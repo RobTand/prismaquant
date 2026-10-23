@@ -1,0 +1,4696 @@
+{
+  "evidence": {
+    "construction_reference": "tests/test_rung_performant_policy.py:approved_t4_table",
+    "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+    "generated_at_scope": "Fixed timestamp inherited from base fixture, not an observation or collection timestamp.",
+    "geometry_reference": "tests/test_rung_allowability.py:fixture_v2('tcq', 'native_tcq')",
+    "geometry_scope": "Unmodified base native fixture geometry reused across all cells except recipe/semantic execution fields copied from the owner; not per-shape observed compiler/plane evidence.",
+    "producer_sha256": "c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c",
+    "source_commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
+    "synthetic": true,
+    "time_scope": "Base fixture constant 10 us copied to kernel_time_us and both pass_times_us for every cell; no raw samples or measurement access."
+  },
+  "format": "TESSERA_E2M1_K2",
+  "generated_at": "2026-10-06T03:00:00Z",
+  "geometry_classes": [
+    {
+      "identity": {
+        "M": 1,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:o_proj:M1",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 1,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:q_b:M1",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          8192,
+          1536
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 1,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M1",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 1,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M1",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 16,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:o_proj:M16",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 16,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:q_b:M16",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          8192,
+          1536
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 16,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M16",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 16,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M16",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:o_proj:M2048",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:q_b:M2048",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          8192,
+          1536
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M2048",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M2048:recorded",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "recorded",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M2048",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 2048,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M2048:recorded",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "recorded",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:o_proj:M4096",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "dense:q_b:M4096",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "BF16 linear output",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "dense",
+        "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "none",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          8192,
+          1536
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M4096",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:down:M4096:recorded",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "route-weighted BF16 down",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 2,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "recorded",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          4096,
+          1024
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M4096",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "balanced",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    },
+    {
+      "identity": {
+        "M": 4096,
+        "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "alignment": {
+          "arity": 2,
+          "kind": "tcq_planes",
+          "owner": "tessera.compact_prep.prepare_span2_compact",
+          "plane_element_bytes": {
+            "code_nibbles": 1,
+            "label": 1,
+            "label_lut": 4,
+            "lut_bytes": 1,
+            "nibbles": 1,
+            "point": 1,
+            "select": 1
+          },
+          "rate": 7,
+          "slot_words": null,
+          "span": 2
+        },
+        "arity": 2,
+        "cell_id": "routed:gate_up:M4096:recorded",
+        "decode_width": {
+          "arity": 2,
+          "block_k": 128,
+          "block_m": 64,
+          "block_n": 64,
+          "history_lookup_bits": 7,
+          "label_lut_entries": 128,
+          "memory": 6,
+          "mma_k": 64,
+          "run_widths": [
+            7
+          ],
+          "scale_group": 16,
+          "span": 2,
+          "value_bits": 4,
+          "window_bits": 0,
+          "word_stages": null
+        },
+        "decoder_kind": "native_tcq",
+        "decoder_owner": "tessera.kernel_a4",
+        "epilogue": "SwiGLU clipped at 10",
+        "execution_scope": "native_tcq_decode_gemm",
+        "format": "TESSERA_E2M1_K2",
+        "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+        "kernel_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+        "kernel_kind": "routed",
+        "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+        "kind": "pure",
+        "mode": 0,
+        "recipe": {
+          "body": "tcq",
+          "channel_sigma": null,
+          "plane": "lut16",
+          "seed": 0,
+          "sigma": null,
+          "span": 2,
+          "window_bits": 0
+        },
+        "register_pressure": {
+          "LOCAL": null,
+          "REG": 196,
+          "SHARED": 12800,
+          "SPILLS": 0,
+          "STACK": null,
+          "compiler": "triton_compiled_kernel",
+          "compiler_symbol": "_a4_span2_gemm_kernel"
+        },
+        "routing": "recorded",
+        "run_widths": [
+          7
+        ],
+        "shape": [
+          1024,
+          4096
+        ],
+        "shared_memory": {
+          "available_bytes": 101376,
+          "fits": true,
+          "kind": "used",
+          "requested_bytes": 12800
+        }
+      },
+      "observed_rungs": [
+        896
+      ]
+    }
+  ],
+  "kernel_build": {
+    "activation_contract": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+    "architecture": "sm_121",
+    "id": "native_span2-sm_121-f01b61f906b7d7fe",
+    "library_variant": "native_tcq",
+    "metadata": {
+      "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+      "snapshot_scope": "test-only metadata snapshot; no runtime/kernel pin changes",
+      "synthetic": true
+    },
+    "source_commit": "synthetic-fixture-not-a-kernel-source-commit"
+  },
+  "performant_policy": {
+    "authority": "D41 whole-bit and measured half-bit authority, 2026-10-06",
+    "kind": "whole_bit_per_structure",
+    "qualification_scope": "Performance evidence does not replace independent export, numerical, or serving gates."
+  },
+  "rungs": [
+    {
+      "anomaly_flags": [],
+      "dominance_evidence": [],
+      "dominating_rung": null,
+      "excluded": false,
+      "lineage": {
+        "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+        "synthetic": true
+      },
+      "measurement_status": "measured",
+      "measurements": [
+        {
+          "M": 1,
+          "cell_id": "routed:gate_up:M1",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 16,
+          "cell_id": "routed:gate_up:M16",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 2048,
+          "cell_id": "routed:gate_up:M2048",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 4096,
+          "cell_id": "routed:gate_up:M4096",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 1,
+          "cell_id": "routed:down:M1",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "down"
+        },
+        {
+          "M": 16,
+          "cell_id": "routed:down:M16",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "down"
+        },
+        {
+          "M": 2048,
+          "cell_id": "routed:down:M2048",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "down"
+        },
+        {
+          "M": 4096,
+          "cell_id": "routed:down:M4096",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "balanced",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "balanced",
+          "shape_id": "down"
+        },
+        {
+          "M": 1,
+          "cell_id": "dense:o_proj:M1",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "o_proj"
+        },
+        {
+          "M": 16,
+          "cell_id": "dense:o_proj:M16",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "o_proj"
+        },
+        {
+          "M": 2048,
+          "cell_id": "dense:o_proj:M2048",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "o_proj"
+        },
+        {
+          "M": 4096,
+          "cell_id": "dense:o_proj:M4096",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "o_proj"
+        },
+        {
+          "M": 1,
+          "cell_id": "dense:q_b:M1",
+          "evidence": {
+            "columns": 1536,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 8192,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "q_b"
+        },
+        {
+          "M": 16,
+          "cell_id": "dense:q_b:M16",
+          "evidence": {
+            "columns": 1536,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 8192,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "q_b"
+        },
+        {
+          "M": 2048,
+          "cell_id": "dense:q_b:M2048",
+          "evidence": {
+            "columns": 1536,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 8192,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "q_b"
+        },
+        {
+          "M": 4096,
+          "cell_id": "dense:q_b:M4096",
+          "evidence": {
+            "columns": 1536,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "BF16 linear output",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "none",
+            "rows": 8192,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "dense",
+          "kernel_path": "tessera.kernel_a4.a4_span2_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "none",
+          "shape_id": "q_b"
+        },
+        {
+          "M": 2048,
+          "cell_id": "routed:gate_up:M2048:recorded",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "recorded",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "recorded",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 4096,
+          "cell_id": "routed:gate_up:M4096:recorded",
+          "evidence": {
+            "columns": 4096,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "SwiGLU clipped at 10",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 0,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "recorded",
+            "rows": 1024,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "recorded",
+          "shape_id": "gate_up"
+        },
+        {
+          "M": 2048,
+          "cell_id": "routed:down:M2048:recorded",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "recorded",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "recorded",
+          "shape_id": "down"
+        },
+        {
+          "M": 4096,
+          "cell_id": "routed:down:M4096:recorded",
+          "evidence": {
+            "columns": 1024,
+            "comparison_id": "synthetic-fixture-paired",
+            "epilogue": "route-weighted BF16 down",
+            "evidence_scope": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+            "input_distribution": "e2m1_group16_ue4m3_static; BF16 inputs, fixed static global448*6/3, native quantizer",
+            "mode": 2,
+            "paired_seed_contract": "synthetic-fixture-same",
+            "routing": "recorded",
+            "rows": 4096,
+            "synthetic": true,
+            "timer": "synthetic-fixture-no-timer",
+            "timing_statistic": "synthetic-fixture-F/R"
+          },
+          "geometry": {
+            "alignment": {
+              "arity": 2,
+              "kind": "tcq_planes",
+              "owner": "tessera.compact_prep.prepare_span2_compact",
+              "plane_bytes": {
+                "code_nibbles": 256,
+                "label": 1048576,
+                "label_lut": 512,
+                "lut_bytes": 16,
+                "nibbles": 524288,
+                "point": 6291456,
+                "select": 528392
+              },
+              "plane_element_bytes": {
+                "code_nibbles": 1,
+                "label": 1,
+                "label_lut": 4,
+                "lut_bytes": 1,
+                "nibbles": 1,
+                "point": 1,
+                "select": 1
+              },
+              "plane_shapes": {
+                "code_nibbles": [
+                  256
+                ],
+                "label": [
+                  1048576
+                ],
+                "label_lut": [
+                  128
+                ],
+                "lut_bytes": [
+                  16
+                ],
+                "nibbles": [
+                  524288
+                ],
+                "point": [
+                  6291456
+                ],
+                "select": [
+                  528392
+                ]
+              },
+              "rate": 7,
+              "slot_words": null,
+              "span": 2
+            },
+            "bits_per_256_weight_tile": {
+              "denominator": 1,
+              "numerator": 768
+            },
+            "body_kind": "tcq",
+            "decode_width": {
+              "arity": 2,
+              "block_k": 128,
+              "block_m": 64,
+              "block_n": 64,
+              "history_lookup_bits": 7,
+              "label_lut_entries": 128,
+              "memory": 6,
+              "mma_k": 64,
+              "run_widths": [
+                7
+              ],
+              "scale_group": 16,
+              "span": 2,
+              "value_bits": 4,
+              "window_bits": 0,
+              "word_stages": null
+            },
+            "decoder_kind": "native_tcq",
+            "decoder_owner": "tessera.kernel_a4",
+            "execution_scope": "native_tcq_decode_gemm",
+            "recipe": {
+              "body": "tcq",
+              "channel_sigma": null,
+              "plane": "lut16",
+              "seed": 0,
+              "sigma": null,
+              "span": 2,
+              "window_bits": 0
+            },
+            "register_pressure": {
+              "LOCAL": null,
+              "REG": 196,
+              "SHARED": 12800,
+              "SPILLS": 0,
+              "STACK": null,
+              "compiler": "triton_compiled_kernel",
+              "compiler_symbol": "_a4_span2_gemm_kernel"
+            },
+            "shared_memory": {
+              "available_bytes": 101376,
+              "fits": true,
+              "kind": "used",
+              "requested_bytes": 12800
+            },
+            "word_ring": {
+              "kind": "none",
+              "owner": "tessera.kernel_a4"
+            }
+          },
+          "kernel_kind": "routed",
+          "kernel_path": "tessera.kernel_a4.a4_span2_grouped_gemm",
+          "kernel_time_us": 10,
+          "measurement_build_id": "native_span2-sm_121-f01b61f906b7d7fe",
+          "measurement_status": "measured",
+          "pass_times_us": [
+            10,
+            10
+          ],
+          "routing": "recorded",
+          "shape_id": "down"
+        }
+      ],
+      "observations": [],
+      "quality": {
+        "anomaly_flags": []
+      },
+      "rung": 896,
+      "supported": true
+    }
+  ],
+  "schema": "fleet.rung_allowability.v3",
+  "scope": {
+    "grid_owner": "tessera.rung_allowability.E2M1_K2_PERFORMANT_MENU",
+    "grid_step_q256": 1,
+    "required_cells": [
+      {
+        "M": 1,
+        "cell_id": "routed:gate_up:M1",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 16,
+        "cell_id": "routed:gate_up:M16",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 2048,
+        "cell_id": "routed:gate_up:M2048",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 4096,
+        "cell_id": "routed:gate_up:M4096",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 1,
+        "cell_id": "routed:down:M1",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "down"
+      },
+      {
+        "M": 16,
+        "cell_id": "routed:down:M16",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "down"
+      },
+      {
+        "M": 2048,
+        "cell_id": "routed:down:M2048",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "down"
+      },
+      {
+        "M": 4096,
+        "cell_id": "routed:down:M4096",
+        "kernel_kind": "routed",
+        "routing": "balanced",
+        "shape_id": "down"
+      },
+      {
+        "M": 1,
+        "cell_id": "dense:o_proj:M1",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "o_proj"
+      },
+      {
+        "M": 16,
+        "cell_id": "dense:o_proj:M16",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "o_proj"
+      },
+      {
+        "M": 2048,
+        "cell_id": "dense:o_proj:M2048",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "o_proj"
+      },
+      {
+        "M": 4096,
+        "cell_id": "dense:o_proj:M4096",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "o_proj"
+      },
+      {
+        "M": 1,
+        "cell_id": "dense:q_b:M1",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "q_b"
+      },
+      {
+        "M": 16,
+        "cell_id": "dense:q_b:M16",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "q_b"
+      },
+      {
+        "M": 2048,
+        "cell_id": "dense:q_b:M2048",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "q_b"
+      },
+      {
+        "M": 4096,
+        "cell_id": "dense:q_b:M4096",
+        "kernel_kind": "dense",
+        "routing": "none",
+        "shape_id": "q_b"
+      },
+      {
+        "M": 2048,
+        "cell_id": "routed:gate_up:M2048:recorded",
+        "kernel_kind": "routed",
+        "routing": "recorded",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 4096,
+        "cell_id": "routed:gate_up:M4096:recorded",
+        "kernel_kind": "routed",
+        "routing": "recorded",
+        "shape_id": "gate_up"
+      },
+      {
+        "M": 2048,
+        "cell_id": "routed:down:M2048:recorded",
+        "kernel_kind": "routed",
+        "routing": "recorded",
+        "shape_id": "down"
+      },
+      {
+        "M": 4096,
+        "cell_id": "routed:down:M4096:recorded",
+        "kernel_kind": "routed",
+        "routing": "recorded",
+        "shape_id": "down"
+      }
+    ],
+    "rung_max": 896,
+    "rung_min": 896,
+    "shapes": [
+      {
+        "columns": 4096,
+        "kernel_kind": "routed",
+        "mode": 0,
+        "rows": 1024,
+        "shape_id": "gate_up"
+      },
+      {
+        "columns": 1024,
+        "kernel_kind": "routed",
+        "mode": 2,
+        "rows": 4096,
+        "shape_id": "down"
+      },
+      {
+        "columns": 4096,
+        "kernel_kind": "dense",
+        "mode": 2,
+        "rows": 4096,
+        "shape_id": "o_proj"
+      },
+      {
+        "columns": 1536,
+        "kernel_kind": "dense",
+        "mode": 2,
+        "rows": 8192,
+        "shape_id": "q_b"
+      }
+    ]
+  },
+  "table_status": "complete",
+  "table_version": 1
+}
