@@ -40,12 +40,61 @@ import os
 import subprocess
 from pathlib import Path
 
+from prismaquant.digests import (
+    DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex, is_sha256hex,
+)
+from prismaquant.staged_lease import QUEUE_ROOT_ENV_VAR, lease_helper_root
+
+
+def native_client():
+    """Use the public queue SDK from the configured native generation.
+
+    This controller does not use PQ's independently versioned staged-residency
+    contract. Retain that owner's SDK pin; do not mix its imported package with
+    another generation just to satisfy this controller's newer record API.
+    """
+    import sys
+
+    root = lease_helper_root()
+    saved_path = sys.path[:]
+    if root is not None:
+        package = (Path(root) / 'src' / 'prismabuild').resolve()
+        if not (package / '__init__.py').is_file():
+            raise ValueError('The configured native generation has no public SDK package.')
+        for name, module in list(sys.modules.items()):
+            if name == 'prismabuild' or name.startswith('prismabuild.'):
+                origin = getattr(module, '__file__', None)
+                if origin is None or not Path(origin).resolve().is_relative_to(package):
+                    raise ValueError('D44 refuses a divergent preimported native generation.')
+        sys.path.insert(0, str(package.parent))
+    try:
+        from prismabuild import client
+        return client
+    finally:
+        sys.path[:] = saved_path
+
 O = Path(os.environ.get('D44_WAVE_EXEC_DIR', '/home/rob/fleet/ceo/exec/eng-d44-campaign-opus'))
 C = Path(os.environ.get('D44_WAVE_CAMPAIGN_DIR',
                         '/mnt/shared/tessera-measurements/eng-ldlq-indomain-20261006/frozen-method-01/campaign-01'))
 SUBMIT = os.environ.get('D44_WAVE_SUBMIT', str(O / 'submit_gpu_batch.sh'))
-QUEUE = Path(os.environ.get('D44_WAVE_QUEUE_DIR', '/mnt/shared/prismabuild-fleet/pb-queue'))
-CAS = Path(os.environ.get('D44_WAVE_CAS_DIR', str(QUEUE.parent / 'cas')))
+# No topology default: the launcher or the operator names the native stores.
+QUEUE = Path(os.environ['D44_WAVE_QUEUE_DIR']) if os.environ.get('D44_WAVE_QUEUE_DIR') else None
+CAS = Path(os.environ['D44_WAVE_CAS_DIR']) if os.environ.get('D44_WAVE_CAS_DIR') else None
+
+
+def routed_queue_root():
+    # Read the public launch context without invoking the independent staged
+    # residency SDK pin. No legacy mount-layout/topology inference is needed.
+    root = QUEUE if QUEUE is not None else os.environ.get(QUEUE_ROOT_ENV_VAR)
+    if not root:
+        raise ValueError('D44 requires D44_WAVE_QUEUE_DIR or a launcher-published queue root.')
+    return Path(root)
+
+
+def routed_cas_root():
+    if CAS is None:
+        raise ValueError('D44 requires D44_WAVE_CAS_DIR.')
+    return CAS
 WAVE = 4
 LAYERS = (40, 3, 41, 42, 43, 44)
 TERMINAL = ('done', 'failed', 'withdrawn')
@@ -82,7 +131,7 @@ def durable_json(path, value):
     sync_directory(path.parent)
 
 def claim_transition_keys():
-    return {path.name.split('.', 1)[0] for path in (QUEUE / 'claimed').iterdir()
+    return {path.name.split('.', 1)[0] for path in (routed_queue_root() / 'claimed').iterdir()
             if path.name.endswith(('.tombstone', '.late-finish'))}
 
 
@@ -92,12 +141,12 @@ def key_state(key):
         return 'live'  # never treat an unreadable key as finished
     if key in claim_transition_keys():
         return 'live'
-    if any((QUEUE / state / f'{key}.json').exists() for state in ('ready', 'claimed')):
+    if any((routed_queue_root() / state / f'{key}.json').exists() for state in ('ready', 'claimed')):
         return 'live'
     for state in TERMINAL:
-        if (QUEUE / state / f'{key}.json').exists():
+        if (routed_queue_root() / state / f'{key}.json').exists():
             return state
-    if (CAS / 'actions' / 'v3' / key[:2] / f'{key}.json').exists():
+    if (routed_cas_root() / 'actions' / 'v3' / key[:2] / f'{key}.json').exists():
         return 'done'
     return 'live'
 
@@ -179,8 +228,8 @@ def admitted_batches(known):
     """Recover keys from PB publications and CAS results, not client stdout."""
     keys = set()
     for name in ('ready', 'claimed', *TERMINAL):
-        keys.update(path.stem for path in (QUEUE / name).iterdir() if path.suffix == '.json')
-    results = CAS / 'actions' / 'v3'
+        keys.update(path.stem for path in (routed_queue_root() / name).iterdir() if path.suffix == '.json')
+    results = routed_cas_root() / 'actions' / 'v3'
     for prefix in results.iterdir():
         if prefix.is_dir():
             keys.update(path.stem for path in prefix.iterdir() if path.suffix == '.json')
@@ -194,7 +243,7 @@ def admitted_batches(known):
 def request_batch(key):
     if len(key) != 64 or any(c not in '0123456789abcdef' for c in key):
         return None
-    request_path = CAS / 'requests' / key[:2] / (key + '.json')
+    request_path = routed_cas_root() / 'requests' / key[:2] / (key + '.json')
     try:
         raw = request_path.read_text()
     except FileNotFoundError:
@@ -241,7 +290,7 @@ def reconcile_pending(state, state_path, key_lines):
         persist_custody(state, state_path)
         return True
     request_keys = []
-    for prefix in (CAS / 'requests').iterdir():
+    for prefix in (routed_cas_root() / 'requests').iterdir():
         if prefix.is_dir():
             for path in prefix.iterdir():
                 if path.suffix == '.json' and request_batch(path.stem) == batch:
@@ -338,25 +387,35 @@ def main():
 
 
 def routed_status(key):
-    """Treat transitions and unknown ownership as live, without a host guess."""
-    claimed = QUEUE / 'claimed' / (key + '.json')
-    transitions = list((QUEUE / 'claimed').glob(key + '.*.tombstone'))
-    transitions += list((QUEUE / 'claimed').glob(key + '.*.late-finish'))
-    if transitions or (QUEUE / 'ready' / (key + '.json')).exists():
-        return 'live', None
-    if claimed.exists():
-        try:
-            host = json.loads(claimed.read_text()).get('claimed_host')
-        except (OSError, ValueError, AttributeError):
-            host = None
-        return 'live', host if isinstance(host, str) and host else None
-    for ending in TERMINAL:
-        if (QUEUE / ending / (key + '.json')).exists():
-            return ending, None
-    cas = routed_api().pb.PrismaBuildCAS(CAS)
-    child = cas.read_action_request(key)
-    if child is not None and cas.lookup(child) is not None:
-        return 'done', None
+    """Ask the native owners about occupancy and the current terminal generation.
+
+    A historical success cannot outrank a newer failure. Unknown reads and
+    finish-cleanup occupancy retain custody, including when a terminal exists.
+    """
+    try:
+        sdk = native_client()
+        queue = sdk.PoolQueue(routed_queue_root())
+        occupancy = queue.records.claim_occupancy(key)
+        if hasattr(occupancy, 'reason'):
+            return 'unknown', None
+        # Native Absent is not a false Present; Unknown is handled above.
+        occupied = getattr(occupancy, 'value', False)
+        if occupied:
+            row = sdk.read_claimed_record(queue, key)
+            host = row.get('claimed_host') if row else None
+            return 'live', host if isinstance(host, str) and host else None
+        ending = queue.current_ending(key)
+        if ending['ambiguous'] or ending['unreadable']:
+            return 'unknown', None
+        if ending['state'] in TERMINAL:
+            return ending['state'], None
+        cas = routed_api().pb.PrismaBuildCAS(routed_cas_root())
+        child = cas.read_action_request(key)
+        if child is not None and cas.lookup(child) is not None:
+            return 'done', None
+    except (OSError, ValueError, RuntimeError):
+        # No read failure can establish completion or release capacity.
+        pass
     return 'unknown', None
 
 
@@ -370,7 +429,7 @@ def routed_ship_queue(own_keys):
     blockers, errors = set(), []
     for state in ('ready', 'claimed'):
         try:
-            paths = list((QUEUE / state).iterdir())
+            paths = list((routed_queue_root() / state).iterdir())
         except OSError as exc:
             errors.append(f'{state}: {exc}')
             continue
@@ -397,10 +456,43 @@ def routed_ship_queue(own_keys):
     return {'clear': not blockers and not errors, 'blockers': sorted(blockers), 'errors': errors}
 
 def routed_api():
+    """Load the public campaign tool from the configured, sealed SDK generation.
+
+    Reuse PQ's generation discovery and coherence check, not a deployment's
+    mutable checkout. Both native tool layouts are supported. An unconfigured
+    generation or a previously imported different tool refuses before admission.
+    """
+    import importlib.util
     import sys
-    sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/tools')
-    import pbcampaign
-    return pbcampaign
+
+    native_client()
+    root = lease_helper_root()
+    if root is None:
+        raise ValueError('D44 submission requires PRISMABUILD_READER_HELPER_ROOT.')
+    root = Path(root).resolve()
+    tool = root / 'tools' / 'fleet' / 'pbcampaign.py'
+    if not tool.is_file():
+        tool = root / 'tools' / 'pbcampaign.py'
+    if not tool.is_file() or not tool.resolve().is_relative_to(root):
+        raise ValueError('The configured native generation has no public pbcampaign tool.')
+    previous = sys.modules.get('pbcampaign')
+    if previous is not None:
+        if Path(previous.__file__).resolve() != tool.resolve():
+            raise ValueError('pbcampaign was imported from a different native generation.')
+        return previous
+    spec = importlib.util.spec_from_file_location('pbcampaign', tool)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    saved_path = sys.path[:]
+    try:
+        sys.path.insert(0, str(tool.parent))
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
+    finally:
+        sys.path[:] = saved_path
+    return module
 
 
 RETAINED_SCOPE_ROLES = ('fit', 'heldout')
@@ -408,12 +500,9 @@ RETAINED_SCOPE_ROLES = ('fit', 'heldout')
 
 def retained_read_digest(task, filename):
     """Return the frozen digest of one named input read of one roster task."""
-    for read in task.get('payload', {}).get('reads', []):
-        if read.get('path', '').split('/')[-1] == filename:
-            digest = read.get('sha256')
-            if isinstance(digest, str) and len(digest) == 64:
-                return digest
-    return None
+    matches = [read.get('sha256') for read in task.get('payload', {}).get('reads', [])
+               if read.get('path', '').split('/')[-1] == filename]
+    return matches[0] if len(matches) == 1 and is_sha256hex(matches[0]) else None
 
 
 def retained_task_scope(task):
@@ -429,14 +518,11 @@ def retained_task_scope(task):
     leaf = qname.split('.')[-1]
     fit = retained_read_digest(task, leaf + '.fit.pt')
     heldout = retained_read_digest(task, leaf + '.heldout.pt')
-    selection = retained_read_digest(task, 'selection-subsample-20261007.json')
-    if selection is None:
-        for read in payload.get('reads', []):
-            if read.get('path', '').split('/')[-1].startswith('selection-subsample-'):
-                digest = read.get('sha256')
-                if isinstance(digest, str) and len(digest) == 64:
-                    selection = digest
-                    break
+    selections = [read.get('sha256') for read in payload.get('reads', [])
+                  if Path(read.get('path', '')).name.startswith('selection-subsample-')
+                  and Path(read.get('path', '')).suffix == '.json']
+    selection = (selections[0] if len(selections) == 1 and is_sha256hex(selections[0])
+                 else None)
     if fit is None or heldout is None or selection is None:
         return None
     return {'fit_sha256': fit, 'heldout_sha256': heldout, 'selection_sha256': selection}
@@ -450,23 +536,23 @@ def check_retained_scope(name, encode, held, task):
     for role, key in (('fit', 'fit_sha256'), ('heldout', 'heldout_sha256')):
         for document, label in ((encode, 'encode'), (held, 'HELD')):
             actual = document.get(role, {}).get('sha256') if isinstance(document.get(role), dict) else None
-            if not isinstance(actual, str) or len(actual) != 64:
-                raise ValueError(f'Retained {label} {role} digest is missing: {name}')
+            if not is_sha256hex(actual):
+                raise ValueError(f'Retained {label} {role} digest is missing or malformed: {name}')
             if actual != expected[key]:
                 raise ValueError(f'Retained {role} rows differ from the frozen task: {name}')
     for document, label in ((encode, 'encode'), (held, 'HELD')):
-        actual = (document.get('conditioning') or {}).get('selection_sha256')
-        if not isinstance(actual, str) or len(actual) != 64:
-            raise ValueError(f'Retained {label} selection digest is missing: {name}')
+        conditioning = document.get('conditioning')
+        actual = conditioning.get('selection_sha256') if isinstance(conditioning, dict) else None
+        if not is_sha256hex(actual):
+            raise ValueError(f'Retained {label} selection digest is missing or malformed: {name}')
         if actual != expected['selection_sha256']:
             raise ValueError(f'Retained selection differs from the frozen task: {name}')
 
 
 def verified_retained_document(reference):
-    import hashlib
     path = Path(reference['path'])
     raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != reference['sha256']:
+    if bytes_sha256hex(raw) != reference['sha256']:
         raise ValueError(f'Retained document digest differs: {path}')
     return json.loads(raw)
 
@@ -477,7 +563,6 @@ def adopt_retained_units(request, manifest):
     The catalogue retains the original output references. It does not copy science
     outputs, create native receipts for old work, or claim a new measurement.
     """
-    import hashlib
     if manifest.get('schema') != 'd44.retained_units.v1':
         raise ValueError('Unsupported retained unit manifest.')
     tasks = request['roster']['tasks']
@@ -500,11 +585,7 @@ def adopt_retained_units(request, manifest):
                 or encode['dry_run'] is not False or held['dry_run'] is not False):
             raise ValueError(f'Retained unit has no actual paired result: {name}')
         blob = Path(encode['blob_path'])
-        digest = hashlib.sha256()
-        with blob.open('rb') as stream:
-            while chunk := stream.read(8 << 20):
-                digest.update(chunk)
-        if digest.hexdigest() != encode['blob_sha256'] or blob.stat().st_size != encode['blob_bytes']:
+        if file_sha256hex(blob) != encode['blob_sha256'] or blob.stat().st_size != encode['blob_bytes']:
             raise ValueError(f'Retained blob bytes or digest differ: {name}')
         task = by_name[name]
         check_retained_scope(name, encode, held, task)
@@ -568,6 +649,10 @@ def prepare_routed_catalog(pc, plan_path, catalog_path, *, l40=False, retained_p
     prepared = pc.pbrun.prepare_submission(args)
     template = prepared['template']
     cas = template['cas']
+    if Path(cas.root).resolve() != routed_cas_root().resolve():
+        raise ValueError('Native preparation CAS differs from D44_WAVE_CAS_DIR.')
+    if Path(prepared['offer_queue']().root).resolve() != routed_queue_root().resolve():
+        raise ValueError('Native preparation queue differs from the configured D44 queue.')
     if 'task_data_manifest' in request:
         template = {**template, 'params': {**template['params'],
                     pc.dc.TASK_DATA_POLICY_PARAM: request['task_data_manifest']}}
@@ -589,7 +674,7 @@ def prepare_routed_catalog(pc, plan_path, catalog_path, *, l40=False, retained_p
             data_manifest=pc.dc.task_data_manifest(request['task_data_manifest'], envelope)
             if 'task_data_manifest' in request else None))
         digests.append(batch_input['sha256'])
-    queue = pc.pool.PoolQueue(QUEUE)
+    queue = native_client().PoolQueue(routed_queue_root())
     if 'task_data_manifest' in request:
         pc.frozen_child_data_plans(request, plan, children, template=template,
                                    args=args, queue=queue, cas=cas)
@@ -744,18 +829,33 @@ class RoutedLedger:
             self.save()
 
 
-def routed_diskcheck(child, *, need_gb, command=None):
-    """Run a fresh D1 check on all possible hosts and on shared output storage."""
+def routed_diskcheck(child, *, need_gb, command=None, targets=None):
+    """Check exactly the configured eligible hosts and output/scratch mounts.
+
+    D1 inventory names need not equal native tags or mount names. The operator
+    declares their relation explicitly; a new/unknown placement cannot inherit
+    another fleet's storage approval. Never infer hosts from architecture tags.
+    """
     import datetime
     import shlex
     import time
     finite_nonnegative(need_gb, 'Declared disk output')
-    tags = child.get('params', {}).get('placement', {}).get('required_tags', [])
-    hosts = [host for host in ('sparky', 'sparklina', 'dl380g10') if host in tags]
-    if not hosts:
-        hosts = ['dl380g10'] if 'x86' in tags else ['sparky', 'sparklina']
-    paths = ['/tmp', '/mnt/shared'] if hosts == ['dl380g10'] else ['/', '/mnt/shared']
-    argv = shlex.split(command or os.environ.get('D44_DISKCHECK', '/home/rob/fleet/ceo/bin/fleet-diskcheck'))
+    targets = targets or os.environ.get('D44_DISK_TARGETS')
+    if not isinstance(targets, dict):
+        if targets is None:
+            raise ValueError('D1 requires configured placement/storage targets.')
+        targets = json.loads(Path(targets).read_text())
+    placement = child.get('params', {}).get('placement')
+    matches = [row for row in targets.get('targets', []) if row.get('placement') == placement]
+    if not isinstance(placement, dict) or len(matches) != 1:
+        raise ValueError('D1 has no unique configured targets for this native placement.')
+    hosts, paths = matches[0].get('hosts'), matches[0].get('paths')
+    if (not isinstance(hosts, list) or not hosts or not isinstance(paths, list) or not paths
+            or any(not isinstance(host, str) or not host or ',' in host for host in hosts)
+            or any(not isinstance(path, str) or not Path(path).is_absolute() or ',' in path for path in paths)
+            or len(set(hosts)) != len(hosts) or len(set(paths)) != len(paths)):
+        raise ValueError('D1 targets must declare nonempty unique hosts and absolute storage paths.')
+    argv = shlex.split(command or os.environ.get('D44_DISKCHECK', 'fleet-diskcheck'))
     started = time.time()
     result = subprocess.run([*argv, '--need-gb', str(need_gb), '--hosts', ','.join(hosts),
                              '--paths', ','.join(paths)], capture_output=True, text=True, timeout=120)
@@ -785,7 +885,7 @@ class RoutedWave:
     """Keep native child custody separate from the existing grid state."""
 
     def __init__(self, pc, catalog, state_dir, wait_path, resume_command, *, custody=None,
-                 seed_path=None, autonomous=False, disk_need_gb=None):
+                 seed_path=None, autonomous=False, disk_need_gb=None, disk_targets=None):
         self.pc, self.catalog = pc, catalog
         self.state_dir, self.wait_path = state_dir, wait_path
         self.resume_command = resume_command
@@ -793,8 +893,9 @@ class RoutedWave:
         self.journal_path = state_dir / 'sub-keys.txt'
         self.state, self.journal = (custody if custody is not None
                                     else restore_routed_custody(state_dir, wait_path, resume_command))
-        self.cas = pc.pb.PrismaBuildCAS(CAS)
-        self.queue = pc.pool.PoolQueue(QUEUE)
+        self.cas = pc.pb.PrismaBuildCAS(routed_cas_root())
+        self.queue = native_client().PoolQueue(routed_queue_root())
+        self.disk_targets = disk_targets
         native_dir = pc.decomposition_dir(self.cas, catalog['parent_key'])
         self.plan = pc.dc.validate_plan(pc._stored_document(native_dir / 'plan.json'))
         if self.plan['parent_key'] != catalog['parent_key']:
@@ -936,12 +1037,12 @@ class RoutedWave:
                 self.ledger.value['reservations'][key] = params['execution_timeout_s'] * gpu / 3600
                 self.ledger.save()
             ending = self.queue.current_ending(key)
-            if ending['ambiguous']:
+            if ending['ambiguous'] or ending['unreadable']:
                 raise ValueError('Ambiguous native GPU cost evidence; retain custody and reservation.')
             row = ending['record']
             if row is None:
                 for name in ('ready', 'claimed'):
-                    path = self.queue.item_path(name, key)
+                    path = self.queue.records.item_path(name, key)
                     if path.exists():
                         row = json.loads(path.read_text())
                         break
@@ -969,7 +1070,7 @@ class RoutedWave:
                 print('REFUSED: native completion ownership is unknown; retain custody', key)
                 return False
             result = self.pc.pbwait.wait_one(self.queue, key, cas=self.cas, deadline=float('inf'),
-                                            generation=member.get('published_unix'), queue_root=QUEUE)
+                                            generation=member.get('published_unix'), queue_root=routed_queue_root())
             self.state['last_completion'] = result
             self.persist()
             if result['status'] in ('record_error', 'unreadable', 'waiting', 'not_submitted'):
@@ -1033,7 +1134,7 @@ class RoutedWave:
             if not ship_queue['clear']:
                 self.state['wait_reason'] = 'ship'
                 self.persist()
-                print('WAIT: the ship queue blocks admission', json.dumps(ship_queue, sort_keys=True))
+                print('WAIT: the ship queue blocks admission', DIRECT_ASCII_SPACED_LAX.text(ship_queue))
                 return 3
             had_reservation = key in self.ledger.value['reservations']
             try:
@@ -1044,7 +1145,8 @@ class RoutedWave:
                 if gpu and self.disk_need_gb is None:
                     raise ValueError('Declare per-child output and scratch GiB for D1.')
                 self.ledger.reserve(key, child['params']['execution_timeout_s'], gpu)
-                disk = routed_diskcheck(child, need_gb=self.disk_need_gb if self.disk_need_gb is not None else 0.1)
+                disk = routed_diskcheck(child, need_gb=self.disk_need_gb if self.disk_need_gb is not None else 0.1,
+                                        targets=getattr(self, 'disk_targets', None))
                 self.state['last_disk_check'] = {'action_key': key, 'evidence': disk}
                 self.state.setdefault('disk_checks', []).append(self.state['last_disk_check'])
                 self.persist()
@@ -1064,7 +1166,7 @@ class RoutedWave:
                     self.ledger.save()
                 self.state['wait_reason'] = 'ship'
                 self.persist()
-                print('WAIT: the ship queue changed during D1', json.dumps(ship_queue, sort_keys=True))
+                print('WAIT: the ship queue changed during D1', DIRECT_ASCII_SPACED_LAX.text(ship_queue))
                 return 3
             self.ledger.reserve(key, child['params']['execution_timeout_s'], gpu)
             self.state.pop('wait_reason', None)
@@ -1111,16 +1213,27 @@ def routed_main(argv):
     import fcntl
     import shlex
     parser = argparse.ArgumentParser(description='Submit and resume durable native PB final-encode children.')
-    parser.add_argument('--routed-plan', required=True, type=Path)
-    parser.add_argument('--state-dir', type=Path, default=O / 'routed-wave-state')
-    parser.add_argument('--wait-file', type=Path, default=O / 'wait.json')
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--routed-plan', type=Path)
+    mode.add_argument('--legacy', action='store_true', help='Explicitly run the legacy batch controller (no routed options).')
+    parser.add_argument('--state-dir', type=Path, default=Path('d44-wave-state'))
+    parser.add_argument('--wait-file', type=Path)
     parser.add_argument('--l40', action='store_true', help='Prepare only the released layer forty roster.')
     parser.add_argument('--retained-units', type=Path, help='Verified encode and HELD pairs to adopt without replay.')
     parser.add_argument('--catalog-only', action='store_true', help='Validate native objects without child admission.')
     parser.add_argument('--autonomous', action='store_true', help='Resume after native completion without another invocation.')
     parser.add_argument('--ledger-seed', type=Path, help='The accepted closed lifetime balance, required for new GPU ledgers.')
     parser.add_argument('--disk-need-gb', type=float, help='Output and scratch GiB for each child, required for GPU admission.')
+    parser.add_argument('--disk-targets', type=Path, help='D1 placement-to-host/storage declarations (or D44_DISK_TARGETS).')
     options = parser.parse_args(argv)
+    if options.legacy:
+        if argv != ['--legacy']:
+            parser.error('--legacy cannot be combined with routed options')
+        routed_queue_root()
+        routed_cas_root()
+        return main()
+    if options.wait_file is None:
+        options.wait_file = options.state_dir / 'wait.json'
     options.state_dir.mkdir(parents=True, exist_ok=True)
     with (options.state_dir / 'controller.lock').open('a') as lock:
         try:
@@ -1141,31 +1254,33 @@ def routed_main(argv):
             command += ' --ledger-seed ' + shlex.quote(str(options.ledger_seed))
         if options.disk_need_gb is not None:
             command += ' --disk-need-gb ' + str(options.disk_need_gb)
+        if options.disk_targets:
+            command += ' --disk-targets ' + shlex.quote(str(options.disk_targets))
         custody = restore_routed_custody(options.state_dir, options.wait_file, command)
-        pc = routed_api()
         catalog_path = options.state_dir / 'catalog.json'
         if catalog_path.exists():
             catalog = json.loads(catalog_path.read_text())
             check_retained_resume(catalog, options.retained_units)
+            pc = routed_api()
         else:
+            pc = routed_api()
             catalog = prepare_routed_catalog(pc, options.routed_plan, catalog_path,
                         l40=options.l40, retained_path=options.retained_units)
         controller = RoutedWave(pc, catalog, options.state_dir, options.wait_file, command, custody=custody,
                                 seed_path=options.ledger_seed, autonomous=options.autonomous,
-                                disk_need_gb=options.disk_need_gb)
+                                disk_need_gb=options.disk_need_gb, disk_targets=options.disk_targets)
         if options.l40 and any('.layers.40.' not in task['payload']['qname']
                               for task in controller.request['roster']['tasks']):
             raise ValueError('The stored catalogue includes a layer that is not released.')
         if options.catalog_only:
-            print(json.dumps({'catalog': str(catalog_path), 'parent_key': catalog['parent_key'],
+            print(DIRECT_ASCII_SPACED_LAX.text({'catalog': str(catalog_path), 'parent_key': catalog['parent_key'],
                 'native_children': len(controller.keys), 'pending_tasks': len(controller.request['roster']['tasks']),
-                'retained_units': catalog.get('retained_units', []), 'admitted': False}, sort_keys=True))
+                'retained_units': catalog.get('retained_units', []), 'admitted': False}))
             return 0
         return controller.run()
 
 
 if __name__ == '__main__':
     import sys
-    routed = any(arg == '--routed-plan' or arg.startswith('--routed-plan=') for arg in sys.argv[1:])
-    raise SystemExit(routed_main(sys.argv[1:]) if routed else main())
+    raise SystemExit(routed_main(sys.argv[1:]))
 

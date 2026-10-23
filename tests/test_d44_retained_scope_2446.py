@@ -10,6 +10,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
 
 from tools.d44_native import next_wave as wave
 
@@ -210,6 +213,61 @@ class RetainedScopeTests(unittest.TestCase):
             {'schema': 'd44.retained_units.v1', 'units': self.units[:2]}))
         with self.assertRaisesRegex(ValueError, 'differs from the stored'):
             wave.check_retained_resume(catalog, dropped_file)
+
+
+@pytest.mark.parametrize('role, keyword', [('fit', 'fit_sha'), ('heldout', 'heldout_sha'),
+                                          ('selection', 'selection')])
+@pytest.mark.parametrize('location', ['matching-frozen', 'encode', 'held'])
+@pytest.mark.parametrize('dev_mode', ['0', '1'])
+def test_nonhex_scope_digests_refuse_without_removing_work(tmp_path, monkeypatch,
+                                                          role, keyword, location, dev_mode):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev_mode)
+    # A matching pair of length-64 strings is not necessarily a SHA-256 identity.
+    invalid = 'z' * 64
+    kwargs = {keyword: invalid} if location == 'matching-frozen' else {}
+    name, unit = write_pair(tmp_path, 'gate', **kwargs)
+    task = scope_task(name, 'unit', **kwargs)
+    if location != 'matching-frozen':
+        path = Path(unit[location]['path'])
+        document = json.loads(path.read_text())
+        if role == 'selection':
+            document['conditioning']['selection_sha256'] = invalid
+        else:
+            document[role]['sha256'] = invalid
+        path.write_text(json.dumps(document))
+        unit[location]['sha256'] = digest(path)
+    request = {'roster': {'tasks': [task]}}
+    before = json.dumps(request)
+    with pytest.raises(ValueError):
+        wave.adopt_retained_units(request, {'schema': 'd44.retained_units.v1', 'units': [unit]})
+    assert json.dumps(request) == before
+
+
+@pytest.mark.parametrize('role', ['fit', 'heldout', 'selection'])
+def test_ambiguous_frozen_scope_refuses(tmp_path, role):
+    name, unit = write_pair(tmp_path, 'gate')
+    task = scope_task(name, 'unit')
+    read = task['payload']['reads'][['fit', 'heldout', 'selection'].index(role)]
+    task['payload']['reads'].append(dict(read))
+    with pytest.raises(ValueError, match='no frozen scope reads'):
+        wave.adopt_retained_units({'roster': {'tasks': [task]}},
+                                  {'schema': 'd44.retained_units.v1', 'units': [unit]})
+
+
+def test_resume_refuses_before_controller_construction(tmp_path):
+    state_dir = tmp_path / 'state'
+    state_dir.mkdir()
+    wave.durable_json(state_dir / 'catalog.json', {'retained_units': []})
+    name, unit = write_pair(tmp_path, 'gate')
+    manifest_path = tmp_path / 'retained.json'
+    wave.durable_json(manifest_path, {'schema': 'd44.retained_units.v1', 'units': [unit]})
+    with patch.object(wave, 'RoutedWave') as controller, patch.object(wave, 'routed_api') as api:
+        with pytest.raises(ValueError, match='differs from the stored'):
+            wave.routed_main(['--routed-plan', str(tmp_path / 'plan.json'),
+                              '--state-dir', str(state_dir),
+                              '--retained-units', str(manifest_path)])
+    controller.assert_not_called()
+    api.assert_not_called()
 
 
 if __name__ == '__main__':
