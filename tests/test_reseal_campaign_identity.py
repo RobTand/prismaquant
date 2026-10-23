@@ -10,8 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import pickle
+import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -882,18 +884,62 @@ def test_tree_digest_stays_raw_on_a_mixed_order_roster(tmp_path):
     assert tool.prismaquant_tree_sha256(second) == tool.prismaquant_tree_sha256(first)
 
 
-def test_dry_run_and_verify_outputs_stay_stable_on_a_seeded_row(tmp_path, capsys):
-    """A seeded sealed row gives byte-identical dry-run output and a clean verify."""
+def test_dry_run_and_verify_outputs_stay_stable_on_a_seeded_row(tmp_path, capsys, monkeypatch):
+    """Raw and routed recipes preserve CLI output and every migrated row byte."""
+    # Freeze elapsed times, run IDs and persisted provenance without changing the
+    # shared stdlib modules or consulting Git history for a reference checkout.
+    clock = tool.time
+    now = 1_700_000_000.0
+    monkeypatch.setattr(tool, 'time', SimpleNamespace(
+        time=lambda: now, gmtime=lambda: clock.gmtime(now), strftime=clock.strftime))
+    monkeypatch.setattr(tool, 'platform', SimpleNamespace(node=lambda: 'fixture-host'))
+    monkeypatch.setattr(tool, 'tool_commit', lambda: '0'*40)
+
     row = tmp_path/'row-seeded'
-    make_row(row)
-    before = {p: p.read_bytes() for p in row.rglob('*') if p.is_file()}
     pins = write_pins(tmp_path/'pins.json')
-    assert run('dry-run', '--pins', pins, '--row', row) == 0
-    first_out = capsys.readouterr().out
-    assert run('dry-run', '--pins', pins, '--row', row) == 0
-    assert capsys.readouterr().out == first_out
-    assert {p: p.read_bytes() for p in row.rglob('*') if p.is_file()} == before
     bundle = write_bundle(tmp_path/'bundle.json')
-    assert run('migrate', '--pins', pins, '--proof', bundle, '--row', row) == 0
-    assert run('verify', '--pins', pins, '--row', row) == 0
-    assert run('verify', '--pins', pins, '--row', row) == 0
+
+    def snapshot():
+        return {p.relative_to(row): p.read_bytes() for p in row.rglob('*') if p.is_file()}
+
+    def exercise():
+        before = snapshot()
+        assert run('dry-run', '--pins', pins, '--row', row) == 0
+        dry_run = capsys.readouterr()
+        assert snapshot() == before
+        assert run('migrate', '--pins', pins, '--proof', bundle, '--row', row,
+                   '--operator', 'fixture-operator') == 0
+        migrate = capsys.readouterr()
+        migrated = snapshot()
+        assert run('verify', '--pins', pins, '--row', row) == 0
+        verify = capsys.readouterr()
+        assert snapshot() == migrated
+        for output in (dry_run, migrate, verify):
+            # The single-row CLI emits one JSON object and no stderr. An
+            # unconditional banner must not pass merely by appearing in both arms.
+            assert isinstance(json.loads(output.out), dict)
+            assert output.err == ''
+        return (dry_run, migrate, verify), migrated
+
+    # Seed once with the original recipes, then replay exactly those same bytes
+    # at the same path. A second migrate without restoration is an idempotent
+    # no-op, not a before/after comparison.
+    with monkeypatch.context() as raw:
+        raw.setattr(tool, 'identity_sha256', _raw_identity_sha256)
+        raw.setattr(tool, 'unit_path', _raw_unit_path)
+        raw.setattr(tool, 'sha256_bytes', _raw_sha256_bytes)
+        raw.setattr(tool, 'sha256_file', _raw_sha256_file)
+        make_row(row)
+        seeded = snapshot()
+        raw_output, raw_row = exercise()
+
+    shutil.rmtree(row)
+    for relative, payload in seeded.items():
+        path = row/relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    routed_output, routed_row = exercise()
+    # CaptureResult equality checks stdout AND stderr verbatim for all three
+    # commands, including verify; row equality includes the migration records.
+    assert routed_output == raw_output
+    assert routed_row == raw_row
