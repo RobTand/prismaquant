@@ -1,8 +1,15 @@
 """Exact authenticated acquisition work on the existing campaign renderer seam."""
+
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant.tessera_campaign_requests import anchor_placement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 
 torch = pytest.importorskip("torch")
 
@@ -56,7 +63,7 @@ def domain():
 
 def schedule(domain, **kwargs):
     return campaign._campaign_round_one_schedule(domain.groups, domain.grids,
-        args=kwargs.pop("args", arguments()), audit_units=kwargs.pop("audit_units", set()),
+        placement=anchor_placement(kwargs.pop("args", arguments())), audit_units=kwargs.pop("audit_units", set()),
         snap=lambda *_: pytest.fail("acquisition must not snap"),
         requests=kwargs.pop("requests", domain.requests), rates_by_unit=domain.rates, **kwargs)
 
@@ -77,13 +84,13 @@ def test_nonuniform_requests_union_only_inside_actual_atomic_group(domain):
     assert actual[domain.names[3]][FAMILY] == [domain.qs[2]]
     reordered = {name: dict(reversed(list(domain.requests[name].items()))) for name in reversed(domain.names)}
     assert schedule(domain, requests=reordered) == actual
-    keys, scope = campaign._campaign_acquisition_scope(packet(domain), domain.groups)
+    keys, scope = campaign_table.campaign_acquisition_scope(packet(domain), domain.groups)
     assert keys == sorted(domain.groups)
     assert scope == set(domain.names)
-    origin = campaign._campaign_acquisition_origin(packet(domain), actual, domain.menus)
+    origin = campaign_table.campaign_acquisition_origin(packet(domain), actual, domain.menus)
     assert origin["expanded_actual_work_count"] == 7
     assert all(DEFERRED in families for families in origin["deferred_domain"].values())
-    assert origin["currency"] == campaign.CURRENCY
+    assert origin["currency"] == campaign_table.CURRENCY
     assert "path" not in origin
 
 
@@ -94,10 +101,10 @@ def test_projected_experts_expand_by_actual_stack_group():
     assert groups == {"s:model.layers.0.mlp.experts": sorted(names)}
     acquisition = dict(requests={name: {FAMILY: [896] if i == 0 else []}
                                 for i, name in enumerate(names)}, source_weights=dict.fromkeys(names, {}))
-    keys, scope = campaign._campaign_acquisition_scope(acquisition, groups)
+    keys, scope = campaign_table.campaign_acquisition_scope(acquisition, groups)
     assert scope == set(names)
     expanded = campaign._campaign_round_one_schedule(groups, {keys[0]: {FAMILY: [896, 1024]}},
-        args=arguments(), audit_units=set(), snap=None, requests=acquisition["requests"],
+        placement=anchor_placement(arguments()), audit_units=set(), snap=None, requests=acquisition["requests"],
         rates_by_unit={name: {FAMILY: {896, 1024}} for name in names})
     assert all(families[FAMILY] == [896] for families in expanded.values())
 
@@ -117,7 +124,7 @@ def test_scope_refuses_unknown_missing_atomic_member_and_extra_work(domain, chan
     else:
         selected.remove(domain.names[1])
     with pytest.raises(ValueError, match="scope|member"):
-        campaign._campaign_acquisition_scope(acquisition, domain.groups, selected=selected)
+        campaign_table.campaign_acquisition_scope(acquisition, domain.groups, selected=selected)
 
 
 def remove_deferred_grid(domain, absent):
@@ -136,12 +143,13 @@ def test_absent_empty_family_is_retained_deferred_without_extra_prime_work(domai
     removed = remove_deferred_grid(domain, absent)
     actual = schedule(domain)
     assert actual == before
-    origin = campaign._campaign_acquisition_origin(packet(domain), actual, domain.menus)
+    origin = campaign_table.campaign_acquisition_origin(packet(domain), actual, domain.menus)
     assert origin["expanded_actual_work_count"] == 7
     assert all(DEFERRED in origin["deferred_domain"][name] for name in removed)
     assert all(actual[name][DEFERRED] == [] for name in domain.names)
     primed = []
-    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), args=arguments(),
+    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), placement=anchor_placement(arguments()), seed_checkpoint=None,
+            batch_size=2, max_artifact_bpp=0,
         checkpoint=tmp_path / "anchors.json", targets=domain.names, menus=domain.menus,
         weights=domain.weights, profile=domain.profile, expert_members={},
         encode_structure=None, projected_units={}, audit_units=set(), route_cache={},
@@ -151,7 +159,7 @@ def test_absent_empty_family_is_retained_deferred_without_extra_prime_work(domai
                for name in members for rate in actual[name][family]]
     assert len(pending) == 7
     assert {family for _name, family, _rate in pending} == {FAMILY}
-    batches = campaign._anchor_batches(pending, weights=domain.weights, batch_size=2)
+    batches = cell_measurement.compatible_batches(pending, weights=domain.weights, batch_size=2)
     assert primed == [[item[0] for item in batches[0]]]
 
 
@@ -165,7 +173,8 @@ def test_absent_family_with_one_positive_request_refuses_before_prime(domain, tm
     with pytest.raises(ValueError, match="family.*atomic-member grid"):
         campaign._prime_first_anchor_batch(
             SimpleNamespace(prime=lambda _: pytest.fail("unsupported positive work primed")),
-            args=arguments(), checkpoint=tmp_path / "anchors.json", targets=domain.names,
+            placement=anchor_placement(arguments()), seed_checkpoint=None,
+            batch_size=2, max_artifact_bpp=0, checkpoint=tmp_path / "anchors.json", targets=domain.names,
             menus=domain.menus, weights=domain.weights, profile=domain.profile, expert_members={},
             encode_structure=None, projected_units={}, audit_units=set(), route_cache={},
             acquisition_requests=requests)
@@ -206,7 +215,8 @@ def test_prime_and_round_one_use_the_same_exact_schedule(domain, tmp_path, monke
         observed.append(value)
         return value
     monkeypatch.setattr(campaign, "_campaign_round_one_schedule", record)
-    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), args=arguments(),
+    campaign._prime_first_anchor_batch(SimpleNamespace(prime=primed.append), placement=anchor_placement(arguments()), seed_checkpoint=None,
+            batch_size=2, max_artifact_bpp=0,
         checkpoint=tmp_path / "anchors.json", targets=domain.names, menus=domain.menus,
         weights=domain.weights, profile=domain.profile, expert_members={},
         encode_structure=None, projected_units={}, audit_units=set(), route_cache={},
@@ -216,7 +226,7 @@ def test_prime_and_round_one_use_the_same_exact_schedule(domain, tmp_path, monke
     pending = [(name, family, rate) for key, members in sorted(domain.groups.items())
                for family in sorted({f for name in members for f in round_one[name]})
                for name in members for rate in round_one[name][family]]
-    batches = campaign._anchor_batches(pending, weights=domain.weights, batch_size=2)
+    batches = cell_measurement.compatible_batches(pending, weights=domain.weights, batch_size=2)
     assert primed == [[item[0] for item in batches[0]]]
     assert len(pending) == 7
 
@@ -226,7 +236,8 @@ def test_prime_validates_bad_tail_before_first_read(domain, tmp_path):
     requests[domain.names[-1]][FAMILY] = [-1]
     with pytest.raises(ValueError, match="q256"):
         campaign._prime_first_anchor_batch(SimpleNamespace(prime=lambda _: pytest.fail("partial prefix primed")),
-            args=arguments(), checkpoint=tmp_path / "anchors.json", targets=domain.names,
+            placement=anchor_placement(arguments()), seed_checkpoint=None,
+            batch_size=2, max_artifact_bpp=0, checkpoint=tmp_path / "anchors.json", targets=domain.names,
             menus=domain.menus, weights=domain.weights, profile=domain.profile, expert_members={},
             encode_structure=None, projected_units={}, audit_units=set(), route_cache={},
             acquisition_requests=requests)
@@ -262,10 +273,10 @@ def test_partial_and_audit_selections_refuse_before_model(tmp_path, monkeypatch,
     import json
     from prismaquant import tessera_full_domain_acquisition as intake, model_profiles
     entry = {"key": "s:experts", "members": ["q", "k"]}
-    schema = campaign.UNITS_SCHEMA_V2
+    schema = campaign_selection.UNITS_SCHEMA_V2
     if kind == "partition":
-        schema = campaign.UNITS_SCHEMA_V3
-        entry["partition"] = dict(schema=campaign.EXPERT_PARTITION_SCHEMA,
+        schema = campaign_selection.UNITS_SCHEMA_V3
+        entry["partition"] = dict(schema=campaign_selection.EXPERT_PARTITION_SCHEMA,
             experts_per_row=1, index=0, count=2, rate_q256=896, members=["q"])
     else:
         entry.update(sampled=["q"], inclusion_probability={"q": 0.5})
@@ -350,30 +361,30 @@ def test_producer_header_digest_is_not_misrepresented_as_raw_digest(monkeypatch)
 def test_checkpoint_seed_extra_rungs_are_refused(domain):
     actual = schedule(domain)
     allowed = SimpleNamespace(qname=domain.names[0], family=FAMILY, body_rate_q256=domain.qs[1])
-    campaign._require_campaign_acquisition_anchor(allowed, actual)
+    campaign_table.require_campaign_acquisition_anchor(allowed, actual)
     for bad in [SimpleNamespace(qname="extra", family=FAMILY, body_rate_q256=domain.qs[0]),
                 SimpleNamespace(qname=domain.names[0], family=DEFERRED, body_rate_q256=domain.qs[0]),
                 SimpleNamespace(qname=domain.names[0], family=FAMILY, body_rate_q256=-1)]:
         with pytest.raises(ValueError, match="extra"):
-            campaign._require_campaign_acquisition_anchor(bad, actual)
+            campaign_table.require_campaign_acquisition_anchor(bad, actual)
 
 
 def test_unset_flags_leave_checkpoint_identity_settings_byte_identical(monkeypatch):
     from prismaquant.cost_stage_checkpoint import canonical_json
     from prismaquant import production_weight_cache as pwc
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
         lambda: SimpleNamespace(encoder_source_sha256=lambda: "a" * 64))
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {})
     monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "b" * 64)
     common = dict(weights={}, acts={}, hessians={}, menus={}, calibration_identity={},
                   serving_scope=None, static_scales={}, static_scale_policy=None)
-    old = campaign._campaign_checkpoint_identity(args=SimpleNamespace(), **common)
-    new = campaign._campaign_checkpoint_identity(args=SimpleNamespace(
+    old = campaign.campaign_checkpoint_identity(settings=dict(), **common)
+    new = campaign.campaign_checkpoint_identity(settings=dict(
         acquisition_request=None, acquisition_request_sha256=None), **common)
     assert canonical_json(old, where="old") == canonical_json(new, where="new")
     schedule_value = {"q": {FAMILY: [896]}}
     origin = {"request_sha256": "a" * 64, "expanded_actual_work_count": 1}
-    bound = [campaign._campaign_checkpoint_identity(args=SimpleNamespace(
+    bound = [campaign.campaign_checkpoint_identity(settings=dict(
         acquisition_request=path, acquisition_request_sha256="a" * 64,
         acquisition_schedule=schedule_value, acquisition_origin=origin), **common)
         for path in ("first/request.json", "second/request.json")]
@@ -392,15 +403,15 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
         th.calibration_identity("cpu acquisition fixture", [torch.arange(8).reshape(1, 8)], fit_tokens=8))
     requests = {name: {FAMILY: [q], DEFERRED: []}}
     actual = campaign._campaign_round_one_schedule({"u:" + name: [name]},
-        {"u:" + name: {FAMILY: [q], DEFERRED: [q]}}, args=arguments(), audit_units=set(),
+        {"u:" + name: {FAMILY: [q], DEFERRED: [q]}}, placement=anchor_placement(arguments()), audit_units=set(),
         snap=None, requests=requests, rates_by_unit={name: {FAMILY: {q}, DEFERRED: {q}}})
     campaign._require_campaign_acquisition_source(name, weight, _cb_cache_tensor_identity(weight))
     cache = SimpleNamespace(weights={}, cache_dir=None)
-    anchor = campaign._measure_anchor(qname=name, weight=weight, activations=rows,
+    anchor = cell_measurement.measure_cell(qname=name, weight=weight, activations=rows,
         format_name=fmt, cache=cache, wire_dir=tmp_path, hessian_required=True,
-        activation_kwargs_for=campaign._activation_kwargs_memo(source, {name: weight}, "cpu"))
-    campaign._require_campaign_acquisition_anchor(anchor, actual)
-    wire = campaign._wire_path(tmp_path, name, fmt)
+        activation_kwargs_for=cell_measurement.encoder_kwargs_memo(source, {name: weight}, "cpu"))
+    campaign_table.require_campaign_acquisition_anchor(anchor, actual)
+    wire = campaign_wire.wire_path(tmp_path, name, fmt)
     assert wire.is_file() and anchor.wire_bytes == wire.stat().st_size
     decoded = read_unit_artifact(wire.read_bytes(), device="cpu")
     assert torch.equal(decoded.to(torch.bfloat16), cache.weights[name, fmt])
@@ -409,5 +420,5 @@ def test_real_cpu_scalar_renderer_publishes_exact_requested_wire(tmp_path):
     identity = campaign._checkpoint_anchor_identity(anchor, weights={name: weight},
         menus={name: [SimpleNamespace(format_name=fmt)]}, calibration_source=source,
         static_scales={}, projected_units={})
-    record = campaign._checkpoint_wire_record(anchor, tmp_path, identity)
-    assert campaign._checkpoint_wire_record(anchor, tmp_path, identity, existing=record) == record
+    record = campaign_wire.checkpoint_wire_record(anchor, tmp_path, identity)
+    assert campaign_wire.checkpoint_wire_record(anchor, tmp_path, identity, existing=record) == record

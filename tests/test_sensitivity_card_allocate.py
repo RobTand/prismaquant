@@ -1,8 +1,8 @@
 """End-to-end: a Sensitivity Card + an arbitrary format menu drives the real DP.
 
-These tests use the actual `allocator_solver.solve_allocation`, not a stand-in,
-so they demonstrate the property Rob asked for: *an arbitrary collection of
-formats can be assigned optimally by the optimizer* with no solver change.
+These tests pass supplied format menus through the actual
+`allocator_solver.solve_allocation`. They check allocation plumbing, budget
+feasibility and cost ordering; they do not independently prove optimality.
 
 Synthetic weights are used deliberately. The point under test is the plumbing
 and the ordering the cost induces, not any particular model's numbers.

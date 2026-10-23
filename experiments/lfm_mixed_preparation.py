@@ -150,6 +150,8 @@ def scale_record(max_abs, counts, scales, policy, population, *, calibration):
 
 
 def producer(args):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     authority = read(args.out / 'host-input.json')
     require(authority['schema'] == 'prismaquant.lfm-mixed-host-input.v1' and
             re.fullmatch('[0-9a-f]{40}', authority['pq_snapshot']) and
@@ -160,7 +162,8 @@ def producer(args):
     import torch
     import safetensors.torch
     from transformers import AutoModelForCausalLM
-    from prismaquant.tessera_campaign import _calibration_tokens, _collect_activations, _static_input_scales
+    from prismaquant.tessera_campaign import _calibration_tokens, _static_input_scales
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     from prismaquant.nvfp4_activation_contract import input_global_scale_tensor
     from tessera.serving_parts import source_identity
     module = importlib.import_module('export_tessera_serving')
@@ -193,7 +196,7 @@ def producer(args):
         targets = sorted(n.removesuffix('.weight') for n in DENSE4)
         profiler = cProfile.Profile()
         profiler.enable()
-        _, hessians, counts, maxima = _collect_activations(model, targets, tokens, 0, 'cuda', want_hessian=False)
+        _, hessians, counts, maxima = capture_activation_statistics(model, targets, tokens, 0, 'cuda', want_hessian=False)
         profiler.disable()
         profiler.dump_stats(str(args.out / 'calibration.prof'))
         require(not hessians, 'weights-only preparation unexpectedly captured Hessians')

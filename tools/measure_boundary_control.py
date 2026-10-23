@@ -8,7 +8,6 @@ source snapshot, prompt contract and action/campaign ID must cover both arms.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -108,12 +107,7 @@ def main(argv=None):
         })
         counts.append(tokenized["count"])
         token_ids.append(tokenized["tokens"])
-    source_hashes = {path: hashlib.sha256((root / path).read_bytes()).hexdigest()
-        for path in ("prismaquant/boundary_control.py",
-                     "prismaquant/validate_quantized_model.py", "prismaquant/shipcard.py",
-                     "tools/measure_boundary_control.py", "tools/serve_fingerprint.py",
-                     "tools/prismaquant_source_bootstrap.py",
-                     "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json")}
+    source_hashes = bc.producer_source_hashes(root)
     binding = {
         "campaign_id": args.campaign_id,
         "artifact_id": bc.artifact_content_id(artifact_pre),

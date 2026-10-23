@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- External quantum completions retain original descriptors without base64 bytes (#2625).
+  The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
+  Bounded local reads retain digest-valid symlink behavior, independent of memo state.
+  `--pilot-quantum-record PATH SHA256` names a consumer-visible original wire copy.
+  The producer path remains provenance across different filesystems.
+  The approved 4 MiB cap and all digest, length, identity, and source checks remain.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).
   A launch with `rungs_q256` joins a unit only at a rung its scope covers;
   a launch without the key keeps the scope of its cell. The scope covers
@@ -38,8 +44,58 @@
   The opt-in brain floating-point degree-two check executes the existing vLLM prompt smoke through Docker.
   Its central processor preflight checks the real runtime arguments without a graphics processor.
   Native serving qualification and all production defaults stay unchanged.
+- The digest census now records source commit `30b6231` at `docs/audits/digest_site_census_pq1301_2026-10-04.json` (#2540).
+  The refresh retains every historical record. It adds 420 primitive calls across 320 scopes, 275 supplemental calls, and 22 protected layouts.
+  Each load-bearing call records its exact algorithm, encoding options, input order, framing, digest width, result type, read boundary, and refusal behavior.
+  Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
+- Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
+- Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).
+- Give the G3 tests their own package namespace so mixed sessions retain the root fixtures (#2680).
+- Stage B spill qualification runs on provisioned private scratch with real direct I/O (#2594).
+  The `_spill_root` helper serves spill acquisition only from `PQ_STAGE_B_SPILL_TEST_ROOT`
+  with real statx direct I/O. Without either it skips and names the incomplete
+  qualification instead of passing on an unqualified disk. Refusal paths keep `tmp_path`
+  and never probe direct I/O. The DSv4 fake-trace ratchet walks the checked-in
+  repeating-cell config, owns its process with an explicit PB source scope, and joins
+  the native-import order matrix. Every other vendored DSv4 test keeps its `own_process`
+  boundary and gains the same explicit scope.
+  PB `b77df200bfdb` passes 7 host-capability tests, `b63327b84bed` passes 3 isolation
+  orders, `fbe76d599bc4` passes 3 walk tests standalone, and the remaining DSv4 shards
+  pass 36 tests on x86. The unprovisioned spill ceiling case skips with the new reason.
+- The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
+  It omits a source tensor only when every requested forward uses a complete replacement.
+  Used source tensors retain their byte-integrity checks.
+  The manifest follows setup, decoder layers, and teacher reads through the profile's layer names.
+  The consumers retain Docker mounts, the PB environment, reader leases, and RAM epochs.
+  The map cache follows atomic publication, including RAM updates at the same fragment count.
+  Phase leases batch published ranges by tier instead of each tensor.
+  The real four-layer comparison uses the pinned source loader, expert packing, and original panel window.
+  Its logits and both FP64 KL arrays match bitwise with omission on and off.
+  This diagnostic does not qualify full-model quality, performance, or promotion.
+  Hash batches use the shared IO engine and preserve their digests.
+  Development mode retains identity stamps without a new promotion gate.
+  The pinned `/pq` package and action `1cb0d64a` remain unchanged.
+  The merge with `origin/main` preserves the accepted fix and both documentation additions.
+  PB `42ee5b235134` passes 113 CPU cases; PB `07921c3dd917` preserves bitwise equality in the real container.
+  The next merge retains main at `3d2841dc9605` and its independent changelog addition.
+  An unavailable RAM cover now selects published stage covers for the same phase and expected bytes.
+  The shared lease owner classifies each refusal; integrity and unknown refusals still fail.
+  PB `35251b1db6f4` reproduces the old RAM refusal; PB `7b2fd0569f8c` passes all 117 affected CPU cases.
+  PB `36269dbc3563` completes the real comparison on Sparklina with bitwise logits and FP64 KL equality.
+  The next correction uses PB's public client instead of internal modules.
+  Both manifest entry points share the existing bounded byte checks and PB decoder.
+  The normal production entry point retains its exact SDK pin.
+  The host loads the container adapter from its pinned source file, not the checkout's `tools` package.
+  PB `064d872a4635` passes 164 affected CPU cases, including both G3 import and PB boundary guards.
+  PB `74f166933103` preserves real logits and both FP64 KL arrays bitwise in the producer container.
+  The next correction tests the launcher's image seal on the pinned adapter.
+  The tests start the real launcher with the real pinned adapter and a replaced docker executable.
+  Default dev mode stamps a differing image and starts the container with the observed digest.
+  Certified mode refuses the same image before any container starts.
+  The pinned adapter binds `image_content_sha256`; the checkout's own adapter binds `_runtime_identity` and is not loaded.
 - The `linked issue` check enforces `prismaquant-<issue>` branches with an optional lowercase suffix (#2518).
   The branch issue must match a verified same-repository closing reference or an open parent reference.
   Branches with `ig/` or `release` prefixes and pull requests created before `2026-10-09T17:00:00Z` retain branch exemptions.
@@ -101,6 +157,26 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- **Bound-publication digest sites route to the digest owners** (Refs #1301, part of #2542).
+  `stage_b_prep_io._hash_range` delegates to the one new exact recipe,
+  `prismaquant.digests.file_range_sha256hex`: open once, seek to the offset,
+  and read to the exact size with the past-end refusal unchanged.
+  The manifest digest sites in `tools/dispatch_joint_quanta.py` (2 calls),
+  `tools/dispatch_tessera_campaign.py` (5 calls), and the union tool
+  `tools/union_tessera_census_tables.py` (`Table.load` twice, `_digest`,
+  `_indent_dump`, and the `write_plan` whole-bytes site) now call
+  `bytes_sha256hex`, `text_sha256hex`, or `DIRECT_UTF8_INDENT2_STRICT.text`
+  through the tools' stdlib bootstrap. Every routed digest is byte-identical:
+  manifest wire bytes, plan and prewarm seals, refusal order, and union
+  outputs stay unchanged. The streamed canonical identity encoder,
+  `read_manifest`, `_write_stream_atomic`, `_json_key`, the `write_plan`
+  resume stream, `check_source_coverage`, and `_require_equal` stay inline
+  as retentions; the streamed-recipe and named-profile requests are open
+  parent decisions in #1301, and no new JSON profile is added. The
+  per-scope census in `docs/audits/digest_site_census_pq1301_2026-10-04.json`
+  records each route and retention against the fresh #2540 manifest, and the
+  duplication baseline shrinks by exactly the nine routed scope rows.
+
 - **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
   `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
   `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —

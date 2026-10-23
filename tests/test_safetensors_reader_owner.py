@@ -61,10 +61,10 @@ def test_footprint_header_is_the_inline_parse(checkpoint):
 
 
 def test_artifact_completeness_header_filters_metadata_like_before(checkpoint):
-    from prismaquant import artifact_completeness
+    from prismaquant import source_read_plan
     _dir, shard, _header = checkpoint
     old = {k: v for k, v in _old_parse(shard).items() if k != "__metadata__"}
-    assert artifact_completeness._read_safetensors_header(shard) == old
+    assert source_read_plan.read_tensor_header(shard) == old
 
 
 def test_pipeline_parameter_count_matches_the_inline_parse(checkpoint):
@@ -123,8 +123,8 @@ def test_malformed_header_prefix_is_the_owner_refusal(
             from prismaquant import footprint
             footprint._read_safetensors_header(str(shard))
         elif consumer == "artifact_completeness":
-            from prismaquant import artifact_completeness
-            artifact_completeness._read_safetensors_header(shard)
+            from prismaquant import source_read_plan
+            source_read_plan.read_tensor_header(shard)
         elif consumer == "pipeline":
             from prismaquant import pipeline
             pipeline._safetensors_parameter_count(directory)

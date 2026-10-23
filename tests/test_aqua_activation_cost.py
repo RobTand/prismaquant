@@ -30,8 +30,10 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from prismaquant.allocator_candidates import (  # noqa: E402
-    ACT_DLOSS_KEY, cost_entry_act_dloss, cost_entry_predicted_dloss,
+from prismaquant.priced_cell import (
+    ACT_DLOSS_KEY,
+    cost_entry_act_dloss,
+    cost_entry_predicted_dloss,
 )
 
 STATS = {"n_params": 4096, "in_features": 64, "out_features": 64,
@@ -113,7 +115,7 @@ def test_it_is_not_added_to_an_activation_inclusive_measurement():
     would mis-rank rungs within one family, which is the failure mode this
     branch was split out to fix in the first place.
     """
-    from prismaquant.allocator_candidates import _prices_from_output_mse
+    from prismaquant.priced_cell import _prices_from_output_mse
     measured = {"output_mse": 0.5, "output_mse_measured": True,
                 ACT_DLOSS_KEY: ACT}
     if not _prices_from_output_mse(STATS, measured):
@@ -178,20 +180,8 @@ def test_price_activation_only_follows_the_explicit_predicate(fmt,
             "-- the two mean different things and only one is a hole")
 
 
-def test_the_a_side_does_not_depend_on_the_weights_being_rendered():
-    """THE claim the whole stage rests on.
-
-    ``activation_dloss`` reads the DENSE weight, ``g_sq_sum`` and the format's
-    activation grid. No render enters it. That is what makes it legitimate to
-    price the A-side off a shared card and add it to a cost whose W-side was
-    built with the full GPTQ+JSO production recipe: the two halves are measured
-    on different bases only because the A-side HAS no basis.
-
-    Pinned by pricing the same unit against two very different weight matrices
-    that share a scale, and asserting the A-side tracks the weights it is given
-    rather than any rendering of them -- and, more sharply, that priced twice on
-    the same weights it is exactly reproducible.
-    """
+def test_activation_price_is_reproducible_for_identical_dense_weights():
+    """Equal dense weights produce equal prices for the same unit and format."""
     card = pytest.importorskip("prismaquant.sensitivity_card")
     from prismaquant.format_cost_protocol import price_activation_only
     from prismaquant.format_cost_registry import RegistryFormatPlugin

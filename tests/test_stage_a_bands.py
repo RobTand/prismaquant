@@ -47,7 +47,7 @@ def runs(tmp_path, monkeypatch):
     """R9 contained after boundary 1, R10 resumed from its capsule, a baseline."""
     from prismaquant import joint_cost_stage_a as stage_a
     from prismaquant import joint_forward_resume as recovery_mod
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from test_joint_cost_quantum_runtime import _execution, _stage_a
     from test_streamed_cost_checkpoints import _model_identity
 

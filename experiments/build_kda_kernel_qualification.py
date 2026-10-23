@@ -34,6 +34,7 @@ rest of the history is recorded too:
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -139,8 +140,22 @@ def qualify(numerics) -> dict:
     """The numerics block of a qualifying run; refuses a run that cannot qualify."""
     if numerics["shape"] != PRODUCTION_SHAPE:
         raise QualificationRefused(f"shape {numerics['shape']} is not the production shape")
-    if numerics["harness_sha256"] != _sha256(HARNESS):
+    harness_source = HARNESS.read_bytes()
+    if numerics["harness_sha256"] != hashlib.sha256(harness_source).hexdigest():
         raise QualificationRefused("the run's harness is not this tree's harness")
+    for node in ast.parse(harness_source).body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "CASES"
+                for target in node.targets):
+            required_cases = set(ast.literal_eval(node.value))
+            break
+    else:
+        raise QualificationRefused("the harness has no literal CASES roster")
+    actual_cases = set(numerics["cases"])
+    if actual_cases != required_cases:
+        raise QualificationRefused(
+            f"numerical case roster differs: missing {sorted(required_cases - actual_cases)}, "
+            f"extra {sorted(actual_cases - required_cases)}")
     missing = [case for case, value in numerics["cases"].items()
                if any(path not in value for path in PATHS)]
     if missing:

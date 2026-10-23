@@ -52,7 +52,12 @@ def cotangent_scratch_plane(tmp_path, monkeypatch, request):
                    test_the_control_at_batch_one_still_holds,
                    test_band_serial_under_the_spill_equals_the_chain_rebuild)
     if request.function in spill_cases:
-        require_direct_io(root)  # before instrumentation/yield, not teardown
+        from test_stageb_one_pass_spill import _spill_root
+
+        # Qualify spill storage before observation starts, so prerequisite
+        # skips/refusals cannot trigger the execution assertions at teardown.
+        _spill_root(tmp_path)
+        require_direct_io(root)  # cotangent storage has its own DIO gate
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_ROOT", str(root))
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES", str(1 << 30))
     built, streams = [], []

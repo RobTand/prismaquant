@@ -20,6 +20,7 @@ file_stat_signature=profile_source_owner('file_identity').file_stat_signature
 
 PQ_IMAGE='d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_power_draw'}
+_ARTIFACT_CAS_SDK_VERSIONS = frozenset((5, 6))
 
 
 def netdata(host,endpoint):
@@ -92,7 +93,7 @@ def artifact_identity(path):
 
 
 def artifact_cas(root):
-    """Use the actual launch-owned SDK5 generation and explicitly sealed CAS."""
+    """Use the launch-owned immutable-input CAS without numeric host imports."""
     if root is None:
         raise RuntimeError('actual control publication requires an explicit sealed CAS root')
     from tools.tessera_campaign_container import reader_context_environment
@@ -102,8 +103,8 @@ def artifact_cas(root):
     source=Path(context['PRISMABUILD_READER_HELPER_ROOT'])/'src'
     sys.path.insert(0,str(source))
     from prismabuild import client, core
-    if client.SDK_VERSION!=5:
-        raise RuntimeError('actual artifact publication requires the qualified SDK5 helper')
+    if client.SDK_VERSION not in _ARTIFACT_CAS_SDK_VERSIONS:
+        raise RuntimeError('actual artifact publication requires a qualified immutable-input CAS helper')
     if any(not getattr(module,'__file__',None)
            or not Path(module.__file__).resolve().is_relative_to(source)
            for name,module in sys.modules.items()

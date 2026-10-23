@@ -19,10 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from tools.dispatch_tessera_campaign import (
-    CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE,
-    DIAGNOSTIC_SCOPE, PANEL_SCHEMA, PANEL_STATUS, ScopeRefused,
-    campaign_identity, joint_campaign_scope, verify_joint_campaign_scope)
+from prismaquant.tessera_campaign_table import (CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE, DIAGNOSTIC_SCOPE, PANEL_SCHEMA, PANEL_STATUS, ScopeRefused, campaign_identity, joint_campaign_scope, verify_joint_campaign_scope)
 
 
 def _sha(path: Path) -> str:
@@ -128,7 +125,7 @@ def test_the_scope_is_derived_from_the_bound_roster_not_a_declared_count(tmp_pat
         inputs["merged_checkpoint"]["sha256"]
 
 
-def test_an_equal_size_calibration_swap_is_a_different_campaign(tmp_path):
+def test_a_calibration_byte_swap_is_a_different_campaign(tmp_path):
     """Same roster, same window count, different bytes: a different draw."""
     campaign = campaign_identity(joint_campaign_scope(_plan(_bind(
         tmp_path / "campaign", ["a", "b", "c"], {"g0": ["a", "b"], "g1": ["c"]}))))

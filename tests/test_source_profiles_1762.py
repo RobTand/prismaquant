@@ -41,12 +41,8 @@ def framed(files):
 
 
 def reseal():
-    path = Path(__file__).parents[1] / 'tools' / 'reseal_campaign_identity.py'
-    spec = importlib.util.spec_from_file_location('reseal_source_profiles_1762', path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from prismaquant import tessera_campaign_reseal
+    return tessera_campaign_reseal
 
 
 def profiles(caller, files, root):
@@ -223,12 +219,12 @@ def test_runtime_relation_v2_compares_strong_profiles_not_cross_run_v1(relation_
 
 
 def test_reseal_hash_output_emits_both_without_rewriting(tmp_path, capsys):
-    from types import SimpleNamespace
     root = tmp_path / 'src' / 'tessera'
     root.mkdir(parents=True)
     (root / '__init__.py').write_bytes(b'')
     tool = reseal()
-    assert tool.cmd_hash_tree(SimpleNamespace(prismaquant=None, producer=str(tmp_path))) == 0
+    from tools.reseal_campaign_identity import main
+    assert main(["hash-tree", "--producer", str(tmp_path)]) == 0
     output = json.loads(capsys.readouterr().out)
     assert output['encoder_source_sha256'] == output['encoder_source_profiles'][V1]
     assert output['encoder_source_profiles'][V2] == framed({'__init__.py': b''})

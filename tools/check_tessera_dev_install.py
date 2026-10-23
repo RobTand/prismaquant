@@ -35,10 +35,8 @@ DIST_NAME = "tessera-quant"
 PB_ISSUE = "RobTand/prismabuild#658"
 PQ_ISSUE = "RobTand/prismaquant#753"
 
-#: The probe runs in the target interpreter WITHOUT ``-I``: pbtest's own
-#: gate inspects the live import environment, including a shadowing checkout
-#: on ``PYTHONPATH`` (which it refuses), so a pre-submit check that hid the
-#: shadow would certify an interpreter the gate then refuses.
+#: Inspect the target interpreter's selected distribution provenance.
+#: pbtest independently checks import ownership and installed bytes.
 _PROBE = (
     "import json, sys\n"
     "from importlib import metadata\n"
@@ -84,12 +82,11 @@ def probe_direct_url(python: str) -> dict:
 
 
 def verdict(provenance: dict, expected: str, python: str) -> tuple[bool, str]:
-    """Whether this provenance passes the gate, and the message either way.
+    """Whether the selected distribution has the required Git provenance.
 
-    The rule is pbtest's (prismabuild ``tools/pbtest_pins.py``): exactly one
-    owning distribution, a ``vcs_info`` naming git at the reviewed commit,
-    and not an editable install. A local-directory install carries no
-    ``vcs_info`` commit, so it refuses here exactly as it refuses there.
+    Require ``vcs_info`` naming Git at the reviewed commit and a non-editable
+    install. pbtest separately verifies unambiguous import ownership and
+    installed bytes; this advisory precheck does not establish either.
     """
     reason = provenance.get("reason")
     if reason is not None:

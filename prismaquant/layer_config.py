@@ -294,7 +294,10 @@ def canonicalize_assignment(raw: Mapping) -> dict[str, str]:
 
 
 def load_assignment(path: str | Path) -> dict[str, str]:
+    """Read a flat layer config or a Pareto v2 assignment envelope."""
     path = Path(path)
     payload = json.loads(path.read_text())
+    if isinstance(payload, Mapping) and payload.get("schema") == "prismaquant.allocator.pareto_assignment.v2":
+        payload = payload.get("assignment")
     validate_layer_config_payload(payload, str(path))
     return canonicalize_assignment(payload)

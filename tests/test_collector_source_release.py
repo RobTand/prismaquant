@@ -9,7 +9,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from test_glm_campaign_streaming import (  # noqa: F401
     _torch_only_causal_conv1d, glm_checkpoint,
 )
@@ -21,7 +21,7 @@ def test_current_packed_storage_dies_before_cpu_return_and_next_stays_resident(
     profile = Glm5NextProfile()
     targets = [m.qname for m in profile_declared_packed_expert_projections(reference, profile)]
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1) for _ in range(2)]
-    expected = _collect_activations(reference, targets, tokens, 7, 'cpu',
+    expected = capture_activation_statistics(reference, targets, tokens, 7, 'cpu',
         want_hessian=True, profile=profile, shared_packed_inputs=True)
     runner = build_streamed_causal_lm(str(source), device=torch.device('cpu'),
         dtype=torch.float32, offload_folder=str(tmp_path/'release-offload'), profile=profile,
@@ -68,7 +68,7 @@ def test_current_packed_storage_dies_before_cpu_return_and_next_stays_resident(
             assert all(p.is_meta for p in runner.layers[layer].parameters())
             callbacks.append(layer)
 
-        values = _collect_activations(runner.model, names, tokens, 7, 'cpu',
+        values = capture_activation_statistics(runner.model, names, tokens, 7, 'cpu',
             want_hessian=True, profile=profile, shared_packed_inputs=True,
             forward_batch=forward, on_forwards_complete=completed)
         for all_values, local in zip(captured, values):
@@ -110,11 +110,11 @@ def test_callback_failure_drains_capture_owners_and_keeps_integer_rows(monkeypat
 
     monkeypatch.setattr(torch.Tensor, '__matmul__', track)
     with pytest.raises(RuntimeError, match='source-release callback failed') as caught:
-        _collect_activations(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True,
+        capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True,
             shared_packed_inputs=shared, on_forwards_complete=completed)
     assert calls == ['completed']
     assert len(refs) == 2 and all(ref() is None for ref in refs)
-    assert failed_collector_row_counts(caught.value, _collect_activations, ['0', '1'])['rows'] == {
+    assert failed_collector_row_counts(caught.value, capture_activation_statistics, ['0', '1'])['rows'] == {
         '0': 2, '1': 2}
 
 
@@ -137,7 +137,7 @@ def test_forward_failure_never_calls_successful_source_boundary(monkeypatch, sha
 
     monkeypatch.setattr(torch.Tensor, '__matmul__', matmul)
     with pytest.raises(RuntimeError, match='source forward failed') as caught:
-        _collect_activations(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True,
+        capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True,
             shared_packed_inputs=shared, forward_batch=forward,
             on_forwards_complete=lambda: called.append(True))
     assert called == []
@@ -161,7 +161,7 @@ def test_callback_failure_releases_cuda_cache_without_resource_callback(monkeypa
     monkeypatch.setattr(torch.Tensor, 'to', cpu_to)
     monkeypatch.setattr(torch.cuda, 'empty_cache', lambda: released.append(True))
     with pytest.raises(RuntimeError, match='source callback failed'):
-        _collect_activations(model, ['0', '1'], tokens, 1, 'cuda', want_hessian=True,
+        capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cuda', want_hessian=True,
             on_forwards_complete=completed)
     assert released == [True]
 
@@ -183,7 +183,7 @@ def test_exact_group_progress_survives_guard_refusal(stop_at, groups_completed, 
             raise RuntimeError('continuous guard already latched')
 
     with pytest.raises(RuntimeError, match='continuous guard already latched'):
-        _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
+        capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
             want_hessian=True, shared_packed_inputs=True, resource_check=check)
     progress = result['output_materialization_progress']
     assert progress['groups_started'] == 1
@@ -201,7 +201,7 @@ def test_complete_group_counts_describe_independent_outputs():
     from test_collector_shared_inputs import packed_targets
     from test_tessera_campaign_packed import _RoutedModel, _routed_tokens
     result = {}
-    values = _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
+    values = capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
         want_hessian=True, shared_packed_inputs=True,
         resource_check=lambda label: record_materialization_checkpoint(result, label, {'time': 1.0}))
     progress = result['output_materialization_progress']

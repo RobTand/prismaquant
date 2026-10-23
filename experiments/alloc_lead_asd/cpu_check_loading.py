@@ -9,6 +9,8 @@ from transformers import AutoModelForCausalLM, Qwen3Config
 from experiments.alloc_lead_asd.run_pair import load_source_model
 
 
+from prismaquant.model_runtime import initialize_model_runtime
+initialize_model_runtime()
 torch.set_num_threads(1)
 torch.manual_seed(1962)
 config = Qwen3Config(vocab_size=256, hidden_size=32, intermediate_size=64,

@@ -83,9 +83,10 @@ def main():
         print("REFUSED: the map did not bind.", flush=True)
         return 2
 
-    mount = residency_shard_reader._mount_options("/stage/prewarm")
-    print(f"[mount] /stage/prewarm {mount[1] if mount else '?'} "
-          f"{mount[2] if mount else '?'}", flush=True)
+    from prismaquant.mount_facts import find_mount
+    mount = find_mount("/stage/prewarm", table=residency_shard_reader.MOUNTS_PATH)
+    print(f"[mount] /stage/prewarm {mount.filesystem if mount else '?'} "
+          f"{dict(mount.options) if mount else '?'}", flush=True)
     print(f"[mount] read shape from the mount: "
           f"{residency_shard_reader._read_shape('/stage/prewarm')}", flush=True)
 
@@ -225,8 +226,8 @@ def main():
     print(f"byte mismatches: {len(mismatches)}", flush=True)
 
     out = {"schema": "prismaquant.staged_read_stream_ab.v1",
-           "mount": {"fstype": mount[1] if mount else None,
-                     "options": mount[2] if mount else None},
+           "mount": {"fstype": mount.filesystem if mount else None,
+                     "options": dict(mount.options) if mount else None},
            "targets": targets, "records": records, "summary": summary,
            "mismatches": mismatches}
     if args.json_out:

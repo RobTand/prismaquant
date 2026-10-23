@@ -197,8 +197,8 @@ def test_an_unknown_policy_name_is_refused(tmp_path):
         export.require_priced_export_inputs(config, input_scales_path=scales)
 
 
-def test_the_policy_reaches_the_build_anchor(tmp_path, monkeypatch):
-    """The ship record is where a reader of the bytes finds the policy."""
+def test_gate_policy_can_populate_the_build_metadata_field(tmp_path, monkeypatch):
+    """Copy the real gate's policy into the documented metadata field."""
     units = _units()
     config = _layer_config(tmp_path, units=units, policy=LEGACY)
     scales = _scales_file(tmp_path, units, policy=LEGACY)

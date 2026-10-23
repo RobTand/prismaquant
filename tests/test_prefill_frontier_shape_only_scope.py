@@ -1,10 +1,9 @@
-"""A named scope that reads none of the fixed terms no gate admits.
+"""A named scope that does not read refused fixed-resource terms.
 
-`admit_fixed_resources` refuses every real table today (PQ debt D37: the
-transient charge boundary is versioned now, and what still refuses is the four
-observations the report consumer recomputes nothing from), so the prefill
-frontier sweep -- which reaches the solver through three consumers of
-`fixed_resources` -- has never emitted a curve from a real table.
+The controlled gate fixture reproduces the D37 refusal for a table with no
+declared transient charge boundary. The prefill frontier reaches the solver
+through three consumers of `fixed_resources`; these tests exercise their
+behavior under that refusal, not the history of real-table qualification.
 
 `--measured-runtime-fixed-scope shape-only` is not a relaxation of that gate.
 The gate still refuses, `fixed_resources_admitted` stays false everywhere it is
@@ -46,7 +45,7 @@ D37 = ("no qualified recomputable full-engine resource partition: "
 
 
 def _stand_in_for_the_gates(monkeypatch, *, fixed_refusal=D37):
-    """Native rows admitted, fixed resources refused -- the state of every real table."""
+    """Control native-row admission and the fixed-resource refusal for this fixture."""
     import prismaquant.runtime_provenance as rp
 
     monkeypatch.setattr(rp, "load_runtime_relation", lambda *a, **k: {"relation": True})

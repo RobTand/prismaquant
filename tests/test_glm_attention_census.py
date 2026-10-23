@@ -12,6 +12,7 @@ pytest.importorskip("transformers")
 from prismaquant import glm_mtp_capture
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant import tessera_campaign as tc
+from prismaquant.digests import indent2_json_file_bytes
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.perturbed_x_cache import activation_cache_filename
 
@@ -141,6 +142,18 @@ def test_body_census_without_flags_stays_byte_identical():
                             "counts", "max_abs", "unit_shapes", "anchor_groups",
                             "dense_targets", "expert_targets", "expert_projection"}
     assert tc._derived_census_base(payload) is None
+    # Freeze the pre-attention body values as well as its keys. No historical
+    # checkout is required, and a changed scalar or serialization cannot pass.
+    expected = {
+        "schema": "prismaquant.tessera_campaign_census.v1",
+        "model": "m", "nsamples": 4, "seqlen": 8, "seed": 0, "layer_stride": 1,
+        "text_sha256": "t", "fit_ids_sha256": "f",
+        "counts": {"a": 16}, "max_abs": {"a": 1.0}, "unit_shapes": {"a": [8, 4]},
+        "anchor_groups": {"u:a": ["a"]}, "dense_targets": ["a"], "expert_targets": [],
+        "expert_projection": None,
+    }
+    expected_bytes = (json.dumps(expected, indent=2, sort_keys=True) + "\n").encode()
+    assert indent2_json_file_bytes(payload) == expected_bytes
 
 
 def test_attention_capture_holds_one_h_row_per_unit(tmp_path):

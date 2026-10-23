@@ -108,13 +108,14 @@ def _cell_groups() -> dict[tuple[str, str, str, int], list[dict]]:
     return groups
 
 
-def test_every_pinned_cell_resolves_to_its_own_measured_route():
+def test_every_pinned_cell_resolves_to_its_declared_route():
     """The regression: on the pre-#537 resolver every one of these was ``absent``.
 
     One case per route the pinned contract ships, so the assertion is the
     contract's census and not a hand-picked example. Each must come back with
     a route status the contract itself carries and the id of one of the cells
-    that carry it.
+    that carry it. This checks packaged status and source, not a new
+    measurement of any cell.
     """
     groups = _cell_groups()
     assert groups, "the pinned contract ships no eligibility cells"

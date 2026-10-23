@@ -371,11 +371,7 @@ def test_expert_sampling_restores_and_annotates():
 
 
 def test_expert_sampling_estimates_full_unit_kl():
-    """Sampling all-but-none vs full: at S == E the sample path must equal the
-    full path exactly (scale 1, same experts); at S < E the estimate should
-    land within a loose factor of the full measurement on the tiny fixture
-    (cross-expert additivity is exact only in fp32; this is a sanity band,
-    the real gate is the 35B validation)."""
+    """Four sampled experts stay within a broad band of the eight-expert result."""
     model = _wide_moe(seed=13)
     calib = torch.randint(0, 32, (2, 24))
     _, _, full = measure_expert_unit_costs(

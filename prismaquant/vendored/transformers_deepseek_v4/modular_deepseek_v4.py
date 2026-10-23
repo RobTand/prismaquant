@@ -993,11 +993,13 @@ class DeepseekV4HashRouter(MixtralTopKRouter):
 
 
 class DeepseekV4SparseMoeBlock(nn.Module):
+    experts_type = DeepseekV4Experts
+
     def __init__(self, config: DeepseekV4Config, layer_idx: int):
         super().__init__()
         self.is_hash = layer_idx < config.num_hash_layers
         self.gate = DeepseekV4HashRouter(config) if self.is_hash else DeepseekV4TopKRouter(config)
-        self.experts = DeepseekV4Experts(config)
+        self.experts = self.experts_type(config)
         self.shared_experts = DeepseekV4MLP(config)
 
     def forward(self, hidden_states: torch.Tensor, input_ids: torch.Tensor | None = None, **_) -> torch.Tensor:

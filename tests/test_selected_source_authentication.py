@@ -1,4 +1,5 @@
 """Selected capture reuse authenticates consumed source objects, once per row."""
+
 import hashlib
 import importlib.metadata
 import json
@@ -7,6 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 
 
 def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
@@ -108,9 +112,9 @@ def selected_source_fixture(monkeypatch, tmp_path, *, priced=False):
         # charged for, so a stub plan publishes one too.
         encoder_memo_capacity=1,
         phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
-    monkeypatch.setattr(campaign, '_collect_activations', lambda *a, **k: pytest.fail('repeated forward'))
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', lambda *a, **k: pytest.fail('repeated forward'))
     selection = tmp_path/'selection.json'
-    selection.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA,
+    selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA,
         groups=[dict(key='u:'+UNIT, members=[UNIT])])) )
     argv[argv.index('--model')+1] = str(source)
     argv[argv.index('--hessian')+1] = 'require'
@@ -242,7 +246,7 @@ def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
 ):
     """A cached SHA is usable only for the exact held source object."""
     from safetensors import safe_open
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
 
     f = complete_source
@@ -263,9 +267,9 @@ def test_adopted_full_source_sha_reuses_bytes_but_rejects_same_size_mutation(
     cache = tmp_path / 'source-identity.json'
     cache_record = {'identity': identity, 'fingerprints': fingerprints}
     cache.write_text(json.dumps(cache_record))
-    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+    monkeypatch.setattr(cost_streaming_identity, '_read_streamed_model_identity_cache',
                         lambda *_a, **_k: (cache_record, identity))
-    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+    monkeypatch.setattr(cost_streaming_identity, '_local_checkpoint_shards',
                         lambda *_a, **_k: (identity['checkpoint_weight_map'],
                                            [Path(row['path']) for row in shards]))
     original = cc.sha256
@@ -301,7 +305,7 @@ def test_the_owner_adopts_the_proof_its_pass_just_wrote(complete_source, monkeyp
     once to write the identity cache and again in the owner's completion
     gate. The owner now adopts the cache the pass wrote, once, and the
     completion gate reads no payload bytes."""
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.tessera_joint_aura import _adopt_built_source_identity
 
@@ -310,16 +314,16 @@ def test_the_owner_adopts_the_proof_its_pass_just_wrote(complete_source, monkeyp
     for name in sorted(f.tensors):
         path = f.root / name
         shards.append({'path': str(path), 'size': path.stat().st_size, 'sha256': cc.sha256(path)})
-        fingerprints.append(cost_streaming.stat_fingerprint(path, path.stat()))
+        fingerprints.append(cost_streaming_identity.stat_fingerprint(path, path.stat()))
     identity = {'shards': shards,
                 'checkpoint_weight_map': json.loads(
                     (f.root/'model.safetensors.index.json').read_text())['weight_map']}
     cache = tmp_path / 'source-identity.json'
     cache_record = {'identity': identity, 'fingerprints': fingerprints}
     cache.write_text(json.dumps(cache_record))
-    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+    monkeypatch.setattr(cost_streaming_identity, '_read_streamed_model_identity_cache',
                         lambda *_a, **_k: (cache_record, identity))
-    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+    monkeypatch.setattr(cost_streaming_identity, '_local_checkpoint_shards',
                         lambda *_a, **_k: (identity['checkpoint_weight_map'],
                                            [Path(row['path']) for row in shards]))
     with cc.authenticate_selected_capture_source(**f.kwargs) as owner:
@@ -343,16 +347,16 @@ def test_adoption_admits_another_nfs_mount_and_refuses_another_object(
     """PQ #1363: a proof written on one host's mount of the pool is adoptable
     on another, whose st_dev differs, in certified mode. Any other field
     difference is refused. The owner uses the identity cache's own predicate."""
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cc
 
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
-    monkeypatch.setattr(cost_streaming, '_mount_filesystem_type', lambda _path: fstype)
+    monkeypatch.setattr(cost_streaming_identity, '_mount_filesystem_type', lambda _path: fstype)
     f = complete_source
     shards, fingerprints = [], []
     for name in sorted(f.tensors):
         path = f.root / name
-        row = cost_streaming.stat_fingerprint(path, path.stat())
+        row = cost_streaming_identity.stat_fingerprint(path, path.stat())
         shards.append({'path': str(path), 'size': row['size'], 'sha256': cc.sha256(path)})
         fingerprints.append({key: value + shift.get(key, 0) if key != 'path' else value
                              for key, value in row.items()})
@@ -362,9 +366,9 @@ def test_adoption_admits_another_nfs_mount_and_refuses_another_object(
     cache = tmp_path / 'source-identity.json'
     cache_record = {'identity': identity, 'fingerprints': fingerprints}
     cache.write_text(json.dumps(cache_record))
-    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+    monkeypatch.setattr(cost_streaming_identity, '_read_streamed_model_identity_cache',
                         lambda *_a, **_k: (cache_record, identity))
-    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+    monkeypatch.setattr(cost_streaming_identity, '_local_checkpoint_shards',
                         lambda *_a, **_k: (identity['checkpoint_weight_map'],
                                            [Path(row['path']) for row in shards]))
     with cc.authenticate_selected_capture_source(**f.kwargs) as owner:

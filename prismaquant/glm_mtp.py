@@ -63,6 +63,8 @@ MTP_OBJECTIVE = "mtp_head_self_kl"
 
 
 def _glm5_modeling():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers.models.glm5_next import modeling_glm5_next
 
     return modeling_glm5_next
@@ -210,6 +212,8 @@ def mtp_layer_skeleton(text_config, *, experts_implementation=None) -> Glm5NextM
     before construction, so the routed experts are built for that dispatch.
     The input config is not modified.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     config = copy.deepcopy(text_config)
     if experts_implementation is not None:
         config._experts_implementation = experts_implementation
@@ -407,7 +411,7 @@ def mtp_layer_initialization_contract(layer, receipt, *, input_manifest):
     import transformers
 
     from prismaquant.stage_a_chain_seed import tensor_payload_sha256
-    from prismaquant.streaming_model import (_MTP_LAYER_INITIALIZATION_SCHEMA,
+    from prismaquant.streaming_initialization import (_MTP_LAYER_INITIALIZATION_SCHEMA,
                                              _initialization_digest,
                                              validate_mtp_layer_initialization_contract)
 

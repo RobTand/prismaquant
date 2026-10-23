@@ -91,3 +91,25 @@ their original configuration, frozen production/producer sources and original
 81 actions were audited complete and 49 were ready. Prepared manifests and
 profiles are retained as bounded evidence for the later fix. No full-model KL,
 serving measurement or six-variant export is claimed by this comparison.
+
+
+## Phase keys after the cell-measurement owner move, 2026-10-16
+
+`steady-summary.json` is unchanged (SHA256 above). Its
+`MainThread:prismaquant.tessera_campaign._finish_anchor` rows time one unit's
+scoring and publication of decoded bytes. When cell measurement moved to
+`prismaquant.tessera_cell_measurement`, `experiments/campaign_publication_ab.py`
+stopped recording that span and recorded `measure_cells` instead. That is a
+broader span: one compatible batch's recipe admission, its encode and every
+unit's scoring and publication, including one-unit batches. It is not the
+historical span and must not be compared with it.
+
+The A/B instrument now records both under their own names. The per-unit span
+is `prismaquant.tessera_cell_measurement._score_and_publish`; it is the
+historical `_finish_anchor` work except that the direct-consumer contract
+lookup now runs before the encode, in `CellRecipe.prepare`. The batch span is
+`prismaquant.tessera_cell_measurement.measure_cells`. The encoder memo moved
+unchanged to `tessera_cell_measurement.encoder_kwargs_memo`, so its counters
+keep the historical key `tessera_campaign._activation_kwargs_memo.cache_info`.
+No measurement was rerun for this record, and no performance claim follows
+from it.

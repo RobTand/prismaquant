@@ -26,7 +26,6 @@ A second copy of a rate constant is a drift bug waiting for a rate to change.
 from __future__ import annotations
 
 import dataclasses
-import functools
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
@@ -64,7 +63,6 @@ __all__ = [
     "render_tessera_weight",
     "tessera_attesting_cells",
     "tessera_lane_admission",
-    "tessera_lane_attested",
     "tessera_serving_contract_path",
     "synthesize_tessera_spec",
     "tessera_quantize_dequantize",
@@ -109,10 +107,6 @@ TESSERA_PLANNED_RELEASE_OVERRIDES = 0
 _LABEL_SHAPE = (2048, 4096)
 
 
-#: Route statuses under which a cell says a native route EXECUTES.  A
-#: ``fallback`` cell attests a serve, not a native one, and admits nothing.
-_NATIVE_ROUTE_STATUSES = frozenset({"backed", "backed_with_serve_flag"})
-
 #: The vLLM plugin every Tessera route requires.  Aliased from the pin module
 #: rather than retyped: one spelling of the runtime's identity, so a rename
 #: cannot leave the gate checking a name nothing publishes.
@@ -139,54 +133,6 @@ def tessera_serving_contract_path():
     from .tessera_runtime_contract import contract_path as _canonical_contract_path
 
     return _canonical_contract_path()
-
-
-@functools.lru_cache(maxsize=1)
-def _pinned_serving_table():
-    """Tessera's packaged eligibility table and format rows, loaded once.
-
-    Until 2026-09-02 this read GRIDBOOK's materialized contract, because
-    Gridbook was the only runtime that could serve Tessera bytes.  Tessera now
-    ships its own vLLM plugin and its own ``runtime_contract.json``, and
-    Gridbook's Tessera lane is withdrawn (its contract v14, which carried the
-    two Tessera rows, was never released), so the authority for what executes
-    Tessera bytes is Tessera's table.
-    """
-    from importlib.resources import as_file
-    import json
-
-    from .lane_eligibility import (
-        load_eligibility_table, load_published_formats,
-    )
-    with as_file(tessera_serving_contract_path()) as path:
-        # The runtime's own version string, so the table's provenance names a
-        # release rather than an empty string.  It is a LABEL here; what
-        # admits a rung is the pin, below.
-        version = str(
-            json.loads(path.read_text(encoding="utf-8"))
-            .get("versions", {}).get("tessera", ""))
-        return (load_eligibility_table(version, contract_path=path),
-                load_published_formats(version, contract_path=path))
-
-
-def _release_pin_satisfied() -> bool:
-    """Is the INSTALLED Tessera the exact pinned one?
-
-    Since 2026-09-04 the pin is a commit plus the packaged contract's
-    SHA-256, not a release tag, so this answers True whenever the installed
-    ``runtime_contract.json`` hashes to the pinned digest and the pin file
-    agrees with the module constants -- and False for any other Tessera on
-    ``PYTHONPATH``, which is the property the tag was standing in for.  The
-    module attribute is looked up at call time so a test can substitute a
-    pinned-runtime fixture without reaching inside this function.
-    """
-    from . import tessera_serving_runtime_pin as pin_module
-
-    try:
-        pin_module.require_pinned_tessera_runtime()
-    except pin_module.TesseraServingRuntimePinError:
-        return False
-    return True
 
 
 def tessera_attesting_cells(
@@ -216,232 +162,65 @@ def tessera_attesting_cells(
     rather than reporting the absence the filter produced.
     """
     from .lane_eligibility import (
-        SCOPED_LANE_SCHEMAS, cell_evidence_admits, cell_lane_admits,
-        cell_matches_serving_context, resolve_payload_rung,
+        resolve_payload_rung,
     )
 
     if table is None or formats is None:
-        pinned_table, pinned_formats = _pinned_serving_table()
-        table = pinned_table if table is None else table
-        formats = pinned_formats if formats is None else formats
+        from .tessera_runtime_contract import installed_runtime_snapshot
+
+        snapshot = installed_runtime_snapshot()
+        table = snapshot.eligibility if table is None else table
+        formats = snapshot.published_formats if formats is None else formats
     if not table.present:
         return ()
     family, _k, rate = resolve_payload_rung(name, published_formats=formats)
     if rate is None or not table.governs(family):
         return ()
-    scoped = table.schema in SCOPED_LANE_SCHEMAS
-    if scoped and serving_context is None:
-        return ()
-    if not scoped and serving_context is not None:
-        return ()
-    matched = tuple(
-        cell for cell in table.cells
-        if cell.is_trellis
-        and cell.family == family
-        and cell.covers_rate(rate)
-        and cell.qualification == "device_qualified"
-        and cell.route_status in _NATIVE_ROUTE_STATUSES
-        and (ignore_evidence or cell_evidence_admits(cell)[0])
-        and (ignore_evidence or cell_lane_admits(cell, rate, table.lanes)[0])
-        and (not scoped or cell_matches_serving_context(cell, serving_context))
-    )
-    if scoped and {cell.regime for cell in matched} != set(table.regimes):
-        return ()
-    return matched
+    from .lane_eligibility import native_rung_cells
+
+    return native_rung_cells(
+        table, family, rate, serving_context=serving_context,
+        ignore_evidence=ignore_evidence)
+
+
+def snapshot_rung_admission(name: str, snapshot, *, serving_context=None):
+    """One native-rung verdict over ``snapshot``, a captured runtime contract.
+
+    Cells are selected first and the exact serving pin is then required of
+    THESE captured bytes, so a caller that already holds a snapshot (the menu)
+    and :func:`tessera_lane_admission` decide on one read.
+    """
+    from .lane_eligibility import NativeRungVerdict
+    from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
+
+    verdict = snapshot.native_rung_verdict(name, serving_context=serving_context)
+    if not verdict.admitted:
+        return verdict
+    try:
+        snapshot.require_exact_pin()
+    except TesseraServingRuntimePinError:
+        cell = verdict.cells[0]
+        return NativeRungVerdict(
+            "pin", f"the packaged Tessera contract attests {len(verdict.cells)} native "
+            f"cell(s) for {cell.family} R{verdict.rate_q256}, but the installed Tessera is not "
+            "the pinned commit/contract digest, so no rung is producer-eligible",
+            cells=verdict.cells, rate_q256=verdict.rate_q256)
+    return verdict
 
 
 def tessera_lane_admission(
-        name: str, *, table=None, formats=None,
-        serving_context: ServingContext | None = None) -> tuple[bool, str]:
-    """Does a pinned runtime execute this Tessera rung natively, and why not?
+    name: str, *, serving_context: ServingContext | None = None,
+):
+    """One typed native-rung verdict over the current captured serving metadata.
 
-    Returns ``(attested, reason)``.  ``reason`` is empty when the answer is
-    True and otherwise names **which conjunct refused**, because "unattested"
-    alone is four different facts and a menu that reports the wrong one sends
-    a reader to fix the wrong thing.  :func:`tessera_lane_attested` is the
-    boolean half; nothing may re-derive the reason beside this body.
-
-    Principle 9 makes this a *measured platform fact*, and principle 14 says
-    the fact is read from the runtime's own table, never asserted here.  The
-    runtime is Tessera's own vLLM plugin (``tessera.serving``, entry point
-    ``tessera``, selected by a checkpoint's ``quant_method: "tessera"``, one
-    operator knob ``TESSERA_SERVE_MODE``), and the table is the
-    ``runtime_contract.json`` that plugin packages.  Five conjuncts, each of
-    which fails closed on its own:
-
-    1. **The table admits the rung.**  The contract publishes the name's
-       payload family (``TESSERA_E2M1_K2`` for ``TESSERA_E2M1_K2_R896``) and
-       carries a ``device_qualified`` cell whose route executes natively and
-       whose ``rungs_q256`` names this rate. V5 additionally requires every
-       regime within the caller's explicit platform, structure, residency,
-       runtime image and execution mode; v3/v4 retain their legacy lookup. No
-       table, an unpublished family, a rate no cell names, a ``compile_only``
-       cell or a ``fallback`` route all answer False.
-    2. **Every matching cell states its plugin requirement.**  Stock vLLM has
-       no reader for these bytes, so a Tessera route is plugin-gated rather
-       than merely flag-gated, and the cell says so in a field a gate can read
-       (``requires_plugin``).  A cell that claims a route while naming no
-       plugin is a CONTRACT DEFECT, and this function RAISES rather than
-       admitting it: silently admitting would produce an artifact whose serve
-       command need not install the runtime that reads it.  The requirement is
-       carried into provenance by
-       ``lane_eligibility.resolve_unit_route``, which aggregates it
-       onto every ``UnitRoute`` / ``RegimeRoute`` (``requires_plugins``) and
-       into ``EligibilityTable.provenance()`` (``required_plugins``) -- the
-       payload the export gate stamps.
-    3. **The installed runtime is the exact pinned one.**  Without this
-       conjunct the answer would flip to True the moment the ``tessera``
-       package became importable -- which it already is, as a producer-side
-       render dependency -- and a producer-side import is not an attested
-       serving runtime.  Since 2026-09-04 the pin is a commit plus the
-       packaged contract's SHA-256 rather than a release tag, so
-       ``require_pinned_tessera_runtime`` admits exactly the Tessera whose
-       ``runtime_contract.json`` hashes to
-       ``TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256`` and refuses every
-       other tree on ``PYTHONPATH`` -- **eligibility is decided by the pin,
-       not by an edit here**.
-    4. **The cell's own evidence admits it.**  A cell whose packaged
-       ``evidence.smoke.status`` records a degenerate greedy smoke is refused
-       by ``lane_eligibility.cell_evidence_admits``: the runtime measured this
-       route generating incorrectly, and principle 9 requires a route to
-       generate correctly.  That is a refusal the runtime attested, not a
-       structural ban this file typed; when the runtime records a clean smoke
-       the refusal lifts on its own and the re-pin is the review event.
-    5. **The lane the cell launches through can read this producer's plan.**
-       Since contract v20 every ``native_extensions`` row publishes the
-       predicate its kernel gates on (``lane.requires``: the column rates,
-       window width, body, plane and decoration it reads), and a cell's
-       ``executes`` names the lane launch only for the rungs the ATTESTED
-       wire reaches.  This producer's plan at the rung is not that stamp --
-       it is :func:`planned_wire_facts`, read off the recipe and decoration
-       the render encodes with -- so ``lane_eligibility.cell_lane_admits``
-       hands those facts to Tessera's own decision core
-       (``tessera.serving.scheme.decide_lane_requirements``, the one home of
-       the rule) and refuses the cell by name when the kernel would refuse
-       the bytes.  Nothing here restates the predicate: a lane that widens
-       or narrows what it reads is a re-pin, not an edit.
-
-    This is the scoped menu-level admission, one lookup. Per-unit structural
-    predicates stay with ``lane_eligibility.resolve_unit_route`` at export.
-
-    History: until 2026-09-02 this was a module constant (``False``), then a
-    lookup against GRIDBOOK's serving pin, whose unreleased contract v13/v14
-    carried the Tessera rows.  Gridbook's Tessera lane is withdrawn and the
-    Gridbook pin no longer governs Tessera admission.
+    Cell selection, evidence, lane requirements and plugin defects are checked
+    before the exact serving pin. Unit predicates and export ranking retain
+    their independent policies.
     """
-    from .lane_eligibility import (
-        SCOPED_LANE_SCHEMAS, LaneEligibilityError, cell_evidence_admits,
-        cell_lane_admits, legacy_runtime_scope_refusal, resolve_payload_rung,
-    )
-    if table is None or formats is None:
-        pinned_table, pinned_formats = _pinned_serving_table()
-        table = pinned_table if table is None else table
-        formats = pinned_formats if formats is None else formats
-    if not table.present:
-        return False, (
-            "no packaged Tessera serving contract is readable"
-            + (f" ({table.absent_reason})" if table.absent_reason else ""))
-    family, _k, rate = resolve_payload_rung(name, published_formats=formats)
-    if rate is None:
-        return False, (
-            f"{name} resolves to no rung the packaged Tessera contract's "
-            f"formats table publishes")
-    if not table.governs(family):
-        return False, (
-            f"the packaged Tessera contract does not publish {family}")
-    scoped = table.schema in SCOPED_LANE_SCHEMAS
-    if not scoped and serving_context is not None:
-        return False, legacy_runtime_scope_refusal(table.schema)
-    if scoped and serving_context is None:
-        return False, (
-            f"{name}: the packaged Tessera {table.schema} contract requires an "
-            "explicit "
-            "serving context (platform, structure, residency, runtime image "
-            "and execution mode)")
-    scope = {"serving_context": serving_context} if serving_context is not None else {}
-    matched = list(tessera_attesting_cells(name, table=table, formats=formats, **scope))
-    if not matched:
-        # Ask again without the evidence filter, so a cell that exists and was
-        # refused on what the runtime MEASURED on it does not read as a cell
-        # that does not exist. The two are opposite facts about the runtime,
-        # and a shipcard that could not tell them apart would report a missing
-        # route where the runtime published a failing one. The lane predicate
-        # is the second such fact: a cell exists, its evidence admits it, and
-        # the kernel it launches through cannot read what this producer plans.
-        evidence_refused: list[str] = []
-        lane_refused: list[str] = []
-        for cell in tessera_attesting_cells(
-                name, table=table, formats=formats, ignore_evidence=True, **scope):
-            admits, why = cell_evidence_admits(cell)
-            if not admits:
-                evidence_refused.append(why)
-                continue
-            admits, why = cell_lane_admits(cell, rate, table.lanes)
-            if not admits:
-                lane_refused.append(why)
-        if evidence_refused:
-            return False, (
-                f"{name}: the packaged Tessera contract's own evidence refuses "
-                f"this route. " + " ".join(sorted(set(evidence_refused))))
-        if lane_refused:
-            return False, (
-                f"{name}: the packaged Tessera contract's lane predicate refuses "
-                f"this producer's plan on this route. "
-                + " ".join(sorted(set(lane_refused))))
-        if scoped:
-            return False, (
-                f"the packaged Tessera contract has no complete device-qualified "
-                f"native regime population for {family} R{rate} in serving "
-                f"context {serving_context.as_dict()}")
-        published = _published_rungs(formats, family)
-        return False, (
-            f"the packaged Tessera contract publishes {family} at rungs "
-            f"{published} and no device-qualified native cell names R{rate}")
-    # Conjunct 2 is checked BEFORE the pin, deliberately.  A defective packaged
-    # contract must be loud the day it lands, not on the day Rob cuts a tag.
-    unstated = [cell.id for cell in matched
-                if cell.requires_plugin != TESSERA_SERVING_PLUGIN]
-    if unstated:
-        raise LaneEligibilityError(
-            f"{name}: cell(s) {unstated} claim a native Tessera route without "
-            f"declaring requires_plugin={TESSERA_SERVING_PLUGIN!r}. Stock vLLM "
-            "has no reader for Tessera bytes, so every such route is "
-            "plugin-gated; a cell that omits the requirement would let an "
-            "artifact be admitted whose serve command need not install the "
-            "runtime that reads it. This is a contract defect -- fix the "
-            "packaged table, never this gate.")
-    if not _release_pin_satisfied():
-        # The table HAS the row.  Saying anything else here would point a
-        # reader at re-pinning a contract that already publishes the cell,
-        # when what is missing is that the INSTALLED Tessera is not the
-        # pinned one.
-        return False, (
-            f"the packaged Tessera contract attests {len(matched)} native "
-            f"cell(s) for {family} R{rate}, but the installed Tessera is not "
-            "the pinned commit/contract digest, so no rung is "
-            "producer-eligible")
-    return True, ""
+    from .tessera_runtime_contract import installed_runtime_snapshot
 
-
-def _published_rungs(formats, family: str) -> list[int]:
-    """The rates the packaged contract's ``formats`` row names for a family."""
-    row = formats.get(family) if hasattr(formats, "get") else None
-    if not isinstance(row, dict):
-        return []
-    return sorted(int(r) for r in row.get("candidate_rungs_q256", ()))
-
-
-def tessera_lane_attested(
-        name: str, *, table=None, formats=None,
-        serving_context: ServingContext | None = None) -> bool:
-    """The boolean half of :func:`tessera_lane_admission`.  **The one seam.**
-
-    Kept as its own name because it is what every gate consults and what the
-    tests substitute; the reason string is a separate read so that patching
-    the verdict cannot silently invent a rationale for it.
-    """
-    scope = {"serving_context": serving_context} if serving_context is not None else {}
-    return tessera_lane_admission(name, table=table, formats=formats, **scope)[0]
+    return snapshot_rung_admission(
+        name, installed_runtime_snapshot(), serving_context=serving_context)
 
 
 def is_tessera_format(name: object) -> bool:
@@ -671,7 +450,7 @@ def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dic
     (``tessera_served_wire_recipe``, the producer's structure-aware resolver)
     and the decoration
     constants above.  ``lane_eligibility.cell_lane_admits`` hands this dict
-    to ``tessera.serving.scheme.decide_lane_requirements``, so a lane's
+    to ``tessera.metadata.decide_lane_requirements``, so a lane's
     published predicate is decided over what this producer plans rather than
     over the attested stamp the contract's cells were derived from; the test
     that pins this function against ``wire_facts_of_parsed`` on a real
@@ -1075,7 +854,7 @@ def synthesize_tessera_spec(
         #   (a) the wire can carry it -- the grid's digest is a permanent
         #       commitment in SERIALISABLE_GRIDS;
         #   (b) a pinned runtime executes it -- read from the pinned serving
-        #       release's own contract (``tessera_lane_attested``), so a rung
+        #       release's own contract (``tessera_lane_admission``), so a rung
         #       is admitted by a cell the runtime published, never by an edit
         #       here (principles 9 and 14).
         # (a) is per-rung and settled here; (b) is one lookup so that a route
@@ -1121,7 +900,7 @@ def synthesize_tessera_spec(
 class HessianContractError(RuntimeError):
     """The Hessian contract was not met, and the encode must not proceed.
 
-    Its own class because the campaign's anchor loop wraps ``_measure_anchor``
+    Its own class because the campaign's anchor loop wraps ``tessera_cell_measurement.measure_cell``
     in ``except Exception: continue`` -- an anchor that fails for its own
     reasons should not abort a multi-hour run -- and a contract refusal is
     exactly the thing that must *not* be absorbed by that. A refusal quietly

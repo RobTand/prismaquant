@@ -19,6 +19,8 @@ claims no versioned fused contract.
 """
 from __future__ import annotations
 
+from .name_projection import fused_dense_group, fused_sibling_group_key
+
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 import hashlib
@@ -612,45 +614,6 @@ E2M1_MIDPOINTS = tuple(
 )
 
 
-# Compatibility fallback for profiles that cannot expose serving fusion
-# metadata.  This catalog lives here because activation calibration and legacy
-# native export must never infer different sibling units.  New architectures
-# should still declare their groups in the model profile/structure spec.
-_FUSED_DENSE_PATTERNS = (
-    (
-        re.compile(
-            r"^(?P<pre>.+)\.self_attn\.(?P<sib>q_proj|k_proj|v_proj)$"
-        ),
-        ("q_proj", "k_proj", "v_proj"),
-    ),
-    (
-        re.compile(r"^(?P<pre>.+)\.mlp\.(?P<sib>gate_proj|up_proj)$"),
-        ("gate_proj", "up_proj"),
-    ),
-    (
-        re.compile(
-            r"^(?P<pre>.+)\.mlp\.shared_expert\."
-            r"(?P<sib>gate_proj|up_proj)$"
-        ),
-        ("gate_proj", "up_proj"),
-    ),
-    (
-        re.compile(
-            r"^(?P<pre>.+)\.linear_attn\."
-            r"(?P<sib>in_proj_qkv|in_proj_z)$"
-        ),
-        ("in_proj_qkv", "in_proj_z"),
-    ),
-    (
-        re.compile(
-            r"^(?P<pre>.+)\.linear_attn\."
-            r"(?P<sib>in_proj_a|in_proj_b)$"
-        ),
-        ("in_proj_a", "in_proj_b"),
-    ),
-)
-
-
 def resolve_input_global_scale_policy(
     value: str | None = None,
     *,
@@ -781,63 +744,6 @@ def resolve_input_global_scale_value(
     # the existing F32 cast; strict contract paths use input_global_scale_tensor
     # when they build and digest their physical mapping.
     return float(value)
-
-
-def fused_dense_group(name: str) -> tuple[str, tuple[str, ...]] | None:
-    """Return the legacy fallback group prefix and sibling leaf names."""
-
-    for pattern, members in _FUSED_DENSE_PATTERNS:
-        match = pattern.match(str(name))
-        if match:
-            return match.group("pre"), members
-    return None
-
-
-def fused_sibling_group_key(
-    name: str,
-    *,
-    profile=None,
-    tolerate_profile_errors: bool = False,
-) -> str | None:
-    """Resolve one canonical fused-sibling key.
-
-    Versioned contract callers use the strict default: a profile that cannot
-    attest its execution unit is an export error.  The legacy native exporter
-    passes ``tolerate_profile_errors=True`` to preserve its historical
-    profile-metadata fallback behavior without owning a second algorithm.
-    """
-
-    target = str(name)
-    group_fn = getattr(profile, "fused_sibling_group", None)
-    if callable(group_fn):
-        try:
-            group = group_fn(target)
-        except Exception:
-            if not tolerate_profile_errors:
-                raise
-            group = None
-        if group:
-            return str(group)
-
-    mapping_fn = getattr(profile, "fused_sibling_leaf_mapping", None)
-    if callable(mapping_fn) and "." in target:
-        try:
-            mapping = mapping_fn()
-        except Exception:
-            if not tolerate_profile_errors:
-                raise
-            mapping = None
-        if mapping:
-            prefix, leaf = target.rsplit(".", 1)
-            for fused, members in mapping.items():
-                if leaf in {str(member) for member in members}:
-                    return f"{prefix}.{fused}"
-
-    fallback = fused_dense_group(target)
-    if fallback is None:
-        return None
-    prefix, members = fallback
-    return f"{prefix}::__fused__:{','.join(members)}"
 
 
 def group_fused_sibling_targets(
@@ -1737,9 +1643,8 @@ class ActivationScaleContractError(RuntimeError):
     Raised by name (the qname) so the refusal says which unit, and raised
     BEFORE anything is measured: an activation-KL hook or a cache score that
     silently fell back to the dynamic FP32-scale RTN would price an activation
-    tensor the runtime never executes (RobTand/prismaquant#194, #205).  The
-    campaign's own refusal (``tessera_campaign.ActivationScaleContractError``)
-    is this class under its historical name.
+    tensor the runtime never executes (RobTand/prismaquant#194, #205).
+    Cell measurement, activation-KL hooks and cache scoring raise this class.
     """
 
 

@@ -1,6 +1,6 @@
 """Calibration maxima stay on device until the complete draw has run."""
 import torch
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
 
 def test_maxima_convert_to_host_once_per_unit_and_keep_python_nan_semantics(monkeypatch):
@@ -20,7 +20,7 @@ def test_maxima_convert_to_host_once_per_unit_and_keep_python_nan_semantics(monk
         scalar_reads.append(value.shape)
         return original(value,*args,**kwargs)
     monkeypatch.setattr(torch.Tensor,'item',item)
-    _x,_h,counts,maxima = _collect_activations(model,['first','second'],batches,1,'cpu',want_hessian=False)
+    _x,_h,counts,maxima = capture_activation_statistics(model,['first','second'],batches,1,'cpu',want_hessian=False)
     # Python max(0, NaN) ignores the NaN batch, including its finite 99.
     assert maxima == {'first':4.,'second':4.}
     assert counts == {'first':3,'second':3}

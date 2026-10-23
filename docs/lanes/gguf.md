@@ -1,7 +1,11 @@
 # GGUF lane — llama.cpp / vLLM-GGUF serving
 
+**Deprecated 2026-10-17, per Rob.** The existing code is retained without further
+fixes or enhancements. The implementation notes, commands, measurements and
+limitations below remain historical reference, not a development roadmap.
+
 *Added 2026-07-06 (branch `claude/gguf-lane-a`); updated 2026-07-30. Status:
-enabled end-to-end. The two items this header used to call open work — the
+historically enabled end-to-end. The two items this header used to call open work — the
 GPTQ-into-k-quant rounder and MoE expert stacking — have both landed
 (`prismaquant/gguf_gptq.py`, `prismaquant/export_gguf_direct.py`); see
 "Known limitations / open work" for what is left. Trust the code and the

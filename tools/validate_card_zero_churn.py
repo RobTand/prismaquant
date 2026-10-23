@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Zero-churn check: does the Sensitivity Card price like the shipping allocator?
+"""Compare the card's SCALAR pricing with the allocator's scalar loss formula.
 
-The adoption argument for the card rests on a claim that must be checked against
-*real* production artifacts, not synthetic fixtures: pricing a (unit, format)
-through the card's SCALAR tier returns bit-for-bit what
-`allocator_solver.predicted_dloss` returns for the same run. If that holds, a
-pipeline switched to the card allocates identically -- no churn, no re-validation
-of shipped artifacts.
+For matching units with a ``weight_mse`` record, compare
+``weight_dloss_scalar(unit, weight_mse)`` with
+``allocator_solver.predicted_dloss(unit.h_trace, weight_mse)``. Other cost
+records are skipped. Equality here does not establish equal candidate menus,
+allocations, or exported artifacts.
 
 It is a tool rather than a test because it needs a real WORK_DIR: a `probe.pkl`
 and the `cost.pkl` produced from it. Run it against any completed run.
@@ -17,9 +16,8 @@ Measured 2026-08-14 on `prod-27b-nvfp4cb-5p5` (Qwen3.6-27B, 505 units, the
 NVFP4-CB menu): 3528/3528 (unit, format) pairs bit-identical, 3024 of them with
 a nonzero predicted loss.
 
-Note on scope: this validates the SCALAR tier, which is the tier that must not
-change answers. MARGINAL and AQUA are *new* estimators -- they are supposed to
-differ, and they are screening surrogates with no served A/B.
+The ``ZERO_CHURN`` verdict covers only the compared scalar prices. MARGINAL and
+AQUA are separate estimators and are not compared here.
 """
 
 from __future__ import annotations

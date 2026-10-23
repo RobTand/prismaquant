@@ -1,0 +1,119 @@
+{
+  "claims_excluded": [
+    "production qualification",
+    "served KL",
+    "prefill performance",
+    "GPU time or energy saving from point counts"
+  ],
+  "counts": {
+    "candidate": 262,
+    "complete_reference": 579,
+    "new_gpu_dependent_audit": 317,
+    "new_gpu_initial": 262
+  },
+  "dependent_roles": {
+    "e2_interior": "requires E2 prediction seal produced from two E2 endpoints",
+    "e4_interior": "requires E4 prediction seal produced from full BF source and two E4 endpoints"
+  },
+  "frozen_unix": 1789169596.9625409,
+  "historical_exposure": {
+    "BF16": [
+      832,
+      960,
+      1088
+    ],
+    "E2M1": [
+      896
+    ],
+    "E4M3": [
+      832,
+      960,
+      1088
+    ],
+    "dataset_sha256": "3547254ab482ed60f20ec738d2aaae23c2d2ca82cb2b9a53fddf756f52df855e",
+    "inspection_for_this_freeze": "Metadata-only inventory of qname/family/rate availability; no numerical cost values read. Layer20 was in the historical development split."
+  },
+  "implementation_freeze_order": "Generalized protocol/sealer must be reviewed, tested and hash-frozen before opening new numerical curve inputs; math and selection above immutable now. Prediction seal is declared input to each dependent GPU action.",
+  "initial_roles": [
+    "bf_source",
+    "e4_left",
+    "e4_right",
+    "e2_left",
+    "e2_right",
+    "e2_terminal"
+  ],
+  "measurement_plans": {
+    "bf_source": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_bf16_full.measurement-plan.json",
+      "sha256": "1bccd8aab9bf446840acef87563e4fdde6f10df5374655995d7006536ec5fc6f"
+    },
+    "e2_interior": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_hidden_interior.measurement-plan.json",
+      "sha256": "767ed16d708b480f521afdd6cf6e6d76ef7dc10583e1933c17a45d844d76ac2b"
+    },
+    "e2_left": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r832.measurement-plan.json",
+      "sha256": "c0b324ad8cb9393efc522ffd35724c32f22d13648b932ffc35e8a5360e3f40fc"
+    },
+    "e2_right": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_window_endpoint_r895.measurement-plan.json",
+      "sha256": "414f623e5a2f606f694428a624f3bcc30f4ccd1f2ca0e435f332308308351841"
+    },
+    "e2_terminal": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.measurement-plan.json",
+      "sha256": "9b0fed0fd1666d125a19ca3f7002370c4f847db42402c75432371890203b3cbe"
+    },
+    "e4_interior": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_hidden_interior.measurement-plan.json",
+      "sha256": "cb387628e31b2c50ab449feb08f92029b57079a85ac16b905c2391bb34d42b52"
+    },
+    "e4_left": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.measurement-plan.json",
+      "sha256": "dc135ffe3d65515572808fd97d020414d1cb19524ecc5000ea8d461bcd8fa1e3"
+    },
+    "e4_right": {
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r1088.measurement-plan.json",
+      "sha256": "262edbcdf641629123f42a6c9a44d3b9134b1c1fb5a42349586eba58fd186b99"
+    }
+  },
+  "qname": "model.language_model.layers.20.mlp.shared_experts.down_proj",
+  "qshape": [
+    4096,
+    2048
+  ],
+  "reference_implementation": {
+    "e2_rule": "two endpoint piecewise linear in value; frozen prior study 48b84df099",
+    "e4_path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/paired-family-transfer-01/evaluate.py",
+    "e4_sha256": "edbbc9fbc49112565071894dec21692e7e5e3a9dfdfc9dca78bec88b2111403e"
+  },
+  "research_only": true,
+  "rules": {
+    "e2_primary": {
+      "formula": "t=(r-832)/63; predict(r)=E2(832)+t*(E2(895)-E2(832)); R896 excluded and separately measured",
+      "name": "endpoint_value_linear"
+    },
+    "e4_primary": {
+      "formula": "beta=(E4(1088)-E4(832))/(BF(1088)-BF(832)); alpha=E4(832)-beta*BF(832); predict(r)=alpha+beta*BF(r)",
+      "name": "affine_bf_from_paired_endpoints"
+    },
+    "e4_secondary": {
+      "formula": "t=(r-832)/256; predict(r)=BF(r)+(E4(832)-BF(832))+t*((E4(1088)-BF(1088))-(E4(832)-BF(832)))",
+      "name": "rate_linear_delta_from_bf"
+    },
+    "exact_endpoints": true,
+    "finite_positive_required": true,
+    "no_refit_from_interiors": true
+  },
+  "schema": "prismaquant.family_transfer_preselection.v1",
+  "screen": {
+    "all_and_fresh_required": true,
+    "complete_predictions_required": true,
+    "family_passes_separate": true,
+    "maximum_max": 0.05,
+    "minimum_evidence_scope": "one Linear, 255 E4 interiors (254 fresh), 62 E2 interiors; no family-wide gate",
+    "nonempty_audit_required": true,
+    "p99_max": 0.01,
+    "relative_error": "abs(prediction/truth-1)"
+  },
+  "status": "frozen_before_new_dense_measurements"
+}

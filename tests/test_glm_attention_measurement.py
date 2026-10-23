@@ -15,6 +15,7 @@ from prismaquant import tessera_campaign as tc
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.perturbed_x_cache import activation_cache_filename
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from prismaquant.tessera_hessian import calibration_identity, token_ids_sha256
 from test_glm_attention_census import KDA_LEAVES, MLA_LEAVES, _contract, _prefix, _runtime
 
@@ -125,7 +126,7 @@ def test_full_draw_attention_measurement_and_publication(tmp_path):
     expected_h = {name: x.double().T @ x.double() for name, x in reference.items()}
     expected_max = {name: x.abs().max().item() for name, x in reference.items()}
     model.batches.clear()
-    rows, hessians, counts, maxima = tc._collect_activations(
+    rows, hessians, counts, maxima = capture_activation_statistics(
         model, targets, ids.split(16), max_rows=257, device="cpu", want_hessian=True)
     assert set(rows) == set(hessians) == set(counts) == set(maxima) == set(units)
     for name, x in reference.items():

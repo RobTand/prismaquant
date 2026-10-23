@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, aura_provenance
+
 import pytest
 import torch
 import copy
@@ -7,7 +9,8 @@ import pickle
 import hashlib
 
 import prismaquant.aura_cost as aura
-from prismaquant.joint_aura import validate_joint_aura_entry, paired_candidate_difference
+from prismaquant.joint_aura import paired_candidate_difference
+from prismaquant.joint_aura_rows import validate_joint_aura_entry
 from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.perturbed_x_cache import _activation_qdq
 from prismaquant import format_registry as fr
@@ -59,7 +62,7 @@ def test_joint_streamed_emits_complete_aligned_rows_and_zero_passthrough():
 
 
 def test_joint_checkpoint_resume_and_refuses_changed_actual_render(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, cache = _fixture()
     first = _run(runner, cache, checkpoint_dir=tmp_path)
     _, context, runner, cache = _fixture()
@@ -126,18 +129,18 @@ def test_joint_activation_identity_reduces_to_weight_only_cost():
 
 
 def test_joint_interrupted_resume_preserves_signed_samples(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, cache = _fixture()
     expected = _run(runner, cache)
-    writer = aura._write_aura_unit_checkpoint
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     def interrupt(*args, **kwargs):
         writer(*args, **kwargs)
         raise RuntimeError("fixture interruption")
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", interrupt)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt)
     _, _, runner, cache = _fixture()
     with pytest.raises(RuntimeError, match="fixture interruption"):
         _run(runner, cache, checkpoint_dir=tmp_path)
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", writer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", writer)
     _, _, runner, cache = _fixture()
     actual = _run(runner, cache, checkpoint_dir=tmp_path, resume=True)
     assert actual["costs"] == expected["costs"]
@@ -149,7 +152,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
 ):
     from prismaquant import joint_aura, joint_projection_backend as backend
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     real_lease = joint_aura.SignedJointProjectionLease
     # CPU numerical fixture for a CUDA-bound backend: populated leases have
     # a logical CUDA target; an empty lease has the constructor's CPU fallback.
@@ -189,7 +192,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         return payload, backward
 
     expected, expected_backward = run()
-    writer = aura._write_aura_unit_checkpoint
+    writer = aura_checkpoint_journal.UnitCheckpointWriter.publish
     written = []
 
     def interrupt_after_complete_layer(*args, **kwargs):
@@ -197,7 +200,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         written.append(kwargs["qname"])
         raise RuntimeError("fixture interruption after complete reverse layer")
 
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", interrupt_after_complete_layer)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", interrupt_after_complete_layer)
     with pytest.raises(RuntimeError, match="fixture interruption after complete reverse layer"):
         run(checkpoint_dir=tmp_path)
     assert written == ["model.layers.1.proj"]
@@ -208,7 +211,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
         written.append(kwargs["qname"])
         return writer(*args, **kwargs)
 
-    monkeypatch.setattr(aura, "_write_aura_unit_checkpoint", record_write)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", record_write)
     written.clear()
     leases.clear()
     actual, actual_backward = run(checkpoint_dir=tmp_path, resume=True)
@@ -232,7 +235,7 @@ def test_joint_resume_checkpointed_layer_keeps_cotangents_without_empty_lease(
 
 
 def test_joint_checkpoint_refuses_probe_alignment_even_valid_envelope(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, cache = _fixture()
     _run(runner, cache, checkpoint_dir=tmp_path)
     path = next((tmp_path / "units").glob("*.pkl"))
@@ -277,11 +280,11 @@ def test_joint_row_refuses_second_scalar_or_activation_application(mutation):
 
 
 def test_joint_resume_refuses_changed_source_closure(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "2" * 64)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "2" * 64)
     _, _, runner, cache = _fixture()
     _run(runner, cache, checkpoint_dir=tmp_path)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "3" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "3" * 64)
     _, context, runner, cache = _fixture()
     with pytest.raises(RuntimeError, match="identity mismatch"):
         _run(runner, cache, checkpoint_dir=tmp_path, resume=True)
@@ -291,7 +294,7 @@ def test_joint_resume_refuses_changed_source_closure(tmp_path, monkeypatch):
 def test_joint_transient_anchor_renderer_is_consumed_and_resumed(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from test_streamed_cost_checkpoints import _ExactAnchorRenderer
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _, runner, _ = _fixture()
     plan = {f"model.layers.{i}.proj": ("FP8_E4M3",) for i in range(2)}
     class TransientRenderer(_ExactAnchorRenderer):
@@ -331,7 +334,7 @@ def test_joint_transient_anchor_renderer_is_consumed_and_resumed(tmp_path, monke
 @pytest.mark.parametrize('field', ['_attn_implementation', '_experts_implementation'])
 def test_joint_resume_binds_private_source_backend(tmp_path, monkeypatch, field):
     from types import SimpleNamespace
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     model, _, runner, cache = _fixture()
     model.model.layers[0].config = SimpleNamespace(**{field: 'eager'})
     _run(runner, cache, checkpoint_dir=tmp_path)

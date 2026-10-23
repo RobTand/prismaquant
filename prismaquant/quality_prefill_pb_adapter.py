@@ -158,12 +158,9 @@ class QualityPrefillAdapterError(SchemaValidationError):
 class DecompositionUnavailable(RuntimeError):
     """The pinned PrismaBuild runtime cannot decompose a logical request.
 
-    Its own type because the caller's response differs in kind.  A schema error
-    is a plan the author can fix; this one says the fleet does not yet carry the
-    capability, and the only answers are to wait for PB #518 to merge and a
-    runtime generation to be published, or to run the phase in process against a
-    checkout of that branch.  Neither is something this module can do, and
-    neither is "submit it undecomposed".
+    The selected runtime must publish the decomposition capability through
+    its client SDK. A compatible checkout can exercise the adapter in process;
+    an undecomposed submission is not a fallback.
     """
 
 
@@ -714,12 +711,12 @@ def require_decomposition_support(
         f"PrismaBuild pre-execution decomposition (PB #517) is not available in "
         f"the runtime at {support['runtime_root']}: it does not advertise "
         f"{DECOMPOSITION_TAG!r} ({found}). "
-        f"It needs PB pull request #518 merged AND a PrismaBuild runtime "
-        f"generation carrying it and PB's client SDK (#1254) published to the "
-        f"fleet; a merge alone is not "
+        f"It needs a PrismaBuild runtime generation carrying decomposition "
+        f"from PB #518 and PB's client SDK (#1254) published to the fleet; "
+        f"a merge alone is not "
         f"deployed support, and publishing a generation needs Rob's explicit "
         f"word and an idle queue. Until then this phase is exercised only in "
-        f"process against a checkout of the #518 branch. This adapter does not "
+        f"process against a compatible PB checkout. This adapter does not "
         f"fall back to submitting the roster as one undecomposed action and "
         f"does not shard it itself."
     )

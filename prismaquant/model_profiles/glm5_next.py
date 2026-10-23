@@ -527,7 +527,8 @@ class Glm5NextProfile(ModelProfile):
         # machinery does not apply (hy_v3 route). checkpoint_to_live_name
         # drops the keys so probe/cost/allocator never see them, and the
         # compressed-tensors lane ships the block VERBATIM through
-        # passthrough_prefixes for a future spec-decode serve.
+        # passthrough_prefixes. That body-indexed source/serving path is
+        # separate from the mtp.* sidecar API.
         #
         # `mtp_source_prefix()` is intentionally left at the base default
         # ("mtp."), which matches no key in this checkpoint. Returning ""
@@ -722,6 +723,8 @@ class Glm5NextProfile(ModelProfile):
         names of ``glm_mtp.MtpCheckpointModel``, its skeleton. Its captures
         carry the MTP layer's load contract.
         """
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         if name != "mtp":
             return super().source_scope(name, model_path)
         import copy
@@ -730,7 +733,7 @@ class Glm5NextProfile(ModelProfile):
 
         from ..glm_mtp import (MtpCheckpointModel, mtp_checkpoint_prefix, mtp_layer_index,
                                mtp_layer_skeleton)
-        from ..streaming_model import _MTP_LAYER_INITIALIZATION_SCHEMA
+        from ..streaming_initialization import _MTP_LAYER_INITIALIZATION_SCHEMA
         from .base import SourceScope
 
         text_config = AutoConfig.from_pretrained(str(model_path)).text_config

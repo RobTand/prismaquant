@@ -126,7 +126,7 @@ def test_staged_owned_buffer_does_not_read_the_pool_path(tmp_path, monkeypatch):
     def forbidden(_self):
         raise AssertionError("pool read forbidden")
 
-    def staged(observed_path, expected, label):
+    def staged(observed_path, expected, label, *, max_bytes=None):
         calls.append((observed_path, expected, label))
         return raw
 
@@ -144,7 +144,7 @@ def test_staged_refusal_propagates_exact_exception_and_cause(tmp_path, monkeypat
     refused.__cause__ = cause
     monkeypatch.setattr(inputs, "bound_stat_fence", lambda _path: None)
 
-    def staged(*_args):
+    def staged(*_args, **_kwargs):
         raise refused
 
     monkeypatch.setattr(inputs, "BOUND_READER", staged)
@@ -299,3 +299,57 @@ def test_join_routes_the_same_single_read_bytes_once(tmp_path, monkeypatch):
     assert result is raw
     assert actual == expected
     assert events == ["read", "owner"]
+
+
+def test_explicit_bound_applies_to_cached_bytes(tmp_path):
+    raw = b"owned bytes"
+    path = tmp_path / "owned.bin"
+    path.write_bytes(raw)
+    bound = record(path, raw)
+    assert inputs.read_bound(bound, "unit") == raw
+    with pytest.raises(ValueError, match="bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) == raw
+
+
+@pytest.mark.parametrize("warm_memo", [False, True])
+def test_bounded_symlink_matches_unbounded_path_behavior(tmp_path, warm_memo):
+    raw = b"bound alias bytes"
+    target = tmp_path / "original.bin"
+    target.write_bytes(raw)
+    alias = tmp_path / "alias.bin"
+    alias.symlink_to(target)
+    bound = record(alias, raw)
+    if warm_memo:
+        assert inputs.read_bound(bound, "unit") == raw
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) == raw
+    with pytest.raises(inputs.BoundReadLimitExceeded):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+
+def test_explicit_bound_reaches_the_staged_reader_without_pool_stat(tmp_path, monkeypatch):
+    raw = b"staged bytes"
+    path = tmp_path / "absent.bin"
+    calls = []
+
+    def staged(observed, digest, label, *, max_bytes):
+        calls.append((observed, digest, label, max_bytes))
+        return raw
+
+    monkeypatch.setattr(inputs, "BOUND_READER", staged)
+    bound = record(path, raw)
+    assert inputs.read_bound(bound, "unit", max_bytes=len(raw)) is raw
+    assert calls == [(path, bound["sha256"], "unit", len(raw))]
+    with pytest.raises(ValueError, match="bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)
+    from prismaquant import stage_b_prep_io, staged_lease
+
+    class Resolver:
+        def staged_read(self, _path, *, expected_sha256):
+            return {"bytes": len(raw), "sha256": expected_sha256}
+
+    reads = stage_b_prep_io.StagedPreparationReads(Resolver(), manifest_sha256="a" * 64)
+    stage_b_prep_io._install_bound_reader(reads)
+    monkeypatch.setattr(staged_lease, "acquire_entry_window",
+                        lambda *_args: pytest.fail("an oversized staged entry must refuse before the pin"))
+    with pytest.raises(ValueError, match="staged input exceeds its read bound"):
+        inputs.read_bound(bound, "unit", max_bytes=len(raw) - 1)

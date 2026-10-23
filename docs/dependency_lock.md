@@ -40,14 +40,66 @@ freshness rather than trusting this structural check alone.
 
 ## Canonical metadata tests
 
-The v3 consumer tests declare one pure metadata module in
-`tests/fixtures/rung_allowability_v3/producer.json`.
-The declaration names the merged Tessera commit, source path and actual module
-SHA-256. The existing isolated producer adapter uses this declaration by default.
-It verifies the fetched module bytes before a child process imports them.
-The child imports no Torch, Triton or serving module.
-An explicitly supplied module and its byte hash remain supported.
-The dependency does not alter the serving pin or the installed serving package.
+The D41, version-dispatch, canonical-consumer and MTP allocator tests use
+`tests/_rung_allowability_producer.py`. Its authoritative declaration is
+`tests/fixtures/rung_allowability_v3/producer.json`: repository `RobTand/tessera`,
+commit `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`, source path
+`src/tessera/rung_allowability.py`, SHA-256
+`3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+
+With `TESSERA_RUNG_ALLOWABILITY_MODULE`,
+`TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256` and `TESSERA_PRODUCER_PYTHON` unset,
+the adapter fetches that exact source from GitHub's raw-content endpoint,
+checks its declared digest and runs it with `sys.executable`.
+Only authenticated downloads are cached, by declaration identity, in a temporary
+directory. Each resolution reads the current environment selection; each call
+rechecks the selected source bytes. A failed fetch or a downloaded digest
+mismatch fails explicitly with the declared repository, commit, path and digest.
+There is no skip, alternate producer or synthetic admission fallback.
+
+For offline execution, set `TESSERA_RUNG_ALLOWABILITY_MODULE` to a readable
+local copy and `TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256` to the declaration's
+digest. Both must be supplied together, and both the companion digest and the
+actual source bytes must match the declaration. Missing or empty companions,
+conflicting digests, unreadable files and changed bytes fail before execution
+with the dependency identity and override information. An authenticated override
+performs no network request. `TESSERA_PRODUCER_PYTHON` may select an explicit
+interpreter; otherwise the current interpreter is used.
+
+Canonical validation and admission stay in the child-process adapter. The child
+runs Python in isolated mode, hashes the source again and executes the bytes it
+hashed, without using cached bytecode. Import guards reject other Tessera
+modules, Torch, Triton and vLLM during module loading and producer calls;
+caught forbidden import attempts still fail the invocation. Successful calls
+and canonical `ValueError` refusals retain source and interpreter SHA-256
+evidence and the empty forbidden-import list. Canonical refusal messages remain
+`ValueError` messages in the parent. Failed invocations clear previous evidence.
+The publication fixture restores the consumer's producer binding on teardown.
+This test dependency does not alter production admission, the serving pin,
+format menus, PrismaBuild or the installed serving package.
+
+`tests/test_rung_allowability_producer.py` uses controlled bytes and transport
+failures to check provisioning and isolation. Those controls establish no
+canonical admission qualification. The operations follow-up must run the actual
+declared source through the composed consumer tests on the production-pinned
+interpreter, then repeat through the normal PrismaBuild runner without injected
+producer environment. For the direct composed run, with `PY` naming that
+interpreter:
+
+```sh
+env -u TESSERA_RUNG_ALLOWABILITY_MODULE \
+    -u TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256 \
+    -u TESSERA_PRODUCER_PYTHON \
+    "$PY" -m pytest -q -rA \
+    tests/test_rung_allowability_producer.py \
+    tests/test_rung_allowability.py tests/test_rung_allowability_versions.py \
+    tests/test_canonical_consumer_join.py tests/test_glm_mtp_selection.py \
+    tests/test_mtp_formats_menu_1692.py
+```
+
+Retain interpreter identity and digest, actual producer source digest, the
+command and the complete pass/fail/skip report for both runs. Mocked provisioning
+results alone do not establish compatibility with the normal runner.
 
 Fleet test commands can use `tools/provision_tessera_pin.py` to provision the
 unchanged development pin in a scoped environment under `/tmp`.

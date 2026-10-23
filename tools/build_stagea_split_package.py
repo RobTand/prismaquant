@@ -69,7 +69,7 @@ from prismaquant.digests import (  # noqa: E402
     indent2_json_file_bytes,
 )
 from prismaquant.joint_adjoint_slices import checkpoint_cotangent_plane  # noqa: E402
-from prismaquant.joint_layer_quanta import adjoint_chain_phase_name  # noqa: E402
+from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from tools.build_stagea_seed_package import (  # noqa: E402
     _checkpoint_files,
