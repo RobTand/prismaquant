@@ -8836,6 +8836,57 @@ charge applies once PB #911 is published; the generation published on
 2026-09-23 (`c2bda68758a3`) predates it and carries the list as an ordinary
 variable. Gate: `tests/test_dispatch_joint_quanta.py`.
 
+Explicit scratch traffic (PQ #2798) is default-off. To opt in, put a JSON
+**string** in the existing sealed `spec.env.PRISMABUILD_LOCAL_SCRATCH_IO`, for
+example (shown as the string's contents):
+
+```json
+{"schema":"prismabuild.local_scratch_io.v1","write_bytes":1073741824,"read_bytes":0,"profile_contract":"prismabuild.local_scratch_io.buffered_seq_sync.v1","max_profile_age_s":3600}
+```
+
+The dispatcher validates and forwards that string verbatim exactly once in the
+outer PB environment, retaining it in the inner spec. Ambient coordinator values
+have no effect; absence preserves capacity-only argv bytes and ordering. An
+explicit empty value is invalid. JSON must have exactly these fields, no duplicate
+keys or nonfinite values; directions are nonnegative integers (not booleans),
+at least one positive. Age is a positive finite number (not boolean), and the
+contract is a nonempty `[A-Za-z0-9_.-]+` token. The example contract is PB's
+currently implemented measured profile contract, not a PQ profile or rate claim.
+
+PB's current I/O contract requires pool transport and exactly one scratch pair.
+The shared `local_scratch_request_environment` projection validates the complete
+capacity declaration before I/O admission, both in dispatcher preflight and when
+building the outer envelope from the serialized row spec. Produced spool remains
+a separate host-window charge, not a scratch pair. Opt-in refuses zero pairs and
+all two-/three-pair combinations of cotangent, replay spill and compilation
+cache; it never drops pairs or merges roots. Opt-out preserves all declarations.
+The inspected default joint-panel artifact `spec-hostcap32-ram-dev-spool.json`
+declares all three pairs and is therefore unsupported for I/O opt-in here. Its
+zero image digest and fixture-labelled roots make it synthetic, not production
+qualification. Each future invocation must use its own sealed spec, not assume
+this artifact's topology. No default spec or deployment is enabled.
+
+Traffic is supplied independently of occupancy: it may exceed capacity and is
+never inferred from spill ceilings, row `reservation_bytes`, rates or host names.
+Row reservation replacement still changes spill capacity only; every ceiling and
+the produced-spool window remain charged independently. Explicit compilation
+cache policy still requires a separate charged TMPDIR workspace. PB alone owns
+profiles, capability fencing, placement-time freshness and scheduling. CPU tests
+prove declaration plumbing only, not GPU execution, representative traffic/rates,
+fleet readiness or deployment. No estimator or scheduler code is imported.
+
+Verification: the shared admission projection was extracted before adding I/O
+validation. After uptake, the following CPU command passed all 215 tests,
+including the 43 #2798 cases, without changing acceptance
+files or weakening coverage. The two placement failures reported in research did
+not reproduce in this run.
+
+```sh
+python -m pytest tests/test_dispatch_joint_quanta.py tests/test_tessera_campaign_container.py -q --basetemp="$TMPDIR/pytest"
+```
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"1100d650464169e5e1ced51763845be94ad211e921baa894beb60c7f328e9015","size":430}},"operation":"6f2fb9c17dd4d95b791ee24a51e72d96ecba408f091a3d3ba53812730efb1c3e","receipt":"ae89028918d4e6da3999cf9c1049faef69a7f0b8d46cbd9a58addc93dcafd6a8"}]
+
 One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
 PQ #1000, part of #997). The strict exact-entry reader
 (`perturbed_x_cache.prefetch_exact_activation_cache_entries`) now pins a
