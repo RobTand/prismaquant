@@ -98,6 +98,29 @@ Receipt publication reuses the existing profile writer and digest owners.
 The Netdata collector and observer share one validator.
 No frozen allowlist or duplication baseline expands.
 
+## Measured ceiling evidence
+
+Re-stamped 2026-10-11 on `prismaquant-2608` for the measured ceiling evidence gate.
+`derive_cache_ceiling_from_receipt` reads the existing compilation or quantum workload results.
+A CUDA device label or probe status alone does not establish completed workload results.
+The quantum receipt must include capture, quantum, and served compilation results.
+A usable checkpoint boundary reaches the declared layer plus one or higher.
+The consumer calls the existing checkpoint geometry owner; layer membership alone does not establish coverage.
+
+The consumer checks every sampler field, sample index, scan result, phase, time, and row boundary.
+It rejects failed scans, missing lifecycle coverage, sample gaps, and inconsistent summaries.
+It derives the peak from the complete sample sequence and checks the claimed peak and first maximum index.
+The final byte total must agree with the final sample.
+
+The formula stays `C = G * ceil((P + H) / G)`, with a minimum of one GiB.
+No run identity seal or second telemetry system is added.
+
+CPU tests prove the parser and evidence logic only, not GPU execution or serving qualification.
+Issues #2608, #2601, and all independent GPU qualification gates remain open.
+
+The retained #2463 GPU receipts lack current lifecycle fields and cannot pass this consumer gate.
+Their immutable historical measurements remain unchanged.
+
 This extends the existing container/scratch adapter. It adds no rendered-
 weight/activation cache, model arithmetic, wire format, serving gate, runtime
 pin, kernel, production recipe default, stage graph or agent scheduler.

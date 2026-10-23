@@ -1950,6 +1950,12 @@ The launcher never loads that file.
 Only the docker executable is replaced.
 The launcher logic, numerical code, and D32 behavior remain unchanged.
 
+Re-stamped (2026-10-11, `prismaquant-2608`) for the measured cache ceiling evidence gate.
+The consumer requires workload results and complete authoritative samples before it applies the unchanged ceiling formula.
+Quantum capture must include a checkpoint boundary at or above the declared layer plus one.
+The existing checkpoint geometry owner determines this boundary.
+CPU evidence proves parser behavior only. GPU and serving qualification remain open.
+
 Re-stamped 2026-10-09 (PQ #2511): the lane reader admits schema v12 and
 applies the per-launch rung scope. A launch with `rungs_q256` joins a unit
 only at a rung its scope covers; a launch without the key keeps the scope
@@ -8306,6 +8312,26 @@ compilation-cache root (PQ #1820, Refs #1091). The four compilation caches stay
 under that root; TMPDIR must explicitly stay in another charged workspace.
 Checks do not create/delete directories or certify crash cleanup. See the
 [separate-cache contract](design/container_cache_charge_1091.md).
+
+Re-stamped 2026-10-11 on `prismaquant-2608` for the measured ceiling evidence gate.
+`derive_cache_ceiling_from_receipt` reads the existing compilation or quantum workload results.
+A CUDA device label or probe status alone does not establish completed workload results.
+The quantum receipt must include capture, quantum, and served compilation results.
+
+The consumer checks every sampler field, sample index, scan result, phase, time, and row boundary.
+It rejects failed scans, missing lifecycle coverage, sample gaps, and inconsistent summaries.
+It derives the peak from the complete sample sequence and checks the claimed peak and first maximum index.
+The final byte total must agree with the final sample.
+
+The formula stays `C = G * ceil((P + H) / G)`, with a minimum of one GiB.
+No run identity seal or second telemetry system is added.
+
+CPU tests prove the parser and evidence logic only, not GPU execution or serving qualification.
+Issues #2608, #2601, and all independent GPU qualification gates remain open.
+
+The retained #2463 GPU receipts lack current lifecycle fields and cannot pass this consumer gate.
+Their immutable historical measurements remain unchanged.
+
 
 Without that opt-in pair, a row declaring bounded local scratch (PB #911)
 keeps its legacy defaults: the launcher binds each variable left unset under
