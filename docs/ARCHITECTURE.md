@@ -1,5 +1,83 @@
 # PrismaQuant Architecture
 
+## Vision selected-cache / export intake completion (#2575)
+
+Implementation provenance: TrustLadder run `dd982abdbab3484a93af4508a9fdc2a3`,
+work package `prismaquant-c298c57cee18-wp1`, checkout base
+`9a0b814a94018146962612a5e4f47737f8d4674b` (research inspected
+`914bf79807120fa60f433714e95cffd44b917d92`). This stamp accompanies the
+implementation in the same change; it is not producer-source qualification.
+Earlier architecture stamps below retain their original scope.
+
+The ownership join remains at existing intake boundaries:
+
+- **Source ownership:** `profile.visual_linear_roster(model_path)` owns canonical
+  visual/merger Linear names, source shapes and admitting roots. The allocator
+  retains its complete measured population and independent choices. Neither that
+  API nor allocator policy is reimplemented or changed here.
+- **Selected-wire authentication:** `tessera_census_cache` owns complete census
+  selection, BF16-only out-of-census choices, measured cells, sealed source,
+  encoder and recipe identities, source geometry, and original wire sizes and
+  digests. Journal loading, manifest construction and installed
+  `CachedUnitBundle` intake preserve the complete selected receipt population.
+  Authenticating synthetic receipts does not confer serving admission.
+- **Export recognition:** scoped `preflight` already passes the detected profile
+  and `model_path` to `_write_plan_assignment`. The existing header reader now
+  also collects exact source names, separately from its body shape map. An
+  explicit BF16 name must exist before any projected assignment is written;
+  real visual/fixed tensors remain legal source-precision passthrough. Low-bit
+  names must belong to the profile-owned decoder root or the existing explicitly
+  selected MTP source scope. Rank-2 tensor existence and allocator role tags are
+  not admission. The existing named **outside the text graph** refusal still
+  takes precedence for declared visual low-bit names. This namespace check does
+  not replace installed serving-cell, geometry or admission checks, nor add
+  visual shapes to the producer body graph. Direct translation-only callers
+  without source context cannot establish source existence.
+
+**Architecture implementation self-sign-off:** source/profile ownership,
+selected-cache authentication and installed serving-contract recognition remain
+separate, joined through existing intake arguments. No parallel cache, visual
+classifier, producer graph or qualification metadata schema was introduced.
+GLM's independent source-precision policy, including `model.visual.`, is unchanged.
+No allocator/profile, capture-default, runtime-pin, kernel, numerical, release-chain
+or admission-gate changes were made. The existing projection regression fixture
+now includes the source header for its explicitly assigned BF16 router; no
+acceptance assertions or acceptance test files were changed.
+
+**CPU evidence only:** synthetic allocator/cache fixtures exercise names,
+geometry, full populations and receipt authentication, not measured production
+wires or numerical/serving performance. The fresh-process installed producer test
+writes a deliberate `--layers 0` BF16 copy and checks artifact names, dtype/values,
+plan and manifest using PQ's runtime-pin/packaged-contract readers. The configured
+pin remains `aaa417003f0ee690e8ace138acd18df7f9531369`; packaged-contract SHA256 is
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+Supplied exploratory evidence observed producer git stamps of both that pin
+and `027103d9a8417e06c7f13356e58779a313cd7088` despite matching packaged-contract
+hashes. A nonempty producer stamp is therefore recorded, not treated as exact
+producer-source qualification. No newer Tessera checkout qualifies this pin.
+GPU/serving acceptance remains separate (#2812 and parent #1921); no GPU work was
+performed. This scoped completion is for #2575, not closure of #1921.
+
+Verification (plain CPU commands, `--basetemp="$TMPDIR/pytest"` throughout):
+
+- `python -m pytest tests/test_vision_serve_recognition_1921.py -k 'explicit_bf16_source_name' -q --basetemp="$TMPDIR/pytest"`:
+  **5 passed, 34 deselected**.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"7d3e96c8ddb3614ade5159a3cc79ad39f54a8427e3653999b31087cd8e6ae7a4","size":776}},"operation":"9ab4dcdf52c33f63e4dec02829f80acdf4db27fbd0d92ed0398a566dddf319a8","receipt":"467beab6ca91002b2f5a04ae64723b3020805ccd7ea75b78b135694214284905"}]
+
+- `python -m pytest tests/test_vision_roster_1921.py tests/test_visual_allocator_units_1936.py tests/test_visual_allocator_roots_1921.py tests/test_tessera_census_cache.py tests/test_vision_alloc_failclosed_1921.py tests/test_vision_serve_recognition_1921.py -q --basetemp="$TMPDIR/pytest"`:
+  **135 passed**.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"47b270bc96f29893b849243418a28e6ee4493249f6206219656ffa5516b84e96","size":902}},"operation":"44eb292fc6553b4e8beaa987d21df333a2b54a8f45e4d028d15ccf33706abb9b","receipt":"77cdc6c0e88e10c8b8e9ab1a5d47775062fdd75f5aaa742c0f37f438d696a90f"}]
+
+- `python -m pytest tests/test_tessera_export_lane.py tests/test_tessera_export_scope.py tests/test_tessera_glm_source_namespace.py tests/test_tessera_selected_cache.py tests/test_tessera_expert_projection.py tests/test_glm_mtp_source_scope.py tests/test_glm_mtp_selection.py tests/test_glm_mtp_priced_wires_1413.py tests/test_mtp_formats_menu_1692.py tests/test_tessera_plan_writer.py tests/test_tessera_export_projection.py tests/test_tessera_materialization.py -q --basetemp="$TMPDIR/pytest" --tb=short`:
+  **259 passed**. Initial development runs exposed an overly narrow shard-regex
+  guard and the omitted BF16 router header; both were corrected before this run.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"cbd03def2c65d47ac1e862d977a8f9049aa74f26758e50173d0da7ae79267b7d","size":1074}},"operation":"265cb5c48736f7af1a09ac0f02cca5f8c7db7f17f8fe817af67d90132a6d6433","receipt":"0a55dac119fa84ef7aaa5cad024c2a9a1fdccbf8b878c86b45523de465738b51"}]
+
+---
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
