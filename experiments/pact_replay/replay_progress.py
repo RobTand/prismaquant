@@ -109,9 +109,8 @@ def _set_parent_death_signal():
         raise OSError(ctypes.get_errno(), "prctl PR_SET_PDEATHSIG failed")
 
 
-def _worker(work, sender, receiver):
+def _worker(work, sender, receiver, parent):
     receiver.close()
-    parent = os.getppid()
     os.setsid()
     _set_parent_death_signal()
     if os.getppid() != parent:
@@ -135,7 +134,10 @@ def supervise(work, allowance):
     watch = StallWatch(allowance)
     context = multiprocessing.get_context("fork")
     receiver, sender = context.Pipe(duplex=False)
-    process = context.Process(target=_worker, args=(work, sender, receiver))
+    # Capture the supervisor identity before fork: the child may already be
+    # reparented (including to a subreaper) before its first instruction runs.
+    parent = os.getpid()
+    process = context.Process(target=_worker, args=(work, sender, receiver, parent))
     process.start()
     sender.close()
     previous = signal.getsignal(signal.SIGTERM)
