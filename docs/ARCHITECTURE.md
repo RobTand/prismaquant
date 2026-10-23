@@ -21,6 +21,10 @@ PB `1de88f98ad06` also proves default and legacy resolver equivalence, plus iden
 `IMPORT_PROVENANCE.json` records exact source identities, the path delta, and CEO replacement authority.
 All identity records remain advisory. No new runtime identity gate reads them.
 The frozen execution copy remains unchanged. The pipeline must review the final artifact before execution adopts it.
+`IMPORT_PROVENANCE.json` also binds an accessible retained bundle containing the exact corrected `de90c563…` commit.
+[Artifact recovery and review](../experiments/pact_replay/ARTIFACT_REVIEW.md) records its digest, locators, and snapshot-only delta.
+This is a different bundle from the PR's reported `corrected-de90c563e2.bundle`; that original digest remains unverified.
+Recovery does not authorize publication or execution adoption.
 
 Re-stamped 2026-10-09 (PQ #2457): direct-consumer decisions require profile context.
 The declared architecture selects GLM ownership; a leaf suffix alone does not select it.

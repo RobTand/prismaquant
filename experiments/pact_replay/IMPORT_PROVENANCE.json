@@ -137,5 +137,40 @@
     "projection": "All 95 projected observation rows match the actual raw CLI capture. The module set is unchanged by the path move.",
     "supersedes": "04d03f51d33360ffe6749dbf72343a7ffbc5b40a83aef71091abd99cccb94916 keeps the pre-move equivalence proof."
   },
+  "reported_corrected_artifact": {
+    "name": "corrected-de90c563e2.bundle",
+    "sha256": "33e890ddea0624fe22ee2c27bac143178c6f58aa1f4d7ff1fa113537feb23aa7",
+    "head": "de90c563e245f483ab54a7e668c41aec2d05fc41",
+    "state": "Unverified historical PR claim: neither these bytes nor a publication record for this digest was found in the accessible retained evidence. The recovery below is a different bundle, not verification of this digest."
+  },
+  "corrected_artifact_recovery": {
+    "kind": "Retained PrismaBuild checkout snapshot containing the independently reviewed corrected head",
+    "fleet_relative_bundle": "cas/blobs/b3/b3d790efbc698b0d05989bfb8242504605d883266e48b741651e848adce10d7d",
+    "bundle_sha256": "b3d790efbc698b0d05989bfb8242504605d883266e48b741651e848adce10d7d",
+    "bundle_bytes": 43702471,
+    "bundle_prerequisites": [],
+    "bundle_ref": "refs/heads/prismabuild-snapshot",
+    "snapshot_commit": "272ccc34b135c57230ad1e1b26932516e7eef764",
+    "snapshot_tree": "3267afaa6322863dc8cea0287c6d3f1ff8b98e13",
+    "snapshot_parent": "de90c563e245f483ab54a7e668c41aec2d05fc41",
+    "snapshot_delta": [
+      {
+        "status": "A",
+        "path": ".pbrun-closure.7e4f8c8f1e579c2f.json",
+        "bytes": 153,
+        "sha256": "33eb643c6daa75bb03efae5ac7287c9166ba6caf969fb79944e70a7a4a90df38"
+      }
+    ],
+    "reviewed_head": "de90c563e245f483ab54a7e668c41aec2d05fc41",
+    "reviewed_tree": "87ead35047d8a6597347965e39a23cc0dcb0cb1a",
+    "reported_source_review": "https://github.com/RobTand/prismaquant/pull/2489#issuecomment-6084535272",
+    "retention_action": "0c3694302889899de93e3b426bc4402751830afdf2a7fdeae536822f6ad29a94",
+    "fleet_relative_record": "pb-queue/done/0c3694302889899de93e3b426bc4402751830afdf2a7fdeae536822f6ad29a94.json",
+    "record_sha256": "d1630e6085b24dd70a76f6a47657ef6ade19747f66ba92a342ad7ef09efb49b6",
+    "record_bytes": 15503,
+    "verification": "Recomputed bundle and record digests; verified and unbundled into an empty object database without prerequisites. The embedded reviewed commit object equals the checkout commit object. All 31 imported files match imported_files. The snapshot adds only the declared closure record over reviewed_head.",
+    "review_boundary": "The PR discussion reports source approval at reviewed_head. This repair provides inspectable artifact bytes for independent review, not artifact approval or execution adoption. The pipeline must review the final artifact before any replacement of frozen source 073646c.",
+    "instructions": "ARTIFACT_REVIEW.md"
+  },
   "schema": "prismaquant.pact_replay_import_provenance.v1"
 }

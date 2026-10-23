@@ -40,6 +40,8 @@
   PB `a46b541d3e84` passes the x86 CPU dry branch after the path move, with no GPU replay.
   PB `1de88f98ad06` verifies exact source bytes, the full correction delta, and canonical public resolver equivalence.
   Preserve the frozen execution source and require final artifact review before replacement.
+  Record a retained bundle containing the exact reviewed corrected head, with digest-bound locators and recovery instructions.
+  Distinguish this verified recovery from the original reported bundle digest, which remains unverified; do not authorize execution adoption.
 - A hand-built `Glm5NextProfile` now refuses KDA fused-member queries without a declared config (#2456).
   The error names the missing `config.json` document.
   The lane still owns every fused-group result when the config exists.
