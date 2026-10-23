@@ -25,7 +25,8 @@ class RequiredAttribution:
 
     def require(self, name, fmt, row, *, zero_cost_formats):
         if ((self.keys is None or (name, fmt) in self.keys)
-                and "sequence_attribution" not in row and fmt not in zero_cost_formats):
+                and row.get("sequence_attribution") is None
+                and fmt not in zero_cost_formats):
             raise self.refusal(name, fmt)
 
 
@@ -181,6 +182,9 @@ class JointPriceStep:
                     sequence_attribution=attribution)
                 if self._validated_probe is not None:
                     row["probe_identity"] = self.probe_identity
+                if self.resume_contract.attribution is not None:
+                    self.resume_contract.attribution.require(
+                        name, fmt, row, zero_cost_formats=self.zero_cost_formats)
                 self.rows[name][fmt] = row
 
     def captured_state(self, name):
