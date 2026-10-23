@@ -676,7 +676,8 @@ def require_serving_target(target=None, *, table=None):
 
 def _source_unit_shapes(model_path: str | Path, profile,
                         shards: dict[str, str] | None = None, *,
-                        source_scope=None) -> dict[str, list[tuple[str, tuple]]]:
+                        source_scope=None,
+                        source_names: set[str] | None = None) -> dict[str, list[tuple[str, tuple]]]:
     """Read source headers and the shared name projection; never load weights.
 
     Keyed by the SOURCE unit: the checkpoint tensor name without its
@@ -694,7 +695,9 @@ def _source_unit_shapes(model_path: str | Path, profile,
 
     ``shards``, when given, is filled with ``{tensor: shard basename}`` for
     every mapped tensor, so a carried producer roster can be checked against
-    the shard each source tensor actually lives in.
+    the shard each source tensor actually lives in. ``source_names`` receives
+    all exact header names, including passthrough tensors. It proves existence
+    only; it never adds those tensors to the body shape/admission map.
     """
     from .footprint import _read_safetensors_header
     from .name_projection import MAPPED, NameProjection, strip_weight_leaf
@@ -715,6 +718,8 @@ def _source_unit_shapes(model_path: str | Path, profile,
                 raise TesseraExportLaneError(
                     f"source checkpoint tensor {name!r} occurs in multiple shards")
             seen.add(name)
+            if source_names is not None:
+                source_names.add(name)
             projected = projection.checkpoint_to_live(name)
             if (projected.outcome != MAPPED and
                     (source_scope is None or source_scope.live_name(name) is None)):
@@ -2410,6 +2415,14 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
         return "BF16" if canonicalize_format(entry) == "BF16" else entry
 
     name_projection = NameProjection(profile)
+    source_names: set[str] | None = None
+    if model_path is not None:
+        source_names = set()
+        _source_unit_shapes(model_path, profile, source_names=source_names)
+    # The profile owns the decoder root. This is a namespace boundary, not
+    # another Linear classifier: existing serving-cell/geometry validation
+    # still owns admission within that root (including expert projections).
+    body_root = profile.body_layer_prefix() + "."
     mtp = metadata.get('mtp_selection')
     mtp_selected = (mtp.get('mtp_expert_wires') if isinstance(mtp, Mapping) else None)
     mtp_scope = None
@@ -2421,6 +2434,10 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
     outside_graph: list[str] = []
     for name in names:
         entry = producer_entry(entries[owners.get(name, name)])
+        if (entry == "BF16" and source_names is not None
+                and name + ".weight" not in source_names and name not in source_names):
+            raise TesseraExportLaneError(
+                f"{name}: explicitly assigned BF16 source unit does not exist")
         if (name_projection.checkpoint_to_live(name + ".weight").outcome
                 == DECLARED_OUT_OF_GRAPH and
                 (mtp_scope is None or mtp_scope.live_name(name + '.weight') is None)):
@@ -2432,6 +2449,12 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
                     "precision, so the priced choice would not be the written one")
             outside_graph.append(name)
             continue
+        if (entry != "BF16" and not name.startswith(body_root)
+                and (mtp_scope is None or mtp_scope.live_name(name + '.weight') is None)):
+            raise TesseraExportLaneError(
+                f"{name}: low-bit source unit is not owned by the profile's decoder "
+                "body or selected MTP source scope; source existence does not "
+                "establish a supported serving cell")
         projected[name] = entry
     projected["__prismaquant__"] = {
         **metadata,

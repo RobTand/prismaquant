@@ -180,11 +180,12 @@ def case(tmp_path, monkeypatch):
         "model_type": "lfm2_moe", "architectures": ["Lfm2MoeForCausalLM"],
         "num_experts": 2,
     }))
-    # Headers only: the gate never reads weights.
+    # Headers only: the gate never reads weights. The explicit BF16 router
+    # assignment also needs a real source header, just like every source unit.
     header = json.dumps({
         name + ".weight": {"dtype": "BF16", "shape": [N, N],
                             "data_offsets": [index * N * N * 2, (index + 1) * N * N * 2]}
-        for index, name in enumerate((DENSE, *_units()))
+        for index, name in enumerate((DENSE, ROUTER, *_units()))
     }).encode()
     (model / SHARD).write_bytes(struct.pack("<Q", len(header)) + header)
     contract = tmp_path / "contract.json"
