@@ -2768,24 +2768,40 @@ def _start_projected_unit_check(name, unit, *, live, model_path, source,
 def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
                                     model_path, source, release_source_pages,
                                     source_authentication, cancelled=lambda:False):
-    """CPU preparation only; the caller owns authenticated whole-file residency."""
+    """CPU preparation only; the caller owns authenticated whole-file residency.
+
+    The source read stages straight into page-locked memory (PQ #2039), so a
+    pinned source tensor is adopted with no second host copy; any other read
+    keeps the one private ``pinned.copy_(weight)`` the check always performed.
+    Validate source metadata first so mismatches cannot exceed the live-sized
+    preparation reservation or turn into pinned-allocation failures.
+    """
     import torch
     from concurrent.futures import CancelledError
+    from .tessera_expert_projection import SourceUnitMetadataMismatch
     weight = pinned = release = None
     try:
         if cancelled():
             raise CancelledError('projected preparation cancelled before source read')
-        weight, release = _read_projected_unit(name, unit, model_path=model_path,
-            source=source, release_source_pages=release_source_pages,
-            source_authentication=source_authentication)
+        try:
+            weight, release = _read_projected_unit(name, unit, model_path=model_path,
+                source=source, release_source_pages=release_source_pages,
+                source_authentication=source_authentication, pinned_host=True,
+                expected_metadata=(live_shape, live_dtype))
+            source_shape, source_dtype = tuple(weight.shape), weight.dtype
+        except SourceUnitMetadataMismatch as mismatch:
+            source_shape, source_dtype = mismatch.shape, mismatch.dtype
         description = (f"{name} (live {tuple(live_shape)} {live_dtype} vs source "
-            f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
-        if live_dtype != weight.dtype or tuple(live_shape) != tuple(weight.shape):
+            f"{unit['source_tensor']} {source_shape} {source_dtype})")
+        if live_dtype != source_dtype or tuple(live_shape) != source_shape:
             return _UnitCheck(description, differs=True)
         if cancelled():
             raise CancelledError('projected preparation cancelled before private copy')
-        pinned = torch.empty_like(weight, pin_memory=True)
-        pinned.copy_(weight)
+        if weight.is_pinned() and weight.is_contiguous():
+            pinned = weight
+        else:
+            pinned = torch.empty_like(weight, pin_memory=True)
+            pinned.copy_(weight)
         weight = None
         if cancelled():
             raise CancelledError('projected preparation cancelled after private copy')
@@ -3034,7 +3050,7 @@ def _settle_projected_unit_checks(checks) -> list:
 
 
 def _read_projected_unit(name, unit, *, model_path, source, release_source_pages=False,
-                         source_authentication=None):
+                         source_authentication=None, pinned_host=False, expected_metadata=None):
     """The producer's source tensor for one projected unit, and its page release.
 
     Returns ``(weight, release)``: ``weight`` is ``source_unit_weight``'s own
@@ -3043,8 +3059,25 @@ def _read_projected_unit(name, unit, *, model_path, source, release_source_pages
     does nothing). The serial byte check compares this tensor with a snapshot
     view; the stream head prices it directly on a reader thread, so there is
     no second view to compare (PQ #1654).
+
+    With ``pinned_host`` the read stages into page-locked memory for the
+    device check, which adopts it with no second host copy (PQ #2039). Host
+    consumers keep the pageable default. ``expected_metadata`` refuses a live
+    mismatch before any payload read/pin; it consumes no pages to retire.
     """
-    from .tessera_expert_projection import ExpertProjectionError, source_unit_weight
+    from .tessera_expert_projection import (
+        ExpertProjectionError, SourceUnitMetadataMismatch, source_unit_weight,
+    )
+
+    weight = source_stat = None
+
+    def release():
+        if source_stat is not None:
+            from .layer_streaming import _advise_consumed_safetensors_pages
+            _advise_consumed_safetensors_pages(
+                str(path) if source_authentication is None
+                else source_authentication.descriptor_path(path),
+                [unit['source_tensor']], source_stat)
 
     try:
         if release_source_pages:
@@ -3056,20 +3089,27 @@ def _read_projected_unit(name, unit, *, model_path, source, release_source_pages
             path = Path(model_path)/source['tensors'][unit['source_tensor']]
             source_stat = (path.stat() if source_authentication is None
                            else source_authentication.file_stat(path))
-        weight = source_unit_weight(model_path, source, unit,
+        weight = source_unit_weight(model_path, source, unit, pin_memory=pinned_host,
+            **({'expected_metadata': expected_metadata} if expected_metadata is not None else {}),
             **({'source_authentication': source_authentication} if source_authentication is not None else {}))
-    except ExpertProjectionError as exc:
-        raise RuntimeError(
-            f"Tessera campaign cannot read the producer's source tensor for "
-            f"{name}: {exc} (PrismaQuant #183).") from exc
-
-    def release():
-        if release_source_pages:
-            from .layer_streaming import _advise_consumed_safetensors_pages
-            _advise_consumed_safetensors_pages(
-                str(path) if source_authentication is None
-                else source_authentication.descriptor_path(path),
-                [unit['source_tensor']], source_stat)
+    except SourceUnitMetadataMismatch:
+        # No payload was read. In particular an authenticated metadata query
+        # need not have a payload-authenticated descriptor available to advise.
+        raise
+    except BaseException as exc:
+        # Until the read succeeds, preparation cannot own this callback. In
+        # particular a failed fallback pin must still retire the source pages.
+        try:
+            release()
+        except Exception as cleanup_error:
+            # A refused/absent payload may not have a releasable span or an
+            # authenticated descriptor. Preserve the primary read diagnostic.
+            exc.add_note(f"Projected source-page retirement failed: {cleanup_error}")
+        if isinstance(exc, ExpertProjectionError):
+            raise RuntimeError(
+                f"Tessera campaign cannot read the producer's source tensor for "
+                f"{name}: {exc} (PrismaQuant #183).") from exc
+        raise
     return weight, release
 
 
