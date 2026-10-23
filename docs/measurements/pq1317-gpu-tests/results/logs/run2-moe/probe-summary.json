@@ -1,0 +1,16 @@
+{
+ "assertions_dropped": 0,
+ "assertions_recorded": 334,
+ "errors": [],
+ "native_libraries_by_worker": {
+  "gw0": {},
+  "gw1": {},
+  "main": {}
+ },
+ "native_library_sha256_seen": {},
+ "tests_recorded": 71,
+ "workers": [
+  "gw0",
+  "gw1"
+ ]
+}
