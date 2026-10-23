@@ -37,6 +37,7 @@ Failed or unknown costs retain custody. The controller never retries failed scie
 """
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -100,7 +101,7 @@ LAYERS = (40, 3, 41, 42, 43, 44)
 TERMINAL = ('done', 'failed', 'withdrawn')
 RESUME = ('Subsample grid wave {wave} terminal ({n} batches{partial}). Check each status; for a failed batch rebuild only '
           'its missing units (campaign_make_batches.py --only-missing --sample, new tag) and resubmit. Then run '
-          'python3 /home/rob/fleet/ceo/exec/eng-d44-campaign-opus/next_wave.py again. {left} batches are not yet submitted. '
+          '{command} again. {left} batches are not yet submitted. '
           'When none remain and all 576 sampled grids exist, run the subsample reduce on x86 and report to the CEO. '
           'CEO approved the whole campaign up to 45 GPU-hours: grids, reduce, final encode (D38 dry run first), HELD '
           'scoring, G3. Report measured cost after each phase. The execution state is in record eng-d44-execution.')
@@ -196,9 +197,10 @@ def write_wait(state, live_other, left, failure=None):
     if handed:
         keys.append(handed[:12])
     keys = list(dict.fromkeys(keys))
+    command = shlex.join(['python3', str(Path(__file__).resolve()), '--legacy'])
     durable_json(O / 'wait.json', {'pb_action_keys': keys, 'max_wait_hours': 2,
                                    'resume_prompt': RESUME.format(wave=wave['wave'], n=len(wave['members']),
-                                                                  partial=partial, left=left)})
+                                                                  partial=partial, left=left, command=command)})
 
 
 def persist_custody(state, state_path, left=None, failure=None):
@@ -1211,7 +1213,6 @@ class RoutedWave:
 def routed_main(argv):
     import argparse
     import fcntl
-    import shlex
     parser = argparse.ArgumentParser(description='Submit and resume durable native PB final-encode children.')
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--routed-plan', type=Path)
@@ -1234,6 +1235,14 @@ def routed_main(argv):
         return main()
     if options.wait_file is None:
         options.wait_file = options.state_dir / 'wait.json'
+    if options.disk_targets is None and os.environ.get('D44_DISK_TARGETS'):
+        options.disk_targets = Path(os.environ['D44_DISK_TARGETS'])
+    # Freeze caller-relative paths before opening custody or saving a handoff.
+    # A resume from another working directory must reopen the same lock and inputs.
+    for name in ('routed_plan', 'state_dir', 'wait_file', 'retained_units', 'ledger_seed', 'disk_targets'):
+        path = getattr(options, name)
+        if path is not None:
+            setattr(options, name, path.resolve())
     options.state_dir.mkdir(parents=True, exist_ok=True)
     with (options.state_dir / 'controller.lock').open('a') as lock:
         try:
