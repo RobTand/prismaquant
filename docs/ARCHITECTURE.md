@@ -8849,8 +8849,9 @@ outer PB environment, retaining it in the inner spec. Ambient coordinator values
 have no effect; absence preserves capacity-only argv bytes and ordering. An
 explicit empty value is invalid. JSON must have exactly these fields, no duplicate
 keys or nonfinite values; directions are nonnegative integers (not booleans),
-at least one positive. Age is a positive finite number (not boolean), and the
-contract is a nonempty `[A-Za-z0-9_.-]+` token. The example contract is PB's
+at least one positive. Age is a positive finite number (not boolean), representable
+as a finite float just as PB requires; overflowing JSON integers are refused.
+The contract is a nonempty `[A-Za-z0-9_.-]+` token. The example contract is PB's
 currently implemented measured profile contract, not a PQ profile or rate claim.
 
 PB's current I/O contract requires pool transport and exactly one scratch pair.
@@ -8876,16 +8877,31 @@ prove declaration plumbing only, not GPU execution, representative traffic/rates
 fleet readiness or deployment. No estimator or scheduler code is imported.
 
 Verification: the shared admission projection was extracted before adding I/O
-validation. After uptake, the following CPU command passed all 215 tests,
-including the 43 #2798 cases, without changing acceptance
-files or weakening coverage. The two placement failures reported in research did
-not reproduce in this run.
+validation. Review repair adds float-representability coverage to the existing
+container tests without changing the dispatcher acceptance file. The focused CPU
+command passes all 43 #2798 cases and five age boundary cases (48 passed,
+172 deselected). Finite integer/fractional ages remain verbatim; overflowing
+integer ages (`10**309` and `10**400`) refuse in both the complete projection and
+`_container_wrap`, without rewriting the source spec.
+
+```sh
+python -m pytest tests/test_dispatch_joint_quanta.py tests/test_tessera_campaign_container.py -q -k 'scratch_io_2798 or scratch_io_freshness_requires_float_representability' --basetemp="$TMPDIR/pytest"
+```
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"aa1d71d382e405b6e9a981dc4b919112aa155a8bc07ea1dbc39df2e1ec5bb868","size":285}},"operation":"e64936f2a3fba11125ab1b12901fdfae28083150a51799c066def7e8e254a55a","receipt":"5de4b665f23e0c13c418347a7c9e1874add7a3e7f87140a8bb66777ddfa87211"}]
+
+The full CPU command reports 218 passed and the two placement failures already
+reported in research:
+`test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed` and
+`test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box`. Both obtain
+correct resource terms before indexing `result["first"]` when it is `None`.
+These failures remain intact; this run is not a full-suite pass.
 
 ```sh
 python -m pytest tests/test_dispatch_joint_quanta.py tests/test_tessera_campaign_container.py -q --basetemp="$TMPDIR/pytest"
 ```
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"1100d650464169e5e1ced51763845be94ad211e921baa894beb60c7f328e9015","size":430}},"operation":"6f2fb9c17dd4d95b791ee24a51e72d96ecba408f091a3d3ba53812730efb1c3e","receipt":"ae89028918d4e6da3999cf9c1049faef69a7f0b8d46cbd9a58addc93dcafd6a8"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"644d5bb7f4236b25fe5b783e4c779ba20387451c806e6e982a7cfc2365d645ee","size":5042}},"operation":"7798e37483fdc5c58b644b4c5587a6d73610bfcd6ba995233dc9b6a6b2b0758e","receipt":"94797e8e51f0fd3f135f0faf87b5b678c5ca1df2fa7fd7f823cf98c6e5dc807e"}]
 
 One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
 PQ #1000, part of #997). The strict exact-entry reader

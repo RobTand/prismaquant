@@ -453,9 +453,14 @@ def local_scratch_io_environment(spec: dict, scratch: dict) -> dict:
     if not isinstance(contract, str) or re.fullmatch(r"[A-Za-z0-9_.-]+", contract) is None:
         refuse("profile_contract must be a nonempty token [A-Za-z0-9_.-]+")
     age = intent["max_profile_age_s"]
-    # JSON integer ages are finite without a potentially overflowing float cast.
-    if (type(age) not in (int, float) or age <= 0
-            or (type(age) is float and not math.isfinite(age))):
+    # PB checks finiteness as a float, including for JSON integer ages.
+    # Unrepresentable integers must refuse, not escape preflight as overflow.
+    try:
+        valid_age = (type(age) in (int, float) and age > 0
+                     and math.isfinite(float(age)))
+    except OverflowError:
+        valid_age = False
+    if not valid_age:
         refuse("max_profile_age_s must be a positive finite JSON number")
     pairs = scratch.get(LOCAL_SCRATCH_PAIRS_ENV, "").split(",")
     if len(pairs) != 1 or not pairs[0]:
