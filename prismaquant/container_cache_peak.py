@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 
 from .digests import DIRECT_ASCII_SPACED_LAX
+from .quality_prefill_knee import is_finite_number
 
 #: GiB in bytes: the ceiling granularity PrismaBuild charges.
 GIB_BYTES = 1073741824
@@ -341,9 +342,9 @@ def _whole(value, minimum=0) -> bool:
     return type(value) is int and value >= minimum
 
 
-def _finite(value, minimum=None) -> bool:
-    return (type(value) in (int, float) and math.isfinite(value)
-            and (minimum is None or value >= minimum))
+def _receipt_number(value, minimum=None) -> bool:
+    """Apply a receipt field's inclusive bound to the shared finite predicate."""
+    return is_finite_number(value) and (minimum is None or value >= minimum)
 
 
 def _cuda_device(value) -> bool:
@@ -413,7 +414,7 @@ def _require_gpu_workload(receipt) -> None:
                       and all(_whole(item, 1) for item in workload["shape"]),
                       f"{prefix}.shape", "missing or malformed output shape")
     for field, minimum in (("quantise_s", 0), ("output_mean", None)):
-        _require_evidence(_finite(workload.get(field), minimum),
+        _require_evidence(_receipt_number(workload.get(field), minimum),
                           f"{prefix}.{field}", "missing or malformed quantiser result")
     probe = workload.get("kda_probe")
     prefix += ".kda_probe"
@@ -427,7 +428,7 @@ def _require_gpu_workload(receipt) -> None:
     _require_evidence(isinstance(probe.get("shape"), list) and bool(probe["shape"])
                       and all(_whole(item, 1) for item in probe["shape"]),
                       f"{prefix}.shape", "missing or malformed probe shape")
-    _require_evidence(_finite(probe.get("probe_s"), 0), f"{prefix}.probe_s",
+    _require_evidence(_receipt_number(probe.get("probe_s"), 0), f"{prefix}.probe_s",
                       "missing or malformed probe duration")
     # The v1 probe result lists both modes of all three Gram kernels.
     # Validate its grammar without importing the CUDA/Triton implementation.
@@ -461,12 +462,12 @@ def _accepted_sample_peak(measurement) -> int:
                       and measurement["sample_count"] == len(samples),
                       "measurement.sample_count", "sample sequence is incomplete")
     interval = measurement.get("sample_interval_s")
-    _require_evidence(_finite(interval, 0) and interval > 0,
+    _require_evidence(_receipt_number(interval, 0) and interval > 0,
                       "measurement.sample_interval_s", "missing positive sample interval")
     started, finished = (measurement.get("row_started_unix"),
                          measurement.get("row_finished_unix"))
     for field, value in (("row_started_unix", started), ("row_finished_unix", finished)):
-        _require_evidence(_finite(value, 0), f"measurement.{field}",
+        _require_evidence(_receipt_number(value, 0), f"measurement.{field}",
                           "missing finite row boundary")
     _require_evidence(finished >= started, "measurement.row_finished_unix",
                       "row boundaries disagree")
@@ -483,7 +484,7 @@ def _accepted_sample_peak(measurement) -> int:
         _require_evidence(sample.get("phase") == phase, f"{prefix}.phase",
                           "missing lifecycle coverage")
         for field in ("unix", "scan_duration_s"):
-            _require_evidence(_finite(sample.get(field), 0), f"{prefix}.{field}",
+            _require_evidence(_receipt_number(sample.get(field), 0), f"{prefix}.{field}",
                               "missing or malformed sample time")
         for field in ("allocated_bytes", "apparent_bytes", "files", "dirs"):
             _require_evidence(_whole(sample.get(field)), f"{prefix}.{field}",
