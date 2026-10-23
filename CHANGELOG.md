@@ -333,7 +333,8 @@
   The offline gate validates evidence shape and coverage; migration owners still verify retained provenance and inventory completeness before moving callers. Deployment-specific source locations remain historical documentation, not application constants.
   Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs. The sample check admits real consumer resources and checks shared versus independent uncertainty using nonconstant samples.
   The GLM oracle stays frozen; detection, name projection and production behavior stay unchanged.
-  PB `089cd4ba6ac5` passes 341 cases; PB `36fb63107abbc`, PB `51a8da327fba` and PB `368d3a1a744` pass the adapter, structure, detection, duplication, spec-match and remap populations.
+  The GLM fused-owner lane adapters use the current SDK's public `tessera.metadata` API, matching main, instead of removed serving-internal exports. Fusion rules remain runtime-owned, and lookup failures still propagate.
+  Historical PB `089cd4ba6ac5` passes 341 cases; PB `36fb63107abbc`, PB `51a8da327fba` and PB `368d3a1a744` pass the adapter, structure, detection, duplication, spec-match and remap populations at their recorded dependency pins.
   PB `c5013dcf027e` records the red run on the base tree.
 - The PACT frontier profile cohort carries the measured-consumer contract
   (#2423, references #2427). `pact_cohort_from_profile` returns

@@ -3292,28 +3292,29 @@ Consumer price, wire-byte, sample-identity and refusal checks run through the ex
 No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_profile_consumer.py`.
 
 The historical CPU command used `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
-Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
-Its installed PrismaBuild commit is `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
-The `pbtest` dependency guard verifies both Git identities and installed package bytes before pytest.
-The Tessera package supplies `tessera.serving.dense_ownership`; no fallback or test exemption replaces that owner.
+Its installed Tessera commit was `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
+Its installed PrismaBuild commit was `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
+The historical `pbtest` dependency guard verified both Git identities and installed package bytes before pytest.
+That Tessera package supplied the GLM ownership helpers through `tessera.serving.dense_ownership`.
+Those serving-internal exports are absent from the current check SDK. The two existing GLM lane adapters now use
+`tessera.metadata.fused_module` and `tessera.metadata.glm_fused_groups`, matching current main's public metadata seam.
+The runtime still owns all fusion rules, declared layer configuration still gates KDA ownership, and lookup failures
+still propagate rather than implying that a fused group is absent. No local rule table or compatibility fallback is added.
 
-Run the affected CPU population with:
+Run the affected CPU population in the supplied check environment with:
 
 ```bash
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
-  --checkout /path/to/prismaquant \
-  --python /home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python \
-  --tag x86 --tmpdir /tmp --shards 4 \
-  --workers-per-shard 1 --threads-per-shard 1 --mem-gb 4 \
-  --timeout-s 600 --wait-s 300 \
-  --pytest-args '["-m", "not integration and not slow"]' \
+python -m pytest -q -m 'not integration and not slow' \
+  --basetemp="$TMPDIR/pytest" -o cache_dir="$TMPDIR/pytest-cache" \
   tests/test_pact_profile_consumer.py tests/test_pact_frontier_profile_adapter.py \
   tests/test_model_structure.py tests/test_spec_match_profile.py \
   tests/test_model_profile_conformance.py tests/test_name_projection.py \
   tests/test_profile_detection_and_calibration.py tests/test_profile_name_remap_validation.py \
-  tests/test_qwen3_profile.py tests/test_glm5_next_attention_fused_groups.py tests/test_duplication_baseline.py
+  tests/test_qwen3_profile.py tests/test_glm5_next_attention_fused_groups.py \
+  tests/test_duplication_baseline.py tests/test_fused_mapping_lookup_failure_2443.py
 ```
 
+The PB results below are historical evidence at their stated dependency pins, not fresh results on the current SDK.
 The historical source `72ebedaf33de` used `/home/rob/venvs/pq-pin-fca4c6ce0/bin/python` with PrismaBuild `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
 PB actions `8b6da86ec9b9`, `b69df9dffdfb`, `b8d6a1d78a42`, and `5c2fd3921c9c` passed its eight-file population.
 They reported 843 passes, 12 skips, one expected failure, and 60 deselected integration or slow cases.

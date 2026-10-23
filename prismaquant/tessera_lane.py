@@ -784,7 +784,7 @@ def format_subfamily(canonical: str) -> str | None:
 
 def glm_fused_sibling_group(linear_qname: str, *, config=None):
     """Resolve the GLM fused owner through the runtime's authoritative rule."""
-    from tessera.serving.dense_ownership import fused_module
+    from tessera.metadata import fused_module
 
     source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
     tensor = source if source.endswith(".weight") else source + ".weight"
@@ -794,11 +794,11 @@ def glm_fused_sibling_group(linear_qname: str, *, config=None):
 
 def glm_fused_sibling_leaf_mapping():
     """Read GLM fused members from the same runtime owner."""
-    from tessera.serving.dense_ownership import GLM_FUSED, fused_module
+    from tessera.metadata import fused_module, glm_fused_groups
 
     owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
     return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
-            **{target: members for _pattern, target, members in GLM_FUSED}}
+            **dict(glm_fused_groups())}
 
 
 # -- the pinned serving runtime (serving_profiles) ---------------------------
