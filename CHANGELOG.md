@@ -329,9 +329,9 @@
   `ModelProfile` centralizes explicit-before-declared measurement entries and aliases in public readers.
   Both PACT profiles resolve through those readers, and the adapter keeps no private config reader.
   Undeclared role splits use the profile-owned default; `down_proj` without a declaration still refuses.
-  `require_pact_consumer_migration` refuses without a canonical head, input identities and caller closure.
-  It preserves the #2483 and #2485 prerequisite reasons.
-  Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs.
+  `require_pact_consumer_migration` requires a full Git object ID, SHA-256 snapshot identities for all three consumer roles and a qualified caller inventory per role; malformed or incomplete records refuse with the #2483 and #2485 prerequisite reasons.
+  The offline gate validates evidence shape and coverage; migration owners still verify retained provenance and inventory completeness before moving callers. Deployment-specific source locations remain historical documentation, not application constants.
+  Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs. The sample check admits real consumer resources and checks shared versus independent uncertainty using nonconstant samples.
   The GLM oracle stays frozen; detection, name projection and production behavior stay unchanged.
   PB `089cd4ba6ac5` passes 341 cases; PB `36fb63107abbc`, PB `51a8da327fba` and PB `368d3a1a744` pass the adapter, structure, detection, duplication, spec-match and remap populations.
   PB `c5013dcf027e` records the red run on the base tree.

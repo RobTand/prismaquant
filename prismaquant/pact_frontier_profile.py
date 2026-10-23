@@ -12,13 +12,14 @@ shared profile needs through the existing owner. Never build a parallel
 model map. This module therefore adds no profile class and no registry.
 It reads only the existing owner API and plain config dicts.
 
-Sources (read-only, never edited here):
-- harness /home/rob/tmp/eng-pact-pricing-20261006
-- frontier /mnt/shared/tessera-measurements/pact-frontier-d43-20261006/frontier.py
-- adapter checkout /home/rob/tmp/eng-pact-energy-20261007
+Historical source locations are recorded in docs/ARCHITECTURE.md. Migration
+inputs and caller closure are supplied by the caller, never workspace paths.
 """
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+import re
 
 # GLM-5.3 Flash legacy values. These are the exact constants the running
 # measurement uses today. Keep them unchanged while those runs finish.
@@ -223,14 +224,9 @@ def pact_hidden_layout(profile=None, config=None):
     return {"hidden_streams": streams, "hidden_size": width}
 
 
-# Canonical consumer sources (issue 2427, item 2485). Read-only names of the
-# campaign inputs a consumer migration must record before it starts. No live
-# harness, frontier or price-adapter workspace moves until the gate passes.
-PACT_CONSUMER_SOURCES = {
-    "harness": "/home/rob/tmp/eng-pact-pricing-20261006",
-    "frontier": "/mnt/shared/tessera-measurements/pact-frontier-d43-20261006/frontier.py",
-    "price_adapter": "/home/rob/tmp/eng-pact-energy-20261007",
-}
+# Logical coverage, not deployment locations. No live consumer moves until
+# all three source identities and their caller inventories are recorded.
+PACT_CONSUMER_ROLES = ("harness", "frontier", "price_adapter")
 
 # Prerequisite reasons the gate preserves (issue 2427 split): the shared
 # contract lands first, then the canonical consumer migration.
@@ -240,17 +236,58 @@ PACT_CONSUMER_PREREQUISITES = ("prismaquant#2483", "prismaquant#2485")
 def require_pact_consumer_migration(
     canonical_head=None, input_identities=None, caller_closure=None
 ):
-    """Admit a consumer migration, or refuse its missing prerequisites."""
-    missing = []
-    if not canonical_head:
-        missing.append("canonical adapter head")
-    if not input_identities:
-        missing.append("input identities")
-    if not caller_closure:
-        missing.append("caller closure")
-    if missing:
+    """Validate a caller-supplied migration evidence record, without fetching.
+
+    ``canonical_head`` is the full lowercase, nonzero Git object ID of the
+    canonical adapter (SHA-1 or SHA-256). ``input_identities`` maps every
+    PACT_CONSUMER_ROLES entry to a lowercase, nonzero SHA-256 content digest
+    of that consumer's input snapshot. ``caller_closure`` maps those same
+    roles to nonempty sequences of distinct Python qualified caller names
+    inventoried against those snapshots. Strings are not caller sequences.
+
+    This checks evidence shape and role coverage, not whether an absent
+    checkout contains the claimed head or whether its inventory is exhaustive.
+    The migration owner must verify that provenance before moving callers.
+    No local paths or deployment locations form part of this contract.
+    """
+    invalid = []
+    if not (
+        isinstance(canonical_head, str)
+        and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", canonical_head)
+        and set(canonical_head) != {"0"}
+    ):
+        invalid.append("canonical adapter head (full lowercase nonzero Git object ID)")
+    if not (
+        isinstance(input_identities, Mapping)
+        and set(input_identities) == set(PACT_CONSUMER_ROLES)
+        and all(
+            isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest)
+            and set(digest) != {"0"}
+            for digest in input_identities.values()
+        )
+    ):
+        invalid.append("input identities (one SHA-256 digest per consumer role)")
+    if not (
+        isinstance(caller_closure, Mapping)
+        and set(caller_closure) == set(PACT_CONSUMER_ROLES)
+        and all(
+            isinstance(callers, Sequence)
+            and not isinstance(callers, (str, bytes))
+            and len(callers) > 0
+            and all(
+                isinstance(caller, str)
+                and re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", caller)
+                for caller in callers
+            )
+            and len(set(callers)) == len(callers)
+            for callers in caller_closure.values()
+        )
+    ):
+        invalid.append("caller closure (nonempty qualified caller inventory per consumer role)")
+    if invalid:
         raise ValueError(
-            "PACT consumer migration is gated on " + ", ".join(missing)
+            "PACT consumer migration is gated on " + ", ".join(invalid)
             + "; prerequisites " + ", ".join(PACT_CONSUMER_PREREQUISITES)
             + " require the shared contract first and the recorded head, "
             + "identities and closure before any caller moves"
@@ -258,6 +295,6 @@ def require_pact_consumer_migration(
     return {
         "canonical_head": canonical_head,
         "input_identities": dict(input_identities),
-        "caller_closure": tuple(caller_closure),
+        "caller_closure": {role: tuple(callers) for role, callers in caller_closure.items()},
         "prerequisites": list(PACT_CONSUMER_PREREQUISITES),
     }

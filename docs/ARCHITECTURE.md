@@ -3276,11 +3276,22 @@ The helper gate uses its unchanged baseline; neither profile defines a second pr
 
 Re-stamped 2026-10-10 (issue 2595, part of 2427): the base owner centralizes explicit-before-declared measurement entries and aliases in public readers.
 Both PACT profiles resolve through those readers. Undeclared role splits use the profile-owned default; `down_proj` without a declaration still refuses.
-The adapter keeps no private config reader. `require_pact_consumer_migration` refuses without a canonical head, input identities and caller closure, and preserves the 2483 and 2485 prerequisite reasons.
-Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs. The GLM oracle stays frozen.
+The adapter keeps no private config reader. `require_pact_consumer_migration` validates caller-supplied migration evidence and preserves the 2483 and 2485 prerequisite reasons on refusal:
+
+- `canonical_head`: the full lowercase, nonzero Git object ID of the canonical adapter (40 hex characters for SHA-1 or 64 for SHA-256; no branch names or abbreviations).
+- `input_identities`: a mapping with exactly `harness`, `frontier` and `price_adapter`, each naming a lowercase, nonzero 64-hex SHA-256 digest of that consumer's input snapshot. A snapshot must include the inputs and source used to inventory its callers; its owner retains the bytes identified by the digest.
+- `caller_closure`: a mapping with those same three roles, each containing a nonempty list or tuple of distinct Python qualified module/callable names inventoried from its identified snapshot. A string is not an inventory. Missing roles, empty or malformed entries, duplicate callers and unknown roles refuse.
+
+For example, a migration owner supplies all three identity digests plus a closure such as
+`{"harness": ["campaign.harness.main"], "frontier": ["campaign.frontier.main", "campaign.frontier.replay"], "price_adapter": ["campaign.price_adapter.price"]}`.
+The returned record copies the identities and freezes each role's caller sequence as a tuple.
+This offline gate validates record shape and coverage, not the existence of an absent checkout, correctness of a claimed digest or exhaustiveness of its caller inventory. Before moving any callers, the migration owner must verify the canonical head and snapshots against their retained source and close the inventory against that head. No external consumer is migrated by this gate.
+
+Sources are deployment inputs, not application constants. Historical read-only sources were the harness at `/home/rob/tmp/eng-pact-pricing-20261006`, frontier at `/mnt/shared/tessera-measurements/pact-frontier-d43-20261006/frontier.py` and price-adapter checkout at `/home/rob/tmp/eng-pact-energy-20261007`; these locations do not configure another deployment.
+Consumer price, wire-byte, sample-identity and refusal checks run through the existing price owners with explicit measurement inputs. The sample check admits a shape table, builds consumer resources and uses repeated source identities with nonconstant samples, checking uncertainty bounds against draw-once behavior while keeping distinct measurements independent. Its fixture uses the supported v8 lane grammar; it does not qualify a current lane schema or bypass admission. The GLM oracle stays frozen.
 No default, stage, format, lane or ship gate changes. Gate: `tests/test_pact_profile_consumer.py`.
 
-The current CPU command uses `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
+The historical CPU command used `/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python` on x86.
 Its installed Tessera commit is `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`.
 Its installed PrismaBuild commit is `027103d9a8417e06c7f13356e58779a313cd7088`, as required after the merge of main.
 The `pbtest` dependency guard verifies both Git identities and installed package bytes before pytest.

@@ -146,18 +146,63 @@ def test_consumer_wire_bytes_count_once_per_owner():
 
 
 def test_consumer_sample_identity_draws_each_row_once():
-    first = mrp.bootstrap_sum([[1.0, 1.0, 1.0]], draws=64, seed=7)
-    second = mrp.bootstrap_sum([[1.0, 1.0, 1.0]], draws=64, seed=7)
-    assert first == second
-    assert first["samples_per_row"] == [3]
-    assert first["seed"] == 7
-    shared = mrp.bootstrap_sum(
-        [[1.0, 1.0, 1.0]], draws=64, seed=7, multiplicities=[3]
+    from dataclasses import replace
+
+    from conftest import down_convert_lane_table
+    from prismaquant import lane_eligibility as lane
+    from prismaquant.allocator_solver import Candidate
+    from test_shape_runtime_prices import (
+        COMMIT, SHA, SCOPE, DENSE_E4M3, E4M3, _doc, _payload, _row,
     )
-    assert shared["multiplicities"] == [3]
-    assert shared["p50"] == pytest.approx(3 * first["p50"])
-    offset = mrp.bootstrap_sum([[1.0, 1.0, 1.0]], draws=64, seed=7, offset_ms=5.0)
-    assert offset["p50"] == pytest.approx(first["p50"] + 5.0)
+
+    # Own a legacy-grammar fixture, not a current-runtime qualification. All
+    # admission and launch checks still run; no GPU measurement is claimed.
+    payload = down_convert_lane_table(_payload(), "tessera.lane-eligibility.v8")
+    eligibility = lane._parse_table(
+        payload["lane_eligibility"], payload["formats"], "", COMMIT, SHA,
+        native_extensions=payload["native_extensions"],
+    )
+    samples = (0.01, 0.02, 0.04, 0.08, 0.16)
+    doc = _doc([
+        _row("dense", shape, E4M3, 1024, 8, DENSE_E4M3, samples)
+        for shape in ("4x8", "4x16")
+    ], regimes=(8,), tensor_parallel=1)
+    table = srp.admit_shape_table(
+        srp.parse_shape_table(doc), scope=replace(SCOPE, tensor_parallel=1),
+        eligibility=eligibility,
+    )
+    fmt = f"{E4M3}_R1024"
+    assignment = {unit: fmt for unit in ("first", "shared", "independent")}
+    pricing = srp.build_shape_runtime_resources(
+        table,
+        {unit: [Candidate(fmt=fmt, bits_per_param=4.0, memory_bytes=128,
+                          predicted_dloss=0.0)] for unit in assignment},
+        option_members={(unit, fmt): {unit: fmt} for unit in assignment},
+        member_shapes={"first": (4, 8), "shared": (4, 8), "independent": (4, 16)},
+        member_structure={unit: "dense" for unit in assignment}, regime_m=8,
+        published_formats={row["family"]: row for row in payload["formats"]},
+    )
+    assert not pricing.gaps
+    first, shared, independent = (pricing.prefill[(unit, fmt)] for unit in assignment)
+    assert first.source_id == shared.source_id != independent.source_id
+    # Equal sample values do not make distinct measurements the same source.
+    assert first.samples_ms == shared.samples_ms == independent.samples_ms == samples
+    result = pricing.operator_sum_bootstrap(assignment, draws=4096, seed=17)
+    assert result == pricing.operator_sum_bootstrap(assignment, draws=4096, seed=17)
+    assert result["distinct_measurements"] == 2
+    assert result["multiplicities"] == [1, 2]  # sorted source IDs: 4x16, 4x8
+    assert result["samples_per_row"] == [5, 5]
+    expected = mrp.bootstrap_sum([samples, samples], draws=4096, seed=17,
+                                 multiplicities=[1, 2])
+    resampled_independently = mrp.bootstrap_sum([samples] * 3, draws=4096, seed=17)
+    for quantile in ("p2.5", "p50", "p97.5"):
+        assert result[quantile] == pytest.approx(expected[quantile])
+    # An independent draw per caller spuriously narrows the uncertainty band.
+    shared_width = result["p97.5"] - result["p2.5"]
+    independent_width = resampled_independently["p97.5"] - resampled_independently["p2.5"]
+    assert shared_width > independent_width
+    offset = pricing.operator_sum_bootstrap(assignment, draws=4096, seed=17, offset_ms=5.0)
+    assert offset["p50"] == pytest.approx(result["p50"] + 5.0)
     with pytest.raises(mrp.RuntimePriceError, match="slowest rank"):
         _rank_row(2, 100, 100, 9.0, priced=8.0)
 
@@ -205,19 +250,102 @@ def test_consumer_uses_explicit_measurement_inputs():
     )
 
 
-def test_consumer_migration_gates_on_head_identities_closure():
+@pytest.fixture
+def migration_evidence():
+    return {
+        "canonical_head": "a" * 40,
+        "input_identities": {
+            "harness": "b" * 64, "frontier": "c" * 64, "price_adapter": "d" * 64,
+        },
+        "caller_closure": {
+            "harness": ["campaign.harness.main"],
+            "frontier": ["campaign.frontier.main", "campaign.frontier.replay"],
+            "price_adapter": ["campaign.price_adapter.price"],
+        },
+    }
+
+
+@pytest.mark.parametrize("head_length", [40, 64])
+def test_consumer_migration_gates_on_head_identities_closure(migration_evidence, head_length):
+    migration_evidence["canonical_head"] = "a" * head_length
     with pytest.raises(ValueError, match="canonical adapter head"):
         require_pact_consumer_migration()
     with pytest.raises(ValueError, match="prismaquant#2483"):
         require_pact_consumer_migration()
     with pytest.raises(ValueError, match="input identities"):
         require_pact_consumer_migration(canonical_head="a" * 40)
-    record = require_pact_consumer_migration(
-        canonical_head="a" * 40,
-        input_identities={"frontier": "b" * 64},
-        caller_closure=["prismaquant.shape_runtime_prices"],
-    )
-    assert record["canonical_head"] == "a" * 40
-    assert record["input_identities"] == {"frontier": "b" * 64}
-    assert record["caller_closure"] == ("prismaquant.shape_runtime_prices",)
+    record = require_pact_consumer_migration(**migration_evidence)
+    assert record["canonical_head"] == migration_evidence["canonical_head"]
+    assert record["input_identities"] == migration_evidence["input_identities"]
+    assert record["caller_closure"] == {
+        role: tuple(callers) for role, callers in migration_evidence["caller_closure"].items()
+    }
     assert record["prerequisites"] == list(PACT_CONSUMER_PREREQUISITES)
+    migration_evidence["input_identities"]["frontier"] = None
+    migration_evidence["caller_closure"]["frontier"].clear()
+    assert record["input_identities"]["frontier"] == "c" * 64
+    assert record["caller_closure"]["frontier"] == (
+        "campaign.frontier.main", "campaign.frontier.replay",
+    )
+
+
+@pytest.mark.parametrize("head", [None, 1, True, "not-a-git-head", "a" * 7,
+                                       "a" * 39, "g" * 40, "0" * 40, "a" * 40 + "\n"])
+def test_consumer_migration_refuses_malformed_head(migration_evidence, head):
+    migration_evidence["canonical_head"] = head
+    with pytest.raises(ValueError, match="canonical adapter head") as refusal:
+        require_pact_consumer_migration(**migration_evidence)
+    assert all(reason in str(refusal.value) for reason in PACT_CONSUMER_PREREQUISITES)
+
+
+@pytest.mark.parametrize("identities", [None, [], [("frontier", "b" * 64)],
+                                             {}, {"frontier": "b" * 64}])
+def test_consumer_migration_refuses_incomplete_identities(migration_evidence, identities):
+    migration_evidence["input_identities"] = identities
+    with pytest.raises(ValueError, match="input identities"):
+        require_pact_consumer_migration(**migration_evidence)
+
+
+@pytest.mark.parametrize("role", ["harness", "frontier", "price_adapter"])
+@pytest.mark.parametrize("digest", [None, True, 1, "", "b" * 63, "g" * 64, "0" * 64])
+def test_consumer_migration_refuses_unusable_identity(migration_evidence, role, digest):
+    migration_evidence["input_identities"][role] = digest
+    with pytest.raises(ValueError, match="input identities"):
+        require_pact_consumer_migration(**migration_evidence)
+
+
+@pytest.mark.parametrize("closure", [None, "campaign.frontier", [None],
+                                          ["campaign.frontier.main"], {},
+                                          {"frontier": ["campaign.frontier.main"]}])
+def test_consumer_migration_refuses_incomplete_closure(migration_evidence, closure):
+    migration_evidence["caller_closure"] = closure
+    with pytest.raises(ValueError, match="caller closure"):
+        require_pact_consumer_migration(**migration_evidence)
+
+
+@pytest.mark.parametrize("role", ["harness", "frontier", "price_adapter"])
+@pytest.mark.parametrize("callers", [None, [], "campaign.frontier.main", [None], [1],
+    [""], [" "], ["campaign.frontier.main\n"], ["/workspace/frontier.py"],
+    ["campaign.frontier.main", "campaign.frontier.main"]])
+def test_consumer_migration_refuses_unusable_callers(migration_evidence, role, callers):
+    migration_evidence["caller_closure"][role] = callers
+    with pytest.raises(ValueError, match="caller closure"):
+        require_pact_consumer_migration(**migration_evidence)
+
+
+@pytest.mark.parametrize("field", ["input_identities", "caller_closure"])
+def test_consumer_migration_refuses_unknown_roles(migration_evidence, field):
+    migration_evidence[field]["typo"] = migration_evidence[field]["frontier"]
+    with pytest.raises(ValueError):
+        require_pact_consumer_migration(**migration_evidence)
+
+
+def test_consumer_migration_reports_all_invalid_prerequisites():
+    with pytest.raises(ValueError) as refusal:
+        require_pact_consumer_migration(
+            canonical_head="not-a-git-head", input_identities={"frontier": None},
+            caller_closure=[None],
+        )
+    for reason in ("canonical adapter head", "input identities", "caller closure",
+                   *PACT_CONSUMER_PREREQUISITES):
+        assert reason in str(refusal.value)
