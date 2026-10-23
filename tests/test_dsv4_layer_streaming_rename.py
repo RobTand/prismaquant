@@ -50,13 +50,6 @@ def test_attn_rename():
         # buffer as `self.sinks`; checkpoint stores it as `attn.attn_sink`.
         ("layers.0.attn.attn_sink",
          "model.layers.0.self_attn.sinks"),
-        # PRISMAQUANT probe mode drops compressor + indexer keys
-        # entirely (see comment in `_rename_dsv4_text_only`). PR
-        # #45643's compressor wkv shape doesn't match the checkpoint
-        # (K and V are concatenated in the source), and the modeling
-        # patch makes attention skip the compressor branch always.
-        # Test that the drop is consistent for every variant we know
-        # about.
     ]
     for ck, live in cases:
         assert _rename(ck) == live, f"{ck} ↦ {_rename(ck)}, expected {live}"
@@ -125,6 +118,7 @@ def test_compressor_and_indexer_keep_faithful_mapping():
 
 
 @pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_indexer_pooling_carries_the_coff_overlap_widening():
     """The Lightning Indexer pools at ``coff * index_head_dim``, not ``index_head_dim``.
 
@@ -175,6 +169,7 @@ def test_indexer_pooling_carries_the_coff_overlap_widening():
 
 
 @pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_csa_compressor_returns_indices_not_a_gather():
     """CSA must hand its top-k out as indices, never gather with them.
 

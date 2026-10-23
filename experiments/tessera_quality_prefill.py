@@ -41,7 +41,7 @@ _ROOT = str(Path(__file__).resolve().parents[1])
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from prismaquant.cost_stage_checkpoint import atomic_write_bytes  # noqa: E402
+from prismaquant.cost_stage_checkpoint import publish_new_bytes  # noqa: E402
 from prismaquant.quality_prefill_contract import (  # noqa: E402
     JOINT_CURRENCY,
     PHASE_DAG,
@@ -149,11 +149,12 @@ def _load_manifest(path: Path, *, mode: str) -> dict:
 def _publish(path: Path, value: object) -> None:
     """Publish canonical bytes exclusively: never overwrite a frozen plan."""
 
-    if path.exists():
+    destination = path.parent.resolve(strict=False) / path.name
+    encoded = canonical_json_bytes(value) + b"\n"
+    if not publish_new_bytes(destination, encoded, nofollow=True):
         raise QualityPrefillContractError(
             f"refusing to overwrite {path}: frozen bytes are published once"
         )
-    atomic_write_bytes(path, canonical_json_bytes(value) + b"\n")
 
 
 def _emit(payload: object) -> None:

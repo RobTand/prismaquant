@@ -56,9 +56,9 @@ SOURCE_TOTAL_BYTES = 1104
 # below is checkable without running the registry.  FP8_E4M3 stores one byte
 # per parameter plus an fp32 scale plane:
 #   (8, 8)    -> 64 weight bytes + 8 row scales x 4 B  =  96 B
-#   (4, 4, 8) -> 128 weight bytes + 4 expert scales x 4 B = 144 B
+#   (4, 4, 8) -> 128 weight bytes + 4 experts x 4 row scales x 4 B = 192 B
 FP8_Q_PROJ_BYTES = 96
-FP8_EXPERT_STACK_BYTES = 144
+FP8_EXPERT_STACK_BYTES = 192
 
 PACKED_EXPERTS = "model.layers.0.mlp.experts.gate_up_proj"
 Q_PROJ = "model.layers.0.self_attn.q_proj"
@@ -141,11 +141,11 @@ def test_synthetic_ledger_matches_hand_computation(model_dir: Path, profile):
 
     # --- stored bytes, class by class -------------------------------------
     # dense           = q_proj re-encoded to FP8                       96
-    # routed_experts  = the 4-expert stack re-encoded to FP8          144
+    # routed_experts  = the 4-expert stack re-encoded to FP8          192
     # held_fixed      = router 64 + layernorm 16 + lm_head 256        336
     # excluded_embed  = embed_tokens                                  256
     # excluded_mtp    = the draft sidecar                             128
-    #                                                          total  960
+    #                                                          total 1008
     classes = report["classes"]
     assert classes["dense"]["stored_bytes"] == FP8_Q_PROJ_BYTES
     assert classes["routed_experts"]["stored_bytes"] == FP8_EXPERT_STACK_BYTES
@@ -163,17 +163,17 @@ def test_synthetic_ledger_matches_hand_computation(model_dir: Path, profile):
             str(model_dir), profile.checkpoint_to_live_name,
             profile.packed_expert_parent_for_projection),
     )
-    assert priced["artifact_payload_bytes"] == 960
-    assert report["reconciliation"]["ledger_stored_bytes"] == 960
-    assert report["reconciliation"]["footprint_artifact_payload_bytes"] == 960
+    assert priced["artifact_payload_bytes"] == 1008
+    assert report["reconciliation"]["ledger_stored_bytes"] == 1008
+    assert report["reconciliation"]["footprint_artifact_payload_bytes"] == 1008
 
     # --- the weighted total ------------------------------------------------
-    # 96 (dense, p=1) + 336 (held_fixed, p=1) + 144 x 2/4 (routed) = 504
-    assert report["read_bytes_per_token"] == 504
-    assert report["read_gb_per_token"] == 504 / fp.GB
+    # 96 (dense, p=1) + 336 (held_fixed, p=1) + 192 x 2/4 (routed) = 528
+    assert report["read_bytes_per_token"] == 528
+    assert report["read_gb_per_token"] == 528 / fp.GB
     assert report["breakdown"] == {
         "dense": 96,
-        "routed": 72,
+        "routed": 96,
         "held_fixed": 336,
         "resident_codebooks": 0,
     }
@@ -358,9 +358,9 @@ def test_tied_embedding_is_streamed_every_token(tmp_path: Path, tie_flag):
     # router 64 + layernorm 16 + the tied embedding/lm_head 256 = 336
     assert report["classes"]["held_fixed"]["stored_bytes"] == 336
     assert report["classes"]["excluded_embedding"]["stored_bytes"] == 0
-    # 848 source - 384 re-encoded source + 96 q_proj + 144 experts = 704
-    assert report["reconciliation"]["ledger_stored_bytes"] == 704
-    assert report["read_bytes_per_token"] == 96 + 72 + 336
+    # 848 source - 384 re-encoded source + 96 q_proj + 192 experts = 752
+    assert report["reconciliation"]["ledger_stored_bytes"] == 752
+    assert report["read_bytes_per_token"] == 96 + 96 + 336
 
     # Post-export there is no allocator/floor split, so every always-active
     # tensor is held_fixed: q_proj 128 + router 64 + ln 16 + embed 256 = 464.

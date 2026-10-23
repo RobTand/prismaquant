@@ -32,7 +32,7 @@ that no panel ever produced — the exact forgery the three-stamp predicates in
 
 THE COST_SOURCE THIS MODULE EMITS, AND WHY IT DIFFERS FROM THE CB LANE
 ---------------------------------------------------------------------
-``allocator_candidates.cost_entry_is_anchored_aura_supersurrogate`` admits an
+``priced_cell.cost_entry_is_anchored_aura_supersurrogate`` admits an
 anchored row on three stamps, all required:
 ``cost_currency == ANCHORED_AURA_COST_CURRENCY``,
 ``cost_source == ANCHORED_AURA_COST_SOURCE`` (``"production_arm_render"``) and
@@ -103,14 +103,14 @@ from dataclasses import dataclass
 import math
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
-    check_format_applicability,
     cost_entry_is_anchored_aura_supersurrogate,
     cost_entry_is_bit_exact,
 )
+from prismaquant.allocator_candidates import check_format_applicability
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.anchored_cost import (
     AURA_CURRENCY,
     AnchoredCostError,

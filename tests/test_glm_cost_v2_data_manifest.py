@@ -1,13 +1,18 @@
 """COST's V2 manifest describes forward/reverse reads and stable resume windows."""
+
 import copy
 from dataclasses import replace
 import hashlib
 import json
+import subprocess
+import sys
 
 import pytest
 import torch
 
-from experiments import glm_data_manifests as producer
+from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant.render_cache_paths import cache_weight_filename
+from prismaquant import campaign_data_manifests as producer
 from prismaquant import format_registry as fr
 from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 from prismaquant.joint_statistics_plan import plan_joint_statistics_target_windows
@@ -121,16 +126,26 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
 
 
 def test_cost_v2_manifest_passes_published_prismabuild_validator(cost_fixture, monkeypatch):
-    """The published PB V2 validator is the final schema authority.
+    """The reviewed installed PB V2 validator is the final schema authority."""
+    from fleet_sdk import require_prismabuild_sdk
 
-    PrismaBuild is importable only where the fleet mount is present (PB
-    workers); hosted CI keeps every producer assertion above and skips here.
-    """
-    monkeypatch.syspath_prepend("/mnt/shared/prismabuild-fleet/repo/src")
-    core = pytest.importorskip("prismabuild.core")
+    require_prismabuild_sdk()
     fixture, prepared, budget = cost_fixture
     manifest = _build(fixture, prepared, budget)
-    assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+    # Isolated mode uses the installed SDK, not PYTHONPATH or a fleet source
+    # checkout. A child also keeps other tests' PB imports out of this gate
+    # and leaves the parent's public plugin import graph untouched.
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", '''
+import json, sys
+import prismabuild.core as core
+manifest = json.load(sys.stdin)
+assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
+'''],
+        input=json.dumps(manifest), text=True, capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
@@ -158,7 +173,7 @@ def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
         assert windows[(name,)]["active_pending_names"] == [name]
     declared = {entry["path"] for entry in resumed["entries"]}
     for name in completed_names:
-        assert not any(producer._cache_weight_filename(name, fmt) in path
+        assert not any(cache_weight_filename(name, fmt) in path
                        for path in declared for fmt in existing.MEASURED)
     assert resumed["read_plan"]["read_bytes"] < full["read_plan"]["read_bytes"]
     for layer in range(3):
@@ -179,17 +194,17 @@ def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):
 
 def test_cost_v2_refuses_unvalidated_resume_and_broken_read_references(cost_fixture):
     fixture, prepared, budget = cost_fixture
-    with pytest.raises(SystemExit, match="validated plan/prepared binding"):
+    with pytest.raises(ReadsetRefused, match="validated plan/prepared binding"):
         _build(fixture, prepared, budget, completed={"units": fixture["names"]})
     manifest = _build(fixture, prepared, budget)
     broken = copy.deepcopy(manifest)
     broken["read_plan"]["phases"][0]["cumulative_bytes"] += 1
-    with pytest.raises(SystemExit, match="phase byte accounting"):
+    with pytest.raises(ReadsetRefused, match="phase byte accounting"):
         producer.check_manifest_v2(broken)
     broken = copy.deepcopy(manifest)
     broken["read_plan"]["phases"][0]["entry_indices"].append(
         broken["read_plan"]["phases"][0]["entry_indices"][0])
-    with pytest.raises(SystemExit, match="repeated phase entry"):
+    with pytest.raises(ReadsetRefused, match="repeated phase entry"):
         producer.check_manifest_v2(broken)
 
 
@@ -197,9 +212,9 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     fixture, prepared, budget = cost_fixture
     name = fixture["names"][0]
     render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
-              / producer._cache_weight_filename(name, existing.MEASURED[0]))
+              / cache_weight_filename(name, existing.MEASURED[0]))
     render.unlink()
-    with pytest.raises(SystemExit, match="prepared COST render is missing"):
+    with pytest.raises(ReadsetRefused, match="prepared COST render is missing"):
         _build(fixture, prepared, budget)
     render.write_bytes(b"r" * 2048)
     with pytest.raises(RuntimeError, match="indivisible target"):
@@ -208,7 +223,7 @@ def test_cost_v2_refuses_missing_prepared_render_or_indivisible_target(cost_fixt
     changed = json.loads(fixture["plan"].read_text())
     changed["source_prefetch"]["prefetch_lookahead"] = 2
     fixture["plan"].write_text(json.dumps(changed))
-    with pytest.raises(SystemExit, match="source lookahead one"):
+    with pytest.raises(ReadsetRefused, match="source lookahead one"):
         _build(fixture, prepared, budget)
 
 
@@ -240,14 +255,14 @@ def test_cost_v2_refuses_probe_count_disagreement_with_the_plan(cost_fixture):
     sixteen-probe plan's manifest; now the build refuses by name."""
     fixture, prepared, budget = cost_fixture
     _declare_plan_probes(fixture, 16)
-    with pytest.raises(SystemExit, match="disagrees with the plan"):
+    with pytest.raises(ReadsetRefused, match="disagrees with the plan"):
         _build(fixture, prepared, budget)
 
 
 def test_cost_v2_refuses_a_plan_without_a_declared_probe_count(cost_fixture):
     fixture, prepared, budget = cost_fixture
     _declare_plan_probes(fixture, None)
-    with pytest.raises(SystemExit, match="execution.n_probes"):
+    with pytest.raises(ReadsetRefused, match="execution.n_probes"):
         _build(fixture, prepared, budget)
 
 
@@ -255,7 +270,7 @@ def test_cost_v2_refuses_a_plan_without_a_declared_probe_count(cost_fixture):
 def test_cost_v2_refuses_non_integer_or_below_two_probe_argument(
         cost_fixture, bad):
     fixture, prepared, budget = cost_fixture
-    with pytest.raises(SystemExit, match="at least two"):
+    with pytest.raises(ReadsetRefused, match="at least two"):
         _build(fixture, prepared, budget, n_probes=bad)
 
 
@@ -291,7 +306,7 @@ def test_cost_v2_refuses_an_incomplete_eval_draw_descriptor(cost_fixture):
     plan = json.loads(fixture["plan"].read_text())
     plan["joint_eval_draw"] = {}
     fixture["plan"].write_text(json.dumps(plan))
-    with pytest.raises(SystemExit, match="joint_eval_draw.calibration_input"):
+    with pytest.raises(ReadsetRefused, match="joint_eval_draw.calibration_input"):
         _build(fixture, prepared, budget)
 
 
@@ -342,5 +357,5 @@ def test_cost_v2_prices_only_the_eval_target_roster(cost_fixture):
     assert len(render_refs) == len(selected) * len(existing.MEASURED)
     declared = {entry["path"] for entry in manifest["entries"]}
     for name in set(fixture["names"]) - set(selected):
-        assert not any(producer._cache_weight_filename(name, fmt) in path
+        assert not any(cache_weight_filename(name, fmt) in path
                        for path in declared for fmt in existing.MEASURED)

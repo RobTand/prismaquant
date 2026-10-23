@@ -1,4 +1,4 @@
-"""The producer's dev switch is the only opt-in to permissive cached intake."""
+"""Cached intake follows the shared dev policy and preserves its warnings."""
 import json
 from types import SimpleNamespace
 

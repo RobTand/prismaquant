@@ -20,12 +20,13 @@ Two things are pinned:
   draw it carries.
 """
 from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant import tessera_campaign_table as campaign
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 
@@ -37,10 +38,6 @@ ROLES = ("w1", "w3")
 
 def _dispatch():
     return pytest.importorskip("dispatch_tessera_campaign")
-
-
-def _campaign():
-    return pytest.importorskip("prismaquant.tessera_campaign")
 
 
 def _profile():
@@ -66,9 +63,7 @@ def _probe_rows(h):
     }}
 
 
-#: Deliberately anti-correlated with the counts below, so a draw that followed
-#: the wrong vector cannot accidentally agree with one that followed the right
-#: one.
+#: These opposing vectors produce different draws for the fixture's fixed seed.
 H = [1.0, 9.0, 2.0, 8.0, 3.0, 7.0, 4.0, 6.0]
 COUNTS_PER_EXPERT = [900, 100, 800, 200, 700, 300, 600, 400]
 
@@ -125,7 +120,7 @@ def _sample(dispatch, **over):
 
 def test_the_default_draw_is_byte_for_byte_what_it_was():
     """No ``sizes`` argument: the same record, serialised identically."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch)[f"s:{MODULE}"]
     record = entry["stack_samples"][PACKED]
     expected = _expected_probe_record(campaign, n=3, seed=5, audit_rate=10)
@@ -142,7 +137,7 @@ def test_the_default_draw_is_byte_for_byte_what_it_was():
 
 def test_a_counts_draw_follows_the_counts_and_declares_them():
     """The vector that drove the draw is named, carried and digested."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     record = entry["stack_samples"][PACKED]
     assert record["design"] == (record["draw"]["method"]
@@ -153,8 +148,7 @@ def test_a_counts_draw_follows_the_counts_and_declares_them():
     assert sizes["sha256"] == record["draw"]["size_sha256"]
     assert sizes["values"] == {str(e): float(COUNTS_PER_EXPERT[e])
                                for e in range(EXPERTS)}
-    # The draw followed the counts, not the Fisher vector: with H and
-    # COUNTS_PER_EXPERT anti-correlated, the two draws cannot coincide.
+    # This fixture and seed distinguish a counts draw from a Fisher draw.
     probe_draw = _sample(dispatch)[f"s:{MODULE}"]["stack_samples"][PACKED]
     assert record["sampled_experts"] != probe_draw["sampled_experts"]
     # The Fisher currency is untouched: the stack row still multiplies by the
@@ -164,7 +158,7 @@ def test_a_counts_draw_follows_the_counts_and_declares_them():
 
 def test_a_counts_draw_survives_the_campaign_rehydration():
     """``selection_stack_samples`` replays it on the declared sizes."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     selection = {"groups": [{"key": f"s:{MODULE}", "members": _members(), **entry}]}
     samples = campaign.selection_stack_samples(selection, _profile())
@@ -176,7 +170,7 @@ def test_a_counts_draw_survives_the_campaign_rehydration():
 
 def test_a_record_whose_declared_digest_is_not_the_draws_is_refused():
     """The digest is what binds the named vector to the one actually used."""
-    dispatch, campaign = _dispatch(), _campaign()
+    dispatch = _dispatch()
     entry = _sample(dispatch, sizes="counts", census=_census())[f"s:{MODULE}"]
     record = dict(entry["stack_samples"][PACKED])
     record["sizes"] = {**record["sizes"], "sha256": "0" * 64}

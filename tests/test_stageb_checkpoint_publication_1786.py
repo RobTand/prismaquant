@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import prismaquant.aura_cost as aura
+from prismaquant import aura_checkpoint_journal
 import prismaquant.joint_cost_quantum as quantum
 import prismaquant.joint_statistics_replay as replay_module
 from test_stageb_one_pass_spill import campaign, _quantum
@@ -56,16 +56,16 @@ def test_next_real_window_replays_before_held_serialization(campaign, monkeypatc
     second_replay = threading.Event()
     seen = {"window": None, "durable": 0, "advanced": False, "worker": None}
     consumer = threading.get_ident()
-    encode = aura._encode_aura_unit_checkpoint
+    encode = aura_checkpoint_journal.UnitCheckpointWriter.publish
     observe = replay_module.observe_and_project_retained_windows
     commit = quantum.QuantumProgress.commit
 
-    def held_encode(**kwargs):
+    def held_encode(writer, **kwargs):
         if not writer_started.is_set():
             seen["worker"] = threading.get_ident()
             writer_started.set()
             assert release_writer.wait(30), "test encoder was not released"
-        return encode(**kwargs)
+        return encode(writer, **kwargs)
 
     def progress_commit(self):
         seen["durable"] = self.units()
@@ -95,7 +95,7 @@ def test_next_real_window_replays_before_held_serialization(campaign, monkeypatc
         finally:
             release_writer.set()
 
-    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", held_encode)
+    monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", held_encode)
     monkeypatch.setattr(quantum.QuantumProgress, "commit", progress_commit)
     monkeypatch.setattr(replay_module, "observe_and_project_retained_windows", instrument)
     controller = threading.Thread(target=control, name="checkpoint-test-control")
@@ -157,7 +157,7 @@ def test_fifo_failure_preserves_real_prefix_and_partial_resume(campaign, monkeyp
     expected = _envelopes(campaign)
     _clear(campaign)
     _enable(monkeypatch)
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     attempts = []
 
     def fail_second(path, body):
@@ -167,7 +167,7 @@ def test_fifo_failure_preserves_real_prefix_and_partial_resume(campaign, monkeyp
                 raise OSError("injected second unit durability failure")
         atomic(path, body)
 
-    monkeypatch.setattr(aura, "atomic_write_bytes", fail_second)
+    monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_second)
     payload, failed = _quantum(campaign, monkeypatch, layer=1)
     assert payload is None and hasattr(failed, "error")
     assert len(attempts) == 2, "FIFO publication continued behind failure"
@@ -175,7 +175,7 @@ def test_fifo_failure_preserves_real_prefix_and_partial_resume(campaign, monkeyp
     assert len(prefix) == 1
     assert all(expected[key] == value for key, value in prefix.items())
 
-    monkeypatch.setattr(aura, "atomic_write_bytes", atomic)
+    monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", atomic)
     observe = replay_module.observe_and_project_retained_windows
     restored = []
 
@@ -198,7 +198,7 @@ def test_final_write_failure_flushes_before_unload_or_return(campaign, monkeypat
     seen = {"tail": None, "failed": False, "premature_unload": False,
             "replay_while_held": False}
     core = quantum.run_layer_quantum_core
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     observe = replay_module.observe_and_project_retained_windows
 
     def launch(*args, **kwargs):
@@ -237,7 +237,7 @@ def test_final_write_failure_flushes_before_unload_or_return(campaign, monkeypat
             release.set()
 
     monkeypatch.setattr(quantum, "run_layer_quantum_core", launch)
-    monkeypatch.setattr(aura, "atomic_write_bytes", fail_tail)
+    monkeypatch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_tail)
     monkeypatch.setattr(replay_module, "observe_and_project_retained_windows", finished)
     controller = threading.Thread(target=control, name="checkpoint-tail-control")
     controller.start()

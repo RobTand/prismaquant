@@ -16,8 +16,8 @@ import torch.nn.functional as F
 from torch import nn
 
 from cuda_sync_sites import sync_sites
-from prismaquant import measure_quant_cost as mqc
-from prismaquant.measure_quant_cost import _packed_experts_router, _packed_router_topk
+from prismaquant import routed_experts
+from prismaquant.routed_experts import packed_experts_router, packed_router_topk
 
 
 def _reference_derive(
@@ -34,7 +34,7 @@ def _reference_derive(
     Routes the module-level expert input ``X`` ([*, hidden]) through the MoE
     block's own router and collects, per expert ``e``, exactly the tensors the
     per-expert GPTQ Hessian needs — identical to the routed forward in
-    ``_packed_experts_forward_with_weights``, but COLLECTING activations instead
+    ``packed_experts_forward_with_weights``, but COLLECTING activations instead
     of producing the output. Shared by the cost path and the export render path
     so the routing + SwiGLU derivation lives in ONE place (no duplication).
 
@@ -57,7 +57,7 @@ def _reference_derive(
     num_experts = int(getattr(experts_mod, "num_experts", gate_up_w.size(0)))
     act_fn = getattr(experts_mod, "act_fn", None)
     apply_gate = getattr(experts_mod, "_apply_gate", None)
-    router = _packed_experts_router(parent_mod)
+    router = packed_experts_router(parent_mod)
     if router is None:
         raise ValueError("no router found for packed-experts module")
     Xf = X.reshape(-1, X.size(-1))
@@ -68,7 +68,7 @@ def _reference_derive(
         if callable(route_fn):
             top_k_index, top_k_weights = route_fn(router(Xf))
         else:
-            top_k_index, top_k_weights = _packed_router_topk(
+            top_k_index, top_k_weights = packed_router_topk(
                 router, Xf,
                 e_score_correction_bias=getattr(
                     parent_mod, "e_score_correction_bias", None),
@@ -239,7 +239,7 @@ def test_fixed_routing_matches_the_per_expert_loop(
     kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows,
                   subsample_seed=77)
     want = _reference_derive(experts, X, parent, **kwargs)
-    got = mqc.derive_per_expert_activations(experts, X, parent, **kwargs)
+    got = routed_experts.derive_per_expert_activations(experts, X, parent, **kwargs)
     _same(got, want)
     if routing == "mixed":
         assert 0 in got["row_counts"], "the case must include zero-row experts"
@@ -253,7 +253,7 @@ def test_fixed_routing_matches_the_per_expert_loop(
 @pytest.mark.parametrize("capture_down", [True, False])
 @pytest.mark.parametrize("max_rows", [None, 5])
 def test_router_path_matches_the_per_expert_loop(device, experts_cls, capture_down, max_rows):
-    """The ``_packed_router_topk`` path, on a [batch, seq, hidden] input."""
+    """The ``packed_router_topk`` path, on a [batch, seq, hidden] input."""
     torch.manual_seed(5)
     num_experts, top_k = 32, 8
     experts = experts_cls(num_experts).to(device)
@@ -261,7 +261,7 @@ def test_router_path_matches_the_per_expert_loop(device, experts_cls, capture_do
     X = torch.randn(2, 37, HIDDEN, device=device)
     kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows)
     want = _reference_derive(experts, X, parent, **kwargs)
-    got = mqc.derive_per_expert_activations(experts, X, parent, **kwargs)
+    got = routed_experts.derive_per_expert_activations(experts, X, parent, **kwargs)
     _same(got, want)
     assert sum(got["row_counts"]) == 2 * 37 * top_k
 
@@ -285,9 +285,9 @@ def test_the_equality_check_catches_a_wrong_row_order(monkeypatch, max_rows):
     kwargs = dict(capture_down=True, max_rows_per_expert=max_rows)
     want = _reference_derive(experts, X, parent, **kwargs)
     assert _first_difference(
-        mqc.derive_per_expert_activations(experts, X, parent, **kwargs), want) is None
-    monkeypatch.setattr(mqc, "_routed_pair_order", _token_major_order)
-    broken = mqc.derive_per_expert_activations(experts, X, parent, **kwargs)
+        routed_experts.derive_per_expert_activations(experts, X, parent, **kwargs), want) is None
+    monkeypatch.setattr(routed_experts, "routed_pair_order", _token_major_order)
+    broken = routed_experts.derive_per_expert_activations(experts, X, parent, **kwargs)
     assert broken["row_counts"] == want["row_counts"], "same membership, wrong order"
     assert _first_difference(broken, want) is not None
 
@@ -298,7 +298,7 @@ def test_an_out_of_range_expert_index_refuses():
     index[2, 1] = num_experts
     parent = _FixedRoute(index, weights)
     with pytest.raises(ValueError, match="outside"):
-        mqc.derive_per_expert_activations(_GateExperts(num_experts), X, parent)
+        routed_experts.derive_per_expert_activations(_GateExperts(num_experts), X, parent)
 
 
 def test_experts_without_a_gate_or_act_fn_still_refuse():
@@ -306,7 +306,7 @@ def test_experts_without_a_gate_or_act_fn_still_refuse():
     experts = _ActExperts(num_experts)
     del experts.act_fn
     with pytest.raises(ValueError, match="neither _apply_gate nor act_fn"):
-        mqc.derive_per_expert_activations(experts, X, _FixedRoute(index, weights))
+        routed_experts.derive_per_expert_activations(experts, X, _FixedRoute(index, weights))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="counts CUDA host syncs")
@@ -320,7 +320,7 @@ def test_routing_syncs_the_host_once_not_once_per_expert():
     experts = _GateExperts(num_experts).cuda().to(torch.bfloat16)
     # The router runs in the input's dtype, as the census's bf16 layers do.
     parent = _FixedRoute(index, weights).cuda().to(torch.bfloat16)
-    for derive, ceiling in ((mqc.derive_per_expert_activations, 1),
+    for derive, ceiling in ((routed_experts.derive_per_expert_activations, 1),
                             (_reference_derive, num_experts)):
         derive(experts, X, parent)  # warm up
         sites = sync_sites(lambda: derive(experts, X, parent))

@@ -106,10 +106,12 @@ def _row(entry: dict) -> dict:
 def prepare(root: Path, tier: str) -> dict:
     """Write the tiny campaign, the producer's template and both readsets."""
     import dispatch_joint_quanta as dispatch
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
-    from prismaquant.joint_layer_quanta import (
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.joint_layer_quanta import seal_manifest_bytes
+    from prismaquant.joint_quantum_row import (
         CHECKPOINT_LOAD_PHASE, executable_bound_phase_name,
-        executable_source_phase_name, seal_manifest_bytes)
+        executable_source_phase_name,
+    )
     from test_quantum_executable_readset import (
         _bind_slice, _tiny_receipt, _tiny_records)
 
@@ -204,7 +206,13 @@ def _load(root: Path):
 
 
 def _slice(record):
-    return json.loads(Path(record["adjoint"]["slice_path"]).read_text())
+    from prismaquant.joint_adjoint_slices import load_adjoint_slice
+
+    adjoint = record["adjoint"]
+    return load_adjoint_slice(
+        adjoint["slice_path"], adjoint["slice_sha256"],
+        layer=record["layer"], checkpoint_boundary=adjoint["checkpoint_boundary"],
+    )
 
 
 class _Owner:
@@ -368,8 +376,12 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
 
     from prismaquant.calibration_data import _read_calibration_payload
     from prismaquant.joint_quantum_handoff import (
-        HANDOFF_LOAD_PHASE, handoff_read_entries, load_handoff_inputs,
-        load_quantum_handoff, require_band_serial_readset)
+        handoff_read_entries,
+        load_handoff_inputs,
+        load_quantum_handoff,
+        require_band_serial_readset,
+    )
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
     from prismaquant.prismabuild_progress import report as progress
     from prismaquant.staged_tier_policy import TierPolicyRefused
 
@@ -397,12 +409,12 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
     checks["head_read"] = _sha(head) == pair["head"]["sha256"]
     progress(HANDOFF_LOAD_PHASE, 1, unit="entries")
 
-    # Negative control: an undeclared file of the same handoff generation
-    # is refused, so a pass below cannot be a silent pool read.
-    undeclared = Path(handoff).parent / "generation.json"
+    # Band-serial replaces the original checkpoint plane with the handoff.
+    # Its bound entry must be refused without a canonical payload read.
+    undeclared = checkpoint["activation_entries"][0]
     try:
-        _read_calibration_payload(undeclared,
-                                  expected_sha256=_sha(undeclared.read_bytes()))
+        _read_calibration_payload(Path(undeclared["path"]),
+                                  expected_sha256=undeclared["sha256"])
     except TierPolicyRefused as refusal:
         out["undeclared_refusal"] = str(refusal)
         checks["undeclared_refused"] = "readset-not-staged" in str(refusal)

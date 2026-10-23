@@ -321,13 +321,13 @@ def derive_cache_ceiling(first_peak_bytes, *, headroom_bytes) -> dict:
     operator declares before the repeat run. ``G`` is one GiB. Both inputs
     must be non-negative integers; the ceiling is at least one GiB.
     """
-    peak = int(first_peak_bytes)
-    headroom = int(headroom_bytes)
+    if type(first_peak_bytes) is not int or type(headroom_bytes) is not int:
+        raise ValueError("peak and headroom must be integer bytes")
+    peak = first_peak_bytes
+    headroom = headroom_bytes
     if peak < 0 or headroom < 0:
         raise ValueError("peak and headroom must be non-negative")
-    if int(first_peak_bytes) != peak or int(headroom_bytes) != headroom:
-        raise ValueError("peak and headroom must be whole bytes")
-    ceiling = max(1, math.ceil((peak + headroom) / GIB_BYTES)) * GIB_BYTES
+    ceiling = max(1, (peak + headroom + GIB_BYTES - 1) // GIB_BYTES) * GIB_BYTES
     return {"peak_bytes": peak, "headroom_bytes": headroom,
             "gib_bytes": GIB_BYTES, "ceiling_bytes": ceiling,
             "formula": "C = G * ceil((P + H) / G)"}

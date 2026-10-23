@@ -48,7 +48,7 @@ def main(argv=None):
 
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.cost_stage_checkpoint import publish_new_bytes
-    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
     from prismaquant.glm_routing_capture import capture_streamed_glm_routes
     from prismaquant.joint_aura import source_execution_identity
     from prismaquant.joint_cost_quantum import build_quantum_source_runner
@@ -205,8 +205,8 @@ def _capture_original(args):
 
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.cost_stage_checkpoint import publish_new_bytes
-    from prismaquant.cost_streaming import (StreamedBoundaryArtifacts, build_streamed_model_identity,
-                                            check_boundary_storage, LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA)
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, check_boundary_storage, LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
     from prismaquant.dev_mode import dev_mode_enabled
     from prismaquant.digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
     from prismaquant.glm_routing_capture import capture_streamed_glm_routes

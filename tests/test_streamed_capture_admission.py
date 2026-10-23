@@ -160,7 +160,7 @@ def test_guard_refuses_unbounded_cuda_capture(tmp_path):
 
 def test_actual_collector_refuses_unproven_sharing_before_forward(glm_checkpoint, monkeypatch):
     import torch
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     model, _source = glm_checkpoint
     targets = [name for name, module in model.named_modules()
@@ -168,7 +168,7 @@ def test_actual_collector_refuses_unproven_sharing_before_forward(glm_checkpoint
     assert len(targets) == 2
     called = []
     with pytest.raises(RuntimeError, match='actual capture input groups'):
-        _collect_activations(model, targets, [torch.ones(1, 2, dtype=torch.long)], 1, 'cpu',
+        capture_activation_statistics(model, targets, [torch.ones(1, 2, dtype=torch.long)], 1, 'cpu',
             profile=Glm5NextProfile(), want_hessian=True, shared_packed_inputs=True,
             expected_shared_input_groups={targets[0]: targets},
             forward_batch=lambda _batch: called.append(True), on_forwards_complete=lambda: None)

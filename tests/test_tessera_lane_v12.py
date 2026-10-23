@@ -67,7 +67,7 @@ def test_v12_parses_and_keeps_the_launch_scope_on_the_record():
     parsed = _parsed()
     assert parsed.lane_schema == "tessera.lane-eligibility.v12"
     route = next(c for c in parsed.cells
-                 if c.cell_id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
+                 if c.id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
     assert dict(zip([d for _, d in route.executes],
                     route.launch_rungs_q256))[CLASS_DECODER] == (768,)
 
@@ -145,14 +145,10 @@ def test_v12_unscoped_launch_keeps_the_scope_of_its_cell():
     assert parsed_cell.launch_covers_rate(0, 768)
     assert parsed_cell.launch_covers_rate(0, 832)
 
-def test_v12_route_cell_keeps_the_derived_launch_coverage():
+def test_v12_parsed_cell_keeps_the_derived_launch_coverage():
     parsed = _parsed()
-    table = _table()
     route = next(c for c in parsed.cells
-                 if c.cell_id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
-    cell = next(c for c in table.cells if c.id == route.cell_id)
-    assert tuple(route.launch_covered_rungs_q256) == tuple(
-        cell.launch_covered_rungs_q256)
+                 if c.id == "tessera_e4m3_k1_routed_moe_sm121_decode_resident")
     index = next(i for i, (_, decoder) in enumerate(route.executes)
                  if decoder in HISTORICAL)
     assert 800 in route.launch_covered_rungs_q256[index]

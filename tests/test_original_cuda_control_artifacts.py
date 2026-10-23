@@ -130,17 +130,25 @@ def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
 
 
 def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path):
-    # The child runs without site packages and must not import prismaquant, so
-    # the parent passes it the one SDK version the consumer pins (PQ #2152).
-    from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
-
     program = (
-        'import sys; from experiments.original_cuda_control import artifact_cas; '
-        'cas=artifact_cas(sys.argv[1]); '
-        'from prismabuild.client import SDK_VERSION; assert SDK_VERSION==int(sys.argv[2]); '
+        'import hashlib, json, os, sys; from pathlib import Path; '
+        'from experiments.original_cuda_control import artifact_cas, _ARTIFACT_CAS_SDK_VERSIONS; '
+        'cas=artifact_cas(sys.argv[1]); from prismabuild import client; '
+        'source=Path(os.environ["PRISMABUILD_READER_HELPER_ROOT"])/"src"; '
+        'assert Path(client.__file__).resolve().is_relative_to(source); '
         'assert "prismaquant" not in sys.modules and "torch" not in sys.modules; '
-        'print(str(cas.root))')
-    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas'),
-                           str(PB_CLIENT_SDK_VERSION)],
+        'payload=b"cold launch-owned CAS bytes"; artifact=Path(sys.argv[1]).parent/"input.bin"; '
+        'artifact.write_bytes(payload); digest=hashlib.sha256(payload).hexdigest(); '
+        'entry,_=cas.ingest_input(artifact,input_id="cold-input",expected_sha256=digest,expected_bytes=len(payload)); '
+        'stored=cas.input_path(entry); '
+        'print(json.dumps({"root":str(cas.root),"bytes_match":stored.read_bytes()==payload, '
+        '"readonly":stored.stat().st_mode & 0o222 == 0,"sdk":client.SDK_VERSION})); '
+        '\nclient.SDK_VERSION=max(_ARTIFACT_CAS_SDK_VERSIONS)+1\n'
+        'try:\n artifact_cas(sys.argv[1])\n'
+        'except RuntimeError as error:\n assert "qualified immutable-input CAS helper" in str(error)\n'
+        'else:\n raise AssertionError("unqualified future SDK was admitted")\n')
+    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas')],
                           capture_output=True, text=True, check=True)
-    assert done.stdout.strip() == str(tmp_path / 'cas')
+    observed = json.loads(done.stdout)
+    assert observed['root'] == str(tmp_path / 'cas')
+    assert observed['bytes_match'] and observed['readonly']

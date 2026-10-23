@@ -75,7 +75,7 @@ def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_
     # own copy before the export has even run (PQ #1110): no publication,
     # no mover, no canonical open. The real fleet then runs the real export,
     # and the action's end waits for it on its own state.
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     chain._strict(monkeypatch, env, pb_repo, queue)
     leases_before = exact_lease_counters()
     with storage.prefetch(references) as window:

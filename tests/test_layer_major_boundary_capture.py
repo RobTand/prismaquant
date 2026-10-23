@@ -8,10 +8,7 @@ import pytest
 import torch
 
 from prismaquant import aura_cost
-from prismaquant.cost_streaming import (
-    LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts,
-    normalize_boundary_storage,
-)
+from prismaquant.streamed_boundary_artifacts import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts, normalize_boundary_storage
 from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.model_profiles.default import DefaultProfile
 from test_joint_aura_streamed import _fixture

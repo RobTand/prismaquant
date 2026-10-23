@@ -254,7 +254,7 @@ def test_scaled_writer_floor_refusal_mid_guard_and_adequate_override(
     explicit adequate override proceeds on the same writer, same guard.
     No missing import is claimed RED: every name here exists.
     """
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_adjoint_checkpoints import (
         adjoint_space, write_adjoint_checkpoint)
     from prismaquant.joint_cost_stage_a import (

@@ -253,7 +253,7 @@ def test_the_boundary_owner_reuses_one_read_buffer_and_frees_it(tmp_path):
     """The same buffer serves every window of a generation, and is released."""
     import tracemalloc
 
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     tensor = torch.randn(1024, 1024)
     nbytes = tensor.numel() * tensor.element_size()

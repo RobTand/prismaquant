@@ -16,7 +16,7 @@ import pytest
 
 from prismaquant import stage_a_chain_resume as resume_mod
 from prismaquant import stage_a_retirement as retire
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.stage_a_chain_resume import chain_state_path
 from test_stage_a_retirement_1073 import (
     argv, completed, last_json, retire_main, successor,

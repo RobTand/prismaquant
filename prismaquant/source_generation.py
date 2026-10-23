@@ -532,7 +532,7 @@ def original_source_runtime(runner, owner):
 
 def normalize_original_source_static_authority(document):
     """Pure canonical projection for issuance, not a source admission object."""
-    from .cost_streaming import validate_streamed_model_identity
+    from .streamed_model_identity import validate_streamed_model_identity
 
     _exact(document, ORIGINAL_STATIC_AUTHORITY_KEYS, 'original static authority')
     _same(document['schema'], ORIGINAL_AUTHORITY_SCHEMA, 'original static authority schema')
@@ -575,7 +575,7 @@ def normalize_original_diagnostic_base_plan(document):
 
 
 def normalize_original_diagnostic_preparation(document):
-    from .cost_streaming import validate_streamed_model_identity
+    from .streamed_model_identity import validate_streamed_model_identity
 
     _exact(document, ORIGINAL_PREPARATION_KEYS, 'original diagnostic preparation')
     _same(document['schema'], 'prismaquant.original_diagnostic_preparation.v1', 'original preparation schema')
@@ -594,7 +594,7 @@ def normalize_original_diagnostic_preparation(document):
 
 def normalize_original_diagnostic_execution(document):
     """The existing Stage-A execution fields with an explicit render-free scope."""
-    from .cost_streaming import check_boundary_storage, LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+    from .streamed_boundary_artifacts import check_boundary_storage, LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
 
     _exact(document, {'schema', 'n_calib_samples', 'calib_seqlen', 'n_probes', 'seed_base',
         'probe_microbatch', 'token_scope', 'temperature', 'boundary_storage', 'stride',
@@ -709,7 +709,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
     require_original_source_authority may require and accept those proofs;
     consumers cannot turn this independent snapshot into an admitted owner.
     """
-    from .cost_streaming import validate_streamed_model_identity
+    from .streamed_model_identity import validate_streamed_model_identity
     from .staged_lease import _load_sealed_payload
 
     _exact(admitted_execution, ORIGINAL_EXECUTION_KEYS, 'original admitted execution')

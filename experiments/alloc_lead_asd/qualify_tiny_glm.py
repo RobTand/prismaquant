@@ -17,7 +17,7 @@ import transformers
 from safetensors.torch import save_file
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA, validate_streamed_model_identity
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA, validate_streamed_model_identity
 from prismaquant.glm_source_derivative import bind_source_derivative
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile

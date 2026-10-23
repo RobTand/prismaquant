@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant import cost_streaming, layer_streaming, staged_whole_file
+from prismaquant import layer_streaming, staged_whole_file
+from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import (
     TierPolicyRefused, activate_staged_tier_policy,
@@ -75,7 +76,7 @@ def test_real_metadata_reader_never_opens_the_pool(checkpoint, tmp_path, monkeyp
         assert shards == {"model.layers.0.proj.weight": str(root / "weights.safetensors")}
         assert names == {"model.layers.0.proj.weight": "model.layers.0.proj.weight"}
     else:
-        names, paths = cost_streaming._local_checkpoint_shards(root)
+        names, paths = cost_streaming_identity._local_checkpoint_shards(root)
         assert names == index["weight_map"]
         assert paths == [(root / "weights.safetensors").resolve()]
     report = residency_report()
@@ -134,7 +135,7 @@ def test_staged_bytes_must_match_the_declared_digest(checkpoint, tmp_path, monke
 def test_inactive_policy_keeps_legacy_metadata_text(checkpoint):
     root, config, index, _manifest = checkpoint
     assert layer_streaming._source_json(root / "config.json") == config
-    assert cost_streaming._local_checkpoint_shards(root)[0] == index["weight_map"]
+    assert cost_streaming_identity._local_checkpoint_shards(root)[0] == index["weight_map"]
 
 
 def test_capture_authenticator_still_owns_its_json_read(monkeypatch):

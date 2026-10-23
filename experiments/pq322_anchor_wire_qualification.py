@@ -1,5 +1,6 @@
 """PB-only original dense-anchor verification; never a full-model cost run."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import argparse
 import copy
@@ -20,7 +21,8 @@ def main():
     from prismaquant.joint_aura import prefetch_joint_cache
     from prismaquant.model_profiles import detect_profile
     from prismaquant.native_operator_panel import prepare_native_inputs
-    from prismaquant.production_weight_cache import ProductionWeightCache, _cache_weight_filename
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import calibrated_maxima, verify_anchor_render
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -69,7 +71,7 @@ def main():
                            identity_sha256=manifest['identity_sha256'])
         for anchor in state['anchors']:
             fmt = anchor['format_name']; record = state['wire_records'][fmt]
-            render = Path(payload['provenance']['cache_dir']) / _cache_weight_filename(name, fmt)
+            render = Path(payload['provenance']['cache_dir']) / cache_weight_filename(name, fmt)
             cells[name, fmt] = dict(anchor=anchor, record=record,
                 wire=str(Path(payload['provenance']['wire_dir']) / record['file']),
                 render=str(render), render_file_sha256=cc.sha256(render))
@@ -100,7 +102,7 @@ def main():
     def baseline():
         refs = {}
         for (name, fmt), cell in sorted(cells.items()):
-            anchor = tc.CampaignAnchor(**cell['anchor'])
+            anchor = campaign_table.CampaignAnchor(**cell['anchor'])
             encoding = tc._checkpoint_anchor_identity(anchor, weights=weights,
                 menus={name: [SimpleNamespace(format_name=fmt)]}, calibration_source=calibration_source,
                 static_scales=scales)

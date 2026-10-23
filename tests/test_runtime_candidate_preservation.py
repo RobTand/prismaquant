@@ -33,7 +33,7 @@ def test_runtime_mode_retains_byte_loss_dominated_routes(precision):
 
 def _licence():
     path = trc.contract_path()
-    return trc._load_at(str(path), hashlib.sha256(path.read_bytes()).hexdigest(),
+    return trc.read_tessera_contract(str(path), hashlib.sha256(path.read_bytes()).hexdigest(),
                         "runtime-preservation-test").fused_module
 
 

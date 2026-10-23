@@ -395,7 +395,7 @@ def plan_chain_resume(space, document, *, recomputed, running_implementation_sha
             f"{adjoint_receipt_path(space)} exists: the run completed and has no "
             "chain left to resume")
     require_chain_fields_equal(document, recomputed)
-    from .cost_streaming import boundary_storage_layout_differs
+    from .streamed_boundary_artifacts import boundary_storage_layout_differs
 
     storage = document["boundary_storage"]
     storage_refusal = ChainResumeRefused("the relaunch runs another boundary storage policy")
