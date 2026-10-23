@@ -157,7 +157,7 @@ elif tool == "pbwait.py":
     records = [json.loads(line) for line in pathlib.Path(os.environ["TR3_TEST_LOG"]).read_text().splitlines()]
     withdrawn = any(r["kind"] == "withdraw" and r["argv"][1] == args[-1] for r in records)
     complete = not (withdrawn and os.environ.get("TR3_TEST_CLEANUP_INCOMPLETE"))
-    print(json.dumps({"complete": complete, "actions": [
+    print(json.dumps({"schema": "prismabuild.endings.v1", "complete": complete, "endings": [
         {"status": "withdrawn" if withdrawn else "executed", "succeeded": not withdrawn}]}))
     sys.exit(1 if withdrawn else 0)
 elif tool == "docker":

@@ -224,7 +224,7 @@ import json, sys
 coordinator, peer = (json.load(open(path)) for path in sys.argv[1:])
 if not (coordinator["complete"] and peer["complete"]):
     raise SystemExit("cleanup incomplete; do not start another pair")
-ending = peer["actions"][0]
+ending = peer["endings"][0]
 if ending["status"] != "withdrawn" and not (ending["status"] == "executed" and ending["succeeded"]):
     raise SystemExit("unexpected peer ending")
 ' "$1.endings.json" "$2.endings.json" || rc=$?
@@ -371,3 +371,26 @@ resident teacher windows / `arm_capture`. No GPU serving or TP2 qualification
 was performed; the checks do not supply either of the measurement receipts above.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"6e07dd584f206cd68ad362bcfb8848ab49f281903716556f7444f8c5b4f97516","size":1432}},"operation":"465a45c38d24e5a60692b7e5db50b92e5db09753346850fe35925fb4efe0ad78","receipt":"271e71509645de54e7fcb04c83e8836cb0e538c6cfc12eb79679e5e25911727c"}]
+
+### PB endings contract repair verification
+
+PrismaBuild `43234d0f`, `tools/fleet/pbwait.py`, emits
+`{"schema": "prismabuild.endings.v1", "complete": ..., "endings": [...]}`
+for `--endings`. The earlier boundary double incorrectly emitted `actions`,
+masking a matching error in `finish_pair()`. Both now use `endings`.
+
+With only the double corrected, the following regression reproduced
+`KeyError: 'actions'` (1 failed), before fixing the helper:
+
+```console
+python -m pytest tests/test_tr3_dual_teacher_procedure_2605.py::test_documented_jobs_enter_image_and_match_two_host_engine_profile -q --basetemp="$TMPDIR/pytest"
+```
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"afcf59135d0447719a0e0cee307654b12f0fdf5ae0b5916b0cd691ad9170cf7f","size":2276}},"operation":"1eb1882e1b6c713cbd51bc0f2c4d969a23fbca8b726f249c939e462ed8c2de13","receipt":"ff465c8da8aa5d19f1ed48c73e7d2bf3245e7de569729176c4ac2a4e06507606"}]
+
+After fixing the helper, the full CPU command above passed again:
+**293 passed, 2 skipped** (the same CUDA-only cases). The shell lint now
+completes both qualification and scoring pairs using the production response
+shape, while still refusing incomplete peer cleanup. No GPU serving was run.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"b4831644127237db921e98a5f2c87cdfbe0d65fae03678161b35ef8d8ab70b88","size":1431}},"operation":"da81a0997f6a94b16f74aed9df6fac84f38a92b67e5e51a700f4256dd69ca33e","receipt":"b1bffff04b286195cc217331e678c1d2ba04db24398838cbb55dcc8631bc8197"}]
