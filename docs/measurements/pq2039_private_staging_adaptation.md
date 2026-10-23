@@ -159,5 +159,14 @@ Current commands and observed outcomes:
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"2770215a1430a0732e518b3816d76bd8a9cbb1feb1f61e10cab7c2c554ef23a0","size":362}},"operation":"c1143714ca47f44fc3d74baa5a9f16db9522c31a9efc8a28e900db9f21404358","receipt":"f137d4a566bf2882ea4420dab3cbd80982e19c66b5d02c4d4fecd7c475243e8f"}]
 
+Final resumed-session CPU verification reran the exact O1 selection plus
+`tests/test_measure_projected_copy_2039.py` and
+`tests/test_collect_row_netdata.py`: **172 passed, 12 skipped**, with one
+Torch profiler cycle warning. The retained current CUDA stdout above was also
+read back and verified (111 passed, no skips); no additional GPU action or
+timing comparison was launched.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"73403815b010ba6f6c6fb67f39149f809804aecb3f43f434695ec44db1595839","size":1003}},"operation":"54c0d6c0348d93e359004320ca63a608550732efb6550ac938833d07db3c35af","receipt":"306cb390560d437f2e5560612404d34337287e662acdf5c54aa47e1024ce752b"}]
+
 `git diff --check` passed. Clock alignment, energy/work-per-joule and
 full-campaign qualification remain **HOLD**.
