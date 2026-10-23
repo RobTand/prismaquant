@@ -1752,8 +1752,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             payload = dict(inputs=acts[name],hessian=hessians[name],count=counts[name],
                            max_abs=maxima[name],name=name,source=SOURCE)
             _validate_tensors(name,payload,census,identity['max_act_rows'])
-            path, record, _fingerprint = _write_capture_entry(root, name, inputs=acts[name],
+            path, record, fingerprint = _write_capture_entry(root, name, inputs=acts[name],
                 hessian=hessians[name], count=counts[name], max_abs=maxima[name])
+            _require_verified_entry(path, name, record, {**record, 'fingerprint': fingerprint})
             file_stat = path.stat() if release_file_pages else None
         else:
             if record.get('path') != str(expected_path):
