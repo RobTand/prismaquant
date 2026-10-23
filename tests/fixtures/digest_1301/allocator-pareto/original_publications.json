@@ -1,0 +1,34 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+  "statements": [
+    {
+      "line": 3771,
+      "source": "applicability_report_path.write_text(\n        json.dumps(applicability_payload, indent=2, sort_keys=True) + \"\\n\"\n    )"
+    },
+    {
+      "line": 5294,
+      "source": "knee_path.write_text(json.dumps(knee_summary, indent=2, sort_keys=True) + \"\\n\")"
+    },
+    {
+      "line": 5425,
+      "source": "path.write_text(json.dumps(payload, indent=2, sort_keys=True) + \"\\n\")"
+    },
+    {
+      "line": 5452,
+      "source": "(out_dir / \"manifest.json\").write_text(json.dumps({\n            \"schema\": \"prismaquant.allocator.pareto_manifest.v1\",\n            \"probe\": str(args.probe),\n            \"costs\": str(args.costs),\n            \"target_profile\": target_profile,\n            \"target_disk_gb\": (float(args.target_disk_gb)\n                               if args.target_disk_gb is not None else None),\n            \"artifact_overhead_reserve_bytes\": (\n                int(args.artifact_overhead_reserve_bytes)\n                if args.artifact_overhead_reserve_bytes is not None\n                else None\n            ),\n            \"formats\": [s.name for s in specs_sorted],\n            \"target_bits\": [float(x) for x in targets],\n            \"knees\": knee_summary,\n            \"candidates\": manifest_rows,\n        }, indent=2, sort_keys=True) + \"\\n\")"
+    },
+    {
+      "line": 5852,
+      "source": "sel_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + \"\\n\")"
+    },
+    {
+      "line": 6043,
+      "source": "sel_path.write_text(\n                json.dumps(selection, indent=2, sort_keys=True) + \"\\n\")"
+    },
+    {
+      "line": 6232,
+      "source": "sel_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + \"\\n\")"
+    }
+  ]
+}

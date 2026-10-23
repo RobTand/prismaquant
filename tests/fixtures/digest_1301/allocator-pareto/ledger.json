@@ -1,0 +1,143 @@
+{
+  "piece": "allocator-pareto",
+  "completed_calls": [
+    {
+      "original_id": "hashlib:prismaquant/allocator.py::main@5361:21",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256(assignment)[:12]",
+      "fixtures": [
+        "tests/fixtures/digest_allocator_pareto_1301.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_publication_matches_original",
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_refusals_match_original",
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_ascii_lax_values_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@3771:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@5294:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@5360:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256(assignment)[:12]",
+      "fixtures": [
+        "tests/fixtures/digest_allocator_pareto_1301.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_publication_matches_original",
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_refusals_match_original",
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_pareto_ascii_lax_values_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@5425:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@5452:47",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@5852:32",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@6043:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/allocator.py::main@6232:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text(value); existing caller LF and write unchanged",
+      "fixtures": [
+        "tests/fixtures/digest_1301/allocator-pareto/original_publications.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/allocator-pareto/test_publication.py::test_all_sorted_publication_statements_match_original"
+      ]
+    }
+  ],
+  "unresolved_calls": [
+    {
+      "original_id": "supplemental-json:prismaquant/allocator.py::_write_bit_attribution_reports@1297:24",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "disposition": "unresolved-owner-gap",
+      "reason": "Insertion-ordered indent=2 ASCII/lax/no-fallback publication; JsonProfile always uses sort_keys=True. json.dump also iteratively writes to the open text stream, preserving partial output on refusal. Needs exact owner text and stream-write interfaces; no retention claimed."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/allocator.py::main._write_layer_config@4627:42",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "disposition": "unresolved-owner-gap",
+      "reason": "Insertion-ordered indent=2 ASCII/lax/no-fallback publication; JsonProfile always uses sort_keys=True. json.dump also iteratively writes to the open text stream, preserving partial output on refusal. Needs exact owner text and stream-write interfaces; no retention claimed."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/allocator.py::main._write_layer_config@4631:16",
+      "source_blob": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+      "disposition": "unresolved-owner-gap",
+      "reason": "Insertion-ordered indent=2 ASCII/lax/no-fallback publication; JsonProfile always uses sort_keys=True. json.dump also iteratively writes to the open text stream, preserving partial output on refusal. Needs exact owner text and stream-write interfaces; no retention claimed."
+    }
+  ],
+  "audit_boundaries": {
+    "file": "prismaquant/allocator.py",
+    "inspection": "All hashlib constructors and json dumps/dump/JSONEncoder calls inspected across the whole module; json.load/loads are parsing, not encoding. Existing bytes/file and direct strict/spaced owner routes remain unchanged. No additional incremental or dynamic encoder calls found in this file. This is not an exhaustive repository supplemental audit.",
+    "classification": "Pareto compact identity is load-bearing (duplicate set and persisted filenames/labels). Assignment and manifest publications are load-bearing; applicability, knee and bit attribution reports are diagnostics. Selection and layer-config publications are load-bearing.",
+    "baseline_integration": "Shared census and baseline are read-only for this piece. Integrator can remove hashlib:prismaquant/allocator.py::main and sorted-json:prismaquant/allocator.py::main after final source scan. Three supplemental JSON calls remain eligible pending owner gap; do not mark them retained."
+  }
+}

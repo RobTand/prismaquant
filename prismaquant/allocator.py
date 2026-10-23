@@ -142,6 +142,8 @@ from prismaquant.allocator_candidates import (
 )
 from prismaquant.priced_cell import CostPricingPolicy
 from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_LAX,
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
     bytes_sha256hex,
@@ -3768,7 +3770,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         ),
     }
     applicability_report_path.write_text(
-        json.dumps(applicability_payload, indent=2, sort_keys=True) + "\n"
+        DIRECT_ASCII_INDENT2_LAX.text(applicability_payload) + "\n"
     )
     print(f"[alloc] format applicability → {applicability_report_path}")
 
@@ -5291,7 +5293,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             w.writerow(row)
     print(f"[alloc] Pareto curve → {args.pareto_csv}")
     knee_path = Path(args.pareto_csv).with_suffix(".knees.json")
-    knee_path.write_text(json.dumps(knee_summary, indent=2, sort_keys=True) + "\n")
+    knee_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(knee_summary) + "\n")
     print(f"[alloc] Pareto knees → {knee_path}")
     if knee_summary.get("refined"):
         _r, _c = knee_summary["refined"], knee_summary["log_error"]
@@ -5357,8 +5359,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         seen_payloads: set[str] = set()
         for idx, record in enumerate(pareto_seed_records):
             assignment = record["assignment"]
-            digest_src = json.dumps(assignment, sort_keys=True, separators=(",", ":"))
-            digest = hashlib.sha256(digest_src.encode()).hexdigest()[:12]
+            digest = DIRECT_ASCII_LAX.sha256(assignment)[:12]
             if digest in seen_payloads:
                 continue
             seen_payloads.add(digest)
@@ -5422,7 +5423,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 **({"serve_constraints": _serve_feasibility(assignment).as_dict()}
                    if measured_runtime_table is not None else {}),
             }
-            path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            path.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
             manifest_rows.append({
                 "label": label,
                 "path": str(path),
@@ -5449,7 +5450,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "whole_artifact_upper_bound_bytes"
                 ),
             })
-        (out_dir / "manifest.json").write_text(json.dumps({
+        (out_dir / "manifest.json").write_text(DIRECT_ASCII_INDENT2_LAX.text({
             "schema": "prismaquant.allocator.pareto_manifest.v1",
             "probe": str(args.probe),
             "costs": str(args.costs),
@@ -5465,7 +5466,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "target_bits": [float(x) for x in targets],
             "knees": knee_summary,
             "candidates": manifest_rows,
-        }, indent=2, sort_keys=True) + "\n")
+        }) + "\n")
         print(
             f"[alloc] Pareto seed assignments → {out_dir} "
             f"({len(manifest_rows)} unique)",
@@ -5849,7 +5850,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 if cheapest else float("nan")
             )
             selection["cheapest_whole_artifact_upper_bound_gb"] = cheapest_gb
-            sel_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n")
+            sel_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n")
             # The floor probe already ran (above), so this number is the
             # menu's floor and not the sweep's — EXCEPT when the probe itself
             # could not be priced or came back INFEASIBLE, which is the one
@@ -6040,7 +6041,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 },
             })
             sel_path.write_text(
-                json.dumps(selection, indent=2, sort_keys=True) + "\n")
+                DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n")
             raise SystemExit(
                 "[alloc] every allocation that fits the "
                 f"{args.target_disk_gb:.3f}GB card misses a hard serving "
@@ -6229,7 +6230,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 else serve_context.stamp_inactive()
             ),
         })
-        sel_path.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n")
+        sel_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n")
         print(
             f"[alloc] byte-budget: card={args.target_disk_gb:.2f}GB ({regime} src) "
             f"-> ship {chosen_info['achieved_bits']:.3f} bpp "
