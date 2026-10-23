@@ -717,6 +717,12 @@ class BoundaryProducedPublication:
         # retirement, and deliberately not a second durable store: it is
         # rebuilt from PB's own records by :meth:`recover_batch_states`.
         self._manifest_digests: dict[str, str] = {}
+        # Local wakeup bookkeeping only, never retirement/recovery authority.
+        # All owners (release, drain and funding) go through retire(). PB may
+        # republish the same content-addressed key without returning its new
+        # generation, so an ending can wake validation only once per batch.
+        self._pending_egress: dict[str, dict] = {}
+        self._consumed_egress_endings: dict[str, set] = {}
 
     # -- binding -----------------------------------------------------------
 
@@ -1405,17 +1411,71 @@ class BoundaryProducedPublication:
         raise BoundaryProducedBindingError(
             f"tier {self.tier!r} announces no stage mountpoint")
 
+    def _egress_wakeup(self, batch_id: str, outcome: Mapping) -> tuple | None:
+        """Observe one usable key-level ending, not a retirement receipt.
+
+        retire_batch does not expose the egress publication generation. A
+        current ending therefore only permits one authoritative re-evaluation;
+        it cannot prove that a republished successor has completed. Remember
+        the key/generation even across another keyed deferral. Unavailable or
+        contested observations keep the existing debt and owner's deadline.
+        """
+        try:
+            ending = self.queue.current_ending(outcome["egress_action_key"])
+            if (not isinstance(ending, Mapping)
+                    or ending.get("unreadable") or ending.get("ambiguous")
+                    or ending.get("state") not in {"done", "failed", "withdrawn"}
+                    or not isinstance(ending.get("record"), Mapping)):
+                return None
+            generation = ending.get("generation")
+            # A lone legacy ending may have no generation (PB's public
+            # current_ending contract). It still grants at most one wakeup.
+            if generation is not None:
+                import math
+                if (type(generation) not in (int, float)
+                        or not math.isfinite(generation)):
+                    return None
+            identity = (outcome["egress_action_key"], generation)
+            if identity in self._consumed_egress_endings.get(batch_id, ()):
+                return None
+            return identity
+        except Exception:
+            # Queue read failures are not retirement failures or refunds.
+            # The existing bounded owner loop can observe recovery later.
+            return None
+
     def retire(self, batch_id: str, *, stage_root: str | Path | None = None,
                residency_root: str | Path | None = None) -> dict:
         """Release the group's stage copy; the origin stays durable."""
 
+        pending = self._pending_egress.get(batch_id)
+        wakeup = None
+        if pending is not None:
+            wakeup = self._egress_wakeup(batch_id, pending)
+            if wakeup is None:
+                return dict(pending)
         root = (self.fragment_root() if residency_root is None
                 else Path(residency_root))
-        return dict(self._po.retire_batch(
+        result = dict(self._po.retire_batch(
             self.queue, self.instance, self.template, batch_id,
             stage_root=(self.stage_root() if stage_root is None
                         else str(stage_root)),
             residency_root=root))
+        # A raised call has no authoritative outcome (e.g. PB can fail taking
+        # its ownership lock before mutating anything). Leave its ending
+        # retryable through the owner's existing bounded failure handling.
+        # Once a response returns, consume the wakeup even for another keyed
+        # deferral: the old ending must not repeatedly wake that successor.
+        if wakeup is not None:
+            self._consumed_egress_endings.setdefault(batch_id, set()).add(wakeup)
+        self._pending_egress.pop(batch_id, None)
+        if (not result.get("ok")
+                and classify_egress_outcome(result) == "own-copy-deferral"
+                and OWN_EGRESS_IN_FLIGHT in result["receipt"][DEFERRED_OWN_FIELD]
+                and isinstance(result.get("egress_action_key"), str)
+                and result["egress_action_key"]):
+            self._pending_egress[batch_id] = result
+        return result
 
     def reclaim_origin(self, batch_id: str) -> dict:
         """Free the group's durable charge once its entries are all gone.
