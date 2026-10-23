@@ -74,7 +74,7 @@ def test_disk_ceiling_and_io_failures_refuse(tmp_path, monkeypatch):
 
 
 def test_checkpoint_sink_drops_prior_tensors_and_owner_closes(tmp_path, monkeypatch):
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     import test_joint_cost_quantum_runtime as rt
     values = {(0, i): torch.full((2, 4), float(i)) for i in range(3)}
     space = checkpoints.adjoint_space(tmp_path)
@@ -177,7 +177,7 @@ def test_shared_payload_ceiling_precedes_deserialization(tmp_path, monkeypatch):
 def test_checkpoint_failure_closes_private_scratch_preserves_originals(tmp_path, monkeypatch):
     import pytest
     from pathlib import Path
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     import test_joint_cost_quantum_runtime as rt
     space = checkpoints.adjoint_space(tmp_path)
     record = checkpoints.write_adjoint_checkpoint(
@@ -258,7 +258,8 @@ def require_direct_io(directory):
     import pytest
     if not _direct_io_supported(directory):
         pytest.skip(f"{directory} lacks statx direct I/O on an 8 KiB grid; "
-                    "requires a DIO-capable local PB worker")
+                    "requires a DIO-capable local PB worker; "
+                    "Stage B spill qualification stays incomplete")
 
 
 def test_grid_slots_write_without_a_sync_or_page_drop_per_slot(tmp_path, monkeypatch):

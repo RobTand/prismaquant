@@ -55,7 +55,7 @@ from .incremental_probe import (
     build_shard_schedule,
     load_num_hidden_layers,
 )
-from .measure_quant_cost import (
+from prismaquant.measure_quant_cost import (
     ActivationIndex,
     HDetailIndex,
     _accumulate_result,
@@ -64,13 +64,13 @@ from .measure_quant_cost import (
     _finalize_results,
     _measure_packed_experts,
     _normalize_fisher_output_mse_row_weights,
-    h_detail_expected_norm_tokens,
     measure_batched_gpu,
     measure_unbatched,
     prepare_cost_context,
     resolve_cost_target_name,
     start_mem_watchdog,
 )
+from prismaquant.probe_statistics import h_detail_expected_norm_tokens
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
@@ -148,6 +148,7 @@ def merge_cost_pickles(paths: list[Path], output_path: Path):
 
 def _expected_cost_shard_meta(*,
                               model: str,
+                              dtype: torch.dtype,
                               probe_path: Path,
                               linear_include: str,
                               shard_idx: int,
@@ -160,6 +161,7 @@ def _expected_cost_shard_meta(*,
                               n_linears_expected: int = 0) -> dict[str, Any]:
     meta = {
         "model": model,
+        "dtype": str(dtype),
         "probe": str(probe_path),
         "activation_cache_dir": str(Path(activation_cache_dir)),
         "linear_include": linear_include,
@@ -683,10 +685,12 @@ def _run_mtp_cost_shard(
     mtp_wrapper.eval()
 
     raw = profile.read_mtp_source_state_dict(model_path)
-    missing, extra = profile.load_mtp_state_dict(inner_mtp, raw)
-    loaded = len(raw) - len(missing)
-    print(f"[incremental-cost/mtp] loaded {loaded}/{len(raw)} mtp weights "
-          f"(missing={len(missing)}, module_params_unset={len(extra)})",
+    from .model_profiles.base import load_complete_mtp_state_dict
+    load_complete_mtp_state_dict(
+        profile, inner_mtp, raw, where="incremental MTP cost",
+    )
+    print(f"[incremental-cost/mtp] loaded {len(raw)} mtp source tensors "
+          "with complete module coverage",
           flush=True)
 
     for p in mtp_wrapper.parameters():
@@ -699,14 +703,14 @@ def _run_mtp_cost_shard(
         n for n, m in mtp_wrapper.named_modules()
         if isinstance(m, nn.Linear) and not n.endswith(".mlp.gate")
     }
-    from .sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from .probe_inventory import (
+        is_packed_experts_module,
+        packed_experts_param_names,
     )
     for name, module in mtp_wrapper.named_modules():
-        if not _is_packed_experts_module(module, profile):
+        if not is_packed_experts_module(module, profile):
             continue
-        for pn in _packed_experts_param_names(module, profile):
+        for pn in packed_experts_param_names(module, profile):
             mtp_linears.add(f"{name}.{pn}")
 
     target_names = shard_targets & mtp_linears
@@ -1036,7 +1040,13 @@ def main():
     global _PIPELINE_COST_MODE
     _PIPELINE_COST_MODE = str(getattr(args, "cost_mode", "") or "")
 
-    n_layers = load_num_hidden_layers(args.model)
+    from .streamed_model_identity import (
+        build_source_model_binding,
+        resolve_source_checkpoint_path, source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(args.model)
+    n_layers = load_num_hidden_layers(str(source_root))
     start = max(0, args.start_layer)
     end = n_layers if args.end_layer is None else min(args.end_layer, n_layers)
     if start >= end:
@@ -1057,7 +1067,7 @@ def main():
         _nsamples = int(_probe_meta.get("nsamples", 32))
         _seqlen = int(_probe_meta.get("seqlen", 1024))
         lps, lps_diag = pick_layers_per_shard(
-            args.model, nsamples=_nsamples, seqlen=_seqlen,
+            str(source_root), nsamples=_nsamples, seqlen=_seqlen,
         )
         print(f"[cost] layers_per_shard=auto -> {lps} "
               f"(nsamples={_nsamples}, seqlen={_seqlen}, "
@@ -1069,7 +1079,7 @@ def main():
         args.layers_per_shard = int(lps_arg)
 
     schedule = build_shard_schedule(
-        model_path=args.model,
+        model_path=str(source_root),
         num_body_layers=n_layers,
         body_layers_per_shard=args.layers_per_shard,
         body_layer_range=(start, end),
@@ -1095,6 +1105,10 @@ def main():
              "fp32": torch.float32}[args.dtype]
     if args.threads > 0:
         torch.set_num_threads(args.threads)
+    source_binding = (build_source_model_binding(source_root, dtype=dtype)
+                      if source_model_decode_contract(source_root) is not None else None)
+
+    from .prepriced_cost import cost_source_binding_for_region
 
     # Shared probe / activation / spec context — probe pickle stays in
     # memory so each shard can just intersect its regex against the stats.
@@ -1154,6 +1168,7 @@ def main():
     expected_metas = [
         _expected_cost_shard_meta(
             model=args.model,
+            dtype=dtype,
             probe_path=args.probe,
             linear_include=linear_include,
             shard_idx=i,
@@ -1169,6 +1184,11 @@ def main():
         )
         for i, linear_include in enumerate(shard_regexes)
     ]
+    if source_binding is not None:
+        for entry, meta in zip(schedule, expected_metas):
+            meta["source_binding"] = cost_source_binding_for_region(
+                source_binding, checkpoint_only=entry.kind in ("mtp", "visual"),
+            )
     all_reusable = all(
         shard_paths[i].exists()
         and cost_shard_is_reusable(shard_paths[i], expected_metas[i])
@@ -1188,7 +1208,7 @@ def main():
             return
         offload_folder = str(work_dir / "streaming_offload")
         ctx_local = _build_streaming_context(
-            args.model,
+            str(source_root),
             device=torch.device(args.device),
             dtype=dtype,
             offload_folder=offload_folder,
@@ -1248,7 +1268,7 @@ def main():
             elif kind == "mtp":
                 _run_mtp_cost_shard(
                     ctx,
-                    model_path=args.model,
+                    model_path=str(source_root),
                     linear_include=linear_include,
                     probe_stats=stats,
                     act_cache=act_cache,
@@ -1273,7 +1293,7 @@ def main():
                 # in model, fall back to an empty pickle and let the
                 # allocator's --visual-format override take over.
                 mm_ctx = _run_visual_cost_shard(
-                    model_path=args.model,
+                    model_path=str(source_root),
                     linear_include=linear_include,
                     probe_stats=stats,
                     act_cache=act_cache,
@@ -1301,6 +1321,13 @@ def main():
                     model_name=args.model, probe_path=args.probe,
                 )
 
+            if source_binding is not None:
+                fresh = _read_pickle(shard_path)
+                for rows in fresh["costs"].values():
+                    for row in rows.values():
+                        row["source_binding"] = expected_meta["source_binding"]
+                with shard_path.open("wb") as handle:
+                    pickle.dump(fresh, handle)
             annotate_cost_shard(shard_path, expected_meta)
             if args.device.startswith("cuda"):
                 torch.cuda.empty_cache()

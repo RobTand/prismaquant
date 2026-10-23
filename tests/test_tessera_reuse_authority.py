@@ -25,12 +25,7 @@ cached_unit = pytest.importorskip("tessera.cached_unit")
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _tool(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "tools" / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
+from prismaquant import tessera_campaign_reseal
 
 # -- the schemas are the writers' ------------------------------------------------
 
@@ -40,7 +35,7 @@ def test_each_schema_is_the_one_its_writer_writes():
     # The T4 overlay reader was v1 only in Tessera; it moved as is.
     assert authority_module.CANDIDATE_OVERLAY_SCHEMAS == {extension.CATALOG_SCHEMA_V1}
     assert authority_module.ADOPTION_SCHEMA == extension.ADOPTION_SCHEMA
-    assert authority_module.RESEAL_PROOF_SCHEMA == _tool("reseal_campaign_identity").BUNDLE_SCHEMA
+    assert authority_module.RESEAL_PROOF_SCHEMA == tessera_campaign_reseal.BUNDLE_SCHEMA
     assert authority_module.SERVED_POLICY_SCHEMA_V1 == served_policy.SCHEMA
     assert authority_module.SERVED_POLICY_SCHEMA_V2 == served_policy.SCHEMA_V2
     assert CANONICAL_CAPTURE == (calibration_cache.SCHEMA, calibration_cache.SOURCE)

@@ -1,6 +1,9 @@
 """CPU-only publisher ownership/ordering gates; not performance measurements."""
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 from concurrent.futures import Future
 import os
+import hashlib
+import pickle
 import stat
 import threading
 import weakref
@@ -208,16 +211,25 @@ def test_cancelled_pool_task_fails_without_hanging():
     assert pub.stats()["charged_bytes"] == 0
 
 
+def _expected_unit_bytes(qname, identity, state):
+    payload = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
+    return pickle.dumps({
+        "schema": "prismaquant.aura_checkpoint.unit.v1", "qname": qname,
+        "identity_sha256": identity,
+        "payload_sha256": hashlib.sha256(payload).hexdigest(), "payload": payload,
+    }, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def test_encoded_unit_is_immutable_and_matches_existing_writer(tmp_path):
     state = {"components": [{"costs": [1.0, 2.0]}],
              "identity": {"source": ["sha256", "verified"]}}
     qname, identity = "layer.0.unit", "a" * 64
-    aura_cost._write_aura_unit_checkpoint(
-        tmp_path, qname=qname, identity_sha256=identity, state=state)
-    path = aura_cost._aura_unit_checkpoint_path(tmp_path, qname)
-    expected = path.read_bytes()
-    encoded = aura_cost._encode_aura_unit_checkpoint(
+    expected = _expected_unit_bytes(qname, identity, state)
+    encoded = aura_checkpoint_journal._encode_unit(
         qname=qname, identity_sha256=identity, state=state)
+    aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, identity).publish(qname=qname, state=state)
+    path = cost_stage_checkpoint.unit_path(tmp_path, qname)
+    assert path.read_bytes() == expected
     assert type(encoded) is bytes and encoded == expected
     state["components"][0]["costs"].append(999.0)
     state["identity"]["source"].append("mutated")
@@ -229,12 +241,12 @@ def test_encoded_cpu_tensor_unit_is_a_snapshot(tmp_path):
 
     state = {"tensor": torch.arange(8, dtype=torch.float32)}
     qname, identity = "tensor.unit", "b" * 64
-    aura_cost._write_aura_unit_checkpoint(
-        tmp_path, qname=qname, identity_sha256=identity, state=state)
-    expected = aura_cost._aura_unit_checkpoint_path(tmp_path, qname).read_bytes()
-    encoded = aura_cost._encode_aura_unit_checkpoint(
+    expected = _expected_unit_bytes(qname, identity, state)
+    encoded = aura_checkpoint_journal._encode_unit(
         qname=qname, identity_sha256=identity, state=state)
-    assert encoded == expected
+    aura_checkpoint_journal.UnitCheckpointWriter(tmp_path, identity).publish(qname=qname, state=state)
+    assert cost_stage_checkpoint.unit_path(tmp_path, qname).read_bytes() == expected
+    assert type(encoded) is bytes and encoded == expected
     state["tensor"].fill_(999)
     assert encoded == expected
 
@@ -377,13 +389,12 @@ def test_atomic_unit_is_not_acknowledged_before_directory_fsync(
             assert release.wait(WAIT)
         original(fd)
 
+    encoded = _expected_unit_bytes("unit", "a" * 64, {"value": 1})
     monkeypatch.setattr(os, "fsync", fsync)
     pub = _pool_publisher(engine, budget=4096)
     path = tmp_path / "unit.bin"
     try:
         pub.reserve(4096)
-        encoded = aura_cost._encode_aura_unit_checkpoint(
-            qname="unit", identity_sha256="a" * 64, state={"value": 1})
         assert len(encoded) <= 4096
         pub.submit(PublicationJob("unit", 4096,
                                   lambda: atomic_write_bytes(path, encoded)))

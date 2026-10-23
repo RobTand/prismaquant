@@ -1,12 +1,10 @@
-"""PRISMAQUANT_DEV_MODE turns run-gate provenance into recorded stamps (#771).
+"""Run-gate provenance in certified and development modes (#771, #1147).
 
-Rob's decision (2026-09-19): rapid iteration must not pay provenance tax --
-the seal returns at the artifact gate, not the run gate. One environment
-variable, ``PRISMAQUANT_DEV_MODE=1``, read at the gates:
+Development mode is the default. ``PRISMAQUANT_DEV_MODE=0`` selects certified
+mode, which is also this suite's default fixture:
 
-* without it, every gate below refuses under the same fixtures it refused
-  under before the switch existed -- certified behavior is byte-identical;
-* with it, the gate accepts and RECORDS: a loud ``[DEV-MODE]`` warning and a
+* certified mode refuses the incomplete provenance fixtures below;
+* development mode accepts and records a ``[DEV-MODE]`` warning and a
   top-level ``dev_uncertified`` stamp in results.json, so a dev result can
   never masquerade as a certified one. Progress records carry the stamp only
   when ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opts in (PR #828): the default
@@ -25,6 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+
+from prismaquant import aura_provenance
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
@@ -66,7 +66,7 @@ def scratch(request):
 @pytest.fixture()
 def shared_mount(scratch, monkeypatch):
     """The fixture's files are not on /mnt/shared, so the prefix moves to it."""
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
 
 
@@ -131,8 +131,8 @@ def sealed(tmp_path, monkeypatch):
     monkeypatch.setattr(transition, "_actual_execution", actual_execution)
     monkeypatch.setattr(transition, "_committed_package",
                         lambda root: {"git_parent_commit": "5" * 40})
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: state["commit"])
-    monkeypatch.setattr(aura, "_aura_source_sha256",
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: state["commit"])
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256",
                         lambda: transition.source_proof(state["package"])["producer_source_sha256"])
     receipt = transition.create_transition(
         bindings={"plan": plan, "prepared": prepared, "campaign_identity": identity},
@@ -293,8 +293,8 @@ def _aura_run(tmp_path, monkeypatch, *, source_sha, resume):
     resident path against a codebook cache identity; that lane was archived,
     #1304, and durable AURA checkpoints are streamed-only.)
     """
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "7" * 40)
-    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: source_sha)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "7" * 40)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: source_sha)
     torch.manual_seed(2026)
     state = {name: value.detach().clone()
              for name, value in _DenseTinyLM().state_dict().items()}
@@ -352,8 +352,6 @@ def test_submit_joint_wrong_digest_still_refuses_without_dev_mode(
         scratch, shared_mount, monkeypatch):
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     with pytest.raises(RuntimeError, match="hashes to"):
         dispatch.main(argv)
 
@@ -363,8 +361,6 @@ def test_submit_joint_digest_arguments_are_records_under_dev_mode(
     import shlex
     dispatch, fixture, _spec, argv = _joint_submission(
         scratch, extra=["--resume", "--plan-sha256", "0" * 64])
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     monkeypatch.setenv(DEV_ENV, "1")
     assert dispatch.main(argv) == 0
     out = capsys.readouterr().out
@@ -381,8 +377,6 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
     import shlex
     dispatch, _fixture_, _spec, argv = _joint_submission(
         scratch, extra=["--resume"])  # no --source-transition: no receipt wiring
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     # Certified mode refuses this shape at the pass gates (gates 1-3 above);
     # the submission itself is admitted only under dev mode's contract.
     monkeypatch.setenv(DEV_ENV, "1")
@@ -420,8 +414,6 @@ def _submitted_launcher_argv(capsys):
 def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
         scratch, shared_mount, monkeypatch, capsys):
     dispatch, _fixture_, spec, argv = _joint_submission(scratch)
-    from experiments import glm_data_manifests
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     # Certified is "0" since PQ #1147 (unset is dev mode), and the certified
     # submitter seals "0" so the container, which does not inherit this
     # environment, stays certified.

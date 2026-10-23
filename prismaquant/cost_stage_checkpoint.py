@@ -156,9 +156,9 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> 
             if path.exists() or path.is_symlink():
                 return False
             target = path
-            temporary = path.with_name(path.name + unique_temp_suffix())
+            temporary = path.with_name(path.name + unique_temp_suffix() + uuid.uuid4().hex)
+            handle = temporary.open("xb")
             owns_temporary = True
-            handle = temporary.open("wb")
         with handle:
             handle.write(payload)
             handle.flush()

@@ -18,7 +18,7 @@ activate_prismaquant_source()
 
 from experiments.build_glm_tr3_teacher import require_reference_binding
 from experiments.glm_tr3_full_vocab import bound_json, sha256
-from prismaquant.cost_streaming import build_source_checkpoint_identity
+from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 from tools.full_kl_teacher_payload import atomic_json_write, canonical_sha256
 
 

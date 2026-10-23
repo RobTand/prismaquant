@@ -27,7 +27,7 @@ def test_three_layer_fixture_extends_both_attention_and_mlp_rosters():
 
 
 def test_boundary_policy_uses_closed_exact_layer_major_schema(tmp_path):
-    from prismaquant.cost_streaming import normalize_boundary_storage
+    from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
     policy = make_boundary_policy(tmp_path)
     assert normalize_boundary_storage(policy) == policy
     assert policy['capture_order'] == 'layer_major'

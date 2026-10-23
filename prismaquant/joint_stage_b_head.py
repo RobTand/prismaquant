@@ -25,6 +25,8 @@ staged whole-file reader. Nothing else under the campaign inputs is opened.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +38,7 @@ from .digests import bytes_sha256hex
 HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
 
 #: The head files a slice may declare, in the order a quantum reads them.
-#: ``prepared`` and ``production_cache`` are always present; the other two
+#: ``prepared`` and ``production_cache`` are always present; optional roles
 #: exist exactly when the plan binds them.
 HEAD_FILE_ROLES = ("prepared", "production_cache", "served_activation_policy",
                    "source_identity_cache", "source_digest_cache")
@@ -375,7 +377,6 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
         _prepared_digest_recorded, check_prepared_completion,
         normalize_historical_encoder_reuse, require_prepared_digests,
         resolve_encoder_source_reuse)
-    from . import tessera_campaign as tc
 
     intake = head_slice["intake"]
     # The policy re-derivations ran under the producer's package, so the
@@ -401,7 +402,7 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
     # here, under the plan's allowance, exactly as the walk compared it.
     resolve_encoder_source_reuse(
         intake["encoder_source_sha256"],
-        tc._checkpoint_identity_api().encoder_source_sha256(),
+        campaign_wire.require_checkpoint_identity_api().encoder_source_sha256(),
         normalize_historical_encoder_reuse(config.get("historical_encoder_reuse")),
         where="joint anchor checkpoint encoder source")
 

@@ -74,7 +74,9 @@ def run(path,expected):
         row.update(exact_parity=True,anchor_units=p['limit_anchors'],observer_result=str(files[0]))
         write(out/'parity.json',row);print(json.dumps(row),flush=True)
     write(root/'result.json',dict(schema=p['schema'],plan_sha256=expected,rows=rows,exact_parity=True,
-        campaign_completed=False,scope='64 anchor units; complete 864-unit resident source and original capture; fresh process and compiler caches per arm'))
+        campaign_completed=False,scope=(f"{p['limit_anchors']} anchor units; complete "
+            f"{p['expected_source_units']}-unit resident source and original capture; "
+            'fresh process and compiler caches per arm')))
 
 
 def main():

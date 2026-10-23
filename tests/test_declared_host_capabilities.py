@@ -41,6 +41,35 @@ def test_preflight_only_spill_root_keeps_local_check_without_dio(monkeypatch, tm
     assert checked == [root]
 
 
+def test_qualification_spill_root_needs_provisioned_private_scratch(
+        monkeypatch, tmp_path):
+    """Stage B spill qualification runs on provisioned scratch only (PQ #2594).
+
+    Without `PQ_STAGE_B_SPILL_TEST_ROOT` the helper skips with the
+    qualification left incomplete instead of qualifying `tmp_path`.
+    Refusal paths (`needs_direct_io=False`) keep `tmp_path` and never probe
+    direct I/O (see the preflight test above)."""
+    monkeypatch.delenv("PQ_STAGE_B_SPILL_TEST_ROOT", raising=False)
+    with pytest.raises(pytest.skip.Exception, match="qualification incomplete"):
+        spill_tests._spill_root(tmp_path)
+
+
+def test_direct_io_skip_marks_spill_qualification_incomplete(
+        monkeypatch, tmp_path):
+    """A provisioned root without real direct I/O still skips (PQ #2594).
+
+    The skip names the incomplete qualification, so a run without
+    STATX_DIOALIGN support can never read as qualified spill evidence."""
+    monkeypatch.setenv("PQ_STAGE_B_SPILL_TEST_ROOT", str(tmp_path))
+    monkeypatch.setattr(StageBSpillScratch, "require_local_root",
+                        classmethod(lambda cls, root: root))
+    monkeypatch.setattr(scratch_tests, "_direct_io_supported",
+                        lambda directory: False)
+    with pytest.raises(pytest.skip.Exception,
+                       match="qualification stays incomplete"):
+        spill_tests._spill_root(tmp_path)
+
+
 @pytest.mark.parametrize("cpus", [{0}, {0, 1}])
 def test_two_worker_guard_respects_assigned_affinity(monkeypatch, cpus):
     # Calling the fixture body directly tests only the guard, not a PWC window.

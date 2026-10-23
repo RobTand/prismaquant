@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
 from test_tessera_campaign_resume import (
     UNIT, _forbid_reencode, _main_fixture, _priced_file_digests,
 )
@@ -77,7 +78,7 @@ def test_t16_produced_wire_does_not_admit_incompatible_activation_metadata(
         assert campaign.main(argv) == 0
         assert pickle.loads(output.read_bytes())["costs"] == initial_costs
     else:
-        with pytest.raises(campaign.ActivationScaleContractError, match="activation (contract|observation)"):
+        with pytest.raises(ActivationScaleContractError, match="activation (contract|observation)"):
             campaign.main(argv)
         assert not output.exists()
         if seed:

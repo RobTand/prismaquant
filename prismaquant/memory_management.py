@@ -1090,9 +1090,9 @@ def enforce_gpu_memory_budget(
 ) -> int:
     """Evict oldest registered cache entries until used CUDA memory is in budget.
 
-    ``torch.cuda.mem_get_info`` reports driver-visible free memory. We compare
-    ``total - free`` against ``PRISMAQUANT_MAX_GPU_MEM_GB`` so the budget acts
-    as a hard ceiling even when PyTorch's caching allocator is holding blocks.
+    Compare CUDA/UMA-aware ``total - free`` from ``cuda_memory_info`` against
+    ``PRISMAQUANT_MAX_GPU_MEM_GB``. Refuse if registered evictors cannot bring
+    this reading within budget.
     """
     budget_bytes = max_gpu_memory_bytes(device)
     if budget_bytes is None:

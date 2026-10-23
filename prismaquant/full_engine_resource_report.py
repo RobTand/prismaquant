@@ -38,8 +38,8 @@ from .runtime_provenance import ArtifactReader, _equal
 REPORT_SCHEMA = "tessera.full_engine_resource_report.v1"
 #: The producer's second envelope (the runtime's PR 556): the same seven members, plus
 #: an observer-allocation class in the partition and three producer-derived
-#: blocks (``admission``, ``fixed_resources``, ``timing_terms``) this consumer
-#: validates as carried and reads nothing from. The four observations v1 owed
+#: blocks. This consumer recomputes ``admission``; ``fixed_resources`` and
+#: ``timing_terms`` are carried without supplying recomputed terms. The four observations v1 owed
 #: as null may be carried; this consumer recomputes no term and closes no
 #: domain from them, and says so by name where a domain is closed on one.
 REPORT_SCHEMA_V2 = "tessera.full_engine_resource_report.v2"
@@ -291,18 +291,17 @@ _SCOPE_FIELDS = ("allocation_scope", "expressible", "invariance",
 _DOMAIN_FIELDS = ("evidence", "reason", "state")
 #: What v2 adds to each member, by name. ``observer_allocations`` is the
 #: producer's own observer's allocations, set aside from every class; this
-#: consumer defines no shape for one, so a non-empty list refuses by name.
+#: v2 consumer refuses a non-empty list. The v3 consumer validates each row.
 _PARTITION_FIELDS_V2 = _PARTITION_FIELDS + ("observer_allocations",)
 _SCOPE_FIELDS_V2 = _SCOPE_FIELDS + ("observer_allocation_count",)
 _DERIVED_FIELDS_V2 = _DERIVED_FIELDS + ("admission", "fixed_resources", "timing_terms")
 
 #: Observation keys admitted by NAME, not by exact-set equality (PQ #731).
 #: Every key in :data:`_OBSERVATION_FIELDS` is required on the wire; every key
-#: in :data:`OPTIONAL_OBSERVATION_FIELDS` may be present or absent.  A key in
-#: neither is refused by name.  A producer half-bump that adds a registered
-#: observation therefore reads instead of refusing; registering a new key
-#: means defining its shape check in :func:`_observations` at the same time,
-#: because a carried record nobody validates is evidence of nothing.
+#: in :data:`OPTIONAL_OBSERVATION_FIELDS` may be present or absent. Unknown
+#: additive keys are accepted unread unless ``must_understand`` names them.
+#: Registering a key also defines its shape check in :func:`_observations`;
+#: accepting an unread field supplies no measurement evidence.
 OPTIONAL_OBSERVATION_FIELDS = (RESERVATION_SLACK_FIELD, "allocator_config")
 OBSERVATION_KEY_REGISTRY = frozenset(_OBSERVATION_FIELDS + OPTIONAL_OBSERVATION_FIELDS)
 

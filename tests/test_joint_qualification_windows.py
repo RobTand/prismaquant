@@ -1,5 +1,6 @@
 """Qualification bounds preserve the canonical per-unit and render checks."""
 from contextlib import contextmanager
+from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
@@ -47,6 +48,7 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
     """
     from prismaquant import tessera_calibration_cache as cc, tessera_campaign as tc
     from prismaquant import tessera_hessian as th, joint_aura
+    from prismaquant.tessera_campaign_table import CampaignAnchor
     names = [f'model.layers.{layer}.{suffix}'
              for layer, suffix in zip(layer_of, ('a', 'b'))]
     assert len(names) == len(set(names)), 'layer_of must name two distinct units'
@@ -63,7 +65,13 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
             cells[name, fmt] = dict(render=str(path), render_origin='encoded',
                                     wire=str(wire), record={'blob_bytes': len(blob),
                                     'blob_sha256': hashlib.sha256(blob).hexdigest()},
-                                    anchor={'qname': name, 'format_name': fmt})
+                                    anchor=asdict(CampaignAnchor(
+                                        qname=name, family='TESSERA_E4M3_K1',
+                                        format_name=fmt, body_rate_q256=int(fmt.rsplit('R', 1)[1]),
+                                        dloss=0.0, dloss_stderr=0.0, memory_bytes=32,
+                                        bits_per_param=16.0, activation_contract='fp8_per_token_dynamic',
+                                        activation_quantized=True, wire_bytes=len(blob), seconds=0.0,
+                                        hessian_applied=True)))
     capture_path = tmp_path / 'capture.json'
     capture_path.write_text('{}')
     capture = dict(path=str(capture_path), sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest())
@@ -112,7 +120,6 @@ def fixture(tmp_path, monkeypatch, *, fail_cell=False, fail_unit=None,
         return ({name: x}, {name: h}, {}, {}), {}
     monkeypatch.setattr(cc, 'prefetch_capture', prefetch)
     monkeypatch.setattr(th, 'activation_source', lambda h, identity: SimpleNamespace(hessians=h))
-    monkeypatch.setattr(tc, 'CampaignAnchor', lambda **kw: SimpleNamespace(**kw))
     @contextmanager
     def bound(anchors, **kwargs):
         observed.append(('bind', tuple(anchor.format_name for anchor in anchors)))

@@ -49,11 +49,10 @@ the second place a wire recipe lives, which is the failure mode principle
    dependency on a script with no stability promise is a value a reader and a
    gate can both see (RobTand/prismaquant#119).
 5. :func:`require_producer_repo_is_pinned` -- the checkout those tools come
-   from must be the SAME Tessera the pin attests: the
-   ``runtime_contract.json`` it packages must hash to the pin's
-   ``contract_sha256``.  Gate 1 hashes the package this process *imports*;
-   without this one a run could satisfy the pin with one Tessera while a
-   different checkout WROTE the wire, which is principle 8's split-brain.
+   from must package a ``runtime_contract.json`` whose SHA-256 equals the
+   pin's ``contract_sha256``. Gate 1 checks the installed runtime separately.
+   This producer predicate checks contract bytes, not the checkout's Git
+   commit, working tree or encoder source bytes.
 6. :func:`require_serving_target` and :func:`require_assignment_scope` -- a
    scoped (v5 or later) contract
    needs an explicit runtime target. Before translation, every selected
@@ -203,7 +202,7 @@ def export_setup(model_path: str | Path, plan: Mapping[str, Any]) -> dict:
 def require_release_pin() -> None:
     """Refuse unless the INSTALLED Tessera is the exact pinned runtime.
 
-    This is the same conjunct ``tessera_render.tessera_lane_attested`` ANDs
+    This is the same conjunct ``tessera_render.tessera_lane_admission`` ANDs
     into producer eligibility, called here so the driver's refusal and the
     allocator's refusal are the same fact rather than two.
 
@@ -581,26 +580,19 @@ def unsupported_producer_tool_lines(spec) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Gate 5 -- the checkout that ENCODES must be the pinned Tessera
+# Gate 5 -- the producer checkout must package the pinned contract bytes
 # ---------------------------------------------------------------------------
 def require_producer_repo_is_pinned(
     env: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
-    """Refuse unless the checkout that ENCODES is the Tessera the pin attests.
+    """Require the producer checkout to package the pinned contract bytes.
 
-    Gate 1 hashes the ``tessera`` package this *process imports*; gate 4
-    resolves the two encoder scripts through the env var each
-    ``producer_tools`` entry names (``TESSERA_REPO``).  Nothing bound those
-    two together, so a run could satisfy the pin with one Tessera on
-    ``PYTHONPATH`` while a **different** checkout wrote the wire -- the
-    rendering/execution split-brain principle 8 exists to stop.
-
-    That hole is one this change OPENS rather than closes: while the pin
-    carried PENDING sentinels the lane could not build at all, so the two
-    Tesseras could never diverge in a run that produced bytes.  Making the pin
-    admittable makes the second Tessera reachable, so the same predicate is
-    applied to the checkout: the ``runtime_contract.json`` it packages must
-    hash to ``pin.contract_sha256``.
+    Gate 1 checks the installed runtime. Gate 4 resolves producer tools
+    through each declaration's repository environment variable. This gate
+    hashes that checkout's ``runtime_contract.json`` against
+    ``pin.contract_sha256``. It does not inspect Git HEAD, working-tree
+    changes or encoder source bytes. A different checkout with the same
+    packaged contract satisfies this predicate.
 
     The repo-relative location is DERIVED from the installed package's own
     path tail rather than typed, and both a ``src/`` layout and a flat one are

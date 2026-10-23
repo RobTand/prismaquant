@@ -101,7 +101,7 @@ def main(argv=None) -> int:
 
     from experiments.stage_b_kda_capture_bench import build_layer
     from prismaquant import glm_kda_capture_kernel as capture
-    from prismaquant.cost_streaming import StreamedForwardBoundaries
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries
     from prismaquant.joint_adjoint_checkpoints import (
         _chain_group_batch, _stack_to_device, render_free_layer_roll)
     from prismaquant.kernels import kda_chunk

@@ -32,7 +32,7 @@ D3. A record binds its layer's Stage A *slice*, never a whole receipt
     digest) and ``adjoint.slice_path`` (the control-metadata file holding the
     slice), and no receipt digest. A band and the complete receipt give the
     same slice, so they give the same record. Binding is a new identity,
-    never an edit. ``check_quantum_for_campaign`` refuses an unbound record
+    never an edit. ``require_quantum_campaign`` refuses an unbound record
     for a bound campaign and any record that still binds a whole receipt.
 D4. Slice ``argv`` annotations carry the §5.2 inner argv without
     ``--quantum-sha256``: that digest is a submission-time binding (like
@@ -43,13 +43,16 @@ D5. The joiner is NOT colocated here. The contract (§4.1/§7) sketched
     as ``prismaquant/joint_quanta_join.py`` first, and #787 kept that module
     (its CLI, its allocation reader, its coverage proof) and deleted this
     module's parallel joiner rather than adapting it -- two joiners that
-    refuse each other's bytes is the failure #787 closed. The joiner imports
-    this module's pure constructions (``roster_digest``, ``phase_ranges``,
-    ``quantum_id``, ``qname_layer``) so the two sides of the wire share one
-    spelling of every digest and id.
+    refuse each other's bytes is the failure #787 closed. The campaign ledger
+    owns the record schema, identity, roster digest and
+    quantum ID. The producer retains manifest ranges and qname-layer geometry,
+    which the joiner imports for coverage. Joint phase names and consumption
+    order belong to joint_quantum_row.
 """
 
 from __future__ import annotations
+
+from prismaquant import joint_quantum_row as quantum_row
 
 import gzip
 import json
@@ -59,12 +62,16 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, newline_utf8_sha256
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
+from .joint_campaign_ledger import (
+    require_quantum_digest,
+    LAYER_QUANTUM_SCHEMA, new_quantum_record, quantum_id, roster_digest,
+    require_quantum_campaign, replace_quantum_readset,
+)
 
 
-LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 PLAN_BLOCK_SCHEMA = "prismaquant.joint_layer_quanta.plan.v1"
 COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 #: The stage-A capture schema, named here so the slice binder and the
@@ -78,49 +85,6 @@ SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"
 HEAD_SOURCE_SCHEMA = "prismaquant.joint_layer_quanta.head_source.v1"
 PREPARED_INPUT_SCHEMA = "prismaquant.joint_layer_quanta.prepared_input.v1"
 
-#: The tail leg's telemetry name. It is NOT a read-plan phase: published
-#: ``manifest_phase_ranges`` drops cumulative==previous phases, so a
-#: zero-byte tail would be absent from the sealed residency plan -- and
-#: reporting a name the plan does not carry resets ``remaining`` to start.
-#: The tail checkpoint work commits durable units under forward-last
-#: instead; this string survives only for explicit runtime log lines.
-ADJOINT_TAIL_PHASE = "tail"
-
-
-def adjoint_forward_phase_name(layer: int) -> str:
-    """The read-plan phase staging layer ``layer``'s source extents for the
-    forward capture walk (ascending)."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a forward phase needs a nonnegative layer, not {layer!r}")
-    return f"forward-{layer:03d}"
-
-
-def adjoint_chain_phase_name(layer: int) -> str:
-    """The read-plan phase staging layer ``layer``'s source extents for the
-    reverse chain walk (descending). One spelling shared by the builder, the
-    capture's progress reports, and the tests -- two spellings of the chain
-    convention is how a consumer ends up committing a name the window cannot
-    match."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a chain phase needs a nonnegative layer, not {layer!r}")
-    return f"chain-{layer:03d}"
-
-
-def adjoint_read_plan_phase_names(num_layers: int) -> tuple[str, ...]:
-    """The frozen Stage A consumption order (PQ #837): head, forward
-    ascending, reverse descending. The builder seals the manifest in this
-    order, the capture reports in this order, and the dispatch lane
-    declares progress in this order -- the published v2 linear-progress
-    rule refuses anything else. There is deliberately no tail phase (see
-    ``ADJOINT_TAIL_PHASE``)."""
-    if type(num_layers) is not int or isinstance(num_layers, bool) or num_layers < 1:
-        raise ValueError(f"a read plan needs a positive layer count, not {num_layers!r}")
-    return (("head",)
-            + tuple(adjoint_forward_phase_name(layer) for layer in range(num_layers))
-            + tuple(adjoint_chain_phase_name(layer)
-                    for layer in reversed(range(num_layers))))
-
-SLICE_ENTRY_POINT = "prismaquant.joint_cost_quantum"
 ADJOINT_ENTRY_POINT = "prismaquant.joint_adjoint_capture"
 
 GIB = 1024 ** 3
@@ -130,7 +94,6 @@ DEFAULT_STRIDE = 8
 DEFAULT_RAM_WINDOW_GIB = 160
 DEFAULT_MAX_RESIDENT_CONSUMERS = 2
 
-_HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 # Canonical JSON: the one encoding (sort_keys, compact separators,
@@ -185,21 +148,6 @@ def append_read_phase(phases: list[dict], entries: Sequence[Mapping],
     return cumulative
 
 
-def quantum_id(layer: int) -> str:
-    if type(layer) is not int or layer < 0:
-        raise ValueError(f"a quantum layer must be a nonnegative integer, not {layer!r}")
-    return f"layer-{layer:03d}"
-
-
-def roster_digest(qnames: Sequence[str]) -> str:
-    """``sha256`` of the sorted qname roster, one per line (#768's construction)."""
-    ordered = sorted(qnames)
-    if any(type(name) is not str or not name for name in ordered):
-        raise ValueError("a unit roster holds nonempty qname strings")
-    if len(set(ordered)) != len(ordered):
-        raise ValueError("a unit roster holds unique qnames")
-    return newline_utf8_sha256(ordered)
-
 
 def qname_layer(qname: object) -> int | None:
     """The layer a roster qname names, or None (§3.1's layer grammar).
@@ -215,10 +163,6 @@ def qname_layer(qname: object) -> int | None:
     return None if match is None else int(match.group(1))
 
 
-def _hex(value: object, label: str) -> str:
-    if type(value) is not str or _HEX64.fullmatch(value) is None:
-        raise ValueError(f"{label} must be a lowercase SHA-256 digest")
-    return value
 
 
 def _bytes_int(value: object, label: str) -> int:
@@ -552,7 +496,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         raise ValueError("layer_quanta needs the plan and prepared mappings")
     if not isinstance(parent_manifest, dict):
         raise ValueError("layer_quanta needs the parent manifest mapping")
-    _hex(parent_manifest_sha256, "parent_manifest_sha256")
+    require_quantum_digest(parent_manifest_sha256, "parent_manifest_sha256")
     annotations = parent_manifest.get("annotations")
     if not isinstance(annotations, dict):
         raise ValueError("the parent manifest has no annotations")
@@ -593,14 +537,14 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         raise ValueError("layer_quanta needs the sealed plan path")
     if plan_sha256 is None:
         plan_sha256 = annotations.get("plan_sha256")
-    _hex(plan_sha256, "plan_sha256")
+    require_quantum_digest(plan_sha256, "plan_sha256")
     if prepared_path is None:
         prepared_path = _argv_flag(argv, "--prepared") if isinstance(argv, list) else None
     if type(prepared_path) is not str or not prepared_path:
         raise ValueError("layer_quanta needs the sealed prepared path")
     if prepared_sha256 is None:
         prepared_sha256 = _argv_flag(argv, "--prepared-sha256") if isinstance(argv, list) else None
-    _hex(prepared_sha256, "prepared_sha256")
+    require_quantum_digest(prepared_sha256, "prepared_sha256")
 
     roster = sorted(prepared.get("formats_by_qname", {}))
     if not roster:
@@ -670,12 +614,11 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
         manifest_path = f"{control_manifest_dir}/{qid}.data-manifest.json.gz"
         record_path = f"{control_record_dir}/{qid}.json"
         space = f"{quanta_root}/{qid}"
-        argv_sealed = ["python3", "-m", SLICE_ENTRY_POINT, "--quantum", record_path,
-                       "--output-root", output_root]
+        argv_sealed = quantum_row.QuantumManifestInvocation(record_path, output_root).argv()
         slice_manifest = {
             "schema": MANIFEST_SCHEMA_V1,
             "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
-                            "entry_point": SLICE_ENTRY_POINT,
+                            "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                             "plan": plan_path, "plan_sha256": plan_sha256},
             "mount_prefix": parent_manifest.get("mount_prefix", "/mnt/shared"),
             "entries": [dict(path=entry["path"], offset=entry["offset"],
@@ -684,7 +627,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
             "entry_count": len(layer_entries),
             "total_bytes": layer_bytes,
             "annotations": {
-                "entry_point": SLICE_ENTRY_POINT,
+                "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                 "quantum_id": qid,
                 "parent_manifest_sha256": parent_manifest_sha256,
                 "plan_sha256": plan_sha256,
@@ -705,11 +648,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
             },
         }
         blob = seal_manifest_bytes(slice_manifest)
-        record = {
-            "schema": LAYER_QUANTUM_SCHEMA,
-            "quantum_id": qid,
-            "layer": layer,
-            "campaign": {
+        record = new_quantum_record(
+            layer=layer,
+            campaign={
                 "plan_path": plan_path,
                 "plan_sha256": plan_sha256,
                 "prepared_path": prepared_path,
@@ -718,7 +659,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "campaign_scope": scope,
                 "unit_roster_sha256": digest,
             },
-            "read_set": {
+            read_set={
                 "manifest_path": manifest_path,
                 "manifest_sha256": bytes_sha256hex(blob),
                 "entry_count": len(layer_entries),
@@ -726,9 +667,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "source_phase": {"name": name, "start_bytes": row["start_bytes"],
                                  "end_bytes": row["end_bytes"]},
             },
-            "chunks": chunks,
-            "windows": windows,
-            "adjoint": {
+            chunks=chunks,
+            windows=windows,
+            adjoint={
                 "checkpoint_boundary": checkpoint,
                 "chain_layers": chain,
                 "boundary_artifacts": adjoint_dir,
@@ -736,18 +677,14 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                     None if bound_slices is None else bound_slices.get(layer),
                     slice_path=f"{control_slice_dir}/{qid}.json"),
             },
-            "output_space": {
+            output_space={
                 "root": space,
                 "cost_payload": space + "/cost.pkl",
                 "results": space + "/results.json",
                 "counters": space + "/counters.json",
                 "checkpoint_dir": space + "/checkpoints",
             },
-        }
-        if catalog_extension is not None:
-            record["catalog_extension"] = dict(catalog_extension)
-        record["identity_sha256"] = canonical_sha256(
-            record, where=f"quantum record {qid}")
+            catalog_extension=catalog_extension)
         records.append(record)
         slices[qid] = slice_manifest
 
@@ -848,7 +785,7 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
     return {
         "schema": MANIFEST_SCHEMA_V1,
         "produced_by": {"tool": "prismaquant/joint_layer_quanta.py",
-                        "entry_point": SLICE_ENTRY_POINT,
+                        "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
                         "plan": plan_path, "plan_sha256": plan_sha256 or ""},
         "mount_prefix": parent_manifest.get("mount_prefix", "/mnt/shared"),
         "entries": [dict(path=entry["path"], offset=entry["offset"],
@@ -857,15 +794,14 @@ def slice_layer_manifest(parent_manifest: Mapping, layer: int, *,
         "entry_count": len(layer_entries),
         "total_bytes": layer_bytes,
         "annotations": {
-            "entry_point": SLICE_ENTRY_POINT,
+            "entry_point": quantum_row.QUANTUM_ENTRY_POINT,
             "quantum_id": qid,
             "parent_manifest_sha256": parent_manifest_sha256,
             "plan_sha256": plan_sha256,
             "prepared_sha256": prepared_sha256,
             "campaign_scope": scope,
             "windows": windows,
-            "argv": ["python3", "-m", SLICE_ENTRY_POINT, "--quantum",
-                     record_path or "", "--output-root", output_root],
+            "argv": quantum_row.QuantumManifestInvocation(record_path or "", output_root).argv(),
             # No zero-byte head phase (PQ #849): PB's phase rule (#594)
             # voids a table whose cumulative falls outside the entries'
             # own prefix sums, and 0 is not one -- the whole slice then
@@ -1053,11 +989,11 @@ def build_adjoint_manifest(plan: Mapping, parent_manifest: Mapping,
 
     _seal_phase("head", list(range(len(head_entries))))
     for layer, run in zip(layers, layer_index_runs):
-        _seal_phase(adjoint_forward_phase_name(layer), run)
+        _seal_phase(quantum_row.adjoint_forward_phase_name(layer), run)
     for layer, run in zip(reversed(layers), reversed(layer_index_runs)):
-        _seal_phase(adjoint_chain_phase_name(layer), run)
+        _seal_phase(quantum_row.adjoint_chain_phase_name(layer), run)
     names = [phase["name"] for phase in read_phases]
-    if names != list(adjoint_read_plan_phase_names(len(layers))):
+    if names != list(quantum_row.adjoint_read_plan_phase_names(len(layers))):
         raise ValueError(
             "the adjoint read plan is not the frozen consumption order")
     if layer_source_spans is not None:
@@ -1226,70 +1162,6 @@ def verify_quanta_coverage(records: Sequence[Mapping], parent_manifest: Mapping,
         where="quanta coverage proof")
     return proof
 
-
-def check_quantum_for_campaign(record: Mapping, campaign: Mapping) -> None:
-    """Refuse a record built for any other campaign revision (fail closed)."""
-    if not isinstance(record, dict) or record.get("schema") != LAYER_QUANTUM_SCHEMA:
-        raise ValueError("a quantum record has a foreign schema: refusing")
-    if not isinstance(campaign, dict):
-        raise ValueError("a campaign binding must be an object")
-    headless = {key: value for key, value in record.items() if key != "identity_sha256"}
-    if canonical_sha256(headless, where="quantum record") != record.get("identity_sha256"):
-        raise ValueError(
-            f"quantum {record.get('quantum_id')!r} identity does not recompute: "
-            f"edited record, refusing")
-    bound = record.get("campaign", {})
-    for field in ("plan_sha256", "prepared_sha256", "read_manifest_sha256",
-                  "unit_roster_sha256"):
-        expected = campaign.get(field)
-        if expected is None:
-            raise ValueError(f"the campaign binding names no {field}: refusing")
-        refusal = ValueError(
-            f"quantum {record.get('quantum_id')!r} was sealed for another "
-            f"{field}: refusing")
-        if field == "unit_roster_sha256":
-            # The roster is what the record measured, not how it was run.
-            if bound.get(field) != _hex(expected, field):
-                raise refusal
-            continue
-        # The plan, prepared and read-manifest digests are run seals
-        # (PQ #1147): dev mode prints a mismatch and admits the record.
-        seal_check(field, _hex(expected, field), bound.get(field),
-                   where=f"quantum {record.get('quantum_id')!r}", refusal=refusal)
-    expected_scope = campaign.get("campaign_scope")
-    scope_where = f"quantum {record.get('quantum_id')!r}"
-    if not isinstance(expected_scope, dict):
-        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
-                   where=scope_where, same=False, refusal=ValueError(
-                       "the campaign binding names no campaign_scope: refusing"))
-    else:
-        seal_check("campaign_scope", expected_scope, bound.get("campaign_scope"),
-                   where=scope_where,
-                   same=canonical_bytes(bound.get("campaign_scope")) == canonical_bytes(expected_scope),
-                   refusal=lambda: ValueError(
-                       f"quantum {record.get('quantum_id')!r} was sealed for another scope: "
-                       f"refusing"))
-    adjoint = record.get("adjoint", {})
-    if "receipt_sha256" in adjoint and adjoint["receipt_sha256"] is not None:
-        raise ValueError(
-            f"quantum {record.get('quantum_id')!r} binds a whole stage-A receipt; "
-            f"records bind their slice (PQ #993): re-seal, refusing")
-    if campaign.get("adjoint_receipt_sha256") is not None:
-        # A caller still naming the whole receipt would otherwise be silently
-        # ignored and admit an unbound record: fail closed.
-        raise ValueError("a campaign binding names a whole stage-A receipt; records "
-                         "bind their slice (PQ #993): pass adjoint_slice_sha256, refusing")
-    expected_slice = campaign.get("adjoint_slice_sha256")
-    if expected_slice is not None:
-        actual = adjoint.get("slice_sha256")
-        if actual is None:
-            raise ValueError(
-                f"quantum {record.get('quantum_id')!r} is unbound (pre-A): re-seal "
-                f"against its stage-A slice before publishing, refusing")
-        if actual != _hex(expected_slice, "adjoint_slice_sha256"):
-            raise ValueError(
-                f"quantum {record.get('quantum_id')!r} binds another stage-A "
-                f"slice: refusing")
 
 
 def adjoint_binding_fields(adjoint_slice: Mapping | None, *, slice_path: str) -> dict:
@@ -1820,14 +1692,14 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     Returns a deep copy of ``record`` carrying a ``boundary_readset`` block
     and a recomputed ``identity_sha256`` (the existing canonical owner, over
     every top-level field but the identity itself -- the same recomputation
-    ``check_quantum_for_campaign`` and the consumer's
+    ``require_quantum_campaign`` and the consumer's
     ``verify_quantum_identity`` enforce, so a bound record passes both);
     the input record is never mutated.
 
     Refuses unless every identity binds exactly: the record's stage-A slice
     (``receipt`` may be the slice, a completed receipt or the record's
     checkpoint band; PQ #993); the input record itself, reverified through
-    the existing ``check_quantum_for_campaign`` owner against its own sealed
+    the existing ``require_quantum_campaign`` owner against its own sealed
     campaign and bound slice BEFORE any mutation (a tampered field with a stale
     identity refuses -- binding never blesses edits by recomputing); the
     record's schema, layer, producer-constrained quantum id, campaign
@@ -1892,7 +1764,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
     # The input record is reverified through the existing owner BEFORE any
     # mutation: a tampered field with a stale identity refuses here, and
     # binding never blesses edits by recomputing.
-    check_quantum_for_campaign(
+    require_quantum_campaign(
         record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("a boundary readset manifest must be an object: "
@@ -1938,173 +1810,11 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
                    for phase in manifest["read_plan"]["phases"]],
         "slice_sha256": bound_slice,
     }
-    body = {key: value for key, value in fresh.items()
-            if key != "identity_sha256"}
-    fresh["identity_sha256"] = canonical_sha256(
-        body, where=f"quantum record {fresh.get('quantum_id')}")
-    return fresh
+    return replace_quantum_readset(record, kind="boundary",
+                                   block=fresh["boundary_readset"])
 
 
 #: The executable-manifest phase staging the whole checkpoint plane load.
-CHECKPOINT_LOAD_PHASE = "checkpoint-load"
-
-
-def quantum_source_layer_order(chain_layers: Sequence[int],
-                               layer: int) -> tuple[int, ...]:
-    """The source layers one quantum installs, in install order (PQ #1095).
-
-    Its chain, descending from the checkpoint boundary, then its own layer.
-    The quantum installs and prefetches exactly these layers
-    (``joint_cost_quantum._install_with_settlement`` with
-    ``source_read_plan.chain_prefetch_window``), and the executable readset
-    declares one source phase for each, in this order. A band-serial
-    consumer walks no chain, so its order is its own layer alone.
-    """
-    return tuple(int(c) for c in chain_layers) + (int(layer),)
-
-
-def executable_source_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging one chain layer's source."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a source phase needs a layer, not {layer!r}")
-    return f"chain-{layer:03d}-source"
-
-
-def executable_bound_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging one chain layer's boundary."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"a bound phase needs a layer, not {layer!r}")
-    return f"chain-{layer:03d}-bound"
-
-
-def executable_own_source_phase_name(layer: int) -> str:
-    """The executable-manifest phase staging the quantum's own source."""
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"an own-source phase needs a layer, not {layer!r}")
-    return f"own-{layer:03d}-source"
-
-
-def executable_replay_phase_name(window_index: int | None, probe: int) -> str:
-    """The executable-manifest phase for one replay probe pass.
-
-    ``None`` names window zero: the zero-pending resume path still reads
-    the own boundary once per probe with no window loop running, and those
-    reads stage under the window-zero phases by this convention.
-    """
-    window = 0 if window_index is None else int(window_index)
-    if window < 0 or type(probe) is not int or isinstance(probe, bool) \
-            or probe < 0:
-        raise ValueError(
-            f"a replay phase needs a window and probe, not "
-            f"{window_index!r}/{probe!r}")
-    return f"replay-{window:02d}-p{probe}"
-
-
-#: The replay modes an executable read plan is sealed for (PQ #1011).
-#: ``windowed`` re-reads the own boundary run once per (window, probe);
-#: ``spill`` reads it once per probe, into the one-pass replay spill.
-REPLAY_MODES = ("windowed", "spill")
-
-
-def normalize_replay_mode(value) -> str:
-    """``windowed`` (the default, also for ``None``) or ``spill``."""
-    mode = "windowed" if value is None else value
-    if mode not in REPLAY_MODES:
-        raise ValueError(f"replay mode must be one of {REPLAY_MODES}, "
-                         f"not {value!r}")
-    return mode
-
-
-def executable_spill_phase_name(probe: int) -> str:
-    """The executable-manifest phase for one probe's spill capture.
-
-    Under the one-pass spill (PQ #994/#1011) each probe reads the own
-    boundary run once, during its capture; the window replays read nothing.
-    """
-    if type(probe) is not int or isinstance(probe, bool) or probe < 0:
-        raise ValueError(f"a spill phase needs a probe, not {probe!r}")
-    return f"spill-p{probe}"
-
-
-def executable_render_phase_name(window_index: int) -> str:
-    """The executable-manifest phase staging one retained window's prepared renders.
-
-    One per already-defined retained window, sealed immediately before that
-    window's replay phases and entered in before_window before the PWC
-    retained load (PQ #917). Source phases stay source-only; rendered inputs
-    get their own consumption phases.
-    """
-    if type(window_index) is not int or isinstance(window_index, bool) \
-            or window_index < 0:
-        raise ValueError(f"a render phase needs a window, not {window_index!r}")
-    return f"render-{window_index:02d}"
-
-
-def quantum_executable_phase_names(chain_layers: Sequence[int], layer: int,
-                                    *, n_probes: int,
-                                    replay_windows: int,
-                                    render_phases: bool = False,
-                                    replay_mode: str | None = None) -> tuple[str, ...]:
-    """The frozen executable staging order (PQ #862): calibration head,
-    the checkpoint plane once, then per chain layer descending its source
-    extents and its boundary entries, the quantum's own source extents,
-    then per retained window and probe the replay boundary reads.
-
-    With ``render_phases`` (PQ #917), each retained window additionally
-    stages one ``render-{window:02d}`` phase immediately before that
-    window's replay phases: the window's selected prepared renders get
-    their own consumption phases while source phases stay source-only.
-    Without it the historical sequencing-only order reproduces unchanged.
-
-    ``replay_mode="spill"`` (PQ #1011) seals the one-pass spill's real
-    consumption order instead: each probe's capture reads the own boundary
-    run once, inside the first window's retained lifetime, and every window
-    replay reads nothing. After the own source come ``render-00`` (with
-    ``render_phases``), one ``spill-p{probe}`` phase per probe, then the
-    remaining windows' render phases. The windowed default is unchanged.
-
-    Every name is reported by the runtime through the existing semantic
-    reporter as its bytes are consumed -- a staging contract declares
-    exactly this list. Chunk names are deliberately not staging phases:
-    durable units keep their existing currency and commit under the read
-    phase in effect when the journal lands.
-    """
-    chain = [int(c) for c in chain_layers]
-    if any(type(c) is not int or isinstance(c, bool) for c in chain_layers):
-        raise ValueError("chain layers must be integers, "
-                         f"not {list(chain_layers)!r}")
-    if len(set(chain)) != len(chain):
-        raise ValueError("chain layers repeat: refusing")
-    if type(layer) is not int or isinstance(layer, bool) or layer < 0:
-        raise ValueError(f"an executable readset needs a layer, not {layer!r}")
-    for label, value in (("probe count", n_probes),
-                         ("replay windows", replay_windows)):
-        if type(value) is not int or isinstance(value, bool) or value < 1:
-            raise ValueError(f"{label} must be positive, not {value!r}")
-    if type(render_phases) is not bool:
-        raise ValueError(f"render phases must be a flag, not {render_phases!r}")
-    replay_mode = normalize_replay_mode(replay_mode)
-    names = ["head", CHECKPOINT_LOAD_PHASE]
-    for boundary in chain:
-        names.append(executable_source_phase_name(boundary))
-        names.append(executable_bound_phase_name(boundary))
-    names.append(executable_own_source_phase_name(layer))
-    if replay_mode == "spill":
-        for window_index in range(replay_windows):
-            if render_phases:
-                names.append(executable_render_phase_name(window_index))
-            if window_index == 0:
-                names.extend(executable_spill_phase_name(probe)
-                             for probe in range(n_probes))
-        return tuple(names)
-    for window_index in range(replay_windows):
-        if render_phases:
-            names.append(executable_render_phase_name(window_index))
-        for probe in range(n_probes):
-            names.append(executable_replay_phase_name(window_index, probe))
-    return tuple(names)
-
-
 def check_prepared_input_windows(prepared: Mapping, *,
                                window_indices: Sequence[int],
                                where: str = "prepared inputs") -> list[dict]:
@@ -2480,9 +2190,9 @@ def _checkpoint_incoming_phases(record, adjoint_slice, *, n_probes, bulk):
                     if index not in seen:
                         seen.add(index)
                         run.append(index)
-        return {executable_bound_phase_name(chain[0]): run}
+        return {quantum_row.executable_bound_phase_name(chain[0]): run}
     boundary = bulk["boundary_runs"][record["layer"]]
-    return {executable_spill_phase_name(probe): boundary + rows
+    return {quantum_row.executable_spill_phase_name(probe): boundary + rows
             for probe, rows in enumerate(probes)}
 
 
@@ -2505,14 +2215,14 @@ def check_checkpoint_incoming_readset(record, manifest, adjoint_slice):
     if type(n_probes) is not int or n_probes < 1:
         raise ValueError("checkpoint incoming readset seals no probe count")
     chain = record["adjoint"]["chain_layers"]
-    if not chain and normalize_replay_mode(block.get("replay_mode")) != "spill":
+    if not chain and quantum_row.normalize_replay_mode(block.get("replay_mode")) != "spill":
         raise ValueError("checkpoint incoming chain-empty consumer requires spill")
     bulk = _collect_quantum_bulk_entries(
         adjoint_slice=adjoint_slice,
         checkpoint_boundary=record["adjoint"]["checkpoint_boundary"],
         needed=sorted(set(chain) | {record["layer"]}))
     expected = _checkpoint_incoming_phases(record, adjoint_slice, n_probes=n_probes, bulk=bulk)
-    expected[CHECKPOINT_LOAD_PHASE] = bulk["checkpoint_auxiliary_indices"]
+    expected[quantum_row.CHECKPOINT_LOAD_PHASE] = bulk["checkpoint_auxiliary_indices"]
     entries = manifest["entries"]
     phases = manifest["read_plan"]["phases"]
     if block.get("phases") != [phase["name"] for phase in phases]:
@@ -2532,7 +2242,7 @@ def check_checkpoint_incoming_readset(record, manifest, adjoint_slice):
         wanted = [bulk["entries"][i] for i in indices]
         if actual != wanted:
             raise ValueError(f"checkpoint incoming phase {name} differs from consuming read order")
-        if name != CHECKPOINT_LOAD_PHASE:
+        if name != quantum_row.CHECKPOINT_LOAD_PHASE:
             moved[name] = sum(row["path"] in activation_paths for row in wanted)
     for phase in phases:
         if phase["name"] not in moved and any(entries[i]["path"] in activation_paths
@@ -2647,7 +2357,7 @@ def build_quantum_executable_manifest(
     """
     from .joint_adjoint_slices import chain_layers_for
 
-    replay_mode = normalize_replay_mode(replay_mode)
+    replay_mode = quantum_row.normalize_replay_mode(replay_mode)
     checkpoint_incoming_mode = normalize_checkpoint_incoming_mode(checkpoint_incoming_mode)
     _require_stage_a_input(receipt)
     if not isinstance(record, dict):
@@ -2902,33 +2612,33 @@ def build_quantum_executable_manifest(
 
     activation_indices = set(bulk["checkpoint_activation_indices"])
     _seal_phase("head", head_indices)
-    _seal_phase(CHECKPOINT_LOAD_PHASE,
+    _seal_phase(quantum_row.CHECKPOINT_LOAD_PHASE,
                 [index_of[i] for i in bulk["checkpoint_auxiliary_indices"]]
                 if checkpoint_incoming_mode else checkpoint_indices)
     for boundary in chain:
-        _seal_phase(executable_source_phase_name(boundary),
+        _seal_phase(quantum_row.executable_source_phase_name(boundary),
                     source_runs[boundary])
-        _seal_phase(executable_bound_phase_name(boundary),
-                    [index_of[i] for i in incoming_phases[executable_bound_phase_name(boundary)]]
-                    if executable_bound_phase_name(boundary) in incoming_phases
+        _seal_phase(quantum_row.executable_bound_phase_name(boundary),
+                    [index_of[i] for i in incoming_phases[quantum_row.executable_bound_phase_name(boundary)]]
+                    if quantum_row.executable_bound_phase_name(boundary) in incoming_phases
                     else boundary_runs[boundary])
-    _seal_phase(executable_own_source_phase_name(layer), source_runs[layer])
+    _seal_phase(quantum_row.executable_own_source_phase_name(layer), source_runs[layer])
     for window_index in range(len(replay_windows)):
         if prepared_windows:
-            _seal_phase(executable_render_phase_name(window_index),
+            _seal_phase(quantum_row.executable_render_phase_name(window_index),
                         render_runs[window_index])
         if replay_mode == "spill":
             if window_index == 0:
                 for probe in range(n_probes):
-                    name = executable_spill_phase_name(probe)
+                    name = quantum_row.executable_spill_phase_name(probe)
                     _seal_phase(name, [index_of[i] for i in incoming_phases[name]]
                                 if name in incoming_phases else boundary_runs[layer])
             continue
         for probe in range(n_probes):
-            _seal_phase(executable_replay_phase_name(window_index, probe),
+            _seal_phase(quantum_row.executable_replay_phase_name(window_index, probe),
                         boundary_runs[layer])
     names = [phase["name"] for phase in read_phases]
-    if names != list(quantum_executable_phase_names(
+    if names != list(quantum_row.quantum_executable_phase_names(
             chain, layer, n_probes=n_probes,
             replay_windows=len(replay_windows),
             render_phases=bool(prepared_windows),
@@ -3079,7 +2789,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     block and a recomputed ``identity_sha256`` (the existing canonical
     owner -- the same recomputation both real validators enforce); the
     input record is never mutated. The input record is reverified through
-    ``check_quantum_for_campaign`` before any mutation. The manifest must
+    ``require_quantum_campaign`` before any mutation. The manifest must
     equal what :func:`build_quantum_executable_manifest` derives from this
     record, receipt, parent and sealed inputs -- forged bytes with a
     consistent rehash refuse. The manifest path is exactly the
@@ -3144,7 +2854,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         raise ValueError(
             f"an executable readset path must be exactly {expected_path}: "
             "refusing")
-    check_quantum_for_campaign(
+    require_quantum_campaign(
         record, {**campaign, "adjoint_slice_sha256": bound_slice})
     if not isinstance(manifest, dict):
         raise ValueError("an executable read manifest must be an object: "
@@ -3238,11 +2948,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
         fresh["executable_readset"]["head_source"] = {
             key: copy.deepcopy(head_source_sealed[key])
             for key in ("schema", "layers_prefix", "tensors")}
-    body = {key: value for key, value in fresh.items()
-            if key != "identity_sha256"}
-    fresh["identity_sha256"] = canonical_sha256(
-        body, where=f"quantum record {fresh.get('quantum_id')}")
-    return fresh
+    return replace_quantum_readset(record, kind="executable",
+                                   block=fresh["executable_readset"])
 
 
 def emit_quantum_executable_readsets(

@@ -82,7 +82,7 @@ from .joint_adjoint_checkpoints import (
     write_adjoint_checkpoint,
     write_adjoint_receipt,
 )
-from .joint_layer_quanta import (
+from prismaquant.joint_quantum_row import (
     ADJOINT_TAIL_PHASE,
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,
@@ -553,7 +553,7 @@ def _require_chain_regime_fits(regime, storage_policy, *, n_probes, entry_bytes)
     things; this asks before the capture instead of after it.
     ``entry_bytes`` is called only for a fused regime.
     """
-    from .cost_streaming import fused_window_size
+    from .streamed_boundary_artifacts import fused_window_size
 
     window = int(storage_policy["prefetch_batches"])
     if window % int(regime["batch_size"]):
@@ -1051,7 +1051,7 @@ def build_adjoint_bind_identity(calib_ids, *, source_model_identity,
                                 token_scope, temperature, execution_partition,
                                 diagnostic=None, defer_source=False):
     """One CPU/GPU construction owner for the capture session identity."""
-    from .cost_streaming import validate_streamed_model_identity
+    from .streamed_model_identity import validate_streamed_model_identity
     return {
         "source_model": (NOT_COMPUTED if defer_source and source_model_identity == NOT_COMPUTED
                          else validate_streamed_model_identity(
@@ -1178,11 +1178,8 @@ def run_adjoint_capture_core(
     chain state; it cannot accompany any seed, recovery or split. Original
     CUDA calls retain the existing source owner's device gate.
     """
-    from .cost_streaming import (
-        StreamedBoundaryArtifacts,
-        normalize_boundary_storage,
-        prefetched_boundary_batches,
-    )
+    from .streamed_boundary_artifacts import StreamedBoundaryArtifacts, normalize_boundary_storage
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
     from .matmul_arithmetic import bf16_reduction_stamp
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
@@ -2529,7 +2526,7 @@ def _stage_a_source_identity(runner, config, identity_cache_path):
     An explicitly selected qualified original context uses that same identity
     mechanism's owned descriptor intake and refuses legacy stat-cache inputs.
     """
-    from .cost_streaming import build_streamed_model_identity
+    from .streamed_model_identity import build_streamed_model_identity
     from .tessera_joint_aura import source_identity_proof_kwargs
 
     if getattr(getattr(runner.context, 'source_authentication', None),
@@ -2549,10 +2546,11 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     The caller owns this existing material owner and its final close. Actual
     original CUDA admission still fails through that owner's unchanged gate.
     """
-    from .aura_cost import _aura_source_sha256
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .calibration_data import load_calibration_input
     from .cost_stage_checkpoint import canonical_json_sha256
-    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from .cost_streaming import build_streamed_causal_lm
+    from .streamed_model_identity import build_streamed_model_identity
     from .gpu_guard import require_cuda_hot_path
     from .joint_aura import source_execution_identity
     from .layer_streaming import _source_profile
@@ -2726,7 +2724,7 @@ def run_adjoint_capture(
     and its unchanged CUDA gate are checked before device/backend/profile
     work; the caller keeps close responsibility. No authority is constructed.
     """
-    from .aura_cost import _aura_source_sha256
+    from .aura_provenance import (producer_package_sha256 as _aura_source_sha256)
     from .cost_streaming import build_streamed_causal_lm
     from .glm_capture_compatibility import require_capture_compatibility
     from .gpu_guard import require_cuda_hot_path

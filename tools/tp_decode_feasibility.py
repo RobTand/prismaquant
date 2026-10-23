@@ -391,7 +391,9 @@ def _iperf3_leg(rank: int, dist: Any, peer: Optional[str], port: int, seconds: i
             gbps = report["end"]["sum_received"]["bits_per_second"] / 1e9
             dist.broadcast(torch.tensor([gbps]), src=1)
         else:
-            gbps = float(dist.broadcast(torch.zeros(1), src=1).item())
+            received = torch.zeros(1)
+            dist.broadcast(received, src=1)
+            gbps = float(received.item())
         if rank == 0:
             print(f"iperf3 bandwidth leg: MEASURED {gbps:.2f} Gbit/s "
                   f"(tcp, {seconds}s, rank1->rank0 receive)")
@@ -503,7 +505,7 @@ def mode_netbench(args: argparse.Namespace) -> int:
         if len(cpu_pin) != 2:
             raise SystemExit("--cpu-pin takes one core or range per rank, e.g. '16-17,18-19'")
         os.sched_setaffinity(0, cpu_pin[args.rank])
-    _, dist = _init_pg(args.rank, 2, init_method)
+    torch, dist = _init_pg(args.rank, 2, init_method)
     results: List[Dict[str, Any]] = []
     try:
         for nbytes in sizes:
@@ -561,12 +563,15 @@ def _print_caveats() -> None:
 
 
 def mode_decide(args: argparse.Namespace) -> int:
+    if not math.isfinite(args.link_gbps) or args.link_gbps <= 0:
+        raise SystemExit("--link-gbps must be finite and positive")
     per_size, flat, label = _resolve_decide_latency(args)
     lower_bound = label is LABEL_LOOPBACK
     print("=" * 78)
     print("DECIDE: TP=2-vs-single-box decode crossover (rule: TP=2 wins iff")
     print("        net overhead per token < TPOT_single / 2)")
     print(f"latency source: {label}")
+    print(f"verdict percentile: {args.latency_stat}")
     if lower_bound:
         print("WARNING: loopback latency is a LOWER BOUND.  Verdicts below can only")
         print("be upgraded to final by --mode netbench across the two real boxes.")
@@ -580,11 +585,12 @@ def mode_decide(args: argparse.Namespace) -> int:
     print("-" * len(hdr))
     unknown_settle: List[str] = []
     for r in rows:
-        p50_us, p99_us, note = _latency_for_row(r, per_size, flat)
+        p50_us, p99_us, selected_us, note = _latency_for_row(
+            r, per_size, flat, stat=args.latency_stat)
         ar = int(r["all_reduces_per_token"])
         add_p50_ms = ar * p50_us / 1000.0
         add_p99_ms = ar * p99_us / 1000.0
-        verdict = verdict_for(r["tpot_ms_single"], add_p50_ms)
+        verdict = verdict_for(r["tpot_ms_single"], ar * selected_us / 1000.0)
         tpot = "unknown" if r["tpot_ms_single"] is None else f"{r['tpot_ms_single']:.1f}"
         budget = "-" if r["budget_ms"] is None else f"{r['budget_ms']:.1f}"
         us_ar = "-" if r["budget_us_per_allreduce"] is None \
@@ -597,7 +603,8 @@ def mode_decide(args: argparse.Namespace) -> int:
               f"{r['wire_ms_at_link']:>8.3f} "
               f"{add_p50_ms:>11.2f} {add_p99_ms:>11.2f} "
               f"{tpot:>9} {budget:>10} {us_ar:>8} {verdict:>18}{flag}")
-        print(f"{'':26} latency {p50_us:.1f}/{p99_us:.1f} us p50/p99 -- {note}")
+        print(f"{'':26} latency {p50_us:.1f}/{p99_us:.1f} us p50/p99 -- {note}; "
+              f"verdict {args.latency_stat}={selected_us:.1f} us")
         if r["moe"]:
             print(f"{'':26} note: MoE -- routing adds collectives beyond "
                   f"{ar}/token (caveat b)")
@@ -644,23 +651,37 @@ def _resolve_decide_latency(
     """Resolve decide-mode latency inputs.
 
     Returns (per_size, flat, label):
-      per_size  maps all-reduce payload bytes -> {"p50_us", "p99_us"} taken
-                from a bench-mode JSON (MEASURED), or None.
-      flat      a single user-supplied microseconds figure used for both the
-                p50 and p99 columns (ASSUMED), or None.
+      per_size  maps all-reduce payload bytes -> p50, p99 and the requested
+                verdict percentile from a bench-mode JSON, or None.
+      flat      a single user-supplied microseconds figure used for every
+                percentile (ASSUMED), or None.
     """
     if args.latency_json:
         payload = json.loads(Path(args.latency_json).read_text(encoding="ascii"))
-        per_size = {
-            int(r["bytes"]): {"p50_us": float(r["p50_us"]), "p99_us": float(r["p99_us"])}
-            for r in payload["results"]
-        }
+        fields = {"p50_us", "p99_us", args.latency_stat}
+        per_size = {}
+        for result in payload["results"]:
+            missing = fields.difference(result)
+            if missing:
+                raise SystemExit(
+                    f"latency JSON result for {result['bytes']}B lacks percentile(s): "
+                    + ", ".join(sorted(missing)))
+            values = {field: float(result[field]) for field in fields}
+            for field, value in values.items():
+                if not math.isfinite(value) or value < 0:
+                    raise SystemExit(
+                        f"latency JSON {field} for {result['bytes']}B "
+                        "must be finite and nonnegative")
+            per_size[int(result["bytes"])] = values
         raw = str(payload.get("label", ""))
         label = LABEL_LOOPBACK if "LOOPBACK" in raw else (
             LABEL_NETBENCH if raw.startswith("MEASURED") else LABEL_ASSUMED)
         return per_size, None, label
     if args.latency_us is not None:
-        return None, float(args.latency_us), LABEL_ASSUMED
+        flat = float(args.latency_us)
+        if not math.isfinite(flat) or flat < 0:
+            raise SystemExit("--latency-us must be finite and nonnegative")
+        return None, flat, LABEL_ASSUMED
     raise SystemExit("decide needs --latency-us N (assumed) or --latency-json FILE (measured)")
 
 
@@ -668,8 +689,10 @@ def _latency_for_row(
     row: Dict[str, Any],
     per_size: Optional[Dict[int, Dict[str, float]]],
     flat: Optional[float],
-) -> tuple[float, float, str]:
-    """(p50_us, p99_us, provenance-note) for one decision row.
+    *,
+    stat: str = "p50_us",
+) -> tuple[float, float, float, str]:
+    """(p50_us, p99_us, selected_us, provenance-note) for one decision row.
 
     MEASURED beats ASSUMED: when a bench JSON is present, each model is priced
     at its OWN all-reduce size (bytes = hidden_size x bf16); models whose exact
@@ -679,12 +702,12 @@ def _latency_for_row(
     if per_size:
         if want in per_size:
             s = per_size[want]
-            return s["p50_us"], s["p99_us"], "matched size"
+            return s["p50_us"], s["p99_us"], s[stat], "matched size"
         biggest = max(per_size)
         s = per_size[biggest]
-        return s["p50_us"], s["p99_us"], f"fallback: largest swept size ({biggest}B)"
+        return s["p50_us"], s["p99_us"], s[stat], f"fallback: largest swept size ({biggest}B)"
     assert flat is not None
-    return flat, flat, "single assumed number (used for both p50 and p99)"
+    return flat, flat, flat, "single assumed number (used for every percentile)"
 
 
 def build_parser() -> argparse.ArgumentParser:

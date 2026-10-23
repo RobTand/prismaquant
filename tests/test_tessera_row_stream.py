@@ -21,6 +21,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
 from test_tessera_hessian_reference_handoff import POLICY as REFERENCE_POLICY, handoff  # noqa: F401
 
 UNITS = ["model.layers.0.a", "model.layers.0.b", "model.layers.1.c"]
@@ -83,7 +88,7 @@ def stream_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
         "accepted": True, "reason": "CPU test fixture", "kwargs": [], "recipe": {}})
     monkeypatch.setattr(campaign, "_calibration_tokens", lambda *_args: (tokens, text))
-    monkeypatch.setattr(campaign, "_collect_activations",
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics",
                         lambda *_a, **_k: pytest.fail("repeated calibration forward"))
     monkeypatch.setattr(campaign, "expand_menus_for_targets",
                         lambda _weights, targets, **_kwargs: {name: menu for name in targets})
@@ -154,7 +159,7 @@ def stream_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(cost_streaming, "build_streamed_causal_lm", build)
     monkeypatch.setattr(autoscale, "selected_anchor_resources", plan)
     selection = tmp_path / "selection.json"
-    selection.write_text(json.dumps(dict(schema=campaign.UNITS_SCHEMA, groups=[
+    selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA, groups=[
         dict(key=key, members=list(members)) for key, members in sorted(groups.items())])))
     argv = ["--model", str(source), "--out", str(tmp_path / "cost.pkl"),
             "--cache-dir", str(tmp_path / "cache"),
@@ -192,10 +197,7 @@ def test_the_stream_head_writes_the_load_all_heads_bytes(monkeypatch, tmp_path, 
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.tessera_row_stream import EXECUTION_FILENAME
-    # Encode durations and the wall clock are the only run-varying values
-    # these files carry; pin them so the comparison is of bytes.
-    monkeypatch.setattr(campaign, "time", SimpleNamespace(
-        time=lambda: 1789500000.0, monotonic=time.monotonic, perf_counter=time.perf_counter))
+    _pin_clock(campaign, monkeypatch)
     prefetches = []
     original_prefetch = cc.prefetch_capture
 
@@ -251,7 +253,7 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
             waited[name] = encoding.wait(timeout=30)
         return original_entry(path, name, **kwargs)
 
-    original_measure = campaign._measure_anchor
+    original_measure = cell_measurement.measure_cell
 
     def measure(**kwargs):
         encodes.append(kwargs["qname"])
@@ -259,7 +261,7 @@ def test_the_first_encode_starts_before_the_late_entries_are_read(monkeypatch, t
         return original_measure(**kwargs)
 
     monkeypatch.setattr(cc, "_verified_capture_entry", delayed)
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     assert campaign.main(argv) == 0
     assert waited == dict.fromkeys(UNITS[1:], True)
     assert encodes == UNITS
@@ -321,13 +323,15 @@ class _Killed(BaseException):
 def _pin_clock(campaign, monkeypatch):
     # Encode durations and the wall clock are the only run-varying values the
     # outputs carry; pinned, a relaunch can be compared byte for byte.
-    monkeypatch.setattr(campaign, "time", SimpleNamespace(
-        time=lambda: 1789500000.0, monotonic=time.monotonic, perf_counter=time.perf_counter))
+    clock = SimpleNamespace(time=lambda: 1789500000.0,
+                            monotonic=time.monotonic, perf_counter=time.perf_counter)
+    monkeypatch.setattr(campaign, "time", clock)
+    monkeypatch.setattr(cell_measurement, "time", clock)
 
 
 def _kill_at(campaign, monkeypatch, call):
     """Run the row until its ``call``-th encode, which dies; return the relaunch's encodes."""
-    original = campaign._measure_anchor
+    original = cell_measurement.measure_cell
     calls = []
 
     def measure(**kwargs):
@@ -336,7 +340,7 @@ def _kill_at(campaign, monkeypatch, call):
             raise _Killed()
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     return calls, original
 
 
@@ -376,7 +380,7 @@ def test_a_killed_stream_row_adopts_its_journalled_anchors_on_relaunch(
         relaunch.append(kwargs["qname"])
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     assert campaign.main(argv) == 0
     out = capsys.readouterr().out
     assert "[campaign] row head: stream (" in out
@@ -427,13 +431,13 @@ def _killed_run(monkeypatch, tmp_path):
     _calls, original = _kill_at(campaign, monkeypatch, 3)
     with pytest.raises(_Killed):
         campaign.main(argv)
-    monkeypatch.setattr(campaign, "_measure_anchor", original)
+    monkeypatch.setattr(cell_measurement, "measure_cell", original)
     return campaign, argv, state
 
 
 def test_a_tampered_journalled_wire_is_refused_not_adopted(monkeypatch, tmp_path):
     campaign, argv, _state = _killed_run(monkeypatch, tmp_path)
-    wire = campaign._wire_path(tmp_path / "cache" / "wire", UNITS[0], FORMAT)
+    wire = campaign_wire.wire_path(tmp_path / "cache" / "wire", UNITS[0], FORMAT)
     data = bytearray(wire.read_bytes())
     data[len(data) // 2] ^= 0xFF
     wire.write_bytes(bytes(data))
@@ -485,7 +489,7 @@ def test_a_corrupt_late_entry_refuses_before_any_identity_bound_write(monkeypatc
     # The batches before it encoded and published their wires, which cite no
     # run identity.
     assert sorted(path.name for path in (cache / "wire").glob("*.tessera")) == sorted(
-        campaign._wire_path(cache / "wire", name, FORMAT).name for name in UNITS[:-1])
+        campaign_wire.wire_path(cache / "wire", name, FORMAT).name for name in UNITS[:-1])
 
 
 def _checkpoint_shard(root, name):
@@ -552,7 +556,7 @@ def _killed_load_all_run(monkeypatch, tmp_path, fixture=None):
         relaunch.append(kwargs["qname"])
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     return campaign, argv, state, relaunch
 
 
@@ -819,7 +823,6 @@ def test_the_stream_plan_charges_a_window_not_the_population(monkeypatch):
 
 def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
     from prismaquant import autoscale
-    from tools import dispatch_tessera_campaign as dispatch
     seen = []
 
     def selected(_model, **kwargs):
@@ -827,15 +830,15 @@ def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
         return {"memory_bytes": 10 * 1024 ** 3, "stream_memory_bytes": 1024 ** 3}
 
     monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
-    monkeypatch.setattr(dispatch, "_process_baseline", lambda _spec: (0, "explicit"))
-    monkeypatch.setattr(dispatch, "_guard_margin_bytes", lambda: 0)
+    monkeypatch.setattr(campaign_rows, "process_baseline", lambda _spec: (0, "explicit"))
+    monkeypatch.setattr(campaign_rows, "guard_margin_bytes", lambda: 0)
     census = dict(unit_shapes={"a": [3, 4]}, counts={"a": 9})
     argv = ["--streaming", "--capture-load-policy", json.dumps(LOAD_POLICY),
             "--export-hessian-reference-policy", json.dumps(REFERENCE_POLICY),
             "--max-rounds", "1"]
 
     def demand(extra):
-        return dispatch._row_memory_demand(dict(model="/source", cpus=6,
+        return campaign_rows.row_memory_demand(dict(model="/source", cpus=6,
             campaign_argv=[*argv, *extra]), ["a"], census, selected_source=True)
 
     assert demand([])["plan_bytes"] == 1024 ** 3
@@ -844,3 +847,26 @@ def test_the_dispatcher_admits_a_stream_row_against_its_window(monkeypatch):
     assert demand(["--seed-checkpoint", "/seed"])["plan_bytes"] == 10 * 1024 ** 3
     assert demand(["--campaign-identity-threads", "2"])["plan_bytes"] == 1024 ** 3
     assert seen[-1]["campaign_identity_threads"] == 2
+
+
+def test_dispatcher_head_and_publication_reservation_follow_effective_cli(monkeypatch):
+    from prismaquant import autoscale
+    seen = []
+    def resource_plan(_model, **kwargs):
+        seen.append(kwargs)
+        return {'memory_bytes': 10 * 1024**3, 'stream_memory_bytes': 1024**3}
+    monkeypatch.setattr(autoscale, 'selected_anchor_resources', resource_plan)
+    census = {'unit_shapes': {'a': [3, 4]}, 'counts': {'a': 9}}
+    base = ['--streaming', '--capture-load-policy=' + json.dumps(LOAD_POLICY),
+            '--export-hessian-reference-policy=' + json.dumps(REFERENCE_POLICY),
+            '--max-rounds=1']
+    def demand(extra):
+        return campaign_rows.row_memory_demand({'model': '/source', 'cpus': 2,
+            'process_baseline_bytes': 0, 'campaign_argv': [*base, *extra]},
+            ['a'], census, selected_source=True)
+    assert demand(['--row-head', 'load-all', '--row-he=stream'])['plan_bytes'] == 1024**3
+    assert demand(['--row-he=load-all'])['plan_bytes'] == 10 * 1024**3
+    demand(['--publication-overlap-bytes', '0', '--publication-overlap-bytes=4096'])
+    assert seen[-1]['publication_overlap_bytes'] == 4096
+    demand(['--publication-overlap-bytes=0'])
+    assert seen[-1]['publication_overlap_bytes'] == 0

@@ -322,7 +322,7 @@ def register_deepseek_v4() -> None:
         "deepseek_v4", DeepseekV4Config, DeepseekV4ForCausalLM
     )
 
-    # Swap DeepseekV4Experts for the per-expert ModuleList variant so
+    # Select the per-expert ModuleList constructor on SparseMoeBlock so
     # prismaquant's per-Linear Fisher hooks observe each routed expert
     # individually. Must run AFTER the modeling module exec_module above
     # but BEFORE any SparseMoeBlock is instantiated. vLLM serving uses

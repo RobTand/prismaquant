@@ -1,8 +1,7 @@
 """Explicit serving scope survives menu lookup, provenance and campaign reuse."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
-from fractions import Fraction
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -12,98 +11,73 @@ from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_menu as menu
 
 
-@dataclass(frozen=True)
-class _Context:
-    platform: str = "sm_121"
-    structure: str = "dense"
-    residency: str = "resident"
-    runtime_image: str = "fixture/runtime@sha256:" + "1" * 64
-    execution_mode: str = "eager"
+def _context(**changed):
+    from prismaquant.lane_eligibility import ServingContext
 
-    def key(self):
-        return tuple(asdict(self).values())
-
-    def as_dict(self):
-        return asdict(self)
+    values = dict(platform="sm_121", structure="dense", residency="resident",
+                  runtime_image="fixture/runtime@sha256:" + "1" * 64,
+                  execution_mode="eager")
+    values.update(changed)
+    return ServingContext(**values)
 
 
-def _contract(monkeypatch, expected):
-    observed = []
-    cell = SimpleNamespace(
-        cell_id="fixture_cell", route_status="backed_with_serve_flag",
-        activation_contract="fp8_per_token_dynamic",
-        requires_serve_flags=("TESSERA_SERVE_MODE=resident",),
-    )
+def _contract(monkeypatch, payload, *, context=None):
+    import copy
+    from prismaquant import tessera_runtime_contract as runtime
+    from tests.conftest import set_cell_census
 
-    def native_cells(family, rate, *, serving_context=None):
-        observed.append(serving_context)
-        return (cell,) if serving_context == expected else ()
+    payload = copy.deepcopy(payload)
+    selected = {}
+    for cell in payload["lane_eligibility"]["cells"]:
+        if cell["family"] == "TESSERA_E4M3_K1" and cell["regime"] not in selected:
+            selected[cell["regime"]] = cell
+    payload["lane_eligibility"]["cells"] = list(selected.values())
+    for cell in selected.values():
+        cell["structure"] = "dense"
+        cell["route_status"] = "backed_with_serve_flag"
+        cell["requires_serve_flags"] = ["TESSERA_SERVE_MODE=resident"]
+        set_cell_census(payload, cell, [1024])
+        if context is not None:
+            cell["runtime"]["image"] = context.runtime_image
+            cell["runtime"]["execution_modes"] = [context.execution_mode]
+    parsed = runtime._parse(payload, commit="owned-menu-fixture",
+                            sha="owned-menu-fixture", path="owned-menu-fixture")
+    monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: parsed)
 
-    contract = SimpleNamespace(
-        commit="fixture", requires_serving_context=True,
-        max_world_size={"TESSERA_E4M3_K1": 1},
-        attested_rungs={"TESSERA_E4M3_K1": (1024,)},
-        governs=lambda family: family == "TESSERA_E4M3_K1",
-        native_cells=native_cells,
-    )
-    monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: contract)
-    return observed
 
-
-def test_menu_admission_passes_context_to_the_contract_and_records_it(monkeypatch):
-    context = _Context()
-    observed = _contract(monkeypatch, context)
+def test_menu_admission_records_its_matching_context(monkeypatch, legacy_v5_contract):
+    context = _context()
+    _contract(monkeypatch, legacy_v5_contract, context=context)
     admitted = menu.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
     assert admitted.attested
-    assert observed == [context]
     assert admitted.serving_context == context
 
 
-@pytest.mark.parametrize("context", [None, _Context(structure="routed_moe")])
-def test_v5_menu_admission_cannot_borrow_another_context(monkeypatch, context):
-    _contract(monkeypatch, _Context())
+@pytest.mark.parametrize("context", [None, _context(structure="routed_moe")])
+def test_v5_menu_admission_cannot_borrow_another_context(monkeypatch, context, legacy_v5_contract):
+    _contract(monkeypatch, legacy_v5_contract, context=_context())
     admitted = menu.route_admission("TESSERA_E4M3_K1_R1024", serving_context=context)
     assert not admitted.attested
     assert admitted.requires_serving_context
     assert "context" in admitted.detail
 
 
-def test_menu_expansion_forwards_explicit_scope(monkeypatch):
-    from prismaquant import tessera_footprint
+def test_menu_expansion_preserves_explicit_scope_and_prices_real_geometry(
+        monkeypatch, legacy_v5_contract):
+    from prismaquant.tessera_formats import get_tessera_family
 
-    context = _Context()
-    calls = []
-    admission = SimpleNamespace(admits=lambda mode: True, act_bits=8)
-    family = SimpleNamespace(
-        mathematical_q256_bounds=(1024, 1024), name="TESSERA_E4M3_K1",
-        base="E4M3", arity=1, format_name=lambda rate: f"TESSERA_E4M3_K1_R{rate}",
-    )
-
-    def admit(name, *, serving_context=None):
-        calls.append(serving_context)
-        return admission
-
-    geometry_structures = []
-    wire_calls = []
-
-    def tp_legal(*args, structure=None, **kwargs):
-        geometry_structures.append(structure)
-        return True, ""
-
-    def served_recipe(spec, rate, *, structure):
-        wire_calls.append((spec, rate, structure))
-        return None
-
-    monkeypatch.setattr(menu, "route_admission", admit)
-    monkeypatch.setattr(menu, "tessera_tp_legal", tp_legal)
-    monkeypatch.setattr(menu, "tessera_served_wire_recipe", served_recipe)
-    monkeypatch.setattr(tessera_footprint, "tessera_exact_bits_for_shape",
-                        lambda *args, **kwargs: Fraction(128))
-    rows = menu.expand_tessera_menu((4, 4), families=(family,), serving_context=context)
-    assert len(rows) == 1 and rows[0].admission is admission
-    assert calls == [context]
-    assert geometry_structures == [context.structure]
-    assert wire_calls == [(family, 1024, context.structure)]
+    context = _context()
+    _contract(monkeypatch, legacy_v5_contract, context=context)
+    family = get_tessera_family("TESSERA_E4M3_K1")
+    rows = menu.expand_tessera_menu(
+        (2048, 4096), families=(family,), step_q256=256,
+        serving_context=context)
+    assert [row.format_name for row in rows] == ["TESSERA_E4M3_K1_R1024"]
+    assert rows[0].admission.serving_context == context
+    assert rows[0].memory_bytes > 0
+    assert menu.expand_tessera_menu(
+        (2048, 4096), families=(family,), step_q256=256,
+        serving_context=replace(context, structure="routed_moe")) == []
 
 
 def test_resolved_lane_identity_and_serialization_retain_scope(monkeypatch):
@@ -119,7 +93,7 @@ def test_resolved_lane_identity_and_serialization_retain_scope(monkeypatch):
         )
 
     monkeypatch.setattr(menu, "route_admission", admit)
-    first = _Context()
+    first = _context()
     second = replace(first, execution_mode="compiled")
     a = menu.tessera_resolved_serving_lane(
         "TESSERA_E4M3_K1_R1024", serving_context=first)
@@ -132,7 +106,7 @@ def test_resolved_lane_identity_and_serialization_retain_scope(monkeypatch):
 
 
 def test_profile_tessera_fallback_forwards_explicit_scope(monkeypatch):
-    context = _Context()
+    context = _context()
     calls = []
     sentinel = object()
     monkeypatch.setattr(profiles, "load_serving_profile", lambda profile: SimpleNamespace(
@@ -154,7 +128,7 @@ def test_profile_tessera_fallback_forwards_explicit_scope(monkeypatch):
     {"execution_mode": "compiled"}, {"platform": "sm_90"},
 ])
 def test_campaign_menu_cache_separates_scope_and_reuses_equal_scope(monkeypatch, different):
-    first = _Context()
+    first = _context()
     second = replace(first, **different)
     calls = []
 
@@ -175,7 +149,7 @@ def test_campaign_menu_cache_separates_scope_and_reuses_equal_scope(monkeypatch,
 
 
 def test_campaign_partial_context_map_keeps_missing_scope_unbound(monkeypatch):
-    first = _Context()
+    first = _context()
     calls = []
 
     def expand(shape, **kwargs):
@@ -192,31 +166,16 @@ def test_campaign_partial_context_map_keeps_missing_scope_unbound(monkeypatch):
     assert result["b"] == [None]
 
 
-def _legacy_contract(monkeypatch):
-    # A legacy supplier can answer only family/rate, even when its Python
-    # method accepts the new keyword. It supplies no runtime-scope evidence.
-    cell = SimpleNamespace(
-        cell_id="legacy_cell", route_status="backed_with_serve_flag",
-        activation_contract="fp8_per_token_dynamic",
-        requires_serve_flags=("TESSERA_SERVE_MODE=resident",),
-    )
-    contract = SimpleNamespace(
-        commit="legacy-fixture", lane_schema="tessera.lane-eligibility.v4",
-        requires_serving_context=False,
-        max_world_size={"TESSERA_E4M3_K1": 1},
-        attested_rungs={"TESSERA_E4M3_K1": (1024,)},
-        governs=lambda family: family == "TESSERA_E4M3_K1",
-        native_cells=lambda *args, **kwargs: (cell,),
-    )
-    monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: contract)
+def _legacy_contract(monkeypatch, payload):
+    _contract(monkeypatch, payload)
 
 
 @pytest.mark.parametrize("context", [
-    None, _Context(), _Context(execution_mode="compiled"),
-    _Context(structure="routed_moe"),
+    None, _context(), _context(execution_mode="compiled"),
+    _context(structure="routed_moe"),
 ])
-def test_legacy_menu_cannot_attest_a_new_runtime_context(monkeypatch, context):
-    _legacy_contract(monkeypatch)
+def test_legacy_menu_cannot_attest_a_new_runtime_context(monkeypatch, context, legacy_v4_contract):
+    _legacy_contract(monkeypatch, legacy_v4_contract)
 
     admission = menu.route_admission(
         "TESSERA_E4M3_K1_R1024", serving_context=context)
@@ -232,9 +191,10 @@ def test_legacy_menu_cannot_attest_a_new_runtime_context(monkeypatch, context):
         assert admission.requires_serve_flags == ()
 
 
-def test_legacy_context_refusal_survives_resolved_route_provenance(monkeypatch):
-    _legacy_contract(monkeypatch)
-    context = _Context(structure="routed_moe", execution_mode="compiled")
+def test_legacy_context_refusal_survives_resolved_route_provenance(
+        monkeypatch, legacy_v4_contract):
+    _legacy_contract(monkeypatch, legacy_v4_contract)
+    context = _context(structure="routed_moe", execution_mode="compiled")
 
     resolved = menu.tessera_resolved_serving_lane(
         "TESSERA_E4M3_K1_R1024", serving_context=context)

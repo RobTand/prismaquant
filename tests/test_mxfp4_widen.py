@@ -6,9 +6,9 @@ carried byte-identically. Both halves are pinned exhaustively where the input
 space allows it (all 256 byte codes, all 256 scale codes) rather than sampled,
 because "exact" is not a statistical property.
 
-Real-checkpoint arms run only when the DSv4-Flash source is present; they read
-a handful of small tensor slices from the safetensors headers and never load a
-layer. Skipped otherwise so the suite stays hermetic on CI.
+Real-checkpoint arms run only when the DSv4-Flash source is present. They load
+complete selected weight and scale tensors, then decode the first 16 rows.
+They do not load a whole layer and are skipped when that source is absent.
 """
 from __future__ import annotations
 
@@ -260,7 +260,7 @@ def test_grouped_mxfp8_route_is_recorded_as_not_backed():
         MXFP8_GROUPED_ROUTE_EVIDENCE,
         MXFP8_GROUPED_ROUTE_STATUS,
     )
-    from prismaquant.allocator_candidates import (
+    from prismaquant.source_format_contracts import (
         ROUTE_STATUS_BACKED,
         ROUTE_STATUS_PENDING,
     )
@@ -275,6 +275,6 @@ def test_grouped_mxfp8_route_is_recorded_as_not_backed():
 def test_mxfp8_wire_id_is_the_one_the_consumer_routes():
     """Widened bytes are only declarable under an id the consumer knows."""
 
-    from prismaquant.allocator_candidates import REQUANT_WIRE_FORMAT_IDS
+    from prismaquant.source_format_contracts import REQUANT_WIRE_FORMAT_IDS
 
     assert REQUANT_WIRE_FORMAT_IDS["MXFP8_UE8M0_G32"] == "mxfp8_e4m3_e8m0_g32"

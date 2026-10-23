@@ -230,11 +230,14 @@ class _FakeNvidiaSmi:
     def terminate(self):
         self.terminated = True
 
+    def poll(self):
+        return 0
+
     def wait(self, timeout=None):
         return 0
 
 
-def test_gpu_power_sampler_block_is_unchanged(monkeypatch):
+def test_gpu_power_sampler_keeps_readings_and_marks_early_eof(monkeypatch):
     launched = []
 
     def popen(argv, **kwargs):
@@ -249,7 +252,8 @@ def test_gpu_power_sampler_block_is_unchanged(monkeypatch):
     assert launched[0][1]["stderr"] is subprocess.DEVNULL
     assert sampler.stop() == {
         "sample_count": 2, "interval_s": 1.0, "gpu_joules": 42.75,
-        "gpu_power_w_p50": 30.25, "gpu_power_w_p95": 12.5, "gpu_power_w_max": 30.25}
+        "gpu_power_w_p50": 12.5, "gpu_power_w_p95": 30.25, "gpu_power_w_max": 30.25,
+        "sampler_error": "sampler process ended before requested stop"}
 
 
 def test_gpu_power_sampler_records_a_failed_launch(monkeypatch):

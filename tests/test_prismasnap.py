@@ -5,7 +5,8 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-import prismaquant.export_native_compressed as native
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.native_render_levers import NativeRenderLevers
 import prismaquant.prismasnap as snap
 import prismaquant.prismasnap_checkpoint as checkpoint
 from prismaquant.prismasnap_contract import refuse_prismasnap_for_unvalidated_lane
@@ -37,20 +38,21 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
 ) -> None:
     generator = torch.Generator().manual_seed(17)
     weight = torch.randn(7, 32, generator=generator) * 0.31
-    monkeypatch.delenv(native.NVFP4_SCALE_RULE_ENV, raising=False)
+    monkeypatch.delenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, raising=False)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", raising=False)
-    monkeypatch.setattr(native, "_NVFP4_SCALE_RULE", None)
 
-    legacy = native._rtn_dequant_nvfp4(weight, group_size=16)
-    explicit_before = native.render_nvfp4_dequant(weight)
+    default_recipe = NativeRenderLevers()
+    legacy = _native_render_codec.rtn_dequant_nvfp4(
+        weight, group_size=16, levers=default_recipe)
+    explicit_before = _native_render_codec.render_nvfp4_dequant(weight)
     grouped = weight.reshape(7, 2, 16)
-    _legacy_scale, legacy_global = native._select_nvfp4_pack_scales_and_global(
-        grouped
+    _legacy_scale, legacy_global = _native_render_codec.select_nvfp4_pack_scales_and_global(
+        grouped, levers=default_recipe
     )
-    explicit_global_before = native.nvfp4_global_real(weight)
-    explicit_joint_before = native.render_nvfp4_dequant(
+    explicit_global_before = _native_render_codec.nvfp4_global_real(weight)
+    explicit_joint_before = _native_render_codec.render_nvfp4_dequant(
         weight,
-        scale_rule=native.NVFP4_SCALE_RULE_JOINT_MSE,
+        scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE,
         joint_scale_levels=(6.0, 4.0),
     )
     torch.testing.assert_close(explicit_before, legacy, rtol=0.0, atol=0.0)
@@ -60,23 +62,22 @@ def test_explicit_codec_is_environment_independent_and_default_compatible(
 
     # Both historical process-global selectors now disagree with the explicit
     # request.  The receipt-selected codec must nevertheless be byte-stable.
-    monkeypatch.setenv(native.NVFP4_SCALE_RULE_ENV, "joint_mse")
+    monkeypatch.setenv(_native_render_codec.NVFP4_SCALE_RULE_ENV, "invalid-after-explicit-receipt")
     monkeypatch.setenv("PRISMAQUANT_NVFP4_SNAPPED_SCALE_SCORING", "1")
-    monkeypatch.setattr(native, "_NVFP4_SCALE_RULE", "four_over_six_mse")
-    monkeypatch.setattr(native, "_NVFP4_JOINT_SCALE_LEVELS", (6.0, 3.0, 1.0))
-    explicit_after = native.render_nvfp4_dequant(
+    monkeypatch.setenv("PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS", "6,3,1")
+    explicit_after = _native_render_codec.render_nvfp4_dequant(
         weight,
-        scale_rule=native.NVFP4_SCALE_RULE_STATIC_6,
+        scale_rule=_native_render_codec.NVFP4_SCALE_RULE_STATIC_6,
         snapped_scale_scoring=False,
     )
-    explicit_global_after = native.nvfp4_global_real(
+    explicit_global_after = _native_render_codec.nvfp4_global_real(
         weight,
-        scale_rule=native.NVFP4_SCALE_RULE_STATIC_6,
+        scale_rule=_native_render_codec.NVFP4_SCALE_RULE_STATIC_6,
         snapped_scale_scoring=False,
     )
-    explicit_joint_after = native.render_nvfp4_dequant(
+    explicit_joint_after = _native_render_codec.render_nvfp4_dequant(
         weight,
-        scale_rule=native.NVFP4_SCALE_RULE_JOINT_MSE,
+        scale_rule=_native_render_codec.NVFP4_SCALE_RULE_JOINT_MSE,
         snapped_scale_scoring=False,
         joint_scale_levels=(6.0, 4.0),
     )
@@ -153,19 +154,19 @@ def test_measured_v1_derives_one_global_per_logical_tensor() -> None:
     )
     torch.testing.assert_close(
         globals_by_group["fused.low"],
-        native.nvfp4_global_real(low.weight),
+        _native_render_codec.nvfp4_global_real(low.weight),
         rtol=0.0,
         atol=0.0,
     )
     torch.testing.assert_close(
         globals_by_group["fused.high_stationary"],
-        native.nvfp4_global_real(high_stationary.weight),
+        _native_render_codec.nvfp4_global_real(high_stationary.weight),
         rtol=0.0,
         atol=0.0,
     )
     torch.testing.assert_close(
         globals_by_group["independent"],
-        native.nvfp4_global_real(independent.weight),
+        _native_render_codec.nvfp4_global_real(independent.weight),
         rtol=0.0,
         atol=0.0,
     )

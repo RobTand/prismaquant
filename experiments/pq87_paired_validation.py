@@ -122,45 +122,8 @@ def require_ppl_measurement(result, prompt_count):
     return result
 
 
-def require_container_name_available(name):
-    result = subprocess.run(["docker", "inspect", name], stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, timeout=10)
-    if result.returncode == 0:
-        raise ValueError("validation container name already exists")
-    if not any(f"no such {kind}: {name}" in result.stdout.lower() for kind in ("object", "container")):
-        raise ValueError("cannot establish validation container name is unused")
-
-
-def cleanup_owned_container(cidfile, name, owner, nonce, *, attempted):
-    """Never stop by a potentially borrowed name, even after failed creation."""
-    evidence = {"safe": not attempted, "commands": [], "attempted": attempted}
-    if not attempted:
-        return evidence
-    try:
-        cid = cidfile.read_text().strip()
-        if not re.fullmatch(r"[0-9a-f]{64}", cid):
-            raise ValueError("Docker did not publish an exact container ID")
-        inspected = subprocess.run(["docker", "inspect", cid], stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, timeout=10)
-        evidence["commands"].append({"argv": ["docker", "inspect", cid],
-            "returncode": inspected.returncode, "output": inspected.stdout})
-        if inspected.returncode != 0:
-            if any(f"no such {kind}: {cid}" in inspected.stdout.lower() for kind in ("object", "container")):
-                evidence["safe"] = True
-                return evidence
-            raise ValueError("cannot inspect created container")
-        observed = json.loads(inspected.stdout)[0]
-        labels = observed.get("Config", {}).get("Labels") or {}
-        if (observed.get("Id") != cid or observed.get("Name") != "/" + name
-                or labels.get("prismabuild.action") != owner
-                or labels.get("prismaquant.pq87.campaign") != nonce):
-            raise ValueError("created container ownership differs")
-        cleanup = instrument.cleanup_container(cid)
-        evidence["commands"].extend(cleanup["commands"])
-        evidence.update(safe=cleanup["safe"], container_id=cid)
-    except Exception as exc:
-        evidence["error"] = repr(exc)
-    return evidence
+require_container_name_available = instrument.require_container_name_available
+cleanup_owned_container = instrument.cleanup_owned_container
 
 
 def _interrupt(_signal, _frame):

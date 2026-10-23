@@ -303,6 +303,8 @@ for (const branch of ["fix/something", "prismaquant-124", "prismaquant-123-", "p
 for (const options of [
   { branch: "ig/train/x-9" },
   { branch: "ig/2518-old" },
+  { branch: "pg/PRISMAQUANT-2353/PRISMAQUANT-2353.a1" },
+  { branch: "pg-train/3" },
   { branch: "release" },
   { branch: "release-v1" },
   { branch: "fix/something", createdAt: "2026-10-09T16:59:59Z" },

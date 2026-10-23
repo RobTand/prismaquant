@@ -1,9 +1,9 @@
 """Failing-branch coverage for the PrismaSnap lane-admission contract.
 
-`prismasnap_contract.main` is the entry `run-pipeline.sh` invokes before any
-expensive stage, and `refuse_prismasnap_lane_before_output` decorates four
-programmatic exporters.  Both had production call sites and no test, so the
-gates that fail closed on a snapped source were themselves unexercised.
+`prismasnap_contract.main` is the entry `run-pipeline.sh` invokes before
+expensive stages. These fixtures cover its refusal branches and the generic
+`refuse_prismasnap_lane_before_output` decorator. The decorator currently has
+no live exporter call sites.
 """
 
 from __future__ import annotations

@@ -1285,7 +1285,8 @@ def routed_owner_rank_resources(panel, ranks, *, where):
     retaining every rank's. That is a maximum over ranks of one interval, not a
     sum of leaf timings and not a world-wide average.
     """
-    world_size = _native_world_size(panel)
+    from .native_panel_kind import panel_kind
+    world_size = panel_kind(panel).world_size(panel)
     roster = sorted(ranks, key=lambda item: item[0])
     covered = [rank for rank, _receipt, _observation in roster]
     if covered != list(range(world_size)):
@@ -1349,23 +1350,6 @@ def routed_slowest_rank(vector, phase):
     return medians.index(max(medians))
 
 
-def _native_world_size(panel):
-    """The world a native panel was measured in, from its own two records.
-
-    ``runtime.execution.tensor_parallel`` is the box's world; a routed owner's
-    ``execution.tensor_parallel`` is the world its priced member shapes were cut
-    for. They are different facts, and a panel stating two different worlds is
-    refused rather than resolved in whichever direction a reader checks first.
-    """
-    runtime = panel["runtime"]
-    execution = runtime.get("execution") if isinstance(runtime, Mapping) else None
-    if not isinstance(execution, Mapping) or "tensor_parallel" not in execution:
-        raise RuntimePriceError("native runtime record names no execution world size")
-    world = execution["tensor_parallel"]
-    owner = panel.get("execution")
-    if isinstance(owner, Mapping) and "tensor_parallel" in owner:
-        _equal(owner["tensor_parallel"], world, "native owner/runtime world size")
-    return world
 
 
 def _served_artifact_families(relation):
@@ -1442,8 +1426,7 @@ def _require_served_route_family(row, served):
 
 def admit_native_rows(table, relation):
     """Reuse exact same-panel producer gates before accepting v2 table rows."""
-    from .native_moe_panel import consume_moe_receipt
-    from .native_operator_panel import consume_native_receipt, operator_route_identity
+    from .native_panel_kind import panel_kind
     reader = ArtifactReader(Path(table.source_path).parent)
     bindings = table.native_receipt_bindings
     if not isinstance(bindings, (list, tuple)):
@@ -1472,7 +1455,7 @@ def admit_native_rows(table, relation):
         _, panel = reader.json(binding["panel"], "independent native panel")
         cohort_panels.append(panel)
         receipt_path, receipt = reader.json(binding["receipt"], "native receipt")
-        from .native_execution_binding import resolve_native_receipt_view
+        from .native_panel_kind import resolve_native_receipt_view
         receipt = resolve_native_receipt_view(receipt, panel)
         trace_path, _ = reader.bytes(binding["memory_trace"], "native memory trace")
         run = relation["runs"][run_id]
@@ -1483,15 +1466,16 @@ def admit_native_rows(table, relation):
         # The priced world is a coordinate of the row, not a label: member
         # shapes, per-rank bytes and the timing that includes the collectives
         # all belong to the world the panel was measured in.
-        _equal(_native_world_size(panel), table.context.tensor_parallel, "native panel world size")
+        kind = panel_kind(panel)
+        _equal(kind.world_size(panel), table.context.tensor_parallel, "native panel world size")
         if table.context.batch_size != 1:
             raise RuntimePriceError("native panel admission currently requires batch size one")
-        if panel["schema"] == "tessera.native_moe_panel.v1":
-            _equal(run["raw"]["schema"], "tessera.native_moe_runtime.v1", "native routed runtime scope")
+        expected_binding = kind.row_binding(panel)
+        consume = kind.consume
+        wire_records = kind.wire_records(panel)
+        _equal(run["raw"]["schema"], kind.runtime_schema, "native runtime scope")
+        if kind.routed:
             _equal(panel["serving_config_sha256"], relation["configuration_sha256"], "native panel configuration")
-            wire_records = [member["wire"]["record"] for member in panel["members"]]
-            consume = consume_moe_receipt
-            expected_binding = panel["runtime_binding"]
             # A world above one is priced from every rank's own receipt, so the
             # binding roster is read as a roster: each peer entry's receipt is
             # rehashed, must carry the same frozen panel, and must declare the
@@ -1508,17 +1492,8 @@ def admit_native_rows(table, relation):
                 roster.append((peer["rank"], peer_path, peer_receipt, peer_trace,
                                peer["receipt"]["sha256"]))
             roster.sort(key=lambda entry: entry[0])
-        elif panel["schema"] == "tessera.native_dense_panel.v1":
-            _equal(run["raw"]["schema"], "tessera.native_dense_runtime.v1", "native dense runtime scope")
-            wire_records = [panel["wire"]["record"]]
-            consume = consume_native_receipt
-            roster = [(0, receipt_path, receipt, trace_path, binding["receipt"]["sha256"])]
-            expected_binding = {"member_formats": {panel["unit"]: panel["format"]},
-                "member_operator_identity_sha256": {panel["unit"]: panel["joint_operator_identity_sha256"]},
-                "member_shapes": {panel["unit"]: panel["shape"]},
-                "operator_route": operator_route_identity(panel["phases"]["prefill"]["expected_route"])}
         else:
-            raise RuntimePriceError("unsupported native producer panel")
+            roster = [(0, receipt_path, receipt, trace_path, binding["receipt"]["sha256"])]
         cited_paths = {rank: path for rank, path, _receipt, _trace, _sha in roster}
         cited_paths_sha256 = {rank: sha for rank, _path, _receipt, _trace, sha in roster}
         # Legacy callers retain only the original common scalar. Companion

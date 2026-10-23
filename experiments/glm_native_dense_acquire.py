@@ -73,7 +73,7 @@ def prepare(args):
     del full,hessians
     quantizers=None
     if args.activation_quantizers:
-        from prismaquant.tessera_runtime_contract import _parse_activation_contract,_parse_activation_generated
+        from prismaquant.tessera_runtime_contract import _parse_activation_platform_entry
         block=json.loads(args.activation_quantizers.read_text())
         # The existing producer validates the emitted image-scoped table.
         # Parse its actual contract rows through the typed reader API; retain
@@ -82,13 +82,13 @@ def prepare(args):
         if set(block['platforms'])!={'sm_121'}:raise ValueError('quantizer platform differs')
         entry=block['platforms']['sm_121']
         if entry['generated']['image']!=IMAGE:raise ValueError('quantizer runtime differs')
-        generated=_parse_activation_generated(entry['generated'],'native measurement generated')
-        quantizers={'sm_121':{name:_parse_activation_contract(value,platform='sm_121',name=name,
-            where='native measurement '+name,generated=generated) for name,value in entry['contracts'].items()}}
+        image_key,contracts=_parse_activation_platform_entry(
+            entry,platform='sm_121',where='native measurement')
+        quantizers={'sm_121':{image_key:contracts}}
     inputs,tensors=prepare_native_inputs(cache,weight,acts[UNIT].to(torch.bfloat16),unit=UNIT,
         format_name=args.format,calibration_receipt=prepared['calibration_input'],wire_blob=blob,
         wire_record=record,encoding_identity=encoding,prefill_rows=512,decode_rows=1,
-        max_resident_bytes=2<<30,activation_quantizers=quantizers)
+        max_resident_bytes=2<<30,activation_quantizers=quantizers,runtime_image=IMAGE)
     inputs['runtime_image']=IMAGE
     args.out.mkdir(parents=True,exist_ok=False)
     if args.activation_quantizers:(args.out/'activation-quantizers.json').write_bytes(args.activation_quantizers.read_bytes())

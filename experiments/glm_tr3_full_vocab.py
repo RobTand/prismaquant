@@ -37,11 +37,7 @@ def bound_json(path, expected):
 
 def cached_checkpoint_identity(model, cache):
     """Use the existing cache, refusing any shard that would require rehashing."""
-    from prismaquant.cost_streaming import (
-        _local_checkpoint_shards, _read_source_checkpoint_digest_cache,
-        _streamed_identity_stat_fingerprint, canonical_fingerprint_key,
-        build_source_checkpoint_identity,
-    )
+    from prismaquant.streamed_model_identity import _local_checkpoint_shards, _read_source_checkpoint_digest_cache, _streamed_identity_stat_fingerprint, canonical_fingerprint_key, build_source_checkpoint_identity
     _, shards = _local_checkpoint_shards(model)
     extras = list(Path(model).rglob("*.safetensors"))
     required = {p.resolve() for p in list(shards or ()) + extras}

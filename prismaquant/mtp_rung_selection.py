@@ -93,6 +93,7 @@ class AcceptancePoint:
     Identify the rung by ``rung_name`` (matched against ``RungPoint.name`` and
     ``E_by_bits`` keys) OR by ``bits``; at least one is required. The fit maps a
     point to its ``E`` via ``key = bits if bits is not None else rung_name``.
+    The selector resolves numeric keys to a unique menu rung before fitting.
     """
 
     measured_acceptance: float
@@ -351,6 +352,25 @@ def _continuous_bstar_lambertw(a_inf, beta, const: ServeConstants):
 # --------------------------------------------------------------------------- #
 # The selector (doc §3)
 # --------------------------------------------------------------------------- #
+def _resolve_acceptance_points(menu, points):
+    resolved = []
+    for point in points:
+        if point.bits is None:
+            resolved.append(point)
+            continue
+        matches = [rung for rung in menu if rung.bits == point.bits]
+        if not matches:
+            raise KeyError(
+                f"select_rung: no rung has bits={point.bits!r}")
+        if len(matches) != 1:
+            raise ValueError(
+                f"select_rung: ambiguous acceptance bits={point.bits!r}; "
+                "identify the rung by rung_name instead")
+        resolved.append(AcceptancePoint(
+            point.measured_acceptance, rung_name=matches[0].name))
+    return resolved
+
+
 def select_rung(menu, constants: ServeConstants, accept_points,
                 mem_budget_bytes: int, k: int = 1,
                 h_source: str = "unknown",
@@ -379,7 +399,7 @@ def select_rung(menu, constants: ServeConstants, accept_points,
     Raises ValueError if no rung passes the memory gate (nothing to ship).
     """
     menu = list(menu)
-    accept_points = list(accept_points)  # may be iterated several times below
+    submitted_accept_points = list(accept_points)
     if not menu:
         raise ValueError("select_rung: empty menu")
     if k < 1:
@@ -395,6 +415,7 @@ def select_rung(menu, constants: ServeConstants, accept_points,
             f"(smallest is {smallest.name} @ {smallest.resident_bytes} B)")
 
     # 2. Fit -----------------------------------------------------------------
+    accept_points = _resolve_acceptance_points(menu, submitted_accept_points)
     E_by_bits = {r.name: r.E for r in menu}
     a_inf, beta, fit_mode = fit_acceptance(accept_points, E_by_bits)
 
@@ -463,12 +484,12 @@ def select_rung(menu, constants: ServeConstants, accept_points,
             "n_points": len(list(accept_points)),
             "beta_negative": (beta is not None and beta < 0),
             "points": [
-                {"rung": p.rung_name, "bits": p.bits,
+                {"rung": p.rung_name, "bits": submitted.bits,
                  "E": E_by_bits.get(p.key),
                  "sqrt_E": (math.sqrt(E_by_bits[p.key])
                             if p.key in E_by_bits else None),
                  "acceptance": p.measured_acceptance}
-                for p in accept_points
+                for p, submitted in zip(accept_points, submitted_accept_points)
             ],
         },
         "memory": {

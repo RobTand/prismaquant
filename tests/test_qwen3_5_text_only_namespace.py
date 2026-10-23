@@ -110,13 +110,9 @@ def test_the_checkpoint_namespace_does_not_move():
 # Recorded FROM vLLM, not from the spec, inside the serving image
 # `gridbook:0.8.7-clean-98916b0` (vllm 0.26.1rc1.dev693+g7f7a32cfe.d20260812) on
 # 2026-08-15 by reading `cls.hf_to_vllm_mapper.orig_to_new_prefix` for each
-# class.  The lane has since moved to `gridbook:0.8.8-clean-064a4cb`, which is
-# built FROM that image and carries the same vLLM build, so the fixture still
-# describes the runtime that serves.  This is the only fixture here that is independent of PrismaQuant's own
-# map: every other check in this file, and every static check that passed before
-# the failed serve, takes the producer's spelling as its input and therefore
-# cannot falsify it.  If vLLM changes these prefixes, this fixture is what
-# should fail.
+# class. The historical `gridbook:0.8.8-clean-064a4cb` image retained that
+# vLLM build. This recorded map is independent of PrismaQuant's own spelling;
+# it does not attest the current serving runtime's prefixes.
 VLLM_PREFIX_MAP = {
     "Qwen3_5ForCausalLM": {"model.language_model.": "model."},
     "Qwen3_5ForConditionalGeneration": {

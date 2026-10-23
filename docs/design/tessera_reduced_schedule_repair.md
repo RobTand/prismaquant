@@ -2,6 +2,9 @@
 
 CPU slice #1776, Refs #495. This extends the [next-work contract](tessera_reduced_schedule.md); it does not execute the live research campaign.
 
+This prototype was removed on 2026-10-14. Its implementation remains in Git
+history. The contracts below describe the retired experiment.
+
 ## Inputs
 
 `plan_reduced_schedule_repair(history, *, max_rounds, expected_previous_sha256=None)` consumes an ordered history of JSON objects using `prismaquant.stack_reduced_schedule_input.v1`. Each snapshot supplies its current assignment and scalar observations. The existing decoder and planner validate each snapshot; no solver callback or replacement allocator is allowed.

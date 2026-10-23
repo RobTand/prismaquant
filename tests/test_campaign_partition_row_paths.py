@@ -11,20 +11,20 @@ import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImp
 
 @pytest.mark.parametrize("row_id", ["row-0000", "row-0075", "row-0001-p0000", "row-0001-p0287"])
 def test_shared_readset_owner_recognizes_exact_row_path(row_id):
-    producer = dispatch._manifest_producer()
+    producer = dispatch.campaign_data_manifests
     row = {"argv": ["python", "--units", f"/workspace/units/{row_id}.json"]}
     assert producer.row_id_of(row) == row_id
 
 
 @pytest.mark.parametrize("row_id", ["row-0001-p", "row-0001-p001", "row-0001-p00000", "row-0001-part0000"])
 def test_shared_readset_owner_does_not_guess_malformed_partition_id(row_id):
-    producer = dispatch._manifest_producer()
+    producer = dispatch.campaign_data_manifests
     row = {"argv": ["python", "--units", f"/workspace/units/{row_id}.json"]}
     assert producer.row_id_of(row) is None
 
 
 def test_shared_readset_owner_refuses_ambiguous_partition_paths():
-    producer = dispatch._manifest_producer()
+    producer = dispatch.campaign_data_manifests
     row = {"argv": ["python", "--units", "/workspace/units/row-0001-p0000.json",
                     "--other", "/workspace/units/row-0001-p0001.json"]}
     assert producer.row_id_of(row) is None

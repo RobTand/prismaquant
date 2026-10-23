@@ -95,28 +95,38 @@ def test_a_requeued_optional_task_gives_the_lane_to_an_urgent_one():
     assert waiting.requeues >= 1 and stager.requeues == waiting.requeues
 
 
-def test_a_requeued_task_waits_its_delay_and_is_busy_only_while_it_runs():
-    from prismaquant.produced_stager import OPTIONAL
+def test_a_requeued_task_waits_its_delay_and_is_busy_only_while_it_runs(monkeypatch):
+    from prismaquant import produced_stager
+    from prismaquant.produced_stager import OPTIONAL, URGENT, Requeue
 
-    landed, runs, done = threading.Event(), [], []
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(produced_stager, "time",
+                        SimpleNamespace(monotonic=lambda: clock.now))
+    runs, done = [], []
+
+    def step():
+        runs.append(clock.now)
+        clock.now += 0.25
+        return Requeue(10.0) if len(runs) == 1 else "landed"
+
     stager = _stager(on_done=done.append)
     try:
-        task = stager.submit(_waiting_on(landed, delay_s=0.2, runs=runs),
-                             kind=OPTIONAL, label="publish-ahead")
-        time.sleep(0.7)
-        landed.set()
+        task = stager.submit(step, kind=OPTIONAL, label="publish-ahead")
+        stager.submit(lambda: None, kind=OPTIONAL, label="first-barrier").wait(5.0)
+        assert runs == [100.0]
+        clock.now = 109.25
+        stager.submit(lambda: None, kind=OPTIONAL, label="before-due").wait(5.0)
+        assert runs == [100.0]
+        clock.now = 110.25
+        stager.submit(lambda: None, kind=URGENT, label="wake").wait(5.0)
         assert task.wait(5.0) == "landed"
         assert stager.drain(5.0)
     finally:
-        landed.set()
         stager.close(timeout=10.0)
-    gaps = [later - earlier for earlier, later in zip(runs, runs[1:])]
-    assert gaps and min(gaps) >= 0.19, (
-        "a requeued task is not taken again before its delay", gaps)
-    assert done == [task], "finished once, not once per run"
-    assert task.busy_s < 0.2, (
-        "the deferrals are not busy time", task.busy_s)
-    assert task.requeues == len(runs) - 1
+    assert runs == [100.0, 110.25]
+    assert done.count(task) == 1
+    assert task.busy_s == 0.5
+    assert task.requeues == 1
 
 
 def test_optional_work_queued_behind_a_requeued_task_is_not_held_by_it():
@@ -364,7 +374,7 @@ def _read_plane(storage, batches, *, then=None):
     finds is what was asked, not a race with the fleet.
     """
 
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     # ``then`` only when asked for: the parent's signature has no such
     # argument, and the red run must fail on staging, not on a keyword.
@@ -491,7 +501,7 @@ def test_write_time_publication_leaves_the_lookahead_its_room(
     assert storage.drain_produced_stager(60.0)
     with chain._fleet(q, tmp_path):
         chain._strict(monkeypatch, env, pb_repo, q)
-        from prismaquant.cost_streaming import prefetched_boundary_batches
+        from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
         with prefetched_boundary_batches(storage, batches, 0) as windows:
             for index, _batch, _tensor, _incoming in windows:
                 if index != 0:

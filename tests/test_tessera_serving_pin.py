@@ -196,7 +196,7 @@ def test_the_pin_transcribes_the_installed_contracts_native_extensions():
     """The §7.4 chain: contract -> pin -> fingerprint, refusing at each link."""
     with as_file(contract_module.contract_path()) as path:
         raw = path.read_bytes()
-        contract = contract_module._load_at(
+        contract = contract_module.read_tessera_contract(
             str(path), hashlib.sha256(raw).hexdigest(), "unreviewed")
     contract_module.require_pin_native_extensions_match_contract(contract)
     pinned = {ext.module_name_prefix

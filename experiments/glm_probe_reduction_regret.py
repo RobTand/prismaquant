@@ -352,13 +352,14 @@ def lambda_star(items, budget):
 
 
 # --------------------------------------------------------------------------
-# Sampling: reuse the campaign's own draw + Horvitz-Thompson estimator
+# Sampling: reuse the campaign's own draw + Horvitz-Thompson estimator, which
+# live in its table owner
 # --------------------------------------------------------------------------
 
 def _load_campaign_sampling():
     try:
-        from prismaquant import tessera_campaign as tc  # noqa
-        return tc, "prismaquant.tessera_campaign"
+        from prismaquant import tessera_campaign_table as tc  # noqa
+        return tc, "prismaquant.tessera_campaign_table"
     except Exception as exc:  # pragma: no cover - PB run has the real one
         return None, f"local_fallback ({type(exc).__name__}: {exc})"
 
@@ -368,7 +369,7 @@ TC, SAMPLING_SOURCE = _load_campaign_sampling()
 
 def _local_draw(weights, n, *, seed, stack):
     """Fallback mirror of draw_stack_sample (randomized systematic PPS with a
-    take-all stratum).  Used only when the campaign module cannot import."""
+    take-all stratum).  Used only when the campaign table cannot import."""
     names = sorted(weights)
     sizes = {k: float(weights[k]) for k in names}
     frame = [k for k in names if sizes[k] > 0]

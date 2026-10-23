@@ -14,6 +14,53 @@ REPO = Path(__file__).resolve().parents[1]
 CENSUS = REPO / "docs/audits/digest_site_census_pq1301_2026-10-04.json"
 SOURCE_COMMIT = "30b6231df000726beda55fb6706e641a5cb2ccb0"
 GENERATED = "2026-10-09"
+REVALIDATED_COMMIT = "914bf79807120fa60f433714e95cffd44b917d92"
+
+# Keep the #2540 snapshot immutable. A separately reviewed integration snapshot
+# admits main's surrounding refactors, not arbitrary changes to callers/owners.
+# All six retained source segments are unchanged. The new file-range/JSON
+# recipes still own none of their acquisition or BLAKE2b result contracts.
+# Each identity is (Git blob, SHA-256); no historical Git objects are needed.
+MANIFEST_SOURCE_BLOBS = {
+    "prismaquant/perturbed_x_cache.py": (
+        "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+        "cebc40e00f04a9f411e5d8fb027adfef4f6011e8541b2acb19bdf36f496f5391",
+    ),
+    "prismaquant/tessera_census_cache.py": (
+        "a7e64371421c65c16b3c587c8034b5a15336963e",
+        "3914f446032630aeb20dd5517c1875f4453d7a024d7a820c7e6e483e2f958e7c",
+    ),
+    "prismaquant/digests.py": (
+        "a2f8936b77a09eda702bd704c40ea3d6970ff1ef",
+        "1cde1f0edd7b210beb5ff67b8efef6d06d05ae6008c84550b7b0db00a28be9b6",
+    ),
+    "prismaquant/tensor_digests.py": (
+        "5c364c5d7c8fadf78ad9917668e72e1262546278",
+        "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037",
+    ),
+}
+CURRENT_SOURCE_BLOBS = {
+    **MANIFEST_SOURCE_BLOBS,
+    "prismaquant/perturbed_x_cache.py": (
+        "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
+        "4daf929763ce5eefc5c3ed31c0bfaa2489e29b3cf7827b5ecf17fd82b9bfdfbf",
+    ),
+    "prismaquant/tessera_census_cache.py": (
+        "b8158910df6d22720611dd9b8588bf51777170c4",
+        "c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1",
+    ),
+    "prismaquant/digests.py": (
+        "65c98d3bdeb16035ef4b104dc159e986e2279897",
+        "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18",
+    ),
+}
+
+# The original producer test is archived, not runnable current coverage. Keep its
+# historical evidence string below and check the active calibration-hash oracle.
+CURRENT_REFERENCES = {
+    "tests/test_sample_parallel_probe.py::test_prepare_artifact_binds_every_local_slice":
+        "tests/test_tensor_digests_1384.py::test_calibration_data_hash_keeps_its_value",
+}
 
 SCOPES = {
     "prismaquant/perturbed_x_cache.py": [
@@ -91,17 +138,26 @@ def _manifest_calls() -> dict[str, dict]:
     # establish freshness without requiring historical git objects in a checkout.
     assert refresh["source_commit"] == SOURCE_COMMIT, "wrong manifest source"
     assert refresh["generated"] == GENERATED, "wrong manifest generation"
-    for rel in (*SCOPES, "prismaquant/digests.py", "prismaquant/tensor_digests.py"):
+    revalidation = refresh["verification"]["guarded_read_retention_2637"]["merge_revalidation"]
+    assert revalidation["source_commit"] == REVALIDATED_COMMIT, "wrong revalidation source"
+    assert revalidation["source_identity_reference"] == (
+        "tests/test_guarded_read_digest_retention_2637.py::CURRENT_SOURCE_BLOBS"
+    )
+    assert revalidation["active_calibration_reference"] == next(iter(CURRENT_REFERENCES.values()))
+    for rel, frozen_identity in MANIFEST_SOURCE_BLOBS.items():
+        identity = refresh["source_blobs"][rel]
+        assert identity["mode"] == "100644", rel
+        assert (identity["git_blob"], identity["sha256"]) == frozen_identity, rel
+        if rel in refresh["owner_contracts"]:
+            assert refresh["owner_contracts"][rel]["source_blob"] == identity["git_blob"], rel
+
         path = REPO / rel
         assert not path.is_symlink(), rel
         raw = path.read_bytes()
-        identity = refresh["source_blobs"][rel]
-        assert identity["mode"] == "100644", rel
         blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
-        assert blob == identity["git_blob"], f"stale manifest source: {rel}"
-        assert hashlib.sha256(raw).hexdigest() == identity["sha256"], rel
-        if rel in refresh["owner_contracts"]:
-            assert refresh["owner_contracts"][rel]["source_blob"] == blob, rel
+        assert (blob, hashlib.sha256(raw).hexdigest()) == CURRENT_SOURCE_BLOBS[rel], (
+            f"stale manifest source: {rel}"
+        )
 
     calls = refresh["calls"]
     indexed = {row["id"]: row for row in calls}
@@ -152,7 +208,8 @@ def test_manifest_keeps_gap_dispositions():
     indexed = _manifest_calls()
     for call_id in IDS:
         _assert_retention(indexed[call_id])
-        rel, test_scope = IDS[call_id][1].split("::")
+        reference = IDS[call_id][1]
+        rel, test_scope = CURRENT_REFERENCES.get(reference, reference).split("::")
         _scope_node(ast.parse((REPO / rel).read_text()), test_scope)
     refresh = json.loads(CENSUS.read_text())["refresh_2540"]
     cohorts = refresh["contract_cohorts"]
@@ -188,7 +245,38 @@ def test_manifest_refuses_missing_refresh(tmp_path, monkeypatch):
         _manifest_calls()
 
 
-@pytest.mark.parametrize("changed", [*SCOPES, "prismaquant/digests.py", "prismaquant/tensor_digests.py"])
+@pytest.mark.parametrize("rel", MANIFEST_SOURCE_BLOBS)
+@pytest.mark.parametrize("field,value", [
+    ("git_blob", "0" * 40),
+    ("sha256", "0" * 64),
+    ("mode", "100755"),
+])
+def test_manifest_refuses_rewritten_snapshot_identity(tmp_path, monkeypatch, rel, field, value):
+    document = json.loads(CENSUS.read_text())
+    document["refresh_2540"]["source_blobs"][rel][field] = value
+    census = tmp_path / "census.json"
+    census.write_text(json.dumps(document))
+    monkeypatch.setitem(globals(), "CENSUS", census)
+    with pytest.raises(AssertionError):
+        _manifest_calls()
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_manifest_requires_reviewed_integration_source(tmp_path, monkeypatch, missing):
+    document = json.loads(CENSUS.read_text())
+    retention = document["refresh_2540"]["verification"]["guarded_read_retention_2637"]
+    if missing:
+        del retention["merge_revalidation"]
+    else:
+        retention["merge_revalidation"]["source_commit"] = "0" * 40
+    census = tmp_path / "census.json"
+    census.write_text(json.dumps(document))
+    monkeypatch.setitem(globals(), "CENSUS", census)
+    with pytest.raises(KeyError if missing else AssertionError):
+        _manifest_calls()
+
+
+@pytest.mark.parametrize("changed", CURRENT_SOURCE_BLOBS)
 def test_manifest_refuses_stale_caller_or_owner(tmp_path, monkeypatch, changed):
     # No .git directory or historical commit is needed, even in a transported tree.
     for rel in (*SCOPES, "prismaquant/digests.py", "prismaquant/tensor_digests.py"):
