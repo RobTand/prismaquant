@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import errno
 import hashlib
-import importlib.util
 import json
 import os
 import pickle
@@ -16,27 +15,20 @@ from prismaquant.cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path, write_unit,
 )
 from prismaquant.layer_config import LAYER_CONFIG_META_KEY
-from prismaquant.tessera_campaign import SCHEMA, ExpertPopulation, campaign_population_block
+from prismaquant.tessera_campaign_table import (SCHEMA, ExpertPopulation, campaign_population_block)
 from prismaquant.tessera_census_cache import (
     census_layer_config, census_selected_cached_units_manifest, load_selected_wire_records,
     seal_roster,
 )
 from prismaquant.tessera_formats import parse_tessera_format_name
 from prismaquant.tessera_hessian import HESSIAN_IDENTITY_FIELDS
-from prismaquant.tessera_joint_aura import STAGE
+from prismaquant.tessera_campaign_table import STAGE
 from prismaquant.tessera_menu import assert_uniform_hessian_identity
 from test_tessera_expert_projection import STACK, _declared, _projection
 
 
-def _load_tool():
-    path = Path(__file__).resolve().parents[1] / "tools" / "union_tessera_census_tables.py"
-    spec = importlib.util.spec_from_file_location("union_tessera_census_tables", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-tool = _load_tool()
+from prismaquant import tessera_census_union as tool
+from tools.union_tessera_census_tables import main as union_main
 
 FMT_A = "TESSERA_E4M3_K1_R1024"
 FMT_A_UNPRICED = "TESSERA_E4M3_K1_R960"
@@ -258,7 +250,7 @@ def _census(tmp_path, shape="routed_subset", *, b_clock=22.0, b_batch=8):
 
 
 def _run(a, b, out, *extra):
-    return tool.main(["--table", f"r1024={a}", "--table", f"e2m1={b}", "--out", str(out),
+    return union_main(["--table", f"r1024={a}", "--table", f"e2m1={b}", "--out", str(out),
                       *map(str, extra)])
 
 
@@ -423,7 +415,7 @@ def test_dry_run_prints_the_plan_and_writes_nothing(tmp_path, capsys):
 
 def test_the_same_table_twice_is_all_identical_collisions(tmp_path, capsys):
     a, _b, _experts, all_units = _census(tmp_path)
-    assert tool.main(["--table", f"one={a}", "--table", f"two={a}", "--out",
+    assert union_main(["--table", f"one={a}", "--table", f"two={a}", "--out",
                       str(tmp_path / "union"), "--dry-run"]) == 0
     plan = json.loads(capsys.readouterr().out)
     assert plan["union"]["units"] == len(all_units)

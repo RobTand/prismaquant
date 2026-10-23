@@ -142,7 +142,7 @@ def test_handoff_refuses_changed_evidence(mutation):
     elif mutation == 'shape': joint['stats'][name]['n_params'] = 5
     elif mutation == 'overwritten_metadata': row['wire_bytes'] = 999
     elif mutation == 'nonzero_bf16':
-        from prismaquant.joint_aura import make_joint_aura_entry
+        from prismaquant.joint_aura_rows import make_joint_aura_entry
         old = joint['costs'][name]['BF16']
         joint['costs'][name]['BF16'] = make_joint_aura_entry(
             operator_identity=old['joint_operator_identity'], probe_identity=old['probe_identity'],
@@ -293,7 +293,7 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
     import hashlib
     import json
     import pickle
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_joint_aura as bridge
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.tessera_joint_allocation import handoff
@@ -325,13 +325,13 @@ def test_file_handoff_validates_a_shared_probe_identity_once(tmp_path, monkeypat
     monkeypatch.setattr(bridge, 'load_measured_anchor_input',
                         lambda inputs, *, verify_payloads, historical_encoder_reuse: data)
     calls = []
-    validate = cost_streaming.validate_streamed_model_identity
+    validate = cost_streaming_identity.validate_streamed_model_identity
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get('where'))
         return validate(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, 'validate_streamed_model_identity', counted)
+    monkeypatch.setattr(cost_streaming_identity, 'validate_streamed_model_identity', counted)
     output = tmp_path / 'allocation.pkl'
     handoff(joint_binding=joint_binding, plan_binding=plan_binding, output_path=output)
     assert len([where for where in calls if where == 'joint AURA row']) == 1 < rows

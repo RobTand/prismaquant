@@ -24,7 +24,7 @@ import pytest
 import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_SCHEMA,
     ProductionWeightCache,

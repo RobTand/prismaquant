@@ -289,3 +289,70 @@ def test_model_v2_cache_fingerprint_drift_keeps_exact_corpus(split, fingerprint,
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
     with pytest.raises(inputs.DSv4WikiTextInputsError, match="dataset fingerprint"):
         inputs._model_dataset(observed, split=split)
+
+
+@pytest.mark.parametrize("template_name", [
+    "chat_templates/default.jinja",
+    "additional_chat_templates/nested/tool_use.jinja",
+])
+@pytest.mark.parametrize("boundary", ["validate", "seal"])
+def test_nested_template_identity_crosses_wikitext_boundary(
+        materializer, template_name, boundary):
+    from prismaquant.tokenizer_identity import build_tokenizer_identity
+
+    payload = _v2(materializer)
+    model, _ = materializer
+    template = model / template_name
+    template.parent.mkdir(parents=True)
+    template.write_text("{{ messages[0]['content'] }}")
+    identity = build_tokenizer_identity(model)
+    assert template_name in identity["files"]
+    payload["tokenizer"] = identity
+    kwargs = dict(expected_tokenizer_identity=identity,
+                  expected_model_identity=payload["model"])
+    if boundary == "seal":
+        payload.pop("semantic_sha256")
+        actual = inputs.seal_model_wikitext_inputs(payload, **kwargs)
+    else:
+        _reseal(payload)
+        actual = inputs.validate_model_wikitext_inputs(payload, **kwargs)
+    assert actual["tokenizer"] == identity
+    assert inputs.validate_model_wikitext_inputs(actual, **kwargs) == actual
+
+
+@pytest.mark.parametrize("name", [
+    "", ".", "..", "../tokenizer.json", "/tokenizer.json",
+    "templates/../tokenizer.json", "./tokenizer.json",
+    "templates//tool.jinja", "templates/./tool.jinja", "templates/tool.jinja/",
+])
+def test_tokenizer_identity_refuses_noncanonical_file_paths(materializer, name):
+    from prismaquant.tokenizer_identity import build_tokenizer_identity
+
+    identity = build_tokenizer_identity(materializer[0])
+    descriptor = identity["files"]["tokenizer.json"]
+    identity["files"] = {name: descriptor}
+    identity["content_sha256"] = inputs.canonical_sha256({"files": identity["files"]})
+    with pytest.raises(inputs.DSv4WikiTextInputsError, match="file descriptor is malformed"):
+        inputs._validate_tokenizer_identity(identity,
+            expected_content_sha256=identity["content_sha256"])
+
+
+@pytest.mark.parametrize("boundary", ["validate", "seal"])
+def test_empty_template_keeps_wikitext_descriptor_refusal(materializer, boundary):
+    from prismaquant.tokenizer_identity import build_tokenizer_identity
+
+    payload = _v2(materializer)
+    model, _ = materializer
+    (model / "chat_template.jinja").write_bytes(b"")
+    identity = build_tokenizer_identity(model)
+    assert identity["files"]["chat_template.jinja"]["bytes"] == 0
+    payload["tokenizer"] = identity
+    kwargs = dict(expected_tokenizer_identity=identity,
+                  expected_model_identity=payload["model"])
+    with pytest.raises(inputs.DSv4WikiTextInputsError, match="file descriptor is malformed"):
+        if boundary == "seal":
+            payload.pop("semantic_sha256")
+            inputs.seal_model_wikitext_inputs(payload, **kwargs)
+        else:
+            _reseal(payload)
+            inputs.validate_model_wikitext_inputs(payload, **kwargs)

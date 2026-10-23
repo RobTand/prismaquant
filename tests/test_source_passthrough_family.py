@@ -15,7 +15,7 @@ import torch
 
 import prismaquant.format_registry as fr
 from prismaquant.activation_fair_pricing import BRANCH_SOURCE_PASSTHROUGH
-from prismaquant.allocator_candidates import (
+from prismaquant.source_format_contracts import (
     PASSTHROUGH_SOURCE_REQUIREMENTS,
     PASSTHROUGH_WIRE_FORMAT_IDS,
     ROUTE_STATUS_BACKED,
@@ -23,8 +23,10 @@ from prismaquant.allocator_candidates import (
     passthrough_serving_notes,
     ROUTE_PENDING_PASSTHROUGH_FORMATS,
     SOURCE_PASSTHROUGH_CONTRACTS,
-    SOURCE_PASSTHROUGH_COST_SOURCE,
     SOURCE_PASSTHROUGH_FORMATS,
+)
+from prismaquant.priced_cell import (
+    SOURCE_PASSTHROUGH_COST_SOURCE,
     cost_entry_activation_pricing_branch,
     cost_entry_is_exact_by_construction,
     cost_entry_is_source_passthrough,

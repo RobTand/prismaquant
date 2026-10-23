@@ -1,11 +1,11 @@
 """The reviewed answer's cell roster IS the pinned document's, row for row.
 
-``TESSERA_DEV_PIN_ANSWER`` is a literal, and a literal is a transcription that
+``TESSERA_DEV_PIN_ANSWER`` is reviewed data, a transcription that
 can be edited without the thing it transcribes moving.  Every other test in
 this repository reads one side or the other: the drift check inside
 ``load_tessera_contract`` compares them only when the development pin is
 REQUESTED, and the tests that assert the packaged file never look at the
-literal.  So a row could be dropped from the answer, or invented in it, and the
+reviewed data. So a row could be dropped from the answer, or invented in it, and the
 suite would stay green while the pin admitted a roster nobody published.
 
 This file closes that.  It reads the packaged contract at the serving pin's
@@ -153,7 +153,7 @@ def test_every_cells_evidence_block_is_closed():
 
 
 def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
-    """The columns documented beside the literal, asserted as a shape.
+    """The reviewed projection retains its positional columns.
 
     A row that grew or lost a column is a WIDENED or narrowed projection, and
     the pin's own rule says that is a re-review even when no published value
@@ -162,12 +162,11 @@ def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
     """
     rows = contract.TESSERA_DEV_PIN_ANSWER["cells"]
     widths = {len(row) for row in rows}
-    assert len(widths) == 1, sorted(widths)
     # 18 columns: 0-12 unconditional, 13-15 runtime, 16 evidence, 17 coverage.
     assert widths == {18}, sorted(widths)
     # The parsed development answer is opt-in, just as it is for menu tests.
     monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, contract.TESSERA_DEV_PIN_COMMIT)
-    parsed = {cell.cell_id: cell for cell in contract.load_tessera_contract().cells}
+    parsed = {cell.id: cell for cell in contract.load_tessera_contract().cells}
     for row in rows:
         assert isinstance(row[13], dict) and set(row[13]) == {
             "image", "execution_modes"}

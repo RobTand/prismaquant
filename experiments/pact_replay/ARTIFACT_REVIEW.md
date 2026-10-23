@@ -106,3 +106,39 @@ python -m pytest tests/test_pact_replay_dependency_manifest_2482.py tests/test_a
 Observed: **22 passed, no skips**, with the same 14 Torch deprecation warnings.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"b78b648047400b70f5866d9422b087415283763076b1fe0abc0b08ff767084af","size":769}},"operation":"f5a49888a7f69829f5f232fff155ed5618d95835b0ef3c45c65268a17b1dcbe8","receipt":"5c5744ef55df3ed8c6693f37692f90245b161ae4051f263aa674f0805d569de5"}]
+
+## Main integration conflict repair
+
+Resolved the architecture-document conflict with main
+`a794607fec04941bf944b2597bb0477b75457983`. Main's current audit entries and
+architecture contracts are retained, with the complete #2482 replay note kept
+among the October 9 historical entries. No replay source, test, manifest,
+provenance identity, or boundary allowlist changes in this repair.
+
+```sh
+python -m pytest tests/test_pact_replay_deadline_2482.py tests/test_pact_replay_dependency_manifest_2482.py tests/test_capture_pact_replay_imports.py tests/test_observer_join_timeout_1367.py tests/test_duplication_baseline.py tests/test_io_site_freeze.py tests/test_prismabuild_boundary.py tests/test_tessera_core_boundary.py tests/test_package_tools_boundary.py tests/test_architecture_doc.py tests/test_docs_staleness.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed on the default CPU arm: **72 passed, no skips**, with 14 Torch
+deprecation warnings, in 33.81 seconds. The retained stdout was read back and
+verified. These checks cover the integrated checkout's parser/resolver,
+byte-bound inventory, observer, production boundaries and documentation; they
+are not a new fleet D38, external-source equivalence run, artifact publication,
+or GPU replay. The original failed D38 remains untouched, and execution
+adoption still requires the pipeline's final review. An initial explicit
+`arm="x86"` request was refused before execution; the default-arm call above
+completed successfully.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"7286108c2b31fabbd9db16c82f82394879cbbd3825df0ab469d4ccc5328a700a","size":750}},"operation":"3e22f84aec5cf74166e0803c7d5e2f2c1d88f7d6099fb1934cccb2333adb0b7c","receipt":"233815475b021271ba55cec6f0553e0280ebc378d99bf111628385e88d5cc55f"}]
+
+After adding the integration evidence above, repeated the manifest and
+documentation checks:
+
+```sh
+python -m pytest tests/test_pact_replay_dependency_manifest_2482.py tests/test_architecture_doc.py tests/test_docs_staleness.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **21 passed, no skips**, with the same 14 Torch deprecation warnings.
+Retained stdout was read back and verified.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"e6fa6f2ae10e1e3d692568489a7796dcd84c6c8de21b5632a577b7d0b340a208","size":749}},"operation":"e888d56bc5a66cfe199d8efbf1c202d7c55e9b05fcc905882e92dded8ef1e680","receipt":"f3f0a5017425419fb0c7365f780dc9aa4b5ca7c7ce809f00f3f0886ea112caf7"}]

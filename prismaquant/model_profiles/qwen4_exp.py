@@ -26,14 +26,11 @@ returns ``None`` and every structural fact is declared by hand in
 ``default_serving_profile`` and no ``supported_lanes``: each of those is a
 statement about what a serving runtime does, and CLAUDE.md principle 14 says
 such a statement is attested or refused — never asserted from the producer
-side. They are owed once a vLLM (or Gridbook) class exists to attest them.
+side. They require an attested serving implementation.
 
-This profile is **not yet registered** in ``registry.py`` (the scaffolding task
-was scoped to new files only). Until the registration snippet in
-``/home/rob/dq-runs/coordination/qwen4exp-structure-recon-2026-08-26.md`` is
-applied, ``detect_profile()`` resolves this architecture to a ``SpecMatchProfile``
-built from ``specs/qwen4_exp.json`` — which carries the naming/fusion/packing
-declarations but *not* the Python-side walk rules or the RMSNorm offset below.
+``Qwen4ExpProfile`` is registered at priority 200 in ``registry.py``.
+``specs/qwen4_exp.json`` supplies its naming, fusion and packing declarations;
+this Python profile supplies the walk rules and RMSNorm offset below.
 """
 from __future__ import annotations
 

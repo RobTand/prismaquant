@@ -49,7 +49,6 @@ from __future__ import annotations
 import argparse
 import contextlib
 import gzip
-import hashlib
 import json
 import math
 import re
@@ -61,10 +60,8 @@ from pathlib import Path, PurePosixPath
 
 if __package__:
     from tools.tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
-        admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
         stage_b_spill_environment,
@@ -72,14 +69,12 @@ if __package__:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
-    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tessera_campaign_container import (
-        CONTAINER_IMAGE_FLAG,
         STAGE_B_SPILL_ENV,
         container_cache_environment,
-        admission_image_reference,
         local_scratch_environment,
         produced_spool_environment,
         stage_b_spill_environment,
@@ -87,7 +82,10 @@ else:
     from prismaquant.joint_layer_quanta import (
         canonical_sha256 as _canonical_receipt_sha256,
     )
-    from prismaquant.joint_quantum_handoff import HANDOFF_LOAD_PHASE
+    from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
+
+from prismaquant.campaign_container_spec import CONTAINER_IMAGE_FLAG, admission_image_reference
+from prismaquant import joint_quantum_row as quantum_row
 
 PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 PBWAIT = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbwait.py")
@@ -128,9 +126,8 @@ HEAD_PROGRESS_GRACE_S = 1800
 #:
 #: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
 #:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py:1989 in
-#:   load_adjoint_checkpoint, prismaquant/joint_quantum_handoff.py:1052 in
-#:   load_handoff_inputs). Without a PrismaBuild landing record the phase
+#:   staged wait in the phase (joint_adjoint_checkpoints.load_adjoint_checkpoint
+#:   and joint_quantum_handoff.load_handoff_inputs). Without a PrismaBuild landing record the phase
 #:   waits at most W in total; with one (PB #989) its waits are declared and
 #:   exempt from the no-progress clock.
 #: * bytes is the phase's byte count in the row's staged read plan, and at
@@ -142,9 +139,9 @@ LOAD_PHASE_GRACE_SCHEMA = "prismaquant.load_phase_grace.v1"
 LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
 LOAD_PHASE_BOUND = (
     "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
-    "for every staged wait in the phase (prismaquant/joint_adjoint_checkpoints.py"
-    ":1989 load_adjoint_checkpoint; prismaquant/joint_quantum_handoff.py:1052 "
-    "load_handoff_inputs), so without a PrismaBuild landing record the phase "
+    "for every staged wait in the phase "
+    "(prismaquant.joint_adjoint_checkpoints.load_adjoint_checkpoint; "
+    "prismaquant.joint_quantum_handoff.load_handoff_inputs), so without a PrismaBuild landing record the phase "
     "waits at most W in total, and with one (PB #989) the waits are declared "
     "and exempt. At or above the floor rate the transfer takes at most "
     "ceil(bytes / floor).")
@@ -177,7 +174,6 @@ LOAD_PHASE_FLOOR_ONE_READER = {
 #: The payload flag that carries a row's grace stamps (load phases and
 #: compute phases) into the quantum, which copies them into results.json and
 #: counters.json.
-PROGRESS_GRACE_FLAG = "--progress-grace-derivation"
 
 #: Stage B's compute phases (PQ #1165). A chain layer's backward roll
 #: (``chain-NNN-bound``), a probe's spill capture (``spill-pP``), a spill
@@ -240,11 +236,6 @@ COMPUTE_KINDS = {
         "measured_by": "counters.json io_spans: the payload and teardown "
                        "spans' wall_s, summed (PQ #1187)"},
 }
-#: The tail's one term (PQ #1190), which :func:`compute_phase_work` appends to
-#: the last declared phase's work.
-TAIL_WORK = {"kind": "tail", "units": 1,
-             "work": ("the quantum's tail after its last window, which "
-                      "declares no phase and commits no unit")}
 #: The per-row entry that carries the bound and the ceiling documents once,
 #: so each compute stamp names its ceiling by kind and the payload stays
 #: small.
@@ -326,7 +317,11 @@ CHAIN_ROLL_CEILING_GB10 = {
 }
 COMPUTE_UNIT_CEILINGS = (SPILL_CAPTURE_CEILING_GB10, CHAIN_ROLL_CEILING_GB10)
 
-RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
+from prismaquant.joint_campaign_ledger import (
+    LAYER_QUANTUM_SCHEMA as RECORD_SCHEMA,
+    QuantumRecordRefused,
+    require_quantum_record_set,
+)
 ADJOINT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 #: The schema of the stage-A data manifest the dispatcher binds
 #: (``prismabuild.core.DATA_MANIFEST_SCHEMA_V1``, restated: this module
@@ -494,31 +489,12 @@ def load_records(records_dir: Path) -> list[tuple[Path, dict]]:
     if not paths:
         raise DispatchRefused(f"no layer records at {records_dir}")
     loaded = [(path, _load_json(path, where="layer record")) for path in paths]
-    for path, record in loaded:
-        if record.get("schema") != RECORD_SCHEMA:
-            raise DispatchRefused(
-                f"{path}: record schema is not {RECORD_SCHEMA!r}")
-    ids = [record.get("quantum_id") for _, record in loaded]
-    if len(set(ids)) != len(ids):
-        raise DispatchRefused("layer records carry duplicated quantum ids")
-    first = loaded[0][1]["campaign"]
-    for path, record in loaded[1:]:
-        if record.get("campaign") != first:
-            raise DispatchRefused(
-                f"{path}: campaign block differs (mixed campaign)")
-    for path, record in loaded:
-        if record.get("adjoint", {}).get("receipt_sha256") is not None:
-            raise DispatchRefused(
-                f"{path}: record binds a whole stage-A receipt, not its slice "
-                "(PQ #993): regenerate")
-    bindings = {record.get("adjoint", {}).get("slice_sha256") is not None
-                for _, record in loaded}
-    if len(bindings) != 1:
-        raise DispatchRefused(
-            "layer records mix unbound and slice-bound stage-A bindings")
-    # Before stage A publishes, the sealed records are unbound (§5.2 seals
-    # records first); after, each binds its own slice. Mixed bindings are a
-    # mixed campaign.
+    try:
+        require_quantum_record_set([record for _, record in loaded])
+    except QuantumRecordRefused as exc:
+        raise DispatchRefused(f"{loaded[exc.index][0]}: {exc}") from exc
+    except ValueError as exc:
+        raise DispatchRefused(f"{records_dir}: {exc}") from exc
     ordered = sorted(loaded,
                      key=lambda item: item[1].get("layer", -1),
                      reverse=True)
@@ -854,7 +830,9 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest unreadable at "
             f"{path}: {exc}") from exc
-    if hashlib.sha256(wire).hexdigest() != staged_sha256:
+    from prismaquant.digests import bytes_sha256hex
+
+    if bytes_sha256hex(wire) != staged_sha256:
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} executable manifest at {path} does "
             "not hash to the sealed digest")
@@ -1407,90 +1385,6 @@ def compute_ceilings(documents: Sequence[Mapping] = ()) -> dict:
     return by_kind
 
 
-_CHAIN_BOUND_PHASE = re.compile(r"chain-(\d{3,})-bound")
-_SPILL_PHASE = re.compile(r"spill-p(\d+)")
-_RENDER_PHASE = re.compile(r"render-(\d{2,})")
-_REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
-
-
-def phase_work_entries(name: str, fact: Mapping, annotations: Mapping):
-    """The entries a phase's pass counts its work by, from its read-plan facts.
-
-    A phase's entry count, less incoming plane entries moved into it by
-    ``band_serial.streamed_incoming`` or ``checkpoint_incoming.streamed_incoming``:
-    those add read bytes, rather than capture groups or chain batches.
-    ``None`` when the plan does not count the phase's entries.
-    """
-    entries = fact.get("entries") if isinstance(fact, Mapping) else None
-    if type(entries) is not int:
-        return entries
-    moved = 0
-    for key in ("band_serial", "checkpoint_incoming"):
-        owner = annotations.get(key) if isinstance(annotations, Mapping) else None
-        streamed = owner.get("streamed_incoming") if isinstance(owner, Mapping) else None
-        count = streamed.get(name, 0) if isinstance(streamed, Mapping) else 0
-        if type(count) is not int or not 0 <= count <= entries:
-            return None
-        moved += count
-    return entries - moved if moved <= entries else None
-
-
-def compute_phase_work(name: str, *, replay_mode: str, entries,
-                       n_probes, capture_batch,
-                       runs_tail: bool = False) -> list[dict] | None:
-    """The compute one phase's pass runs, or ``None`` for a phase with none.
-
-    Each term is ``{"kind", "units", "work"}``; ``units`` is ``None`` when
-    the read plan or the row does not count them. The order follows
-    ``joint_statistics_replay.observe_and_project_retained_windows``: a spill
-    row captures each probe under ``spill-pP`` and replays the first window
-    for that probe under the same phase, and replays every later window under
-    its ``render-NN`` phase. A resume that has committed window 0 still
-    captures under ``spill-pP`` and replays nothing there (PQ #1172), so the
-    replay term of ``spill-pP`` is an upper bound for it. ``render-00`` of a
-    spill row, and every ``render-NN`` of a windowed row, only read.
-
-    ``runs_tail`` marks the row's last declared phase: the quantum's tail
-    after its last window runs on its clock (PQ #1187), so :data:`TAIL_WORK`
-    is its last term, with or without a pass of its own (PQ #1190).
-    """
-    def counted(*values):
-        return all(type(value) is int and value > 0 for value in values)
-
-    tail = [dict(TAIL_WORK)] if runs_tail else []
-    match = _CHAIN_BOUND_PHASE.fullmatch(name)
-    if match:
-        return [{"kind": "chain-roll",
-                 "units": entries * n_probes if counted(entries, n_probes) else None,
-                 "work": (f"chain layer {int(match.group(1))}'s backward roll: "
-                          "one row per probe and stored batch")}, *tail]
-    match = _SPILL_PHASE.fullmatch(name)
-    if match and replay_mode == "spill":
-        probe = int(match.group(1))
-        return [{"kind": "spill-capture",
-                 "units": (-(-entries // capture_batch)
-                           if counted(entries, capture_batch) else None),
-                 "work": (f"probe {probe}'s spill capture: one group per "
-                          "capture_batch stored batches")},
-                {"kind": "spill-replay", "units": 1,
-                 "work": f"the first window's spill replay for probe {probe}"},
-                *tail]
-    match = _RENDER_PHASE.fullmatch(name)
-    if match and replay_mode == "spill" and int(match.group(1)) >= 1:
-        return [{"kind": "spill-replay",
-                 "units": n_probes if counted(n_probes) else None,
-                 "work": (f"window {int(match.group(1))}'s spill replay for "
-                          "each probe")}, *tail]
-    match = _REPLAY_PHASE.fullmatch(name)
-    if match and replay_mode == "windowed":
-        return [{"kind": "windowed-replay",
-                 "units": entries if counted(entries) else None,
-                 "work": (f"window {int(match.group(1))}'s replay for probe "
-                          f"{int(match.group(2))}: one backward per stored "
-                          "batch")}, *tail]
-    return tail or None
-
-
 def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
     """Why a row is outside a measurement's scope; empty when it is inside."""
     misses = []
@@ -1679,9 +1573,9 @@ def _read_plan_phase_bytes(wire: bytes, *, where: str) -> dict:
 
 def progress_grace_of(argv: Sequence[str]) -> list | None:
     """The grace stamps (load and compute phases) a row's payload carries, if any."""
-    if PROGRESS_GRACE_FLAG not in argv:
+    if quantum_row.PROGRESS_GRACE_FLAG not in argv:
         return None
-    return json.loads(argv[list(argv).index(PROGRESS_GRACE_FLAG) + 1])
+    return json.loads(argv[list(argv).index(quantum_row.PROGRESS_GRACE_FLAG) + 1])
 
 
 def require_staged_wait_below_grace(spec: Mapping,
@@ -2285,7 +2179,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                   and declared_phases else None)
 
     def compute_grace(name, fact, annotations):
-        from prismaquant.joint_layer_quanta import normalize_replay_mode
+        from prismaquant.joint_quantum_row import (normalize_replay_mode)
 
         if "context" not in row_context:
             row_context["context"] = _row_compute_context(
@@ -2293,10 +2187,10 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                 annotations=annotations,
                 emits_handoff=emit_template is not None)
         context = row_context["context"]
-        work = compute_phase_work(
+        work = quantum_row.compute_phase_work(
             name, replay_mode=normalize_replay_mode(
                 (executable or {}).get("replay_mode")),
-            entries=phase_work_entries(name, fact, annotations),
+            entries=quantum_row.phase_work_entries(name, fact, annotations),
             n_probes=context.get("n_probes"),
             capture_batch=context.get("replay_regime.capture_batch"),
             runs_tail=name == tail_phase)
@@ -2396,7 +2290,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         # digest of the bytes just read. Certified mode refuses unless the
         # two are equal, so its argv is unchanged.
         from prismaquant.dev_mode import seal_check
-        plan_sha256 = hashlib.sha256(plan_raw).hexdigest()
+        from prismaquant.digests import bytes_sha256hex
+        plan_sha256 = bytes_sha256hex(plan_raw)
         seal_check("resource-bound plan", campaign["plan_sha256"], plan_sha256,
                    where=f"quantum {quantum_id!r}",
                    refusal=lambda: DispatchRefused(
@@ -2440,75 +2335,38 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         except (ValueError, KeyError, TypeError) as exc:
             raise DispatchRefused(
                 f"quantum {quantum_id!r} cotangent plane: {exc}") from exc
-    band_payload: list[str] = []
-    if handoff is not None:
-        band_payload += ["--adjoint-handoff", str(handoff["path"]),
-                         "--adjoint-handoff-sha256", str(handoff["sha256"])]
+    handoff_binding = (None if handoff is None else quantum_row.QuantumFileBinding(
+        str(handoff["path"]), str(handoff["sha256"])))
     handoff_chain_batch_size = None
     if emit_template is not None:
-        band_payload.append("--emit-adjoint-handoff")
         handoff_chain_batch_size = _slice_chain_batch_size(record)
-    if grace_stamps:
-        band_payload += [PROGRESS_GRACE_FLAG,
-                         json.dumps(grace_stamps, sort_keys=True,
-                                    separators=(",", ":"), allow_nan=False)]
-    wrapped, container_image = _container_wrap(SPEC_PATH, [
-        "python3", "-m", "prismaquant.joint_cost_quantum",
-        "--quantum", str(record_path),
-        "--quantum-sha256", record_sha256,
-        "--plan", str(campaign["plan_path"]),
-        "--plan-sha256", plan_sha256,
-        "--prepared", str(campaign["prepared_path"]),
-        "--prepared-sha256", prepared_sha256,
-        "--adjoint-slice", str(slice_path),
-        "--adjoint-slice-sha256", slice_sha256,
-        "--data-manifest-sha256", staged_sha256,
-        "--allowed-tiers", STAGED_ALLOWED_TIERS,
-        "--resume",
-        "--output-root", str(output_root), *band_payload], progress=progress,
-        resource_policy=resource_policy, spill_bound=_sealed_spill_bound(record),
-        spec=spec_parse.get("spec"),
+    grace_wire = (None if not grace_stamps else json.dumps(
+        grace_stamps, sort_keys=True, separators=(",", ":"), allow_nan=False))
+    band_arguments = quantum_row.QuantumBandArguments(
+        handoff_binding, emit_template is not None, grace_wire)
+    inputs = quantum_row.QuantumRunInputs(
+        quantum_row.QuantumFileBinding(str(record_path), record_sha256),
+        quantum_row.QuantumFileBinding(str(campaign["plan_path"]), plan_sha256),
+        quantum_row.QuantumFileBinding(str(campaign["prepared_path"]), prepared_sha256),
+        quantum_row.QuantumFileBinding(str(slice_path), slice_sha256),
+        staged_sha256, str(output_root))
+    wrapped, container_image = _container_wrap(
+        SPEC_PATH, inputs.argv(allowed_tiers=STAGED_ALLOWED_TIERS, band=band_arguments),
+        progress=progress, resource_policy=resource_policy,
+        spill_bound=_sealed_spill_bound(record), spec=spec_parse.get("spec"),
         handoff_chain_batch_size=handoff_chain_batch_size)
-    argv = [sys.executable, str(PBRUN)]
-    for tag in consumer_tags:
-        argv += ["--tag", str(tag)]
-    argv += ["--data-manifest", str(manifest),
-             "--residency", "stage", "--residency-ram", "auto"]
-    for name, grace in progress:
-        argv += ["--progress-phase", f"{name}={grace}"]
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    mem_gib, gpu_gib, cpus = "104", "80", 10
-    if resource_policy is not None:
-        limits = resource_policy["limits"]
-        mem_gib, gpu_gib = (f"{limits[key] / 1024 ** 3:g}" for key in ("physical_bytes", "gpu_bytes"))
-        cpus = max(int(sealed_spec.get("env", {}).get("PRISMAQUANT_LAYER_READ_THREADS", 1)),
-                   int(plan["source_prefetch"]["prefetch_workers"]) + 1,
-                   int(plan["execution"]["operator_windows"]["prefetch_workers"]) + 1)
-    argv += ["--priority", str(priority),
-             "--demand", f"gpu=1,mem_gb={mem_gib}", "--gpu-memory-gb", gpu_gib,
-             "--cpus", str(cpus)]
-    if emit_template is not None:
-        # An envelope option, as for stage A: pbrun seals the declaration
-        # into the request and derives the window's tier demand from it.
-        argv += ["--produced-output-template", str(emit_template)]
-    if container_image is not None:
-        # A pbrun option, so it precedes the separator like the manifest: PB
-        # must admit the row only where this image is already present, or
-        # leave it ready for a box that has it (RobTand/prismabuild#714).
-        argv += [CONTAINER_IMAGE_FLAG, container_image]
-    # Every bounded-local scratch pair and PrismaBuild's list of them (PB
-    # #911), so pbrun charges each ceiling to the executing box's disk
-    # budget at claim. Nothing declared, nothing added.
-    for name, value in local_scratch_environment(
-            sealed_spec, sealed_spec.get("env", {})).items():
-        argv += ["--env", f"{name}={value}"]
-    # A spec that declares the produced spool seals it into the request too:
-    # the container refuses a declared spool the action does not carry, and
-    # a band-serial producer writes its handoff group through it (#1015).
-    for name, value in produced_spool_row_environment(sealed_spec).items():
-        argv += ["--env", f"{name}={value}"]
-    argv += ["--env", DEV_MODE_ENV, "--detach", "--", *wrapped]
-    return argv
+    demand = quantum_row.QuantumRowDemand.from_policy(
+        resource_policy, environment=sealed_spec.get("env", {}),
+        source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
+        operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
+    environment = [*local_scratch_environment(sealed_spec, sealed_spec.get("env", {})).items(),
+                   *produced_spool_row_environment(sealed_spec).items()]
+    return quantum_row.QuantumPBEnvelope(
+        str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
+        produced_output_template=emit_template, container_image=container_image).argv(
+            python=sys.executable, pbrun=str(PBRUN), container_image_flag=CONTAINER_IMAGE_FLAG,
+            dev_mode_assignment=DEV_MODE_ENV)
 
 
 def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
@@ -2918,8 +2776,8 @@ def handoff_template(record: Mapping, *, plan: Mapping,
     re-dispatch of the same row files the same one again (PQ #1054). An
     explicit ``template_id`` overrides the derived one.
     """
-    from prismaquant.cost_streaming import normalize_boundary_storage
-    from prismaquant.joint_layer_quanta import quantum_id as layer_quantum_id
+    from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
+    from prismaquant.joint_campaign_ledger import quantum_id as layer_quantum_id
     from prismaquant.joint_quantum_handoff import handoff_root
     from prismaquant.stage_a_produced_output import build_boundary_template
 
@@ -3539,7 +3397,8 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
         if key not in verified:
             try:
                 verified[key] = _verify_pilot_result(
-                    gateway, selector, counters, reference, contracts=contracts)
+                    gateway, selector, counters, reference, contracts=contracts,
+                    quantum_records=args.pilot_quantum_record)
             except PilotRefused as exc:
                 raise DispatchRefused(
                     f"pilot for {row['quantum_id']}: {exc}") from exc
@@ -3583,7 +3442,8 @@ def _bounded_pilot_bytes(path: Path, cap: int) -> bytes:
     return raw
 
 
-def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
+def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
+                         quantum_records):
     """Authenticate a selected result, then bind independent source approval."""
     from prismaquant.joint_dispatch_pilot import PilotRefused, validate_pilot_completion
 
@@ -3604,16 +3464,21 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
     if not isinstance(payload, bytes) or len(payload) > PILOT_RESULT_MAX_BYTES:
         raise PilotRefused("pilot PB result carries no bounded owned result payload")
     completion = _single_completion(payload)
+    original_paths = [path for path, digest in quantum_records
+                      if digest == invocation["--quantum-sha256"]]
+    if len(original_paths) != 1:
+        raise PilotRefused("pilot requires one unique consumer reference for the sealed original quantum record")
     evidence = validate_pilot_completion(
         completion, counters=counters,
         counters_sha256=reference["sha256"], counters_bytes=reference["bytes"],
-        quantum_record_sha256=invocation["--quantum-sha256"])
+        quantum_record_sha256=invocation["--quantum-sha256"],
+        quantum_record_path=original_paths[0])
     record = _owned_record_from_completion(completion, evidence)
     if counters.get("identity_sha256") != record.get("identity_sha256"):
         raise PilotRefused("pilot counters name another quantum record identity")
     try:
-        from prismaquant.joint_layer_quanta import check_quantum_for_campaign
-        check_quantum_for_campaign(record, {
+        from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+        require_quantum_campaign(record, {
             **record["campaign"],
             "adjoint_slice_sha256": invocation["--adjoint-slice-sha256"]})
     except (KeyError, ValueError, TypeError) as exc:
@@ -3628,6 +3493,10 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
         "receipt_sha256": (result.get("receipt") or {}).get("receipt_sha256"),
         "quantum_sha256": invocation["--quantum-sha256"],
         "quantum_bytes": len(evidence["quantum_record"]),
+        "quantum_record_producer": dict(completion["quantum_record"]),
+        "quantum_record_consumer": {"path": original_paths[0],
+                                    "sha256": invocation["--quantum-sha256"],
+                                    "bytes": len(evidence["quantum_record"])},
         "record_identity_sha256": record["identity_sha256"],
         "source_contract": source_ref,
         "source_snapshot": source["snapshot"],
@@ -3858,6 +3727,10 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         metavar=("PATH", "SHA256"),
                         help="independently reviewed versioned source and invocation contract; "
                              "must bind the exact PB snapshot input and expected environments")
+    parser.add_argument("--pilot-quantum-record", action="append", nargs=2, default=[],
+                        metavar=("PATH", "SHA256"),
+                        help="consumer-visible copy of the original pilot quantum wire; "
+                             "one unique reference per sealed original digest")
     parser.add_argument("--force-unverified-pilot", action="store_true",
                         help="explicitly bypass pilot admission; stamp the "
                              "override in dry-run output and dispatch state")
@@ -4010,6 +3883,12 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                     continue
                 if wanted and quantum_id not in wanted:
                     continue
+                previous = last_submission.get(quantum_id)
+                if (previous is not None and
+                        previous.get("identity_sha256") != record["identity_sha256"]):
+                    raise DispatchRefused(
+                        f"quantum {quantum_id}: recorded request identity differs; "
+                        "use a new --state/output-root for a changed request")
                 key = submitted_keys.get(quantum_id)
                 if key is not None and gateway.is_terminal_executed(key):
                     continue

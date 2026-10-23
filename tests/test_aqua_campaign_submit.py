@@ -41,7 +41,6 @@ The fixture is torch-free on the producer side on purpose: the manifest is
 built by the CPU path, exactly as it is at submission time. The stage itself is
 never executed here -- these tests run no GPU work.
 """
-
 import hashlib
 import json
 import pickle
@@ -53,11 +52,15 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
+from prismaquant import tessera_campaign_table as campaign_table
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 
 CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
 TENSOR_BYTES = 4096
@@ -116,7 +119,7 @@ def joint_row_is_joint(monkeypatch):
     """The stub: anything carrying a joint operator identity is a joint row."""
     from prismaquant import allocator_candidates
 
-    monkeypatch.setattr(allocator_candidates, "cost_entry_is_joint_aura",
+    monkeypatch.setattr(joint_aura_rows, 'cost_entry_is_joint_aura',
                         lambda entry: "joint_operator_identity" in entry)
     return allocator_candidates
 
@@ -187,11 +190,10 @@ def _workspace(scratch: Path) -> dict:
     spec.write_text(json.dumps({"container": {"image": "x"},
                                 "cpu_memory_gb": 34, "box_memory_gb": 114}))
 
-    import dispatch_tessera_campaign as dispatch
 
-    scope = dispatch.joint_campaign_scope(json.loads(plan.read_text()))
+    scope = campaign_table.joint_campaign_scope(json.loads(plan.read_text()))
     identity = scratch / "campaign-identity.json"
-    identity.write_text(json.dumps(dispatch.campaign_identity(scope),
+    identity.write_text(json.dumps(campaign_table.campaign_identity(scope),
                                    sort_keys=True))
     return {"plan": plan, "identity": identity, "cost_in": cost_in, "card": card,
             "spec": spec, "checkpoint": checkpoint, "names": names,
@@ -241,10 +243,6 @@ def shared_mount(scratch, monkeypatch):
 
 @pytest.fixture()
 def campaign(scratch, shared_mount, monkeypatch):
-    import dispatch_tessera_campaign as dispatch
-
-    monkeypatch.setattr(dispatch, "_manifest_producer",
-                        lambda: glm_data_manifests)
     return _workspace(scratch)
 
 
@@ -308,6 +306,24 @@ def test_the_declared_read_set_is_the_units_extents_and_the_card(
     assert all(entry["offset"] + entry["bytes"] <= size for entry in extents)
     assert [phase["name"] for phase in manifest["annotations"]["phases"]] == [
         "head", "layer-0"]
+
+
+def test_the_aqua_read_set_names_layer_phases_through_the_reporter(campaign, monkeypatch):
+    """A layer phase is spelled by ``joint_run_progress.layer_phase_name`` alone.
+
+    The function is replaced with a sentinel spelling; a builder that typed
+    ``layer-<L>`` itself would still declare the old name.
+    """
+    from prismaquant import joint_run_progress
+
+    monkeypatch.setattr(joint_run_progress, "layer_phase_name",
+                        lambda layer: f"sentinel-{layer}")
+    manifest = glm_data_manifests.build_aqua_manifest(
+        str(campaign["plan"]), card=str(campaign["card"]),
+        cost_in=str(campaign["cost_in"]), act_dir=None,
+        produced_by={"entry_point": glm_data_manifests.AQUA_ENTRY_POINT})
+    assert [phase["name"] for phase in manifest["annotations"]["phases"]] == [
+        "head", "sentinel-0"]
 
 
 def test_a_cost_artifact_that_drifted_from_the_plan_roster_refuses(campaign):
@@ -385,7 +401,6 @@ def test_the_plan_may_price_a_narrower_surface_than_the_census(campaign):
     rungs -- and it is why the expected set is read per ``(unit, format)``
     rather than as units times formats.
     """
-    import dispatch_tessera_campaign as dispatch
 
     names = campaign["names"]
     payload = {"provenance": {},
@@ -399,7 +414,7 @@ def test_the_plan_may_price_a_narrower_surface_than_the_census(campaign):
     campaign["plan"].write_text(json.dumps(plan))
     campaign["cost_in"].write_bytes(pickle.dumps(payload))
     assert submit_aqua(campaign, "--dry-run") == 0
-    record, cells = dispatch.aqua_requested_cells(
+    record, cells = campaign_table.aqua_requested_cells(
         json.loads(campaign["plan"].read_text()), payload, list(MEASURED))
     assert record["requested_cells"] == len(MEASURED) + 1
     assert cells == frozenset({(names[0], MEASURED[0]),
@@ -474,7 +489,6 @@ def test_a_joint_cell_the_plan_never_priced_refuses_or_is_recorded_unverified(
     campaign never priced beside the plan's own table. By default that
     refuses; the explicit flag reuses it and says so in the record.
     """
-    import dispatch_tessera_campaign as dispatch
 
     names = campaign["names"]
     payload = _cost_payload(names)
@@ -486,7 +500,7 @@ def test_a_joint_cell_the_plan_never_priced_refuses_or_is_recorded_unverified(
     message = str(refused.value)
     assert "never priced" in message and "FP8_UNPLANNED" in message
 
-    record, cells = dispatch.aqua_requested_cells(
+    record, cells = campaign_table.aqua_requested_cells(
         json.loads(campaign["plan"].read_text()), payload, list(MEASURED),
         accept_joint_cells_outside_plan=True)
     assert record["joint_cells_outside_plan"] == 1

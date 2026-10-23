@@ -67,7 +67,7 @@ def sealed(tmp_path, monkeypatch):
                                 "cwd": str(tmp_path), "python": "python3", "env": {}}))
     # The quantum's demand is the monolithic capture row's, from the existing
     # planner; what this test checks is that every row carries one.
-    monkeypatch.setattr(dispatch, "_row_memory_gb", lambda spec, members, census: 7)
+    monkeypatch.setattr(dispatch, "row_memory_gb", lambda spec, members, census: 7)
     document = dispatch.seal(spec, tmp_path, ranges="0:1,1:2",
                              boundary_storage=_boundary_policy(fixture.boundaries),
                              timeout_s=TIMEOUT, bookend_timeout_s=BOOKEND)
@@ -102,7 +102,7 @@ def test_a_gate_critical_chain_seals_every_row_in_the_band_it_is_given(tmp_path,
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"model": str(fixture.source), "campaign_argv": ["--streaming"],
                                 "cwd": str(tmp_path), "python": "python3", "env": {}}))
-    monkeypatch.setattr(dispatch, "_row_memory_gb", lambda spec, members, census: 7)
+    monkeypatch.setattr(dispatch, "row_memory_gb", lambda spec, members, census: 7)
     assert dispatch.main(["seal", "--spec", str(spec), "--workspace", str(tmp_path),
                           "--ranges", "0:1,1:2", "--boundary-storage",
                           json.dumps(_boundary_policy(fixture.boundaries)),
@@ -117,7 +117,7 @@ def test_a_quantum_declares_its_progress_phase_only_when_asked(tmp_path, monkeyp
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"model": str(fixture.source), "campaign_argv": ["--streaming"],
                                 "cwd": str(tmp_path), "python": "python3", "env": {}}))
-    monkeypatch.setattr(dispatch, "_row_memory_gb", lambda spec, members, census: 7)
+    monkeypatch.setattr(dispatch, "row_memory_gb", lambda spec, members, census: 7)
     document = dispatch.seal(spec, tmp_path, ranges="0:1,1:2",
                              boundary_storage=_boundary_policy(fixture.boundaries),
                              timeout_s=TIMEOUT, bookend_timeout_s=BOOKEND,
@@ -140,7 +140,7 @@ def test_seal_refuses(tmp_path, monkeypatch, change, message):
     spec.write_text(json.dumps({"model": str(fixture.source),
                                 "campaign_argv": change.pop("argv", ["--streaming"]),
                                 "cwd": str(tmp_path), "python": "python3", "env": {}}))
-    monkeypatch.setattr(dispatch, "_row_memory_gb", lambda spec, members, census: 7)
+    monkeypatch.setattr(dispatch, "row_memory_gb", lambda spec, members, census: 7)
     options = dict(ranges="0:1,1:2", boundary_storage=_boundary_policy(fixture.boundaries),
                    timeout_s=TIMEOUT, bookend_timeout_s=BOOKEND)
     options.update(change)

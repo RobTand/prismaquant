@@ -21,7 +21,7 @@ def _reader(monkeypatch, raw, *, failure=None):
     resolver = object()
     reader = prep.StagedPreparationReads(resolver, manifest_sha256="m" * 64)
 
-    def staged(resolver_arg, path, entry, *, label):
+    def staged(resolver_arg, path, entry, *, label, max_bytes=None):
         calls.append((resolver_arg, path, entry, label))
         if failure is not None:
             raise failure

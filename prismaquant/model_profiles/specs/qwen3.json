@@ -47,6 +47,12 @@
   },
   "passthrough_prefixes": [],
   "pinned_names": ["lm_head"],
+  "pact": {
+    "dense_layer_end": 0,
+    "band_width": 6,
+    "tp_splits": {"down_proj": 2},
+    "hidden_streams": 1
+  },
   "_verified_source_layout": {
     "verified": "2026-08-03, Qwen/Qwen3-30B-A3B revision ad44e777bcd18fa416d9da3bd8f70d33ebb85d39; config + safetensors index + all 16 shard headers",
     "source_dtype": "BF16 for all 18,867 tensors; no source quantization or scale siblings",

@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_quantum_row as quantum_row
+
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tests", ROOT / "tools"):
     if str(_entry) not in sys.path:
@@ -273,9 +275,7 @@ def test_a_malformed_ceiling_refuses(edit, why):
 
 
 def test_phase_work_follows_the_runtime_order():
-    import dispatch_joint_quanta as dispatch
-
-    work = dispatch.compute_phase_work
+    work = quantum_row.compute_phase_work
     common = {"entries": 512, "n_probes": 4, "capture_batch": 4}
     (roll,) = work("chain-044-bound", replay_mode="spill", **common)
     assert (roll["kind"], roll["units"]) == ("chain-roll", 2048)
@@ -315,7 +315,7 @@ V7_CONTEXT = {
 def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
     import dispatch_joint_quanta as dispatch
 
-    work = dispatch.compute_phase_work(
+    work = quantum_row.compute_phase_work(
         name, replay_mode="spill", entries=entries, n_probes=4, capture_batch=4)
     return dispatch.compute_phase_grace(
         name, work=work, phase_bytes=phase_bytes, staged_wait_s=300.0,
@@ -358,7 +358,6 @@ def test_the_quantum_commits_nothing_inside_a_pass_and_runs_the_priced_units(
     """The real quantum, spill mode, one chain layer: no report lands between
     the first and last unit of a chain roll or a spill capture, and the units
     it runs under each phase are the units the dispatcher prices for it."""
-    import dispatch_joint_quanta as dispatch
     import test_quantum_executable_readset as phases
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.joint_adjoint_checkpoints as checkpoints
@@ -421,7 +420,7 @@ def test_the_quantum_commits_nothing_inside_a_pass_and_runs_the_priced_units(
             ran.setdefault((event[1], event[2]), []).append(event)
     priced = {}
     for name, phase in plan.items():
-        for term in dispatch.compute_phase_work(
+        for term in quantum_row.compute_phase_work(
                 name, replay_mode="spill",
                 entries=len(phase["entry_indices"]), n_probes=n_probes,
                 capture_batch=1) or ():

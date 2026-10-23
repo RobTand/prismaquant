@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import compressed_route_sweep_gate as gate
-from prismaquant import shipcard
+from prismaquant import shipcard, shipcard_slots
 
 FIXTURE = Path(__file__).parent / "fixtures" / "compressed_route_sweep_0p6b"
 
@@ -223,7 +223,7 @@ def test_a_scheme_missing_the_attributes_the_descriptor_reads_is_not_verified():
 
 
 def test_a_moe_method_with_no_scheme_is_not_verified_rather_than_passed():
-    """No packed-MoE artifact has been swept; the gap refuses, it does not pass."""
+    """The gate cannot verify a method with no observed activation contract."""
     sweep = _sweep()
     row = _first_quantized(sweep)
     row["scheme"] = None
@@ -231,7 +231,10 @@ def test_a_moe_method_with_no_scheme_is_not_verified_rather_than_passed():
     row["quant_method"] = "CompressedTensorsW4A4MoeMethod"
     verdict = _compare(sweep)
     assert verdict["status"] == gate.NOT_VERIFIED
-    assert "no packed-MoE artifact has been swept" in verdict["detail"]
+    assert row["name"] in verdict["detail"]
+    assert row["quant_method"] in verdict["detail"]
+    assert "observed no activation contract for that method class" in verdict["detail"]
+    assert "METHOD_ACTIVATION" in verdict["detail"]
 
 
 def test_an_artifact_that_prices_nothing_is_refused():
@@ -245,21 +248,21 @@ def test_an_artifact_that_prices_nothing_is_refused():
 # The lane owes the slot, and the shipcard replays the comparison.
 # --------------------------------------------------------------------------
 def test_the_compressed_tensors_lane_owes_route_sweep():
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_gate_slots(
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.lane_gate_slots(
         "compressed-tensors")
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.LANE_SLOT_VERIFIERS
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.lane_scoped_slots()
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard_slots.CORE_LANE_SLOTS
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.lane_scoped_slots()
 
 
 def test_a_compressed_tensors_card_is_required_to_close_route_sweep():
     card = {"lane": "compressed-tensors", "slots": {}}
-    assert shipcard.ROUTE_SWEEP_SLOT in shipcard.required_slots(card)
+    assert shipcard_slots.ROUTE_SWEEP_SLOT in shipcard.required_slots(card)
 
 
 def test_a_historical_card_with_no_lane_keeps_its_base_set():
     """Cards opened before #631 carry no lane and must not retroactively owe."""
     card = {"slots": {}}
-    assert shipcard.ROUTE_SWEEP_SLOT not in shipcard.required_slots(card)
+    assert shipcard_slots.ROUTE_SWEEP_SLOT not in shipcard.required_slots(card)
 
 
 def test_the_run_prints_how_to_close_the_slot_it_opens(tmp_path, capsys):
@@ -277,7 +280,7 @@ def test_the_run_prints_how_to_close_the_slot_it_opens(tmp_path, capsys):
     assert lane_main([
         "gates", "--lane", "compressed-tensors", "--shipcard", str(card)]) == 0
     printed = capsys.readouterr().out
-    assert f"[OPEN] route.sweep -> slots['{shipcard.ROUTE_SWEEP_SLOT}']" in printed
+    assert f"[OPEN] route.sweep -> slots['{shipcard_slots.ROUTE_SWEEP_SLOT}']" in printed
     assert "--route-sweep-out" in printed
     assert "fill-route-sweep" in printed
 
@@ -293,7 +296,7 @@ def test_make_route_sweep_record_refuses_a_disagreeing_sweep():
     sweep = _sweep()
     _first_quantized(sweep)["scheme_attrs"]["use_a16"] = "True"
     with pytest.raises(gate.CompressedRouteSweepError):
-        shipcard.make_route_sweep_record(
+        shipcard_slots.make_route_sweep_record(
             tool="test", model_sha=None,
             sweeps=[("rank0", json.dumps(sweep))], expected_ranks=1,
             config_json=(FIXTURE / "config.json").read_text())
@@ -301,7 +304,7 @@ def test_make_route_sweep_record_refuses_a_disagreeing_sweep():
 
 def test_make_route_sweep_record_refuses_a_missing_sweep():
     with pytest.raises(gate.RouteSweepNotVerified):
-        shipcard.make_route_sweep_record(
+        shipcard_slots.make_route_sweep_record(
             tool="test", model_sha=None, sweeps=[("rank0", None)],
             expected_ranks=1,
             config_json=(FIXTURE / "config.json").read_text())
@@ -309,45 +312,63 @@ def test_make_route_sweep_record_refuses_a_missing_sweep():
 
 def test_verify_replays_the_comparison_and_refuses_a_hand_set_pass(tmp_path):
     model_dir = _model_dir(tmp_path)
-    record = shipcard.make_route_sweep_record(
+    record = shipcard_slots.make_route_sweep_record(
         tool="test", model_sha=None,
         sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
         expected_ranks=1, config_json=(model_dir / "config.json").read_text())
-    assert shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, record, model_dir=model_dir) == []
+    assert shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, record, model_dir=model_dir) == []
 
     forged = json.loads(json.dumps(record))
     for row in forged["route_sweeps"][0]["sweep"]["ranks"][0]["modules"]:
         if row.get("scheme"):
             row["scheme_attrs"]["use_a16"] = "True"
             break
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, forged, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, forged, model_dir=model_dir)
     assert problems and "priced" in problems[0]
 
     lying = json.loads(json.dumps(record))
     lying["sweep_verdict"]["histogram"] = {"A4:float/g16:dynamic": 1}
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, lying, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, lying, model_dir=model_dir)
     assert any("differs from the replay" in p for p in problems)
 
 
 def test_verify_refuses_carried_config_text_that_is_not_the_artifacts(tmp_path):
     model_dir = _model_dir(tmp_path)
-    record = shipcard.make_route_sweep_record(
+    record = shipcard_slots.make_route_sweep_record(
         tool="test", model_sha=None,
         sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
         expected_ranks=1, config_json=(model_dir / "config.json").read_text())
     (model_dir / "config.json").write_text(
         (model_dir / "config.json").read_text() + " ")
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, record, model_dir=model_dir)
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, record, model_dir=model_dir)
+    assert any("compared against another price" in p for p in problems)
+
+
+def test_registered_sweep_replay_binds_the_config_of_its_current_artifact(tmp_path):
+    model_dir = _model_dir(tmp_path)
+    carried_config = (model_dir / "config.json").read_text()
+    (model_dir / "config.json").write_text(carried_config + " ")
+    # The card and record both carry the current artifact identity. Only the
+    # sweep's carried price config differs, so the model identity check alone
+    # cannot detect this mismatch.
+    card = shipcard.open_shipcard(model_dir, lane="compressed-tensors")
+    record = shipcard_slots.make_route_sweep_record(
+        tool="test", model_sha=card["model_sha"],
+        sweeps=[("rank0", (FIXTURE / "sweep_rank0.json").read_text())],
+        expected_ranks=1, config_json=carried_config)
+    card["slots"][shipcard_slots.ROUTE_SWEEP_SLOT] = record
+    problems = shipcard.verify(
+        card, model_dir=model_dir, required=[shipcard_slots.ROUTE_SWEEP_SLOT])
     assert any("compared against another price" in p for p in problems)
 
 
 def test_verify_reads_an_absent_observation_as_unfilled_not_as_clean(tmp_path):
-    problems = shipcard._verify_route_sweep_record(
-        shipcard.ROUTE_SWEEP_SLOT, {"passed": True},
+    problems = shipcard_slots._verify_route_sweep_record(
+        shipcard_slots.ROUTE_SWEEP_SLOT, {"passed": True},
         model_dir=_model_dir(tmp_path))
     assert any("not a clean bill" in p for p in problems)
 
@@ -374,7 +395,7 @@ def _fill(card: Path, model_dir: Path, sweep: Path) -> int:
 def test_cli_fills_the_slot_from_the_real_sweep(tmp_path):
     model_dir, card = _card(tmp_path)
     assert _fill(card, model_dir, FIXTURE / "sweep_rank0.json") == 0
-    filled = json.loads(card.read_text())["slots"][shipcard.ROUTE_SWEEP_SLOT]
+    filled = json.loads(card.read_text())["slots"][shipcard_slots.ROUTE_SWEEP_SLOT]
     assert filled["passed"] is True
     assert filled["metrics"]["activation_contracts"] == {
         "A4:float/g16:dynamic": 112}
@@ -388,14 +409,14 @@ def test_cli_exits_1_and_leaves_the_slot_unfilled_on_disagreement(tmp_path):
     path.write_text(json.dumps(sweep))
     assert _fill(card, model_dir, path) == 1
     assert json.loads(card.read_text())["slots"][
-        shipcard.ROUTE_SWEEP_SLOT] is None
+        shipcard_slots.ROUTE_SWEEP_SLOT] is None
 
 
 def test_cli_exits_3_when_the_sweep_is_missing(tmp_path):
     model_dir, card = _card(tmp_path)
     assert _fill(card, model_dir, tmp_path / "absent.json") == 3
     assert json.loads(card.read_text())["slots"][
-        shipcard.ROUTE_SWEEP_SLOT] is None
+        shipcard_slots.ROUTE_SWEEP_SLOT] is None
 
 
 def test_cli_exits_3_on_a_graph_arm_sweep(tmp_path):
@@ -409,9 +430,9 @@ def test_cli_exits_3_on_a_graph_arm_sweep(tmp_path):
 
 # --------------------------------------------------------------------------
 # PQ #706: method classes that carry no scheme read through METHOD_ACTIVATION.
-# No packed-MoE artifact has been swept, so the table is empty and the gap
-# refuses by name. The mechanics below run on a synthetic test-only entry
-# that is removed again, never on a method name read from vLLM's source.
+# The table holds the one swept class; unobserved classes still refuse by
+# name. The mechanics below run on a synthetic test-only entry that is
+# removed again, never on a method name read from vLLM's source.
 # --------------------------------------------------------------------------
 def test_an_unobserved_moe_method_names_its_method_class():
     sweep = _sweep()
@@ -455,3 +476,99 @@ def test_a_swept_method_missing_its_numbers_is_not_verified():
         del gate.METHOD_ACTIVATION["TestOnlySweptMoeMethod"]
     assert verdict["status"] == gate.NOT_VERIFIED
     assert "do not carry the numbers" in verdict["detail"]
+
+
+# --------------------------------------------------------------------------
+# PQ #706: the recorded packed-MoE sweep agrees with its own price.
+# --------------------------------------------------------------------------
+MOE_FIXTURE = Path(__file__).parent / "fixtures" / "compressed_route_sweep_moe"
+
+
+def _moe_config() -> dict:
+    return json.loads((MOE_FIXTURE / "config.json").read_text())
+
+
+def _moe_sweep() -> dict:
+    return json.loads((MOE_FIXTURE / "sweep_rank0.json").read_text())
+
+
+def _compare_moe(sweep: dict | None, *, config=None):
+    text = None if sweep is None else json.dumps(sweep)
+    return gate.compare_route_sweeps(
+        [("rank0:sweep_rank0.json", text)],
+        expected_ranks=1,
+        config=_moe_config() if config is None else config,
+    )
+
+
+def _moe_rows(sweep: dict) -> list[dict]:
+    return [row for row in sweep["ranks"][0]["modules"]
+            if row.get("quant_method") == "CompressedTensorsW8A8Fp8MoEMethod"]
+
+
+def test_packed_moe_sweep_agrees_with_its_price():
+    """The fail-before test for #706: a real packed-MoE sweep agrees."""
+    sweep = _moe_sweep()
+    assert len(_moe_rows(sweep)) == 2
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.AGREE, verdict["detail"]
+
+
+def test_packed_moe_verdict_is_deterministic_so_verify_can_replay_it():
+    assert _compare_moe(_moe_sweep()) == _compare_moe(_moe_sweep())
+
+
+def test_an_unobserved_moe_method_class_is_still_not_verified():
+    """The table holds one swept class; any other schemeless class refuses."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["quant_method"] = "CompressedTensorsW4A4MoeMethod"
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "CompressedTensorsW4A4MoeMethod" in verdict["detail"]
+
+
+def test_a_swept_moe_method_missing_its_numbers_is_not_verified():
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["method_attrs"] = {}
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "do not carry the numbers" in verdict["detail"]
+
+
+def test_a_swept_moe_method_with_mismatched_sides_is_not_verified():
+    """W8A8 means both sides: weight/activation disagreement reads nothing."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["method_attrs"] = dict(row["method_attrs"])
+        row["method_attrs"]["weight_quant"] = row["method_attrs"][
+            "input_quant"].replace("num_bits=8", "num_bits=4")
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.NOT_VERIFIED
+    assert "do not carry the numbers" in verdict["detail"]
+
+
+def test_a_moe_row_whose_runner_never_fired_is_refused():
+    """Parent evidence rescues a bypassed __call__, never an idle runner."""
+    sweep = _moe_sweep()
+    for row in _moe_rows(sweep):
+        row["parent_dispatches"] = 0
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.REFUSED
+    assert "ZERO forwards" in verdict["detail"]
+
+
+def test_a_dense_row_never_reads_its_parent_count():
+    """A fused Linear at zero is suspect even when its parent ran."""
+    sweep = _moe_sweep()
+    for row in sweep["ranks"][0]["modules"]:
+        if row.get("scheme") == "CompressedTensorsW8A8Fp8":
+            row["dispatches"] = 0
+            row["parent_dispatches"] = 4
+            break
+    else:  # pragma: no cover - the fixture carries dense FP8 rows
+        pytest.fail("fixture carries no dense FP8 row")
+    verdict = _compare_moe(sweep)
+    assert verdict["status"] == gate.REFUSED
+    assert "ZERO forwards" in verdict["detail"]

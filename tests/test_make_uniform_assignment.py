@@ -180,7 +180,7 @@ def test_illegal_member_demotes_the_whole_fused_unit(graph, profile):
         graph, "MXFP8_E4M3", profile=profile, target_profile="research",
         source_kinds=_bf16_sources(graph))
 
-    # up_proj is group-256-illegal; gate_proj alone would have been legal.
+    # up_proj is block-32-illegal; gate_proj alone would have been legal.
     assert result.assignment["model.layers.1.mlp.up_proj"] == "BF16"
     assert result.assignment["model.layers.1.mlp.gate_proj"] == "BF16"
     assert "fused:model.layers.1.mlp.gate_up_proj" in result.demoted_units

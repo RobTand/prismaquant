@@ -119,6 +119,12 @@
     "model.visual.",
     "model.language_model.layers.45."
   ],
+  "pact": {
+    "dense_layer_end": 3,
+    "band_width": 6,
+    "tp_splits": {"down_proj": 2},
+    "hidden_streams": 4
+  },
 
   "pinned_names": [
     "lm_head",

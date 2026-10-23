@@ -720,13 +720,12 @@ def test_a_non_joint_submission_without_the_flag_passes_the_gate():
 def _dry_run_joint(scratch, monkeypatch, capsys, *, residency):
     """One real submit-joint dry run, so the argv asserted is the argv built."""
     import dispatch_tessera_campaign as dispatch
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     import test_glm_joint_data_manifest_at_submit as fixtures
 
     fixture = fixtures._workspace(scratch)
     spec = scratch / 'spec.joint.json'
     spec.write_text(json.dumps({'container': {'image': 'x'}}))
-    monkeypatch.setattr(dispatch, '_manifest_producer', lambda: glm_data_manifests)
     argv = [
         'submit-joint', 'prepare',
         '--plan', str(fixture['plan']),

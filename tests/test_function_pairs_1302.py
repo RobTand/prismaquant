@@ -1,10 +1,25 @@
 """Each consolidated near-duplicate function pair keeps its outcomes (PQ #1302).
 
 The duplication baseline listed these pairs as one responsibility implemented
-twice. Each now has one owner, and each old site binds or calls it. Every call
-below goes through the old site's name. Its outcome, a return or a refusal, was
-frozen from the pre-consolidation code into
-``tests/fixtures/function_pairs_1302.json`` (``tests/golden_table.py``).
+twice. Each now has one owner. Where an old site still exists, it binds or
+calls that owner, and the call below goes through the old site's name. Three
+groups of calls go through the current owner instead. ``probe_inventory`` owns
+the packed-expert helpers: ``export_native_compressed`` and
+``measure_quant_cost`` import them under their old private names, and the
+``sensitivity_probe`` copies were removed. ``aura_provenance`` owns the AURA
+producer commit, formerly ``aura_cost._git_commit``. ``perturbed_x_cache``
+owns the first forward tensor, and the ``layer_state_cache`` site was retired.
+
+Each outcome, a return or a refusal, is a row in
+``tests/fixtures/function_pairs_1302.json`` (``tests/golden_table.py``). The
+rows were frozen from the pre-consolidation code, with one deliberate
+exception. Commit ``dae261bad6`` made a declared packed-profile failure
+propagate and re-recorded the 12 ``probe_inventory`` rows for
+``_NamesProfile(fail=True)``. Those rows record the profile's
+``RuntimeError``; the frozen code returned ``[]``, ``False`` or ``None``.
+The other 36 ``probe_inventory`` rows equal the rows frozen for both old
+sites. A passing run therefore shows unchanged outcomes except for those 12
+rows.
 """
 from __future__ import annotations
 
@@ -18,9 +33,10 @@ import pytest
 import torch
 import torch.nn as nn
 
+from prismaquant import aura_provenance
 from tests.golden_table import GoldenTable
 
-GOLDEN = GoldenTable("function_pairs_1302")
+GOLDEN = GoldenTable("function_pairs_1302", every_row_used=True)
 
 
 def _site(ref):
@@ -46,7 +62,7 @@ def test_canonical_json_value(index):
     GOLDEN.call(lambda: site(_JSON_VALUES[index], where="w"))
 
 
-# --- git HEAD commit (emu_forward_kl, fisher_col_weights -> aura_cost) ---------
+# --- git HEAD commit (emu_forward_kl, fisher_col_weights -> aura_provenance) ---
 
 _GIT_RESULTS = ["abc123\n", "", "  \n", OSError("no git"), subprocess.TimeoutExpired(["git"], 5)]
 
@@ -78,15 +94,14 @@ def test_git_commit(monkeypatch, ref, index):
 
 
 def test_aura_git_commit_keeps_its_override(monkeypatch):
-    from prismaquant import aura_cost
     calls = []
     monkeypatch.setattr(subprocess, "run", _fake_run("f" * 40 + "\n", calls))
     monkeypatch.delenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", raising=False)
-    GOLDEN.call(aura_cost._git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "A" * 40)
-    GOLDEN.call(aura_cost._git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     monkeypatch.setenv("PRISMAQUANT_IDENTITY_GIT_COMMIT", "not-a-commit")
-    GOLDEN.call(aura_cost._git_commit)
+    GOLDEN.call(aura_provenance.producer_git_commit)
     GOLDEN.value(calls)
 
 
@@ -112,8 +127,8 @@ def test_profile_call(ref, accessor):
     GOLDEN.call(lambda: site(_Profile(), accessor, "a", 2))
 
 
-# --- packed-expert helpers (export_native_compressed, measure_quant_cost ->
-#     sensitivity_probe) -------------------------------------------------------
+# --- packed-expert helpers (owner probe_inventory; export_native_compressed and
+#     measure_quant_cost import it under the old names) ------------------------
 
 class _NamesProfile:
     def __init__(self, names=None, parent=None, fail=False):
@@ -151,24 +166,24 @@ _MODULES = [Qwen3MoeExperts("gate_up_proj", (2, 2, 2)), Qwen3MoeExperts("gate_up
 
 
 @pytest.mark.parametrize("module_name", [
-    "prismaquant.export_native_compressed", "prismaquant.sensitivity_probe"])
+    "prismaquant.probe_inventory"])
 @pytest.mark.parametrize("profile_index", range(len(_PROFILES)))
 def test_packed_expert_param_names_and_module_test(module_name, profile_index):
     module = importlib.import_module(module_name)
     profile = _PROFILES[profile_index]
-    GOLDEN.call(lambda: sorted(module._packed_expert_param_name_set(profile)))
+    GOLDEN.call(lambda: sorted(module.packed_expert_param_name_set(profile)))
     for candidate in _MODULES:
-        GOLDEN.call(lambda: module._is_packed_experts_module(candidate, profile))
-        GOLDEN.call(lambda: module._packed_experts_param_names(candidate, profile))
+        GOLDEN.call(lambda: module.is_packed_experts_module(candidate, profile))
+        GOLDEN.call(lambda: module.packed_experts_param_names(candidate, profile))
 
 
 @pytest.mark.parametrize("module_name", [
-    "prismaquant.export_native_compressed", "prismaquant.measure_quant_cost"])
+    "prismaquant.probe_inventory"])
 @pytest.mark.parametrize("profile_index", range(len(_PROFILES)))
 @pytest.mark.parametrize("projection", ["gate_proj", "down_proj", "unknown"])
 def test_packed_expert_parent_for_projection(module_name, profile_index, projection):
     module = importlib.import_module(module_name)
-    GOLDEN.call(lambda: module._packed_expert_parent_for_projection(
+    GOLDEN.call(lambda: module.packed_expert_parent_for_projection(
         _PROFILES[profile_index], projection))
 
 
@@ -190,7 +205,8 @@ def test_control_directory(ref, index):
     GOLDEN.call(lambda: site(output_root, metadata_root=metadata_root))
 
 
-# --- first tensor of a forward call (layer_state_cache -> perturbed_x_cache) ---
+# --- first tensor of a forward call (owner perturbed_x_cache; the
+#     layer_state_cache site was retired) --------------------------------------
 
 _T = torch.arange(3.0)
 _CALLS = [((), {}), ((1, _T), {}), ((), {"x": 1, "input": _T}),
@@ -199,7 +215,6 @@ _CALLS = [((), {}), ((1, _T), {}), ((), {"x": 1, "input": _T}),
 
 
 @pytest.mark.parametrize("ref", [
-    "prismaquant.layer_state_cache._first_tensor_location",
     "prismaquant.perturbed_x_cache._first_tensor_location",
 ])
 @pytest.mark.parametrize("index", range(len(_CALLS)))

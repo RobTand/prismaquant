@@ -28,10 +28,12 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # noqa: E402
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 from test_tessera_campaign_fanout import (  # noqa: E402
     _partition_workspace, _plan_args)
 
@@ -230,7 +232,7 @@ def test_a_row_whose_read_set_cannot_be_derived_refuses_the_plan(
     spec, workspace = _partition_workspace(tmp_path, box_memory_gb=None)
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT",
                         str(tmp_path / "elsewhere"))
-    with pytest.raises(SystemExit, match="outside the shared mount"):
+    with pytest.raises(ReadsetRefused, match="outside the shared mount"):
         dispatch.cmd_plan(_plan_args(spec, workspace))
     assert sorted(path.name for path in workspace.iterdir()) == ["census.json"]
 
@@ -239,6 +241,6 @@ def test_a_row_whose_read_set_cannot_be_derived_refuses_the_plan(
     before = _published(workspace)
     # The model's index goes missing: no row reads anything any more.
     (tmp_path / "model" / "model.safetensors.index.json").unlink()
-    with pytest.raises(SystemExit, match="non-empty"):
+    with pytest.raises(ReadsetRefused, match="non-empty"):
         dispatch.cmd_plan(_plan_args(spec, workspace, groups_per_row=2))
     assert _published(workspace) == before

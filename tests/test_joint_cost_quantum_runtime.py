@@ -16,10 +16,15 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from test_joint_operator_windows import policy as operator_policy
+from test_layer_major_boundary_capture import fixture, draw
+from test_streamed_cost_checkpoints import _model_identity
 
+from prismaquant import aura_checkpoint_journal
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space,
     adjoint_receipt_path,
@@ -52,10 +57,6 @@ from prismaquant.joint_cost_stage_a import (
     run_adjoint_capture_core,
 )
 from prismaquant.sensitivity_probe import SharedStateCotangents
-
-from test_joint_operator_windows import policy as operator_policy
-from test_layer_major_boundary_capture import fixture, draw
-from test_streamed_cost_checkpoints import _model_identity
 
 QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 HEX = "0123456789abcdef"
@@ -156,7 +157,7 @@ def _execution(tmp_path, *, n_probes=4, seed_base=7000):
 
 def _single_run(tmp_path, monkeypatch, *, checkpoint, layers=2):
     """The campaign of record: one consumer, retained windows, exact boundaries."""
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     model, context, runner, cache = fixture(layers)
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
     context.source_residency_snapshot = lambda layers, include_head=False: {
@@ -341,21 +342,22 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     substituted_bytes = json.dumps(substituted).encode("utf-8")
     assert substituted["identity_sha256"] != original["identity_sha256"]
 
-    real_read_bytes = Path.read_bytes
+    from prismaquant import io_engine
+
+    real_read_file = io_engine.read_file
     consumed: list[Path] = []
 
-    def racing_read_bytes(self):
-        if self == record_path:
-            consumed.append(self)
-            payload = real_read_bytes(self)
-            # Replace the live file before any second read can see it.
+    def racing_read_file(path, limit, **kwargs):
+        owned = real_read_file(path, limit, **kwargs)
+        if path == record_path:
+            consumed.append(path)
+            # Replace the path after the one bounded read owns its bytes.
             swap = record_path.with_suffix(".swap")
             swap.write_bytes(substituted_bytes)
             os.replace(swap, record_path)
-            return payload
-        return real_read_bytes(self)
+        return owned
 
-    monkeypatch.setattr(Path, "read_bytes", racing_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", racing_read_file)
 
     kwargs = dict(
         quantum_path=record_path, quantum_sha256=original_sha,
@@ -373,11 +375,73 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
     assert _record_bytes == original_bytes
 
     # The live file has changed; the old digest must now refuse.
-    monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
+    monkeypatch.setattr(io_engine, "read_file", real_read_file)
     assert record_path.read_bytes() == substituted_bytes
     with pytest.raises(QuantumIdentityRefused, match="digest mismatch"):
         verify_quantum_identity(**kwargs)
 
+
+
+def _padded_identity_bytes(identity_files, *, target_bytes):
+    """A valid identity record padded to exactly ``target_bytes`` of JSON."""
+    record = _valid_record(identity_files)
+    record.pop("identity_sha256")
+    pad = target_bytes - len(json.dumps(record).encode("utf-8"))
+    assert pad > 0
+    record["sealed_note"] = "n" * pad
+    record["identity_sha256"] = canonical_json_sha256(record, where="record")
+    raw = json.dumps(record).encode("utf-8")
+    drift = target_bytes - len(raw)
+    if drift:
+        record.pop("identity_sha256")
+        note = record["sealed_note"]
+        if drift < 0:
+            record["sealed_note"] = note[: len(note) + drift]
+        else:
+            record["sealed_note"] = note + "n" * drift
+        record["identity_sha256"] = canonical_json_sha256(record, where="record")
+        raw = json.dumps(record).encode("utf-8")
+    assert len(raw) == target_bytes
+    return raw
+
+
+def _identity_kwargs(identity_files, record_path, sha):
+    return dict(
+        quantum_path=record_path, quantum_sha256=sha,
+        plan_path=identity_files["plan"][0], plan_sha256=identity_files["plan"][1],
+        prepared_path=identity_files["prepared"][0],
+        prepared_sha256=identity_files["prepared"][1],
+        adjoint_path=identity_files["adjoint"][0],
+        adjoint_sha256=identity_files["adjoint"][1],
+        output_root=identity_files["output_root"])
+
+
+def test_identity_gate_admits_sealed_record_below_raised_cap(identity_files):
+    """PQ #2603: a 2.7 MB valid record passes ``verify_quantum_identity``."""
+    from prismaquant.joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+    raw = _padded_identity_bytes(identity_files, target_bytes=int(2.7 * 1024 * 1024))
+    assert 1024 * 1024 < len(raw) < QUANTUM_RECORD_MAX_BYTES
+    record_path = identity_files["output_root"].parent / "record-big.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_bytes(raw)
+    verified, _slice, record_bytes = verify_quantum_identity(
+        **_identity_kwargs(identity_files, record_path, hashlib.sha256(raw).hexdigest()))
+    assert record_bytes == raw
+    assert verified["identity_sha256"] == json.loads(raw.decode("utf-8"))["identity_sha256"]
+
+
+def test_identity_gate_refuses_record_above_raised_cap(identity_files):
+    """PQ #2603: a record one byte above 4 MiB refuses the cap."""
+    from prismaquant.joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+    raw = _padded_identity_bytes(
+        identity_files, target_bytes=QUANTUM_RECORD_MAX_BYTES + 1)
+    record_path = identity_files["output_root"].parent / "record-over.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    record_path.write_bytes(raw)
+    with pytest.raises(QuantumIdentityRefused, match="cap"):
+        verify_quantum_identity(
+            **_identity_kwargs(identity_files, record_path,
+                               hashlib.sha256(raw).hexdigest()))
 
 
 def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeypatch, capsys):
@@ -454,6 +518,7 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     import prismaquant.joint_cost_stage_a as stage_a
     import prismaquant.tessera_joint_aura as aura
     import prismaquant.cost_streaming as streaming
+    from prismaquant import streamed_model_identity as streaming_identity
     import prismaquant.tessera_reader as reader_mod
     import prismaquant.gpu_guard as guard
     import prismaquant.joint_projection_backend as backend
@@ -473,7 +538,7 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     monkeypatch.setattr(backend, "prewarm_projection_backend",
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     # Stage A takes its head from the completion the preflight checked
     # (PQ #1051); the stub returns it as the real preflight does.
     monkeypatch.setattr(aura, "_preflight_run_prepared",
@@ -579,6 +644,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     import prismaquant.joint_cost_stage_a as stage_a
     import prismaquant.tessera_joint_aura as aura
     import prismaquant.cost_streaming as streaming
+    from prismaquant import streamed_model_identity as streaming_identity
     import prismaquant.tessera_reader as reader_mod
     import prismaquant.gpu_guard as guard
     import prismaquant.joint_projection_backend as backend
@@ -626,7 +692,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(backend, "executing_image", lambda: None)
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     # Stage A takes its head from the completion the preflight checked
     # (PQ #1051); the stub returns it as the real preflight does.
     monkeypatch.setattr(aura, "_preflight_run_prepared",
@@ -645,7 +711,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     monkeypatch.setattr(streaming, "build_streamed_causal_lm",
                         lambda model, **kwargs: (
                             captured.update(kwargs) or _Runner()))
-    monkeypatch.setattr(streaming, "build_streamed_model_identity",
+    monkeypatch.setattr(streaming_identity, "build_streamed_model_identity",
                         lambda *a, **k: {"identity": "stub"})
     monkeypatch.setattr(residency, "bind_residency_manifest", lambda *a, **k: None)
     monkeypatch.setattr(stage_a, "GpuPowerSampler",
@@ -876,7 +942,7 @@ def test_stage_a_threads_the_plan_historical_encoder_reuse(tmp_path, monkeypatch
     monkeypatch.setattr(backend, "prewarm_projection_backend",
                         lambda *a, **k: type("B", (), {"identity": None})())
     monkeypatch.setattr(reader_mod, "load_declared_reader", lambda *a, **k: None)
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: _hex("b"))
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: _hex("b"))
     monkeypatch.setattr(aura, "_preflight_run_prepared",
                         lambda *a, **k: {"plan_sha256": _hex("d")})
     monkeypatch.setattr(aura, "load_measured_anchor_input", fake_loader)
@@ -1101,7 +1167,7 @@ def test_quantum_matches_single_run_bitwise(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     # The tail checkpoint exists, boundary entries all survived, receipt not
     # yet sealed on disk by the core (the CLI seals it).
     assert [c["boundary"] for c in receipt["checkpoints"]] == [2]
@@ -1155,7 +1221,7 @@ def test_the_core_refuses_a_live_bf16_flag_the_slice_does_not_record(
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
             prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-            implementation_sha256=aura._aura_source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
         assert BF16_REDUCTION_FIELD not in receipt["run_identity"]
         matmul.allow_bf16_reduced_precision_reduction = False
         with pytest.raises(QuantumIdentityRefused) as refused:
@@ -1213,7 +1279,7 @@ def _campaign_receipt(tmp_path, monkeypatch, output_root):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
 
 
 def test_the_proof_reads_only_the_shape_off_a_meta_skeleton(tmp_path, monkeypatch):
@@ -1280,7 +1346,7 @@ def test_quantum_writes_only_inside_its_output_space(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
         prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
 
     def tree(root):
         return {str(p.relative_to(root)) for p in Path(root).rglob("*")}
@@ -1337,7 +1403,7 @@ def test_band_and_receipt_slices_give_byte_identical_payloads(tmp_path, monkeypa
             source_model_identity=_model_identity("joint-source"),
             unit_roster_sha256=_hex("a"), plan_sha256=_hex("d"),
             prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-            implementation_sha256=aura._aura_source_sha256())
+            implementation_sha256=aura_provenance.producer_package_sha256())
     receipt = json.loads(json.dumps(receipt))
     band = build_band_receipt(
         output_root=output_root, boundary=2, plan_sha256=_hex("d"),
@@ -1521,18 +1587,16 @@ def test_shared_state_cotangents_state_dict_roundtrip():
 
 def _journal(tmp_path, rows, identity_extra):
     """A synthetic AURA journal: manifest + per-unit envelopes."""
-    from prismaquant.aura_cost import (
-        _aura_unit_checkpoint_path, _write_aura_checkpoint_manifest,
-        _write_aura_unit_checkpoint,
-    )
+    from prismaquant.cost_stage_checkpoint import unit_path as _aura_unit_checkpoint_path
 
     root = tmp_path
     identity = {"schema": "prismaquant.aura.checkpoint.identity.v1",
                 "git_commit": "1" * 40, **identity_extra}
-    identity_sha256 = _write_aura_checkpoint_manifest(root, identity, sorted(rows))
+    journal = aura_checkpoint_journal.AuraCheckpointJournal.open(
+        root, identity=identity, names=sorted(rows), resume=False)
+    identity_sha256 = journal.identity_sha256
     for name, state in rows.items():
-        _write_aura_unit_checkpoint(root, qname=name,
-                                    identity_sha256=identity_sha256, state=state)
+        aura_checkpoint_journal.UnitCheckpointWriter(root, identity_sha256).publish(qname=name, state=state)
     return root
 
 
@@ -1775,7 +1839,7 @@ def test_independent_draw_quantum_records_actual_observations(tmp_path, monkeypa
         runner_a, draw(), execution=_execution(tmp_path), output_root=output_root, stride=2,
         source_model_identity=_model_identity("joint-source"), unit_roster_sha256=_hex("a"),
         plan_sha256=_hex("d"), prepared_sha256=_hex("e"), read_manifest_sha256=_hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     panel = {"status": "diagnostic_pilot", "draw": "independent-context-fixture"}
     payload, _record, _counters = _run_quantum(
         tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,

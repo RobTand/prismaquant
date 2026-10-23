@@ -59,7 +59,7 @@ order they bind:
   family, so the holdout-gated ladder shape survives untouched; it re-levels
   families against each other, which is exactly the audit's complaint. And
   because it is multiplicative it cannot turn a 0.0 price into a nonzero one,
-  so ``allocator_candidates.cost_entry_prices_unmeasured_activation_at_zero``
+  so ``priced_cell.cost_entry_prices_unmeasured_activation_at_zero``
   — the existing candidate-removal gate — keeps precisely its current
   strength.
 

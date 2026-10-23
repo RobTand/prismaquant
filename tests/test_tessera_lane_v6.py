@@ -30,6 +30,10 @@ on the historical shape -- the v17 smoke transplanted back onto the installed
 routed-MoE cells (``_with_repetitive_smoke``), never on a cell this repository
 invented.
 """
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import copy
 import hashlib
 import json
@@ -326,7 +330,7 @@ def test_the_dense_unit_still_resolves_backed_with_its_grade_recorded(table, pay
 def test_the_development_menu_reads_the_same_predicate(payload):
     parsed = _parse(payload)
     admitted = parsed.native_cells(FAMILY, RATE, serving_context=_moe_context(payload))
-    assert {cell.cell_id for cell in admitted} == {MOE_DECODE, MOE_BATCH}
+    assert {cell.id for cell in admitted} == {MOE_DECODE, MOE_BATCH}
     historical = _parse(_with_repetitive_smoke(payload))
     assert historical.native_cells(FAMILY, RATE,
                                    serving_context=_moe_context(payload)) == ()
@@ -334,15 +338,18 @@ def test_the_development_menu_reads_the_same_predicate(payload):
 
 def test_the_renderer_names_the_evidence_when_it_refuses(payload, table, monkeypatch):
     formats = {row["family"]: row for row in payload["formats"]}
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    admitted, reason = render.tessera_lane_admission(
+
+    install_metadata(monkeypatch, payload)
+    verdict = render.tessera_lane_admission(
         NAME, serving_context=_moe_context(payload))
+    admitted, reason = verdict.admitted, verdict.reason
     assert admitted, reason
     historical = _table_of(_with_repetitive_smoke(payload))
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (historical, formats))
-    admitted, reason = render.tessera_lane_admission(
+    install_metadata(monkeypatch, _with_repetitive_smoke(payload))
+    verdict = render.tessera_lane_admission(
         NAME, serving_context=_moe_context(payload))
+    admitted, reason = verdict.admitted, verdict.reason
+    assert verdict.kind == "evidence"
     assert not admitted
     assert "evidence refuses this route" in reason
     assert "repetitive" in reason

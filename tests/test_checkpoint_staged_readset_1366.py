@@ -1,4 +1,5 @@
 """CPU prerequisite checks; context doubles do not qualify staged lifetimes/GPU."""
+
 from contextlib import contextmanager
 import copy
 import hashlib
@@ -8,9 +9,11 @@ from pathlib import Path
 import pytest
 import torch
 
+from prismaquant import joint_quantum_row as quantum_row
 import test_quantum_executable_readset as fixture
 from test_quantum_executable_readset import (CALIB, N_PROBES, RENDER_PREREQ, STRIDED,
                                            _tiny_records, _tiny_receipt)
+from prismaquant import aura_checkpoint_journal
 from prismaquant import joint_layer_quanta as quanta
 
 MODE = quanta.CHECKPOINT_INCOMING_STAGED
@@ -190,7 +193,7 @@ def test_runtime_requires_authenticated_context(tmp_path, monkeypatch, case):
 
 
 def test_dispatch_compute_counts_exclude_incoming_rows():
-    from tools.dispatch_joint_quanta import phase_work_entries
+    from prismaquant.joint_quantum_row import phase_work_entries
     annotations = {"checkpoint_incoming": {"streamed_incoming": {"chain-003-bound": 6, "spill-p0": 3}}}
     assert phase_work_entries("chain-003-bound", {"entries": 9}, annotations) == 3
     assert phase_work_entries("spill-p0", {"entries": 6}, annotations) == 3
@@ -276,7 +279,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     monkeypatch.setattr(runtime, "_authenticate_checkpoint_incoming_readset", context_double)
     events, manifest, candidate, _ = drive(MODE)
     if record["adjoint"]["chain_layers"]:
-        phase = quanta.executable_bound_phase_name(record["adjoint"]["chain_layers"][0])
+        phase = quantum_row.executable_bound_phase_name(record["adjoint"]["chain_layers"][0])
         current, seen, opened = None, set(), []
         for event in events:
             if event[0] == "report":
@@ -294,8 +297,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     # final batches even for a grouped capture seal; compare like resumes.
     assert captured[-1] == baseline_resume_plane
     shutil.rmtree(record["output_space"]["root"])
-    import prismaquant.aura_cost as aura
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []
     def fail_second(path, body):
         if Path(path).suffix == ".pkl":
@@ -304,7 +306,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
             published.append(str(path))
         return atomic(path, body)
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "atomic_write_bytes", fail_second)
+        patch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_second)
         with pytest.raises(OSError, match="partial staged checkpoint journal"):
             drive(MODE)
     assert len(published) == 1 and Path(published[0]).is_file()
@@ -312,7 +314,7 @@ def test_real_cpu_operands_plane_costs_and_complete_resume(tmp_path, monkeypatch
     assert partial["costs"] == baseline["costs"]
     assert captured[-1] == baseline_plane
     assert {p.name: p.read_bytes() for p in checkpoint_dir.glob("*.pkl")} == baseline_journal
-    assert [p["name"] for p in manifest["read_plan"]["phases"]] == list(quanta.quantum_executable_phase_names(
+    assert [p["name"] for p in manifest["read_plan"]["phases"]] == list(quantum_row.quantum_executable_phase_names(
         record["adjoint"]["chain_layers"], layer, n_probes=setup["n_probes"],
         replay_windows=len(record["windows"]), render_phases=True, replay_mode="spill"))
 

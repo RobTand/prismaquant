@@ -622,12 +622,15 @@ def live_pins() -> DomainPins:
 #: audit is the exact exporter/grammar crossing, not private 608bb equality.
 #: Re-taken 2026-10-07 for fca4c6ce0 / v60 (PQ #2426).
 #: The historical study producer and measured values stay unchanged.
+#: Re-taken 2026-10-16 for the aaa417003f public API delivery. The v60
+#: contract, export.py fingerprint and grammar.py fingerprint are unchanged;
+#: the existing source-state match and audited rate counts remain authoritative.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    reader_dev_pin_commit="aaa417003f0ee690e8ace138acd18df7f9531369",
     reader_dev_pin_contract_sha256=(
         "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
     ),
-    serving_runtime_pinned_commit="fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    serving_runtime_pinned_commit="aaa417003f0ee690e8ace138acd18df7f9531369",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
         "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e"
@@ -846,7 +849,8 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
     data = packaged_contract_payload() if payload is None else payload
     lanes = data.get("lane_eligibility") or {}
     covered = {}
-    if lanes.get("schema") == "tessera.lane-eligibility.v11":
+    if lanes.get("schema") in ("tessera.lane-eligibility.v11",
+                               "tessera.lane-eligibility.v12"):
         from .lane_eligibility import _parse_table
         table = _parse_table(lanes, data["formats"], "", "", "",
                              native_extensions=data["native_extensions"])

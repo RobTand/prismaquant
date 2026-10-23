@@ -151,12 +151,13 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
 
         wire = record_path.read_bytes()
         sealed_sha = hashlib.sha256(wire).hexdigest()
+        args += ["--pilot-quantum-record", str(record_path), sealed_sha]
         completion = quantum_completion_record(
             {"quantum_id": record["quantum_id"], "passed": True,
              "status": "complete", "units_done": 1, "units_total": 1,
              "counters": {"path": str(path), "sha256": digest,
                           "bytes": path.stat().st_size}},
-            record_bytes=wire)
+            record_path=record_path, record_bytes=wire)
         if quantum_override is not None:
             completion = quantum_override(completion) or completion
         if mutate_completion is not None:
@@ -347,16 +348,23 @@ def test_a_duplicate_selector_refuses(tmp_path, campaign, records_dir, monkeypat
 
 def test_a_substituted_quantum_record_refuses(tmp_path, campaign, records_dir,
                                               monkeypatch, capsys):
-    """A completion inlining other record bytes than the sealed digest refuses."""
+    """An explicit consumer copy with bytes outside the sealed digest refuses."""
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(
         tmp_path, records_dir, monkeypatch, gateway=gateway,
         quantum_override=lambda completion: {
-            # Same declared length and digest, different bytes: the validator
-            # must reject the block rather than trust the declared fields.
+            # Same declared length and digest, different bytes on disk: the
+            # bound reader must reject the substitution, not the descriptor.
             **completion,
-            "quantum_record": _flip_base64(completion["quantum_record"])})
+            "quantum_record": {**completion["quantum_record"],
+                               "path": str(_tampered_copy(
+                                   Path(completion["quantum_record"]["path"]),
+                                   tmp_path, completion["quantum_id"]))}})
+    for index, word in enumerate(args):
+        if word == "--pilot-quantum-record":
+            original = json.loads(Path(args[index + 1]).read_bytes())
+            args[index + 1] = str(tmp_path / f"{original['quantum_id']}.tampered.json")
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
                 _gateway=gateway) == 3
     assert not gateway.submitted
@@ -398,13 +406,13 @@ def test_a_wrong_attempt_selector_refuses(tmp_path, campaign, records_dir,
     assert "no verified result published" in capsys.readouterr().err
 
 
-def _flip_base64(encoded: str) -> str:
-    """A same-length base64 string carrying different bytes."""
-    import base64
-
-    raw = bytearray(base64.b64decode(encoded, validate=True))
+def _tampered_copy(path: Path, tmp_path: Path, quantum_id: str) -> Path:
+    """A same-length sibling file carrying different bytes."""
+    raw = bytearray(path.read_bytes())
     raw[0] = raw[0] ^ 0x01
-    return base64.b64encode(bytes(raw)).decode("ascii")
+    sibling = tmp_path / f"{quantum_id}.tampered.json"
+    sibling.write_bytes(bytes(raw))
+    return sibling
 
 
 def test_override_is_explicit_and_persistent(tmp_path, campaign, records_dir):
@@ -443,24 +451,30 @@ def test_sealed_invocation_mismatch_refuses(tmp_path, campaign, records_dir,
 
 
 def test_replaced_record_shape_refuses(tmp_path, campaign, records_dir, monkeypatch):
-    import base64
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.stage_inputs import read_bound
 
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
     for result in gateway.results.values():
         completion = json.loads(result["payload"])
-        record = json.loads(base64.b64decode(completion["quantum_record"]))
+        entry = completion["quantum_record"]
+        record = json.loads(read_bound({"path": entry["path"], "sha256": entry["sha256"]},
+                                       "pilot completion quantum record"))
         record["chunks"][0]["end_bytes"] += 1
         del record["identity_sha256"]
         record["identity_sha256"] = canonical_json_sha256(record, where="altered record")
         wire = json.dumps(record).encode()
-        completion.update(quantum_record=base64.b64encode(wire).decode(),
-                          quantum_record_sha256=hashlib.sha256(wire).hexdigest(),
-                          quantum_record_bytes=len(wire))
+        altered = tmp_path / f"altered-{record['quantum_id']}.json"
+        altered.write_bytes(wire)
+        completion["quantum_record"] = {"path": str(altered),
+                                        "sha256": hashlib.sha256(wire).hexdigest(),
+                                        "bytes": len(wire)}
         command = result["request"]["params"]["command"]
-        command[command.index("--quantum-sha256") + 1] = completion["quantum_record_sha256"]
+        command[command.index("--quantum-sha256") + 1] = completion["quantum_record"]["sha256"]
+        position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
+        args[position - 1:position + 1] = [str(altered), completion["quantum_record"]["sha256"]]
         result["payload"] = json.dumps(completion).encode()
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
                 _gateway=gateway) == 3
@@ -550,25 +564,29 @@ def test_missing_independent_source_contract_refuses(tmp_path, campaign, records
 
 def test_another_output_namespace_uses_only_the_authenticated_record(
         tmp_path, campaign, records_dir, monkeypatch):
-    import base64
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.stage_inputs import read_bound
 
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
     for result in gateway.results.values():
         completion = json.loads(result["payload"])
-        record = json.loads(base64.b64decode(completion["quantum_record"]))
+        entry = completion["quantum_record"]
+        record = json.loads(read_bound({"path": entry["path"], "sha256": entry["sha256"]},
+                                       "pilot completion quantum record"))
         record["output_space"]["root"] = "/other-pilot-output/" + record["quantum_id"]
         del record["identity_sha256"]
         record["identity_sha256"] = canonical_json_sha256(record, where="pilot namespace")
         wire = json.dumps(record, indent=2).encode()
-        completion.update(quantum_record=base64.b64encode(wire).decode(),
-                          quantum_record_bytes=len(wire),
-                          quantum_record_sha256=hashlib.sha256(wire).hexdigest())
+        moved = tmp_path / f"moved-{record['quantum_id']}.json"
+        moved.write_bytes(wire)
+        completion["quantum_record"] = {"path": str(moved),
+                                        "sha256": hashlib.sha256(wire).hexdigest(),
+                                        "bytes": len(wire)}
         command = result["request"]["params"]["command"]
         command[command.index("--quantum") + 1] = "/absent-pilot-wire/" + record["quantum_id"]
-        command[command.index("--quantum-sha256") + 1] = completion["quantum_record_sha256"]
+        command[command.index("--quantum-sha256") + 1] = completion["quantum_record"]["sha256"]
         command[command.index("--output-root") + 1] = "/other-pilot-output"
         path = Path(completion["counters"]["path"])
         counters = json.loads(path.read_bytes())
@@ -579,6 +597,8 @@ def test_another_output_namespace_uses_only_the_authenticated_record(
         completion["counters"].update(sha256=digest, bytes=len(raw))
         start = args.index(str(path))
         args[start + 1] = digest
+        position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
+        args[position - 1:position + 1] = [str(moved), completion["quantum_record"]["sha256"]]
         result["payload"] = json.dumps(completion).encode()
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 0
     assert len(gateway.submitted) == 3
@@ -591,3 +611,36 @@ def test_foreign_selector_refuses(tmp_path, campaign, records_dir, monkeypatch):
     args += ["--pilot-selector", "8" * 64, "1.0", "1"]
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 3
     assert not gateway.submitted
+
+
+def test_original_wire_survives_a_distinct_producer_namespace(
+        tmp_path, campaign, records_dir, monkeypatch):
+    receipt = _ready(tmp_path, campaign, records_dir)
+    gateway = FakeGateway()
+    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
+    for result in gateway.results.values():
+        completion = json.loads(result["payload"])
+        completion["quantum_record"]["path"] = "/workspace/producer-only/quantum.json"
+        assert not Path(completion["quantum_record"]["path"]).exists()
+        result["payload"] = json.dumps(completion).encode()
+    assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
+                _gateway=gateway) == 0
+    assert len(gateway.submitted) == 3
+
+
+@pytest.mark.parametrize("reference_fault", ["missing", "duplicate"])
+def test_original_wire_reference_must_be_unique(
+        tmp_path, campaign, records_dir, monkeypatch, capsys, reference_fault):
+    receipt = _ready(tmp_path, campaign, records_dir)
+    gateway = FakeGateway()
+    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
+    position = args.index("--pilot-quantum-record")
+    reference = args[position:position + 3]
+    if reference_fault == "missing":
+        del args[position:position + 3]
+    else:
+        args += reference
+    assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args),
+                _gateway=gateway) == 3
+    assert not gateway.submitted
+    assert "one unique consumer reference" in capsys.readouterr().err

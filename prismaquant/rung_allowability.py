@@ -76,7 +76,7 @@ CANONICAL_CHORD_SOURCE = "canonical_qualified_chord"
 def _quality_anchor_scope(scope: Mapping, tag: str, family: str) -> str:
     """Validate the complete scientific coordinates, not a provenance label."""
     from .schemas import Contract
-    from .joint_aura import JOINT_CURRENCY, identity_sha256
+    from prismaquant.joint_aura_rows import JOINT_CURRENCY, joint_identity_sha256
     contract = Contract(RungAllowabilityError, f"{tag} quality anchor: ")
     contract.mapping(scope, where="quality_scope")
     required = (*QUALITY_COORDINATES, "format", "validated", "probe_ids",
@@ -137,7 +137,7 @@ def _quality_anchor_scope(scope: Mapping, tag: str, family: str) -> str:
     contract.require(scope["probe_ids"] == list(range(seed, seed + count)),
                      "sample coordinates differ from actual probe ids")
     contract.sha256(scope["probe_identity_sha256"], where="probe identity digest")
-    contract.require(identity_sha256(probe) == scope["probe_identity_sha256"],
+    contract.require(joint_identity_sha256(probe) == scope["probe_identity_sha256"],
                      "probe identity digest differs from its own actual data")
     return unit
 
@@ -145,20 +145,20 @@ def _quality_anchor_scope(scope: Mapping, tag: str, family: str) -> str:
 def require_quality_scope_alignment(left: Mapping, right: Mapping, *, where: str,
                                     same_unit: bool = True) -> None:
     """Keep current scientific facts strict and use the existing D32 split."""
-    from .joint_aura import _require_probe_alignment
+    from prismaquant.joint_aura_rows import require_probe_alignment
     for axis in QUALITY_COORDINATES:
         if not same_unit and axis in ("unit", "shape", "source_weight", "activation_contract"):
             continue
         if left[axis] != right[axis]:
             raise RungAllowabilityError(f"quality anchors name different {axis}")
-    _require_probe_alignment(left, right, where=where,
+    require_probe_alignment(left, right, where=where,
         message="quality anchors name different probe sample coordinates")
 
 
 def qualified_cost_scope(row: Mapping, *, family: str, unit: str | None = None,
                          format_name: str | None = None) -> Mapping | None:
     """Validate the measured row before any optional scope can be read."""
-    from .joint_aura import validate_joint_aura_entry, _require_probe_alignment
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry, require_probe_alignment
     is_joint = validate_joint_aura_entry(row)
     scope = row.get("quality_scope")
     if scope is None:
@@ -171,7 +171,7 @@ def qualified_cost_scope(row: Mapping, *, family: str, unit: str | None = None,
     if format_name is not None and scope["format"] != format_name:
         raise RungAllowabilityError("quality anchor differs from its actual format key")
     if is_joint:
-        from .allocator_candidates import joint_row_binds_cell
+        from prismaquant.joint_aura_rows import joint_row_binds_cell
         joint_row_binds_cell(row, actual_unit, scope["format"], where="canonical quality anchor")
         operator, probe = row["joint_operator_identity"], row["probe_identity"]
         expected = {"shape": operator["source_weight"]["shape"],
@@ -190,20 +190,20 @@ def qualified_cost_scope(row: Mapping, *, family: str, unit: str | None = None,
                 raise RungAllowabilityError(f"joint quality_scope {axis} differs from its actual samples")
         if evidence["joint_operator_identity"]["rendered_weight"] != operator["rendered_weight"]:
             raise RungAllowabilityError("joint quality_scope differs from actual rendered bytes")
-        _require_probe_alignment(scope, row, where="joint quality_scope binding",
+        require_probe_alignment(scope, row, where="joint quality_scope binding",
             message="joint quality_scope differs from actual probe sample coordinates")
     return scope
 
 
 def _require_joint_anchor(scope: Mapping, value) -> None:
     """Bind a joint scope and scalar to actual validated joint samples."""
-    from .joint_aura import JOINT_CURRENCY, validate_joint_aura_entry, _require_probe_alignment
+    from prismaquant.joint_aura_rows import JOINT_CURRENCY, validate_joint_aura_entry, require_probe_alignment
     if scope["currency"] != JOINT_CURRENCY:
         return
     original = scope.get("joint_anchor")
     if not isinstance(original, Mapping) or not validate_joint_aura_entry(original):
         raise RungAllowabilityError("joint quality_scope requires its actual validated joint_anchor")
-    from .allocator_candidates import joint_row_binds_cell
+    from prismaquant.joint_aura_rows import joint_row_binds_cell
     joint_row_binds_cell(original, scope["unit"], scope["format"], where="joint quality_scope evidence")
     operator, probe = original["joint_operator_identity"], original["probe_identity"]
     expected = {"shape": operator["source_weight"]["shape"],
@@ -213,7 +213,7 @@ def _require_joint_anchor(scope: Mapping, value) -> None:
     for axis, actual in expected.items():
         if scope[axis] != actual:
             raise RungAllowabilityError(f"joint quality_scope {axis} differs from actual joint_anchor")
-    _require_probe_alignment(scope, original, where="joint anchor evidence",
+    require_probe_alignment(scope, original, where="joint anchor evidence",
         message="joint anchor differs from actual probe sample coordinates")
     if value != original["predicted_dloss"]:
         raise RungAllowabilityError("joint anchor scalar differs from its actual aligned samples")
@@ -300,7 +300,7 @@ def complete_scientific_price(row: Mapping, *, format_name: str | None = None) -
             raise RungAllowabilityError("scientific sum differs from its actual quantities or format")
         return float(actual["predicted_dloss"])
     claims = row.get("cost_source") == CANONICAL_CHORD_SOURCE or "canonical_quality" in row
-    from .joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     measured_joint = not claims and validate_joint_aura_entry(row)
     scope = row.get("quality_scope")
     if not claims and (not isinstance(scope, Mapping)

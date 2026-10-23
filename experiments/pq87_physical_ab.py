@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -18,6 +19,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 
 
 def remaining(deadline):
@@ -61,6 +63,47 @@ def cleanup_container(name):
                     evidence["safe"] = True
         except Exception as exc:
             evidence["commands"].append({"argv": command, "error": repr(exc)})
+    return evidence
+
+
+def require_container_name_available(name):
+    result = subprocess.run(["docker", "inspect", name], stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, timeout=10)
+    if result.returncode == 0:
+        raise ValueError("validation container name already exists")
+    if not any(f"no such {kind}: {name}" in result.stdout.lower() for kind in ("object", "container")):
+        raise ValueError("cannot establish validation container name is unused")
+
+
+def cleanup_owned_container(cidfile, name, owner, nonce, *, attempted):
+    """Never stop by a potentially borrowed name, even after failed creation."""
+    evidence = {"safe": not attempted, "commands": [], "attempted": attempted}
+    if not attempted:
+        return evidence
+    try:
+        cid = cidfile.read_text().strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", cid):
+            raise ValueError("Docker did not publish an exact container ID")
+        inspected = subprocess.run(["docker", "inspect", cid], stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, timeout=10)
+        evidence["commands"].append({"argv": ["docker", "inspect", cid],
+            "returncode": inspected.returncode, "output": inspected.stdout})
+        if inspected.returncode != 0:
+            if any(f"no such {kind}: {cid}" in inspected.stdout.lower() for kind in ("object", "container")):
+                evidence["safe"] = True
+                return evidence
+            raise ValueError("cannot inspect created container")
+        observed = json.loads(inspected.stdout)[0]
+        labels = observed.get("Config", {}).get("Labels") or {}
+        if (observed.get("Id") != cid or observed.get("Name") != "/" + name
+                or labels.get("prismabuild.action") != owner
+                or labels.get("prismaquant.pq87.campaign") != nonce):
+            raise ValueError("created container ownership differs")
+        cleanup = cleanup_container(cid)
+        evidence["commands"].extend(cleanup["commands"])
+        evidence.update(safe=cleanup["safe"], container_id=cid)
+    except Exception as exc:
+        evidence["error"] = repr(exc)
     return evidence
 
 
@@ -216,6 +259,11 @@ def host(args):
               "deadline_seconds": min(args.seconds, 1200), "no_speed_claim": True}
     nonce = out.name
     container = "pq87-" + nonce
+    owner = os.environ.get("PRISMABUILD_CONTAINER_OWNER", "")
+    ownership_nonce = uuid.uuid4().hex
+    cidfile = out / "container.cid"
+    creation_attempted = False
+    status["container_ownership"] = {"name": container, "action": owner, "nonce": ownership_nonce}
     stop = threading.Event()
     def telemetry():
         with (out / "telemetry.jsonl").open("x", buffering=1) as log:
@@ -236,10 +284,13 @@ def host(args):
                 stop.wait(10)
     monitor = threading.Thread(target=telemetry, daemon=True)
     try:
+        if not owner:
+            raise ValueError("physical validation must be dispatched through PrismaBuild")
         inspect = json.loads(subprocess.check_output(["docker", "image", "inspect", args.image],
                                                      text=True, timeout=min(10, remaining(deadline))))[0]
         if args.image not in inspect.get("RepoDigests", []):
             raise ValueError("Docker image has no matching immutable RepoDigest")
+        require_container_name_available(container)
         dump(out / "image.json", inspect)
         before, source_stats = client._capture_artifact(args.model_dir)
         frozen = out / "frozen-model"
@@ -259,6 +310,7 @@ def host(args):
             (out / directory).mkdir()
         monitor.start()
         command = ["docker", "run", "--rm", "--pull=never", "--name", container,
+            "--cidfile", str(cidfile), "--label", "prismaquant.pq87.campaign=" + ownership_nonce,
             "--gpus", "all", "--memory=28g", "--memory-swap=28g", "--cpus=2",
             "--shm-size=1g", "--network=host", "--cap-add=SYS_PTRACE",
             "--security-opt=seccomp=unconfined", "-v", f"{root}:/repo:ro",
@@ -276,6 +328,7 @@ def host(args):
         status["docker_argv"] = command
         dump(out / "campaign.json", status)
         with (out / "container.log").open("x") as log:
+            creation_attempted = True
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT,
                            timeout=remaining(deadline), check=True)
         status["inside"] = json.loads((out / "inside-status.json").read_text())
@@ -284,8 +337,8 @@ def host(args):
         status["error"] = repr(exc)
     finally:
         stop.set()
-        # The exact unique container is ours; never stop or inspect another campaign's process.
-        status["cleanup"] = cleanup_container(container)
+        status["cleanup"] = cleanup_owned_container(cidfile, container, owner, ownership_nonce,
+                                                     attempted=creation_attempted)
         if not status["cleanup"]["safe"]:
             status["status"] = "inconclusive"
             status["cleanup_error"] = "exact container not confirmed absent or stopped"

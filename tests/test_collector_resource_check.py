@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from experiments.glm_layer_workspace import failed_collector_row_counts
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
 
 def model_and_tokens():
@@ -47,21 +47,21 @@ def test_guard_refuses_before_next_hessian_transfer_and_keeps_observed_rows(monk
     monkeypatch.setattr(torch.Tensor, 'to', to)
     monkeypatch.setattr(torch.Tensor, '__matmul__', matmul)
     with pytest.raises(RuntimeError, match='memory guard latched') as caught:
-        _collect_activations(model, ['0', '1'], tokens, 1, 'cpu',
+        capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cpu',
                              want_hessian=True, resource_check=check)
     assert len(transferred) == expected_transfers
     assert all(ref() is None for ref in transferred)
     assert len(hessians) == 2 and all(ref() is None for ref in hessians)
-    observed = failed_collector_row_counts(caught.value, _collect_activations, ['0', '1'])
+    observed = failed_collector_row_counts(caught.value, capture_activation_statistics, ['0', '1'])
     assert observed['rows'] == {'0': 2, '1': 2}
     assert all(not module._forward_pre_hooks for module in model)
 
 
 def test_successful_resource_checks_preserve_rows_hessians_counts_and_maxima():
     model, tokens = model_and_tokens()
-    baseline = _collect_activations(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True)
+    baseline = capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cpu', want_hessian=True)
     labels = []
-    checked = _collect_activations(model, ['0', '1'], tokens, 1, 'cpu',
+    checked = capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cpu',
                                    want_hessian=True, resource_check=labels.append)
     for position in (0, 1):
         for name in ('0', '1'):
@@ -92,6 +92,6 @@ def test_cuda_guard_failure_returns_cache_after_output_owners_clear(monkeypatch)
     monkeypatch.setattr(torch.Tensor, 'to', fake_cuda_to)
     monkeypatch.setattr(torch.cuda, 'empty_cache', lambda: released.append('cache released'))
     with pytest.raises(RuntimeError, match='guard'):
-        _collect_activations(model, ['0', '1'], tokens, 1, 'cuda',
+        capture_activation_statistics(model, ['0', '1'], tokens, 1, 'cuda',
                              want_hessian=True, resource_check=check)
     assert released == ['cache released']

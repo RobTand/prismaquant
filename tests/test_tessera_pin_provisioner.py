@@ -306,6 +306,24 @@ def _venv_with_tessera(tmp_path: Path, name: str, encoder_body: str) -> Path:
     return env / "bin" / "python"
 
 
+def test_installed_identity_reads_contract_without_initializing_serving(tmp_path):
+    import hashlib
+
+    mod = _load()
+    python = _venv_with_tessera(tmp_path, "metadata-only", "VERSION = 1\n")
+    serving_init, = python.parent.parent.glob(
+        "lib/python*/site-packages/tessera/serving/__init__.py")
+    serving_init.write_text(
+        "raise AssertionError('serving runtime initialized during metadata inspection')\n",
+        encoding="utf-8")
+
+    found, absent = mod.installed_identity(str(python))
+
+    assert absent is None
+    assert found["contract_sha256"] == hashlib.sha256(CONTRACT).hexdigest()
+    assert found["package_files"] > 0
+
+
 def test_same_contract_with_older_source_is_not_already_the_reviewed_bytes(tmp_path):
     """The regression root found: a re-pin that only moves code is a no-op.
 

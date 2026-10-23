@@ -384,20 +384,19 @@ def _priced_projection_population(binding, build, formats):
 def _check_runtime_image_declaration(census, requested):
     """Replay the launcher's carried declaration through its pure Tessera owner.
 
-    ``runtime_image`` is the stdlib metadata helper also used by Tessera's
-    contract image parser; it imports no serving execution code. Supply only
-    the receipt's inputs, never this publisher's environment or Docker daemon.
+    Supply only the receipt's inputs to the public metadata owner, never this
+    publisher's environment or Docker daemon.
     """
-    from tessera.serving import runtime_image
+    from tessera import image_metadata
 
     _require("runtime_image_declaration" in census,
              "image_declaration_missing: legacy v2 census has only an operator-asserted "
              "runtime image; rerun the census under a declaring launcher")
     declaration = _object(census["runtime_image_declaration"], "runtime_image_declaration")
-    _require(declaration.get("schema") == runtime_image.DECLARATION_SCHEMA and
-             declaration.get("source") == runtime_image.DECLARATION_SOURCE and
-             declaration.get("env") == [runtime_image.CENSUS_IMAGE_ENV,
-                                         runtime_image.CENSUS_DECLARATION_ENV],
+    _require(declaration.get("schema") == image_metadata.DECLARATION_SCHEMA and
+             declaration.get("source") == image_metadata.DECLARATION_SOURCE and
+             declaration.get("env") == [image_metadata.CENSUS_IMAGE_ENV,
+                                         image_metadata.CENSUS_DECLARATION_ENV],
              "image_declaration_unsupported: unsupported declaration schema/source/env")
     image = declaration.get("image")
     _require(isinstance(image, str) and bool(image),
@@ -411,11 +410,11 @@ def _check_runtime_image_declaration(census, requested):
     _require(isinstance(digests, list) and all(isinstance(digest, str) for digest in digests),
              "image_declaration_unreadable: record.repo_digests must be a string list")
     try:
-        replay = runtime_image.declared_reference(requested, env={
-            runtime_image.CENSUS_IMAGE_ENV: image,
-            runtime_image.CENSUS_DECLARATION_ENV: json.dumps(dict(record)),
+        replay = image_metadata.declared_reference(requested, env={
+            image_metadata.CENSUS_IMAGE_ENV: image,
+            image_metadata.CENSUS_DECLARATION_ENV: json.dumps(dict(record)),
         })
-    except runtime_image.RuntimeImageError as exc:
+    except image_metadata.RuntimeImageError as exc:
         raise TesseraRouteReceiptError(f"{exc.payload['reason']}: {exc}") from exc
     _require(declaration == replay,
              "image_declaration_unsupported: carried declaration differs from supported owner replay")

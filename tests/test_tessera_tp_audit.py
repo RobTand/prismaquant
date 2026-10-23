@@ -123,10 +123,9 @@ def test_the_other_cut_direction_and_the_other_families_pass(tmp_path,
 def test_a_packed_expert_resolves_to_no_cut_at_all(tmp_path, contract_file):
     """Expert parallelism cuts the stack; each expert's 2-D unit stays whole.
 
-    The fixture's packed experts carry the family whose row axis the loader
-    refuses, so a packed expert read as column-parallel would be refused
-    here. The receipt records the profile rule's answer beside the effective
-    one, because a disagreement is worth seeing and is not a refusal.
+    The receipt records the profile rule's cut beside the effective whole
+    expert. The cut-kind and axis assertions verify that distinction even
+    though the current contract also admits K2 row shards.
     """
     _, receipt = _run(tmp_path, contract_file, tp=2)
     packed = [unit for unit in receipt["units"] if unit["packed_expert"]]

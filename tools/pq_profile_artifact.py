@@ -123,3 +123,32 @@ def publish_profile(source, destination):
     if file_sha256hex(destination) != digest:
         raise RuntimeError('published py-spy bytes differ from workload output')
     return {'sha256': digest, 'bytes': len(payload), **receipt}
+
+
+def validate_netdata_window(data, *, after, before):
+    """Require fresh finite samples for every declared chart dimension."""
+    if not isinstance(data, dict):
+        raise RuntimeError('required Netdata response is not an object')
+    labels, rows = data.get('labels'), data.get('data')
+    if (not isinstance(labels, list) or len(labels) < 2 or labels[0] != 'time'
+            or any(not isinstance(label, str) or not label for label in labels)
+            or len(set(labels)) != len(labels) or not isinstance(rows, list) or not rows):
+        raise RuntimeError('required Netdata labels or samples are missing')
+    measured = set()
+    for row in rows:
+        if not isinstance(row, list) or len(row) != len(labels):
+            raise RuntimeError('required Netdata sample has malformed dimensions')
+        stamp = row[0]
+        if (type(stamp) not in (int, float) or not math.isfinite(stamp)
+                or not after <= stamp <= before):
+            raise RuntimeError('required Netdata sample is outside its requested window')
+        for index, value in enumerate(row[1:], 1):
+            if value is None:
+                continue
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise RuntimeError('required Netdata sample is not finite numeric telemetry')
+            measured.add(index)
+    if measured != set(range(1, len(labels))):
+        raise RuntimeError('required Netdata dimensions have no measured samples')
+
+

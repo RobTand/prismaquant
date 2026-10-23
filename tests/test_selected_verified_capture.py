@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_campaign_rows as campaign_rows
 from test_tessera_calibration_cache import capture
 from test_verified_capture_load import policy
 
@@ -65,14 +66,13 @@ def test_selected_admission_prices_private_buffer_source_pages_and_scratch(monke
 
 
 def test_dispatch_seals_same_selected_load_demand(monkeypatch):
-    from tools import dispatch_tessera_campaign as dispatch
     from prismaquant import autoscale
     seen = {}
     def selected(model, **kwargs):
         seen.update(kwargs)
         return {'memory_bytes': 100}
     monkeypatch.setattr(autoscale, 'selected_anchor_resources', selected)
-    dispatch._streamed_resource_plan(dict(model='/source', campaign_argv=[
+    campaign_rows.streamed_resource_plan(dict(model='/source', campaign_argv=[
         '--streaming', '--capture-load-policy', json.dumps(policy())]),
         dict(unit_shapes={'a': [3, 4]}, counts={'a': 9}), ['a'], selected_source=True)
     assert seen['capture_load_policy'] == policy()
@@ -165,9 +165,9 @@ def test_selected_load_policy_and_source_keep_existing_resume_boundaries(tmp_pat
     monkeypatch.setattr(pwc, '_production_cache_source_sha256', lambda: source['value'])
     args = SimpleNamespace(capture_load_policy=policy(), cache_dir='/first-cache')
     def identity():
-        return campaign._campaign_checkpoint_identity(weights={'a': torch.ones(2, 2)},
+        return campaign.campaign_checkpoint_identity(weights={'a': torch.ones(2, 2)},
             acts={'a': torch.ones(2, 2)}, hessians={'a': torch.eye(2)}, menus={'a': []},
-            args=args, calibration_identity={'fit_ids_sha256': 'original-draw'},
+            settings=vars(args), calibration_identity={'fit_ids_sha256': 'original-draw'},
             serving_scope=None, static_scales={}, static_scale_policy='fixture')
     before = identity()
     journal = tmp_path/'journal'

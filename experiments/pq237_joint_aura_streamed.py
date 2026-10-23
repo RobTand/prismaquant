@@ -120,10 +120,9 @@ def verify_source_manifest(root, path):
 def expected_currency_bindings(runner, calibration, protocol, model_identity, cache, renders):
     """Seal dense qualification inputs before the producer returns any rows."""
     from prismaquant import format_registry as fr
-    from prismaquant.aura_cost import _aura_source_sha256
-    from prismaquant.joint_aura import (
-        activation_identity, arithmetic_identity, identity_sha256, source_execution_identity,
-    )
+    from prismaquant.aura_provenance import (producer_package_sha256 as source_sha256)
+    from prismaquant.joint_aura import activation_identity, arithmetic_identity, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
     plan = protocol["plan"]
@@ -133,12 +132,12 @@ def expected_currency_bindings(runner, calibration, protocol, model_identity, ca
         "calibration_shape": list(calibration.shape), "calibration_dtype": str(calibration.dtype),
         "n_probes": protocol["n_probes"], "seed_base": protocol["seed_base"],
         "token_scope": "causal", "temperature": 1.0, "distribution": "rademacher",
-        "normalization": "global_kl_fisher", "producer_source_sha256": _aura_source_sha256(),
+        "normalization": "global_kl_fisher", "producer_source_sha256": source_sha256(),
         "source_execution": source_execution_identity(runner.model),
         "arithmetic": arithmetic_identity(runner.dtype),
     }
-    expected_probe_sha256 = identity_sha256(expected_probe)
-    expected = {name: {fmt: identity_sha256({
+    expected_probe_sha256 = joint_identity_sha256(expected_probe)
+    expected = {name: {fmt: joint_identity_sha256({
         "schema": "prismaquant.joint_aura.operator.v2", "qname": name, "format": fmt,
         "source_weight": renders[name][fmt]["source_weight"],
         "rendered_weight": renders[name][fmt]["rendered_weight"],
@@ -158,7 +157,7 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
     from prismaquant import format_registry as fr
     from prismaquant.allocator_candidates import build_candidates
     from prismaquant.cost_currency import require_run_currency
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     with Path(path).open("rb") as stream:
         payload = pickle.load(stream)
@@ -168,13 +167,13 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
     if actual != coordinates or set(payload["stats"]) != set(plan):
         raise ValueError("persisted joint coordinate scope differs from frozen plan")
     provenance = payload["provenance"]
-    if (identity_sha256(provenance["probe_identity"]) != probe_sha256
+    if (joint_identity_sha256(provenance["probe_identity"]) != probe_sha256
             or provenance["probe_identity_sha256"] != probe_sha256):
         raise ValueError("persisted joint probe identity differs from measured input")
-    if (identity_sha256(provenance["joint_aura_identity"])
+    if (joint_identity_sha256(provenance["joint_aura_identity"])
             != provenance["joint_aura_identity_sha256"]):
         raise ValueError("persisted joint provenance digest mismatch")
-    if (identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
+    if (joint_identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
             != probe_sha256):
         raise ValueError("persisted joint provenance probe mismatch")
     currency = require_run_currency(payload)
@@ -190,12 +189,13 @@ def load_candidate_payload(path, plan, operator_bindings, probe_sha256):
                 or stats.get("in_features") != shape[1] or stats.get("out_features") != shape[0]):
             raise ValueError("persisted joint stats differ from the bound dense source shape")
     masks, menu = [], {}
-    candidates = build_candidates(
+    candidate_build = build_candidates(
         payload["stats"], costs,
         [fr.get_format(fmt) for fmt in sorted({fmt for _, fmt in coordinates})],
         mask_records=masks, tessera_menu_report=menu,
         preserve_runtime_frontier=True,
     )
+    candidates = candidate_build.candidates
     admitted = {(name, candidate.fmt) for name, rows in candidates.items() for candidate in rows}
     if admitted != coordinates:
         raise ValueError(f"production candidate coordinate scope differs: masks={masks}, "
@@ -243,7 +243,7 @@ def unit_activation_source_recorder(captured_source, activation_source):
 def retain_production_wire(weight, rendered, blob, *, qname, fmt, activation_source, wire_dir):
     """Retain the original bytes using the existing campaign/producer grammar."""
     from prismaquant.production_weight_cache import _cb_cache_tensor_identity
-    from prismaquant.tessera_campaign import _wire_path
+    from prismaquant.tessera_campaign_wire import wire_path
     from prismaquant.tessera_formats import parse_tessera_format_name
     from tessera import cached_unit
     from tessera.unit_artifact import read_unit_artifact
@@ -251,7 +251,7 @@ def retain_production_wire(weight, rendered, blob, *, qname, fmt, activation_sou
     family, rung = parse_tessera_format_name(fmt)
     input_identity = cached_unit.encoding_input_identity(
         weight, qname, family.payload_grid(), int(rung), activation=activation_source)
-    path = _wire_path(Path(wire_dir), qname, fmt)
+    path = wire_path(Path(wire_dir), qname, fmt)
     record = cached_unit.make_unit_record(blob, input_identity, filename=path.name)
     temporary = path.with_suffix(".tessera.tmp")
     temporary.write_bytes(blob)
@@ -567,8 +567,10 @@ def main():
     from transformers import AutoModelForCausalLM
     import tessera
     from prismaquant.aura_cost import compute_aura_cost_streamed
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
-    from prismaquant.joint_aura import arithmetic_identity, identity_sha256, prefetch_joint_cache
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
+    from prismaquant.joint_aura import arithmetic_identity, prefetch_joint_cache
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.model_profiles import detect_profile
 
     if not torch.cuda.is_available():
@@ -606,6 +608,8 @@ def main():
     dump(out / "identity.json", identity)
 
     def resident_model():
+        from prismaquant.model_runtime import initialize_model_runtime
+        initialize_model_runtime()
         model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16,
                     local_files_only=True, attn_implementation="eager").cuda().eval()
         model.config.use_cache = False
@@ -654,7 +658,7 @@ def main():
         for name, rows in payload["costs"].items():
             for fmt, row in rows.items():
                 operator = row["joint_operator_identity"]
-                if identity_sha256(operator) != expected[name][fmt]:
+                if joint_identity_sha256(operator) != expected[name][fmt]:
                     raise ValueError("streamed operator differs from independently recorded production render")
         restored = compute_aura_cost_streamed(runner, calibration, formats, resume=True, **kwargs)
         if restored["costs"] != payload["costs"]:

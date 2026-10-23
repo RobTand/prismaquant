@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from prismaquant import aura_provenance
+
 import pytest
 import torch
 
@@ -68,7 +70,7 @@ def test_joint_microbatch_signed_sum_and_uneven_partition_invariance():
 
 
 def test_microbatch_checkpoint_refuses_changed_partition(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     first, _ = _run(2, checkpoint_dir=tmp_path)
     resumed, context = _run(2, checkpoint_dir=tmp_path, resume=True)
     assert first['costs'] == resumed['costs']

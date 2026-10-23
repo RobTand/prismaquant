@@ -9,7 +9,7 @@ element, propagating each column's quantization error through the
 activation Hessian's Cholesky inverse. This strictly generalizes the
 diagonal imatrix weighting llama.cpp uses (the Hessian's diagonal IS the
 imatrix; GPTQ adds the off-diagonal error compensation), and mirrors the
-NVFP4 lane's static-scale GPTQ (`_gptq_obs_rounding_nvfp4`), whose
+NVFP4 lane's static-scale GPTQ (`gptq_obs_rounding_nvfp4`), whose
 Hessian preparation and damp conventions are reused verbatim:
 ``H = X^T X`` with per-token activation clipping, dead activation
 channels excluded from the damp reference and NOT zeroed (serving-safe),
@@ -66,18 +66,20 @@ def _per_element_scales(
 
 def _hessian_inverse(
     weight: torch.Tensor, activations: torch.Tensor, damp: float | None,
+    *, levers,
 ) -> torch.Tensor:
     """Upper-triangular Cholesky of H^-1, with the NVFP4 lane's activation
     clipping, dead-channel, and damp conventions."""
-    from prismaquant.export_native_compressed import (
-        _activation_matrix_for_gptq,
-        _resolve_gptq_fixed_damp,
+    from prismaquant.native_render_codec import (
+        activation_matrix_for_gptq,
+        resolve_gptq_fixed_damp,
     )
 
     if damp is None:
-        damp = _resolve_gptq_fixed_damp()
+        damp = resolve_gptq_fixed_damp(levers=levers)
     cols = weight.shape[1]
-    X = _activation_matrix_for_gptq(activations, cols, device=weight.device)
+    X = activation_matrix_for_gptq(
+        activations, cols, device=weight.device, levers=levers)
     H = (X.t() @ X).to(torch.float32)
     diag0 = torch.diagonal(H)
     dead = diag0 <= 0
@@ -100,8 +102,14 @@ def gptq_fields(
     col_weights: torch.Tensor | None = None,
     damp: float | None = None,
     block_cols: int = 128,
+    *,
+    levers,
 ) -> dict[str, torch.Tensor]:
-    """GPTQ-rounded fields for a 2-D weight under frozen k-quant scales."""
+    """GPTQ-rounded fields for a 2-D weight under frozen k-quant scales.
+
+    ``levers`` is the ``NativeRenderLevers`` whose damp and activation-clip
+    controls the Hessian borrows from the native NVFP4 lane.
+    """
     if w.ndim != 2:
         raise ValueError(f"gptq_fields expects a 2-D weight, got {w.shape}")
     sub, qmin, qmax, asym = _GRID[fmt]
@@ -114,7 +122,7 @@ def gptq_fields(
     dl_safe = torch.where(dl != 0, dl, torch.ones_like(dl))
     live = dl != 0
 
-    Hinv = _hessian_inverse(W, activations, damp)
+    Hinv = _hessian_inverse(W, activations, damp, levers=levers)
     Q = torch.zeros(rows, cols, dtype=torch.float32, device=device)
 
     for i1 in range(0, cols, block_cols):
