@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 
 from .digests import DIRECT_ASCII_SPACED_LAX
+from .quality_prefill_knee import is_finite_number
 
 #: GiB in bytes: the ceiling granularity PrismaBuild charges.
 GIB_BYTES = 1073741824
@@ -330,6 +331,207 @@ def derive_cache_ceiling(first_peak_bytes, *, headroom_bytes) -> dict:
     return {"peak_bytes": peak, "headroom_bytes": headroom,
             "gib_bytes": GIB_BYTES, "ceiling_bytes": ceiling,
             "formula": "C = G * ceil((P + H) / G)"}
+
+
+def _require_evidence(condition: bool, field: str, reason: str) -> None:
+    if not condition:
+        raise ValueError(f"refuse measured ceiling: {field}: {reason}")
+
+
+def _whole(value, minimum=0) -> bool:
+    return type(value) is int and value >= minimum
+
+
+def _receipt_number(value, minimum=None) -> bool:
+    """Apply a receipt field's inclusive bound to the shared finite predicate."""
+    return is_finite_number(value) and (minimum is None or value >= minimum)
+
+
+def _cuda_device(value) -> bool:
+    return (isinstance(value, str) and (value == "cuda"
+            or value.startswith("cuda:") and value[5:].isascii()
+            and value[5:].isdigit()))
+
+
+def _require_gpu_workload(receipt) -> None:
+    """Read completion results from the two measurement producers."""
+    from collections.abc import Mapping
+
+    workload = receipt.get("workload")
+    prefix = "GPU workload"
+    _require_evidence(isinstance(workload, Mapping) and bool(workload),
+                      prefix, "missing workload results")
+    _require_evidence(workload.get("failure") is None, prefix,
+                      f"row failed: {workload.get('failure')}")
+    if receipt.get("schema") == "prismaquant.container_cache_quantum_row.v1":
+        _require_evidence(_cuda_device(receipt.get("device")),
+                          f"{prefix}.device", "missing or non-CUDA row device")
+        _require_evidence(workload.get("row") == "stage_a_capture_plus_stage_b_quantum",
+                          f"{prefix}.row", "missing complete quantum result")
+        for field, minimum in (("layer", 0), ("n_probes", 1),
+                               ("seed_base", 0), ("windows", 1)):
+            _require_evidence(_whole(workload.get(field), minimum),
+                              f"{prefix}.{field}", "missing or malformed quantum result")
+        for field in ("units", "formats"):
+            value = workload.get(field)
+            _require_evidence(isinstance(value, list) and bool(value)
+                              and all(isinstance(item, str) and item for item in value)
+                              and len(set(value)) == len(value),
+                              f"{prefix}.{field}", "missing or malformed quantum results")
+        checkpoints = workload.get("checkpoints")
+        _require_evidence(isinstance(checkpoints, list) and bool(checkpoints)
+                          and all(_whole(item) for item in checkpoints)
+                          and checkpoints == sorted(set(checkpoints)),
+                          f"{prefix}.checkpoints", "missing or malformed capture results")
+        from .joint_adjoint_slices import nearest_checkpoint_boundary
+
+        try:
+            nearest_checkpoint_boundary(checkpoints, workload["layer"])
+        except ValueError as error:
+            _require_evidence(False, f"{prefix}.checkpoints",
+                              f"no usable checkpoint: {error}")
+        workload = workload.get("served_compile")
+        prefix += ".served_compile"
+        _require_evidence(isinstance(workload, Mapping), prefix,
+                          "missing compilation results")
+    else:
+        _require_evidence(receipt.get("schema") == "prismaquant.container_cache_row.v1",
+                          "schema", "unsupported measurement producer")
+    _require_evidence(_cuda_device(workload.get("device")),
+                      f"{prefix}.device", "missing or non-CUDA result device")
+    if "device" in receipt:
+        # Distinct CUDA indices are permitted: the row device and the
+        # compilation device may differ. Each must still name CUDA.
+        _require_evidence(_cuda_device(receipt["device"]),
+                          f"{prefix}.device", "missing or non-CUDA row device")
+    _require_evidence(isinstance(workload.get("quantiser"), str)
+                      and bool(workload["quantiser"]),
+                      f"{prefix}.quantiser", "missing quantiser result")
+    _require_evidence(_whole(workload.get("seed")), f"{prefix}.seed",
+                      "missing or malformed workload seed")
+    _require_evidence(isinstance(workload.get("shape"), list)
+                      and bool(workload["shape"])
+                      and all(_whole(item, 1) for item in workload["shape"]),
+                      f"{prefix}.shape", "missing or malformed output shape")
+    for field, minimum in (("quantise_s", 0), ("output_mean", None)):
+        _require_evidence(_receipt_number(workload.get(field), minimum),
+                          f"{prefix}.{field}", "missing or malformed quantiser result")
+    probe = workload.get("kda_probe")
+    prefix += ".kda_probe"
+    _require_evidence(isinstance(probe, Mapping), prefix, "missing probe results")
+    _require_evidence(probe.get("status") == "ran", f"{prefix}.status",
+                      "missing completed probe")
+    digest = probe.get("sha256")
+    _require_evidence(isinstance(digest, str) and len(digest) == 64
+                      and all(char in "0123456789abcdef" for char in digest),
+                      f"{prefix}.sha256", "missing or malformed output/gradient digest")
+    _require_evidence(isinstance(probe.get("shape"), list) and bool(probe["shape"])
+                      and all(_whole(item, 1) for item in probe["shape"]),
+                      f"{prefix}.shape", "missing or malformed probe shape")
+    _require_evidence(_receipt_number(probe.get("probe_s"), 0), f"{prefix}.probe_s",
+                      "missing or malformed probe duration")
+    # The v1 probe result lists both modes of all three Gram kernels.
+    # Validate its grammar without importing the CUDA/Triton implementation.
+    compiled_names = sorted(f"{name}_{mode}"
+                            for name in ("gram_fwd", "gram_bwd_rows", "gram_bwd_cols")
+                            for mode in ("inclusive", "strict"))
+    _require_evidence(probe.get("compiled") == compiled_names,
+                      f"{prefix}.compiled", "missing complete compiled probe results")
+
+
+def _accepted_sample_peak(measurement) -> int:
+    """Validate the sampler's own representation and derive its first maximum."""
+    from collections.abc import Mapping
+
+    samples = measurement.get("samples")
+    _require_evidence(isinstance(samples, list) and bool(samples),
+                      "measurement.samples", "missing peak samples")
+    peak = measurement.get("peak_allocated_bytes")
+    peak_index = measurement.get("peak_sample_index")
+    _require_evidence(_whole(peak, 1), "measurement.peak_allocated_bytes",
+                      "missing accepted peak")
+    _require_evidence(_whole(peak_index) and peak_index < len(samples),
+                      "measurement.peak_sample_index", "missing accepted peak index")
+    for field, expected in (("valid", True), ("incomplete_scan", False),
+                            ("child_exitcode", 0), ("errors", []), ("gaps", [])):
+        value = measurement.get(field)
+        _require_evidence(type(value) is type(expected) and value == expected,
+                          f"measurement.{field}",
+                          f"sampler did not cover the complete row: {value!r}")
+    _require_evidence(_whole(measurement.get("sample_count"))
+                      and measurement["sample_count"] == len(samples),
+                      "measurement.sample_count", "sample sequence is incomplete")
+    interval = measurement.get("sample_interval_s")
+    _require_evidence(_receipt_number(interval, 0) and interval > 0,
+                      "measurement.sample_interval_s", "missing positive sample interval")
+    started, finished = (measurement.get("row_started_unix"),
+                         measurement.get("row_finished_unix"))
+    for field, value in (("row_started_unix", started), ("row_finished_unix", finished)):
+        _require_evidence(_receipt_number(value, 0), f"measurement.{field}",
+                          "missing finite row boundary")
+    _require_evidence(finished >= started, "measurement.row_finished_unix",
+                      "row boundaries disagree")
+    _require_evidence(len(samples) >= 2, "measurement.samples",
+                      "sampler did not cover the complete row: missing lifecycle samples")
+    observed_peak, observed_index = 0, None
+    previous = None
+    for index, sample in enumerate(samples):
+        prefix = f"measurement.samples[{index}]"
+        _require_evidence(isinstance(sample, Mapping), prefix, "malformed sample")
+        _require_evidence(type(sample.get("index")) is int and sample["index"] == index,
+                          f"{prefix}.index", "sample sequence is incomplete")
+        phase = "initial" if index == 0 else "final" if index == len(samples) - 1 else "periodic"
+        _require_evidence(sample.get("phase") == phase, f"{prefix}.phase",
+                          "missing lifecycle coverage")
+        for field in ("unix", "scan_duration_s"):
+            _require_evidence(_receipt_number(sample.get(field), 0), f"{prefix}.{field}",
+                              "missing or malformed sample time")
+        for field in ("allocated_bytes", "apparent_bytes", "files", "dirs"):
+            _require_evidence(_whole(sample.get(field)), f"{prefix}.{field}",
+                              "missing or malformed scan result")
+        _require_evidence(type(sample.get("errors")) is list and sample["errors"] == [],
+                          f"{prefix}.errors", "missing scan status or failed scan")
+        if previous is not None:
+            gap = sample["unix"] - previous["unix"]
+            _require_evidence(gap >= previous["scan_duration_s"], f"{prefix}.unix",
+                              "sample times or scan_duration_s disagree")
+            _require_evidence(gap <= 2 * interval, f"{prefix}.unix",
+                              "sampler coverage gap exceeds twice sample_interval_s")
+        if sample["allocated_bytes"] > observed_peak:
+            observed_peak, observed_index = sample["allocated_bytes"], index
+        previous = sample
+    first, last = samples[0], samples[-1]
+    _require_evidence(first["unix"] + first["scan_duration_s"] <= started,
+                      "measurement.row_started_unix", "initial scan does not cover row start")
+    _require_evidence(last["unix"] >= finished, "measurement.row_finished_unix",
+                      "final scan does not cover row end")
+    _require_evidence(peak == observed_peak, "measurement.peak_allocated_bytes",
+                      "aggregate peak disagrees with complete samples")
+    _require_evidence(peak_index == observed_index, "measurement.peak_sample_index",
+                      "aggregate index disagrees with first observed maximum")
+    final = measurement.get("final_allocated_bytes")
+    _require_evidence(_whole(final) and final == last["allocated_bytes"],
+                      "measurement.final_allocated_bytes", "final total disagrees with sample")
+    return observed_peak
+
+
+def derive_cache_ceiling_from_receipt(receipt, *, headroom_bytes) -> dict:
+    """Require producer results and complete samples before the original formula.
+
+    This parser checks recorded evidence, not the authenticity of a GPU run.
+    Device labels and summary flags cannot replace workload results or scans.
+    """
+    from collections.abc import Mapping
+
+    _require_evidence(isinstance(receipt, Mapping), "receipt", "not a mapping")
+    _require_evidence(receipt.get("failure") is None, "failure",
+                      f"row failed: {receipt.get('failure')}")
+    _require_gpu_workload(receipt)
+    measurement = receipt.get("measurement")
+    _require_evidence(isinstance(measurement, Mapping), "measurement",
+                      "missing measurement evidence")
+    peak = _accepted_sample_peak(measurement)
+    return derive_cache_ceiling(peak, headroom_bytes=headroom_bytes)
 
 
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use the existing incoming-boundary rule for quantum cache receipts (#2608).
+  A checkpoint must reach the declared layer plus one. CPU parser proof does not qualify GPU measurements.
 ### Added
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
@@ -50,6 +52,12 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- The measured cache ceiling consumer requires complete producer workload results and authoritative sampler evidence (#2608).
+  Device labels, a probe status, and top-level validity flags cannot replace those results.
+  The consumer derives the first observed maximum from every sample and rejects inconsistent peaks, counts, times, and lifecycle boundaries.
+  Quantum captures name a checkpoint for the declared layer. Distinct CUDA indices are permitted; each device must still name CUDA.
+  The ceiling formula stays unchanged. CPU tests and the API smoke establish parser logic only.
+  Issues #2608, #2601, and independent GPU qualification gates remain open.
 - Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
 - Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
 - Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).
