@@ -1064,19 +1064,53 @@ def _tessera_published(name: str, where: str) -> Any:
         ) from exc
 
 
+def _tessera_smoke_record_validator(where: str):
+    """Adapt the producer's legacy signature or its versioned public API.
+
+    Only the entry point moved; grammar and refusal decisions still belong to
+    Tessera. Select by capability, never retry after a validator rejects data.
+    """
+    legacy = getattr(_tessera_contract_module(), "_evidence_smoke_record", None)
+    if callable(legacy):
+        def validate(record, *, control, where):
+            return legacy(record, where, control, where.removesuffix(".record"))
+        return validate
+
+    from importlib import import_module
+
+    try:
+        metadata = import_module("tessera.metadata")
+    except ImportError as exc:
+        raise LaneEligibilityError(
+            f"{where} needs Tessera's smoke-record validator; the installed "
+            "runtime publishes neither _evidence_smoke_record nor the public "
+            "tessera.metadata API") from exc
+    if getattr(metadata, "METADATA_API_VERSION", None) != "tessera.producer-metadata.v1":
+        raise LaneEligibilityError(
+            f"{where}: incompatible Tessera metadata API version "
+            f"{getattr(metadata, 'METADATA_API_VERSION', None)!r}; "
+            "this reader requires tessera.producer-metadata.v1")
+    validate = getattr(metadata, "parse_smoke_record", None)
+    if not callable(validate):
+        raise LaneEligibilityError(
+            f"{where}: Tessera metadata API does not publish callable "
+            "parse_smoke_record")
+    return validate
+
+
 def _parse_smoke_record(payload: Any, where: str, *,
                         control: Any = None) -> SmokeRecord | None:
     """Read v9 records through the pinned producer's owning pure validator.
 
     Validating only vocabularies before deriving a status is insufficient:
     observation identity, portable paths and nullable reference arms are also
-    producer grammar. The immutable pin binds this private metadata helper's
-    API; a runtime lacking it refuses by name through ``_tessera_published``.
-    No serving execution or kernel module is imported here.
+    producer grammar. Both supported entry points delegate to Tessera; a runtime
+    publishing neither refuses by name. No serving execution or kernel module
+    is imported here.
     """
-    validate = _tessera_published("_evidence_smoke_record", where)
+    validate = _tessera_smoke_record_validator(where)
     try:
-        parsed = validate(payload, where, control, where.removesuffix(".record"))
+        parsed = validate(payload, control=control, where=where)
     except ValueError as exc:
         raise LaneEligibilityError(str(exc)) from exc
     if parsed is None:

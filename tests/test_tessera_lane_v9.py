@@ -36,6 +36,8 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
+from types import SimpleNamespace
 
 import pytest
 from importlib.resources import as_file
@@ -189,6 +191,16 @@ def tessera_v9(monkeypatch):
     return ts
 
 
+@pytest.fixture
+def tessera_record_owner(tessera_v9):
+    """The module owning smoke-record grammar in this producer release."""
+    if callable(getattr(tessera_v9, "_evidence_smoke_record", None)):
+        return tessera_v9
+    from tessera import metadata
+
+    return metadata
+
+
 # ---------------------------------------------------------------------------
 # The grammar
 # ---------------------------------------------------------------------------
@@ -309,8 +321,8 @@ def test_an_extra_key_on_a_row_is_refused(tessera_v9):
         _table(payload)
 
 
-def test_the_vocabularies_come_from_tessera_and_are_not_typed_here(tessera_v9,
-                                                                   monkeypatch):
+def test_the_vocabularies_come_from_tessera_and_are_not_typed_here(
+        tessera_record_owner, monkeypatch):
     """One rule, one home: widen Tessera's vocabulary and this reader widens.
 
     If the interface list were transcribed into this module, an interface
@@ -323,8 +335,8 @@ def test_the_vocabularies_come_from_tessera_and_are_not_typed_here(tessera_v9,
     with pytest.raises(lane.LaneEligibilityError, match="interface"):
         _table(payload)
     monkeypatch.setattr(
-        tessera_v9, "EVIDENCE_SMOKE_INTERFACES",
-        tuple(tessera_v9.EVIDENCE_SMOKE_INTERFACES) + ("harness_replay",))
+        tessera_record_owner, "EVIDENCE_SMOKE_INTERFACES",
+        tuple(tessera_record_owner.EVIDENCE_SMOKE_INTERFACES) + ("harness_replay",))
     assert _table(payload).schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
 
 
@@ -549,8 +561,8 @@ def test_provenance_says_whether_the_status_was_derived(tessera_v9):
             assert smoke["status_is_derived"] is True, cell.id
 
 
-def test_the_record_key_sets_come_from_tessera_and_are_not_typed_here(tessera_v9,
-                                                                      monkeypatch):
+def test_the_record_key_sets_come_from_tessera_and_are_not_typed_here(
+        tessera_record_owner, monkeypatch):
     """Widen Tessera's member set and this reader widens with it."""
     payload = _up_convert(_installed())
     for cell_id in (MOE_DECODE, MOE_BATCH):
@@ -558,8 +570,8 @@ def test_the_record_key_sets_come_from_tessera_and_are_not_typed_here(tessera_v9
     with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
         _table(payload)
     monkeypatch.setattr(
-        tessera_v9, "EVIDENCE_SMOKE_RECORD_KEYS",
-        frozenset(set(tessera_v9.EVIDENCE_SMOKE_RECORD_KEYS) | {"sampler"}))
+        tessera_record_owner, "EVIDENCE_SMOKE_RECORD_KEYS",
+        frozenset(set(tessera_record_owner.EVIDENCE_SMOKE_RECORD_KEYS) | {"sampler"}))
     assert _table(payload).schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V9
 
 
@@ -690,11 +702,64 @@ def test_real_producer_and_consumer_refuse_duplicate_prompt_form(change):
         _table(payload)
 
 
-def test_v9_refuses_a_runtime_missing_the_owning_record_validator(monkeypatch):
+@pytest.mark.parametrize("api", ["legacy", "public"])
+@pytest.mark.parametrize("outcome", ["record", "null", "refusal"])
+def test_smoke_record_validator_delegates_with_the_producer_signature(
+        monkeypatch, api, outcome):
+    """Both entry points own the decision, including nulls and refusals."""
+    seen = []
+    where = "cell.evidence.smoke.record"
+    control = {"reference": "bf16_source"}
+    refusal = ValueError("producer rejected this observation")
+
+    def answer(record, actual_control, actual_where):
+        seen.append((record, actual_control, actual_where))
+        if outcome == "refusal":
+            raise refusal
+        return record
+
+    def legacy(record, actual_where, actual_control, smoke_where):
+        assert smoke_where == "cell.evidence.smoke"
+        return answer(record, actual_control, actual_where)
+
+    def public(record, *, control, where):
+        return answer(record, control, where)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("a selected validator's answer must not trigger a retry")
+
+    monkeypatch.setattr(lane, "_tessera_contract_module", lambda: SimpleNamespace(
+        _evidence_smoke_record=legacy if api == "legacy" else None))
+    monkeypatch.setitem(sys.modules, "tessera.metadata", SimpleNamespace(
+        METADATA_API_VERSION="tessera.producer-metadata.v1",
+        parse_smoke_record=public if api == "public" else unexpected))
+    record = None if outcome == "null" else copy.deepcopy(RECORD)
+    if outcome == "refusal":
+        with pytest.raises(lane.LaneEligibilityError, match=str(refusal)) as exc:
+            lane._parse_smoke_record(record, where, control=control)
+        assert exc.value.__cause__ is refusal
+    else:
+        parsed = lane._parse_smoke_record(record, where, control=control)
+        assert (None if parsed is None else parsed.as_dict()) == record
+    assert seen == [(record, control, where)]
+
+
+@pytest.mark.parametrize(("metadata", "message"), [
+    (None, "needs Tessera's smoke-record validator"),
+    (SimpleNamespace(METADATA_API_VERSION="tessera.producer-metadata.v1"),
+     "does not publish callable parse_smoke_record"),
+    (SimpleNamespace(METADATA_API_VERSION="tessera.producer-metadata.v1",
+                     parse_smoke_record=42),
+     "does not publish callable parse_smoke_record"),
+    (SimpleNamespace(METADATA_API_VERSION="future", parse_smoke_record=lambda: None),
+     "incompatible Tessera metadata API version"),
+], ids=["missing-api", "missing-parser", "noncallable-parser", "wrong-version"])
+def test_v9_refuses_a_runtime_missing_the_owning_record_validator(
+        monkeypatch, metadata, message):
     from tessera.serving import contract as ts
 
     payload = _installed()
-    monkeypatch.delattr(ts, "_evidence_smoke_record")
-    with pytest.raises(lane.LaneEligibilityError,
-                       match="needs Tessera's _evidence_smoke_record"):
+    monkeypatch.delattr(ts, "_evidence_smoke_record", raising=False)
+    monkeypatch.setitem(sys.modules, "tessera.metadata", metadata)
+    with pytest.raises(lane.LaneEligibilityError, match=message):
         _table(payload)

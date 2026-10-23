@@ -17294,18 +17294,26 @@ and the attribution are re-derived by calling Tessera's own
 `derive_smoke_status` / `derive_smoke_attribution`, and a published value
 that disagrees with what they return is refused as a contract defect rather
 than resolved. The record grammar is also owned by Tessera:
-`_parse_smoke_record` calls the pinned metadata module's
-`_evidence_smoke_record` validator before converting its result to immutable
-consumer dataclasses. This validates closed record and row members, known
-forms, interfaces and statuses, a portable repository-relative instrument
+`_parse_smoke_record` calls the producer's legacy `_evidence_smoke_record`
+validator, or `tessera.metadata.parse_smoke_record` when the producer publishes
+its versioned `tessera.producer-metadata.v1` public API instead, before converting
+its result to immutable consumer dataclasses. This validates closed record and
+row members, known forms, interfaces and statuses, a portable repository-relative instrument
 path, a nonempty rule and nonempty rows. The reference is a known arm or
 `null`; each row's reference status must be null exactly when no reference
 arm is named. Observation identity is `(prompt, form)`, so changing an
 interface or verdict cannot manufacture a second observation of that pair.
 A record beside a non-null v7 control is refused by the same owning validator.
-The immutable pin binds this private metadata API; its absence is a named
-refusal rather than a fallback grammar. Whether a cell's status was derived
-is asked through `smoke_status_is_derived` and carried into provenance.
+The immutable pin still binds the runtime and contract. If neither supported
+validator is available, or the public API version is incompatible, parsing
+refuses rather than substituting a local grammar. A producer rejection never
+retries through another validator. Whether a cell's status was derived is
+asked through `smoke_status_is_derived` and carried into provenance.
+
+Re-stamped (2026-10-23, `prismaquant#2648` acceptance repair) for the
+smoke-record validator's public metadata entry point. The adapter preserves
+legacy producer signatures and delegates all validation to Tessera. No runtime
+pin, table bytes, status policy, admission gate or serving execution changes.
 
 **The pin names v23, so v10 is the CURRENT grammar, not one this reader
 merely accepts.** `LANE_ELIGIBILITY_SCHEMA_TESSERA` is
