@@ -1,0 +1,154 @@
+{
+  "audit_action": {
+    "checks_failed": 0,
+    "checks_passed": 181,
+    "clean_tree_proof": {
+      "closure_file": ".pbrun-closure.1ea8d4a7048c41d8.json",
+      "dirty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "equals_sha256_of_empty_input": true,
+      "head": "73a2f9c9159a790993f284168431e60dd5cba7ac"
+    },
+    "host": "dl380g10",
+    "key": "9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934",
+    "memory_peak_bytes": 1404706816,
+    "payload_bytes": 128573,
+    "payload_sha256": "95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a",
+    "receipt_schema": "prismaquant.prismabuild.cas_receipt.v3",
+    "receipt_sha256": "02a4f63516b3763d13dc7a9d8a63290731ee8151baeda02eefd82509a7409af7",
+    "request_manifest_sha256": "25b0737ba03bb5cceb4902e554e903a9ec1716b090cbb0b4708745826d102928",
+    "resources": {
+      "cpu": 4,
+      "mem_gb": 12
+    },
+    "returncode": 0,
+    "snapshot": {
+      "bundle_sha256": "450841cf3014ced5587af693cca7295c48b44ad8e39cceac48e21512cb6b2443",
+      "commit": "668adbcbc46a343fc93165b94deffd9c94d0c495",
+      "parent": "73a2f9c9159a790993f284168431e60dd5cba7ac"
+    },
+    "status": "executed",
+    "stdout_sha256": "8b44c6a24dc4539d2048b2c137772c7d9678579df546250bc0bd79b857e5a533",
+    "tags": [
+      "interpreter-path-v1",
+      "progress-helper-v1",
+      "progress-v1",
+      "x86"
+    ],
+    "verify_command": "python3 tools/audit_glm_mtp_layer45.py --verify-actions-only --extra-action audit=9d713876e24dee84e2f8b9754e75a65c1f266b1a6a4b189b5f62aea6b4a8b934",
+    "wall_seconds": 1683.7
+  },
+  "body_admission": {
+    "message": "joint AURA requires matching aura/joint provenance",
+    "payloads_refused": [
+      "r1024_part",
+      "r896_part",
+      "merged_original",
+      "merged_current"
+    ],
+    "raised_at": "prismaquant/cost_currency.py:308",
+    "relabelled_provenance_probe": "admitted"
+  },
+  "counts": {
+    "capture_entries": 867,
+    "checkpoint_only_cells": 12,
+    "expert_wire_cells": 3456,
+    "offered_cells_recorded_m6_menu": 1734,
+    "offered_cells_repo_pinned_contract": 2604,
+    "priced_cells": 3468,
+    "rendered_shards": 3468,
+    "routed": 864,
+    "shared": 3,
+    "units": 867,
+    "wire_blobs": 3468
+  },
+  "cross_checks": {
+    "pb_receipts_mcp": {
+      "keys": "14 accepted actions and the audit action",
+      "keys_checked": 15,
+      "read_only_tool": "pb_receipts",
+      "verdict_green": 15
+    }
+  },
+  "identities": {
+    "calibration_artifact_sha256": "9cd1fa129f249abd80d22efaeb8bc7e8b2d3b4252f173a8c6f2b2e496a4f8329",
+    "calibration_sha256": "dd5be8c887a48465fcd7df567b8aba876026339785da03f6642c7179413668e1",
+    "census_sha256": "577bf157ad623aee11c28570a06f050a18d0cf5786e14f659c17857cfa2c728f",
+    "container_content_sha256": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+    "merged_price_original_sha256": "052adde6bb66ff9b32eb05fd2326ee0aacd7435b812a48c0c7c29841f7d2fbba",
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "objective": "mtp_head_self_kl",
+    "probe_identity_sha256": "eab33bfbfc744aa46d7bbb5072ded168804492331fb46c2214cb10ff63703b9e",
+    "producer_encoder_source_sha256": "da5805bc707c041efaeb27c5083fb7809fd8cdc51d501f41103b791270b569cb",
+    "producer_pin_commit": "07bfcc0e9b7da13276938cb722bc7dcd893e6c63",
+    "source_identity_file_sha256": "4db808a769eb4fa4fa3df3c30c9857bd197200555355671e1c0c84ee8faefdfd",
+    "source_model_content_sha256": "c45d2d35b4520d729e1026b926dc1eb0de9d8fc905d46733c7edd322af2009a0"
+  },
+  "inputs": {
+    "count": 45,
+    "listed_in": "audit.json, section inputs (path, SHA-256 and size of every parsed file)"
+  },
+  "issue": "RobTand/prismaquant#2530",
+  "layer": 45,
+  "limits": [
+    "dev_uncertified",
+    "certified_run_refuses_routed_shapes",
+    "dense_wires_have_no_selection_receipt_path",
+    "body_refusal_rests_on_payload_provenance"
+  ],
+  "parent": "RobTand/prismaquant#1271",
+  "performance_claims": [],
+  "record_dir": "docs/measurements/pq-2530-mtp-layer45",
+  "record_files": {
+    "audit.json": "95d0c34279ccbdd2c11be4373f13101f51632f7f5c256e113ad5bba478f7974a",
+    "cells.csv": "c8d30e8f73b2788af8b5813d7f496c35c18e0e79d080720064bbe0dca3c9c6b7",
+    "units.csv": "64ce7611b5d7fbba2c39bd8b68f2a285fd15d1255eab05fb655a34a621807416"
+  },
+  "schema": "pq2530.evidence_manifest.v2",
+  "superseded_audit_runs": [
+    {
+      "key": "4a811283fc0379f28ee8bca64908424a81fe79dde55810439634f24a406620ba",
+      "note": "Revision 1 audit script, 50 checks. The script was never committed.",
+      "tool_commit": "none"
+    },
+    {
+      "key": "179ddafaa0f88101f3126a5409e8cea690531b08f3e377955b7d4134088525f4",
+      "note": "Revision 2 audit script, 104 checks. The script was never committed.",
+      "tool_commit": "none"
+    },
+    {
+      "key": "65932b5915b02958a3955d419761beb009292ac7a0330487bfe3b46f0f6a26b3",
+      "note": "First committed tool, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "e2905ce1f0"
+    },
+    {
+      "key": "2c736f7d8a05b44277e106b944c755b65a29ee5326fec71da9c586ffa04c22bc",
+      "note": "Digest owners in place of raw hashing, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "da64adf400"
+    },
+    {
+      "key": "1a452539b99fd28719301983fd2dddeef7ad6e60a6df9fc2c80eff606cf9fe96",
+      "note": "Light import of the digest owner, 178 checks. Every evidence section equals this record.",
+      "tool_commit": "559e401332"
+    },
+    {
+      "key": "dc971e51bea2eaa6a43d099e1fd1db6fdcef8adad9ef6a432758b3465df0952b",
+      "note": "Selection binding and bound receipt reads, 181 checks. It used parallel readers, which the io site freeze refuses. Every evidence section equals this record.",
+      "tool_commit": "fa74f5bb7e"
+    },
+    {
+      "key": "35029e831cfbc518f660be88d86a0a4e8644f8ea7189c3dd9d53dc7deffb8db6",
+      "note": "Dry run on 6 units without the seal recompute, 175 checks. It is not a record.",
+      "tool_commit": "da64adf400"
+    }
+  ],
+  "tool": {
+    "path": "tools/audit_glm_mtp_layer45.py",
+    "sha256": "322ab0f7d12ac5445186f94fa490ead2df44f63b0388fc2bcbaac94eec4bcc00"
+  },
+  "wire_bytes_by_rung": {
+    "TESSERA_BF16_K1_R1024": 3670266765,
+    "TESSERA_BF16_K1_R896": 3215698376,
+    "TESSERA_E4M3_K1_R1024": 3656058369,
+    "TESSERA_E4M3_K1_R896": 3201489980
+  }
+}
