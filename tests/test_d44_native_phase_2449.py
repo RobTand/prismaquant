@@ -79,16 +79,20 @@ class PhaseTests(unittest.TestCase):
         with patch.object(wave.subprocess, 'run', return_value=SimpleNamespace(
                 returncode=0, stdout=json.dumps(body))):
             with self.assertRaisesRegex(ValueError, 'Incomplete'):
-                self.disk_patch.temp_original(child, need_gb=0.1, command='unexecuted-fixture')
+                self.disk_patch.temp_original(child, need_gb=0.1, command='unexecuted-fixture',
+                    targets={'targets': [{'placement': child['params']['placement'],
+                                          'hosts': ['dl380g10'], 'paths': ['/tmp', '/mnt/shared']}]})
         body['at'] = '2000-01-01T00:00:00+00:00'
         with patch.object(wave.subprocess, 'run', return_value=SimpleNamespace(
                 returncode=0, stdout=json.dumps(body))):
             with self.assertRaisesRegex(ValueError, 'stale'):
-                self.disk_patch.temp_original(child, need_gb=0.1, command='unexecuted-fixture')
+                self.disk_patch.temp_original(child, need_gb=0.1, command='unexecuted-fixture',
+                    targets={'targets': [{'placement': child['params']['placement'],
+                                          'hosts': ['dl380g10'], 'paths': ['/tmp', '/mnt/shared']}]})
 
     def native_gpu_cost_fixture(self):
-        pc = wave.routed_api()
-        self.controller.queue = pc.pool.PoolQueue(self.queue)
+        pc = wave.native_client()
+        self.controller.queue = pc.PoolQueue(self.queue)
         self.controller.cas = SimpleNamespace(read_action_request=lambda _: {
             'params': {'demand': {'gpu': 1}, 'execution_timeout_s': 1800,
                        'retry_policy': {'max_attempts': 1}}})
@@ -98,8 +102,8 @@ class PhaseTests(unittest.TestCase):
         key = self.record(0, status='done')
         queue = self.native_gpu_cost_fixture()
         row = {'action_key': key, 'published_unix': 123.0}
-        wave.durable_json(queue.item_path('done', key), row)
-        wave.durable_json(queue.item_path('failed', key), row)
+        wave.durable_json(queue.records.item_path('done', key), row)
+        wave.durable_json(queue.records.item_path('failed', key), row)
         self.assertTrue(queue.current_ending(key)['ambiguous'])
         self.assertEqual(self.controller.run(), 1)
         stored = json.loads(self.controller.ledger.path.read_text())
@@ -115,9 +119,9 @@ class PhaseTests(unittest.TestCase):
                'retry_safe': True, 'attempts': 0, 'attempt_history': [],
                'claimed_unix': 123.0, 'claimed_host': 'sparky', 'finished_unix': 483.0}
         row['attempt_history'] = queue.archive_attempt(
-            row, attempt=1, status='failed', disposition='ready', detail={'elapsed_s': 360.0})
+            row, attempt=1, status='failed', disposition='requeued', detail={'elapsed_s': 360.0})
         row.update(attempts=1, attempt_history_missing_before=1)
-        wave.durable_json(queue.item_path('ready', key), row)
+        wave.durable_json(queue.records.item_path('ready', key), row)
         self.assertEqual(self.controller.run(), 1)
         stored = json.loads(self.controller.ledger.path.read_text())
         self.assertEqual(stored['reservations'], {key: 0.5})
@@ -125,19 +129,39 @@ class PhaseTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertIn('Unknown partial', json.loads(self.controller.wait_path.read_text())['failure'])
 
+    def test_newer_native_failure_blocks_following_admission(self):
+        key = self.record(0, status='done')
+        queue = self.native_gpu_cost_fixture()
+        # No GPU attempt cost in this status-only proof. Exercise run_once's
+        # failure gate with the actual generation owner, not a mocked status.
+        self.controller.cas = SimpleNamespace(read_action_request=lambda _: {
+            'params': {'demand': {'gpu': 0}, 'execution_timeout_s': 30}})
+        wave.durable_json(queue.records.item_path('done', key),
+                          {'action_key': key, 'published_unix': 100})
+        wave.durable_json(queue.records.item_path('failed', key),
+                          {'action_key': key, 'published_unix': 200})
+        self.status_patch.stop()
+        self.assertEqual(wave.routed_status(key), ('failed', None))
+        self.assertEqual(self.controller.run(), 1)
+        self.assertEqual(self.calls, [])
+        self.assertEqual([member['key'] for member in self.controller.members()], [key])
+        self.assertTrue(queue.records.item_path('failed', key).is_file())
+
     def test_native_cleanup_tombstone_retains_capacity(self):
-        pc = wave.routed_api()
+        pc = wave.native_client()
         key = self.record(0)
-        queue = pc.pool.PoolQueue(self.queue)
-        tombstone = self.queue / 'claimed' / f'{key}.1.sparky.tombstone'
+        queue = pc.PoolQueue(self.queue)
+        tombstone = queue.records.dir('claimed') / f'{key}.1.sparky.tombstone'
         wave.durable_json(tombstone, {'action_key': key, 'published_unix': 123.0})
-        wave.durable_json(queue.item_path('done', key), {'action_key': key, 'published_unix': 123.0})
+        wave.durable_json(queue.records.item_path('done', key), {'action_key': key, 'published_unix': 123.0})
         self.status_patch.stop()
         self.assertEqual(wave.routed_status(key), ('live', None))
-        self.assertTrue(pc._pool_slot_occupied(queue, key))
+        self.assertTrue(queue.records.claim_occupancy(key).value)
         self.assertEqual(self.controller.capacity(), 0)
         tombstone.unlink()
-        self.assertFalse(pc._pool_slot_occupied(queue, key))
+        occupancy = queue.records.claim_occupancy(key)
+        self.assertFalse(hasattr(occupancy, 'reason'), 'Unknown occupancy must not release capacity.')
+        self.assertFalse(getattr(occupancy, 'value', False))
         self.assertEqual(wave.routed_status(key), ('done', None))
         self.assertEqual(self.controller.capacity(), 1)
 
@@ -195,22 +219,20 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), stored)
 
     def test_success_failure_partial_and_duplicate_restart(self):
-        import sys
-        sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/tools')
-        import pbcampaign as pc
+        pc = wave.native_client()
         ledger = self.ledger()
         key = 'b' * 64
         ledger.reserve(key, 1800, 1)
-        queue = pc.pool.PoolQueue(self.root / 'queue')
+        queue = pc.PoolQueue(self.root / 'queue')
         for name in ('ready', 'claimed', 'done', 'failed', 'withdrawn'):
-            queue.dir(name).mkdir(parents=True, exist_ok=True)
+            queue.records.dir(name).mkdir(parents=True, exist_ok=True)
         row = {'action_key': key, 'published_unix': 123.0, 'max_attempts': 2,
                'retry_safe': True, 'attempts': 0, 'attempt_history': [],
                'claimed_unix': 123.0, 'claimed_host': 'sparky', 'finished_unix': 483.0}
         row['attempt_history'] = queue.archive_attempt(row, attempt=1, status='failed',
-            disposition='ready', detail={'elapsed_s': 360.0, 'stdout': 'Partial CPU fixture result.'})
+            disposition='requeued', detail={'elapsed_s': 360.0, 'stdout': 'Partial CPU fixture result.'})
         row['attempts'] = 1
-        wave.durable_json(queue.item_path('ready', key), row)
+        wave.durable_json(queue.records.item_path('ready', key), row)
         controller = wave.RoutedWave.__new__(wave.RoutedWave)
         controller.state = {'waves': [{'members': [{'key': key}], 'closed': False}]}
         controller.ledger, controller.queue = ledger, queue
@@ -224,8 +246,8 @@ class LedgerTests(unittest.TestCase):
         row['attempt_history'] = queue.archive_attempt(row, attempt=2, status='executed',
             disposition='done', detail={'elapsed_s': 180.0, 'stdout': 'Successful CPU fixture result.'})
         row.update(attempts=2, status='executed')
-        queue.item_path('ready', key).unlink()
-        wave.durable_json(queue.item_path('done', key), row)
+        queue.records.item_path('ready', key).unlink()
+        wave.durable_json(queue.records.item_path('done', key), row)
         controller.ledger = self.ledger()
         actual_writer = wave.durable_json
 

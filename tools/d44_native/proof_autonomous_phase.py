@@ -6,7 +6,6 @@ The read-only disk service runs the actual fleet-diskcheck for each admission.
 This proof executes no science and has no production GPU descendants.
 """
 import argparse
-import hashlib
 import json
 import os
 import shlex
@@ -18,20 +17,20 @@ import threading
 import time
 from pathlib import Path
 
+from prismaquant import digests
+
 import next_wave as wave
-sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/tools')
-import pbcampaign as pc
 
 PRODUCER = r'''
-import hashlib,json,sys
+import json,sys
 from pathlib import Path
+from prismaquant.digests import DIRECT_ASCII_LAX
 batch=json.loads(Path(sys.argv[1]).read_text())
 rows=[]
 for task in batch['tasks']:
     value={'sum_of_squares':sum(v*v for v in task['payload']['values'])}
-    raw=json.dumps(value,sort_keys=True,separators=(',',':')).encode()
     rows.append({'task_id':task['id'],'output_id':task['output_id'],
-                 'value_sha256':hashlib.sha256(raw).hexdigest()})
+                 'value_sha256':DIRECT_ASCII_LAX.sha256(value)})
 Path(batch['result_manifest_path']).write_text(json.dumps({
     'schema':'prismabuild.child_result_manifest.v1',
     'parent_key':batch['parent_key'],'plan_key':batch['plan_key'],
@@ -43,15 +42,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--disk-address', required=True)
     parser.add_argument('--disk-port', type=int, required=True)
+    parser.add_argument('--disk-hosts', required=True, help='Comma-separated D1 inventory hosts.')
+    parser.add_argument('--disk-paths', required=True, help='Comma-separated D1 scratch/output mounts.')
     options = parser.parse_args()
     assert os.environ.get('CUDA_VISIBLE_DEVICES') == ''
-    with tempfile.TemporaryDirectory(prefix='d44-autonomous-native-', dir='/tmp') as scratch:
+    pc = wave.routed_api()
+    with tempfile.TemporaryDirectory(prefix='d44-autonomous-native-') as scratch:
         root = Path(scratch)
         work = root / 'work'
         work.mkdir()
         (work / 'seed.txt').write_text('Native CPU arithmetic proof only.\n')
+        # Seal the real digest owner into the fixture checkout so materialized
+        # CPU children do not depend on a separate PrismaQuant installation.
+        package = work / 'prismaquant'
+        package.mkdir()
+        (package / '__init__.py').write_text('')
+        (package / 'digests.py').write_bytes(Path(digests.__file__).read_bytes())
         for args in [('init', '-q'), ('config', 'user.email', 'test@example.invalid'),
-                     ('config', 'user.name', 'D44 CPU proof'), ('add', 'seed.txt'),
+                     ('config', 'user.name', 'D44 CPU proof'), ('add', 'seed.txt', 'prismaquant'),
                      ('commit', '-qm', 'Native CPU fixture')]:
             subprocess.run(['git', '-C', str(work), *args], check=True, capture_output=True)
         wave.QUEUE, wave.CAS = root / 'pb-queue', root / 'cas'
@@ -59,7 +67,6 @@ def main():
         queue = pc.pool.PoolQueue(wave.QUEUE)
         queue.announce(host=socket.gethostname(), tags=['x86'], has_gpu=False,
                        capacity={'cpu': 2, 'mem_gb': 2, 'gpu': 0})
-        wave.routed_api = lambda: pc
         evidence = 'cas:sha256:' + '0' * 64
         request = {'schema': pc.dc.LOGICAL_REQUEST_SCHEMA_V1,
             'common': {'argv': ['python3', '-c', PRODUCER, pc.dc.TASK_BATCH_PLACEHOLDER],
@@ -91,18 +98,28 @@ def main():
         keys = pc._stored_document(native / 'publication.json')['child_action_keys']
         assert len(keys) == 8
         for key in keys:
-            queue.item_path('ready', key).unlink()
+            queue.records.item_path('ready', key).unlink()
         seed = root / 'closed-balance.json'
         seed.write_text(json.dumps({'schema': 'fleet.d44.native_phase_ledger_seed.v1',
             'authoritative_seed_GPU_hours': 21.187425203522047,
             'global_ceiling_GPU_hours': 110, 'GPU_hour_multiplier': 1}))
-        disk_command = shlex.join(['python3', str(Path('proof_disk_client.py').resolve()),
+        disk_targets = root / 'disk-targets.json'
+        placements = []
+        for key in keys:
+            placement = cas.read_action_request(key)['params']['placement']
+            if placement not in placements:
+                placements.append(placement)
+        wave.durable_json(disk_targets, {'targets': [
+            {'placement': placement, 'hosts': options.disk_hosts.split(','),
+             'paths': options.disk_paths.split(',')} for placement in placements]})
+        disk_command = shlex.join(['python3', str(Path(__file__).with_name('proof_disk_client.py')),
                                   '--address', options.disk_address, '--port', str(options.disk_port)])
         env = {**os.environ, 'D44_WAVE_QUEUE_DIR': str(wave.QUEUE),
                'D44_WAVE_CAS_DIR': str(wave.CAS), 'D44_DISKCHECK': disk_command}
-        command = ['python3', str(Path('next_wave.py').resolve()), '--routed-plan', str(plan_file),
+        command = ['python3', str(Path(wave.__file__).resolve()), '--routed-plan', str(plan_file),
                    '--state-dir', str(state_dir), '--wait-file', str(wait_file),
-                   '--ledger-seed', str(seed), '--disk-need-gb', '0.1']
+                   '--ledger-seed', str(seed), '--disk-need-gb', '0.1',
+                   '--disk-targets', str(disk_targets)]
         initial = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)
         print(initial.stdout, end='', flush=True)
         assert initial.returncode == 3, initial.stderr
@@ -115,8 +132,8 @@ def main():
         def execute_cpu_children():
             try:
                 while not stop.is_set():
-                    ready = list(queue.dir('ready').glob('*.json'))
-                    claimed = list(queue.dir('claimed').glob('*.json'))
+                    ready = list(queue.records.dir('ready').glob('*.json'))
+                    claimed = list(queue.records.dir('claimed').glob('*.json'))
                     max_live[0] = max(max_live[0], len(ready) + len(claimed))
                     assert len(ready) + len(claimed) <= 1
                     if not ready:
@@ -127,7 +144,7 @@ def main():
                     assert key not in executed
                     row.update(claimed_unix=time.time(), claimed_host=socket.gethostname(),
                                claimed_by='isolated-native-cpu-executor')
-                    wave.durable_json(queue.item_path('claimed', key), row)
+                    wave.durable_json(queue.records.item_path('claimed', key), row)
                     ready[0].unlink()
                     child = cas.read_action_request(key)
                     assert child['params']['demand'].get('gpu', 0) == 0
@@ -151,11 +168,11 @@ def main():
                     row['attempt_history'] = queue.archive_attempt(row, attempt=1, status='executed',
                                                                    disposition='done', detail=detail)
                     row.update(schema=pc.pool.POOL_OUTCOME_SCHEMA_V1, attempts=1)
-                    adopted = queue.adopted_attempt_summary(row)
+                    adopted = queue.attempt_ending(row)
                     row.update({field: adopted[field] for field in
                                 ('status', 'finished_unix', 'finished_host', 'detail')})
-                    wave.durable_json(queue.item_path('done', key), row)
-                    queue.item_path('claimed', key).unlink()
+                    wave.durable_json(queue.records.item_path('done', key), row)
+                    queue.records.item_path('claimed', key).unlink()
                     executed.append(key)
                     receipts[key] = cas.lookup(child)
             except BaseException as exc:
@@ -189,9 +206,8 @@ def main():
         assert ledger['seed']['authoritative_seed_GPU_hours'] == 21.187425203522047
         assert ledger['charges'] == {} and ledger['reservations'] == {}
         group = json.loads((native / 'group.json').read_text())
-        expected = [[f't{i}', f'out{i}', hashlib.sha256(json.dumps({
-            'sum_of_squares': sum(v * v for v in [i, i + 1, i + 2])},
-            sort_keys=True, separators=(',', ':')).encode()).hexdigest()] for i in range(8)]
+        expected = [[f't{i}', f'out{i}', digests.DIRECT_ASCII_LAX.sha256({
+            'sum_of_squares': sum(v * v for v in [i, i + 1, i + 2])})] for i in range(8)]
         assert group['task_count'] == group['child_count'] == 8
         assert group['merged_result_sha256'] == pc.pb.canonical_sha256(expected)
         duplicate = subprocess.run([*command, '--autonomous'], env=env,
@@ -199,7 +215,7 @@ def main():
         assert duplicate.returncode == 0, duplicate.stderr
         assert len(json.loads((state_dir / 'wave-state.json').read_text())['disk_checks']) == 8
         assert max_live[0] == 1
-        print('D44_AUTONOMOUS_CPU_PROOF=' + json.dumps({
+        print('D44_AUTONOMOUS_CPU_PROOF=' + digests.DIRECT_ASCII_SPACED_LAX.text({
             'actual_entry': 'next_wave.py --routed-plan --autonomous',
             'restarted_after_first_native_admission': True, 'autonomous_exit': completed.returncode,
             'duplicate_exit': duplicate.returncode, 'native_CPU_children': len(executed),
@@ -207,8 +223,7 @@ def main():
             'closed_balance_GPU_hours': ledger['seed']['authoritative_seed_GPU_hours'],
             'GPU_admissions': 0, 'science_replayed': False,
             'group': group, 'native_receipts': receipts,
-            'next_wave_sha256': hashlib.sha256(Path('next_wave.py').read_bytes()).hexdigest()},
-            sort_keys=True), flush=True)
+            'next_wave_sha256': digests.file_sha256hex(Path(wave.__file__))}), flush=True)
     print('D44_AUTONOMOUS_CLEANUP=isolated CPU roots removed', flush=True)
 
 
