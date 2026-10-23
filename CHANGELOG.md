@@ -15,7 +15,9 @@
   population before resume admits work. Matching retained recovery admits once without
   duplicate admission. Native status uses generation-resolved endings, and live cost recovery
   uses the record-store owner. CLI help/invalid arguments cannot enter legacy submission;
-  legacy execution is explicit. Runtime stores and D1 host/storage targets are configured,
+  legacy execution is explicit. Routed recovery commands preserve absolute state and input
+  paths across working-directory changes; legacy wait prompts use the current controller
+  path with `--legacy`. Runtime stores and D1 host/storage targets are configured,
   with unknown mappings refused. Completion, lifetime balances, ship and memory gates remain.
   Verification is CPU-only; see `docs/d44-retained-scope-2446.md`.
 - Read Tessera lane schema v12 and apply the per-launch rung scope (#2511).

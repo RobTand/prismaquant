@@ -1,6 +1,8 @@
 """CPU refusals for D44 native status, CLI dispatch and configured D1 targets."""
 import datetime
 import json
+import shlex
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -147,3 +149,101 @@ def test_missing_disk_targets_refuse_before_check(monkeypatch):
     with pytest.raises(ValueError, match='configured placement/storage targets'):
         wave.routed_diskcheck({'params': {'placement': {'required_tags': ['x86']}}}, need_gb=1)
     run.assert_not_called()
+
+
+@pytest.mark.parametrize('paths', ['defaults', 'explicit', 'environment'])
+def test_persisted_routed_handoff_reopens_original_paths(tmp_path, monkeypatch, paths):
+    launch, elsewhere = tmp_path / 'launch space', tmp_path / 'elsewhere'
+    launch.mkdir()
+    elsewhere.mkdir()
+    monkeypatch.chdir(launch)
+    monkeypatch.delenv('D44_DISK_TARGETS', raising=False)
+    plan = launch / 'plan file.json'
+    plan.write_text('{}')
+    state_dir = launch / ('d44-wave-state' if paths == 'defaults' else 'state space')
+    state_dir.mkdir()
+    wait_path = state_dir / 'wait.json' if paths == 'defaults' else launch / 'wait file.json'
+    key = 'a' * 64
+    state = {'waves': [{'wave': 1, 'closed': False,
+                       'members': [{'batch': 'child-00000', 'key': key}]}]}
+    wave.durable_json(state_dir / 'wave-state.json', state)
+    (state_dir / 'sub-keys.txt').write_text(f'child-00000 {key}\n')
+    arguments = ['--routed-plan', str(plan)]
+    seed_path = targets_path = None
+    if paths != 'defaults':
+        arguments = ['--routed-plan', plan.name, '--state-dir', state_dir.name,
+                     '--wait-file', wait_path.name, '--l40', '--autonomous', '--disk-need-gb', '2.5']
+        retained = launch / 'retained units.json'
+        wave.durable_json(retained, {'schema': 'd44.retained_units.v1', 'units': []})
+        seed_path, targets_path = launch / 'ledger seed.json', launch / 'disk targets.json'
+        wave.durable_json(seed_path, {
+            'schema': 'fleet.d44.native_phase_ledger_seed.v1',
+            'authoritative_seed_GPU_hours': 21.187425203522047,
+            'global_ceiling_GPU_hours': 110, 'GPU_hour_multiplier': 1})
+        wave.durable_json(targets_path, {'targets': []})
+        arguments += ['--retained-units', retained.name, '--ledger-seed', seed_path.name]
+        if paths == 'explicit':
+            arguments += ['--disk-targets', targets_path.name]
+            monkeypatch.setenv('D44_DISK_TARGETS', 'unused-environment-targets.json')
+        else:
+            monkeypatch.setenv('D44_DISK_TARGETS', targets_path.name)
+    observed = []
+
+    def prepare(pc, plan_path, catalog_path, **kwargs):
+        assert json.loads(plan_path.read_text()) == {}
+        wave.durable_json(catalog_path, {'retained_units': []})
+        return {'retained_units': []}
+
+    prepare_catalog = Mock(side_effect=prepare)
+    monkeypatch.setattr(wave, 'prepare_routed_catalog', prepare_catalog)
+    monkeypatch.setattr(wave, 'routed_api', Mock(return_value=object()))
+
+    def controller(pc, catalog, directory, wait, command, **kwargs):
+        ledger = wave.RoutedLedger(directory / 'lifetime-cost.json',
+                                   seed_path=kwargs['seed_path'], cpu=True)
+        if kwargs['disk_targets'] is not None:
+            assert json.loads(Path(kwargs['disk_targets']).read_text()) == {'targets': []}
+        observed.append((directory, wait, command, kwargs, ledger.total()))
+        return SimpleNamespace(request={'roster': {'tasks': []}}, run=lambda: 3)
+
+    monkeypatch.setattr(wave, 'RoutedWave', controller)
+    assert wave.routed_main(arguments) == 3
+    saved_ledger = (state_dir / 'lifetime-cost.json').read_bytes()
+    prompt = json.loads(wait_path.read_text())['resume_prompt']
+    command = shlex.split(prompt.split('Resume with: ', 1)[1])
+    monkeypatch.chdir(elsewhere)
+    assert wave.routed_main(command[2:]) == 3
+    assert [row[0] for row in observed] == [state_dir, state_dir]
+    assert [row[1] for row in observed] == [wait_path, wait_path]
+    for _, _, resume, kwargs, total in observed:
+        argv = shlex.split(resume)
+        assert argv[:2] == ['python3', str(Path(wave.__file__).resolve())]
+        assert Path(argv[argv.index('--routed-plan') + 1]) == plan
+        assert kwargs['custody'] == (state, [('child-00000', key)])
+        assert kwargs['seed_path'] == seed_path
+        assert kwargs['disk_targets'] == targets_path
+        if paths != 'defaults':
+            assert Path(argv[argv.index('--retained-units') + 1]) == retained
+            assert kwargs['autonomous'] is True
+            assert kwargs['disk_need_gb'] == 2.5
+            assert '--l40' in argv
+            assert total == 21.187425203522047
+    prepare_catalog.assert_called_once()
+    assert (state_dir / 'lifetime-cost.json').read_bytes() == saved_ledger
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_legacy_wait_handoff_uses_current_script_and_explicit_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(wave, 'O', tmp_path)
+    script = tmp_path / 'configured controller' / 'next_wave.py'
+    monkeypatch.setattr(wave, '__file__', str(script))
+    monkeypatch.setattr(wave, 'QUEUE', tmp_path / 'queue')
+    monkeypatch.setattr(wave, 'CAS', tmp_path / 'cas')
+    legacy = Mock(return_value=3)
+    monkeypatch.setattr(wave, 'main', legacy)
+    wave.write_wait({'waves': []}, [], 5)
+    prompt = json.loads((tmp_path / 'wait.json').read_text())['resume_prompt']
+    command = shlex.split(prompt.split('Then run ', 1)[1].split(' again.', 1)[0])
+    assert wave.routed_main(command[2:]) == 3
+    legacy.assert_called_once_with()
+    assert command == ['python3', str(script), '--legacy']

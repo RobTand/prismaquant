@@ -61,8 +61,18 @@ fleet from an architecture tag.
   unknown/incomplete arguments refuse. Legacy submission requires exactly
   `--legacy` and configured stores; it cannot be combined with routed flags.
   The existing legacy campaign/exec environment overrides remain available.
-  Routed state defaults to `d44-wave-state` in the caller's working directory,
-  with `wait.json` beside it, or explicit `--state-dir` / `--wait-file` paths.
+  Legacy wait prompts use the current controller's resolved script path with
+  `--legacy`, not a fixed deployment script. No-argument invocation still refuses.
+  Routed state defaults to `d44-wave-state` in the caller's launch working directory,
+  with `wait.json` beneath it, or explicit `--state-dir` / `--wait-file` paths.
+  State, wait, plan, ledger seed, retained manifest and disk-target paths are resolved
+  there before opening custody or persisting a shell-quoted resume command.
+  A configured `D44_DISK_TARGETS` fallback is captured as an absolute `--disk-targets`
+  argument; explicit CLI targets still win. Replaying a newly generated handoff from
+  another working directory reopens the same lock, catalogue and custody history.
+  No stored state is migrated or reset. Previously generated relative handoffs need
+  regeneration from the original launch directory (or known absolute paths).
+  The configured native runtime and stores must remain available when resuming.
 - The optional standalone CPU proof now takes `--disk-hosts` and `--disk-paths`
   matching its read-only service's actual declaration. It is not part of the
   checks below and was not executed in this repair.
@@ -85,8 +95,8 @@ The issue's historical `645e9c2b...` failing-before proof predates this checkout
 it was not replayed. The scope tests now directly assert the previously reported
 non-hex refusals. No new exact historical-head proof is claimed.
 
-Final corrected CPU command (after Python AST syntax checks of the controller
-and proof scripts, without executing the standalone proof):
+Previous repair's corrected CPU command (after Python AST syntax checks of the
+controller and proof scripts, without executing the standalone proof):
 
 ```sh
 python -m pytest \
@@ -110,3 +120,59 @@ bounded CPU proofs, not a whole-repository or native-worker execution proof.
 No source counter, lifetime seed, boundary allowlist or duplication baseline was reset.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"f79a2dca3683c2eb72dcaaa59b6b7122a779a32e3a7bef06075f9fbbdf141794","size":1535}},"operation":"607b48a51f9d93d6e0678d6a9970f850d2287fe6996c5e43450da752a719d9fd","receipt":"8bdbf339aef2826854aa4c07c5465d812716c3dff6bd97860f00ffb475b5dfe2"}]
+
+### Recovery-handoff follow-up
+
+The handoff regressions first ran against the pre-fix `9afbb89c` controller:
+
+```sh
+python -m pytest tests/test_d44_runtime_safety_2446.py -q -k handoff --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **4 failed**, 19 deselected, exit 1. Default-state replay used a different
+state directory; relative explicit/environment-path replays could not find the
+plan; the legacy prompt lacked the required mode and exited 2. These failures
+were reproduced before changing the handoff implementation, not inferred from
+source inspection alone.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"e9e79aa47acaca5b81522e3035113669ab0caf2fd6b897b1c1523663b830000b","size":39495}},"operation":"5ba23e0e5a9c163aac4b61cc104cba5d1c2d0bd2e6b0251282d58b13a97ca88e","receipt":"6c14c1361ae7aae444afb5b11b60e49083a7ce76969f0f576ee216f92e8844ca"}]
+
+After the fix, all five D44 suites pass, including the four new handoff cases:
+
+```sh
+python -m pytest \
+  tests/test_d44_retained_scope_2446.py tests/test_d44_native_catalogue_2449.py \
+  tests/test_d44_native_controller_2449.py tests/test_d44_native_phase_2449.py \
+  tests/test_d44_runtime_safety_2446.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **88 passed**, 14 torch/Python 3.14 deprecation warnings, exit 0.
+The new tests replay the persisted prompt from another directory with spaces in
+paths, covering default and explicit state/wait paths, relative optional inputs,
+CLI precedence over environment disk targets, and environment-only disk targets.
+They exercise the real CLI, custody restoration and ledger path reuse, with native
+catalogue creation/controller execution mocked. Catalogue creation occurs once,
+existing custody and lifetime ledger bytes remain, and no state is created in the
+second directory. The legacy test follows the saved prompt through the parser to
+a mocked legacy controller, using a configured script path containing spaces.
+The existing no-argument refusal remains covered. No native worker or GPU proof
+is claimed by these tests, and the source counter and accepted controls are unchanged.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"f95f2ed9f6b98a4ed2d71e9c43fc7ee6b4122fc25172e60c57dfd2728ab4a4fe","size":902}},"operation":"c6b85b5403bdeff429ba103f6a696189ab60b0cdfa02b6e13694f97dfd4a49a2","receipt":"83f3fb289404af33169e21f8f7359e32a94bd401baef46f097b283d9a8ae26ca"}]
+
+Repository guard command for this follow-up:
+
+```sh
+python -m pytest \
+  tests/test_architecture_doc.py tests/test_doc_claims_driver_truth.py \
+  tests/test_docs_entrypoints.py tests/test_docs_staleness.py \
+  tests/test_duplication_baseline.py tests/test_prismabuild_boundary.py \
+  tests/test_tool_imports_1304.py tests/test_file_hash_routing_1672.py \
+  tests/test_tools_hash_routing_1680.py tests/test_digest_hex_1457.py \
+  tests/test_digest_profiles_1301.py tests/test_digest_profiles_1301_files.py \
+  -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **533 passed**, 14 torch/Python 3.14 deprecation warnings, exit 0.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"6483945c72e3948a98b81bb688ca7ea48e939b6745e17d1d6a4c9a86d7a3b10b","size":1383}},"operation":"337dfe7ae44e57a720a48e9a2ab342f4e4afa7912ecc4429b623f6b00a434120","receipt":"f980e2f74fa5e9c3a3d31fd6c6e010804edf2116146ddf78ab8e65473ae34ed2"}]
