@@ -3563,6 +3563,13 @@ remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
 
+PQ #2789 (owner-loop portion of PB #811): produced Stage A retirement now
+observes keyed egress through the publication's already-selected public queue.
+Release, drain and refill share one local gate; a previously unseen ending
+permits authoritative retirement validation, never a terminal-derived refund.
+The existing absolute deadlines, keyless retries and PB materialization recovery
+remain unchanged. See [the local handshake and CPU evidence](design/keyed_egress_owner_2789.md).
+
 Re-stamped 2026-10-02 (Refs PQ #1293, PB #1453): the reviewed PrismaBuild
 reader and client SDK pin is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`,
 with exact SDK version 4. The existing sealed-root resolver, test-only
