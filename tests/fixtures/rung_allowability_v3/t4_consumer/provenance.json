@@ -1,0 +1,79 @@
+{
+  "artifacts": {
+    "README.md": {
+      "sha256": "f4a4580f796d0c25add76d542d0ccd96d19c0cd32ad763891544b00bef1503a3",
+      "size_bytes": 2628
+    },
+    "producer.py": {
+      "sha256": "c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c",
+      "size_bytes": 73615
+    },
+    "synthetic_t4_scope.json": {
+      "sha256": "2177850231cf78602d684df9cc41e1b518e026194703a343d03b8c38e3a8b2ca",
+      "size_bytes": 142490
+    }
+  },
+  "commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
+  "construction": {
+    "build_source_commit": "Explicit synthetic placeholder, not a claim about the approved kernel source.",
+    "class_constructor": "producer.py:measured_geometry_classes",
+    "geometry": "Native fixture geometry copied unchanged except menu recipe/semantic execution fields; repeated across all cells, not measured per shape; no invented geometry formula.",
+    "quality": "Only anomaly_flags: []; no samples, measured KL, sampled-weight or numerical evidence.",
+    "runtime_dependencies": "Standard library and these local inputs only; no private PB API, git, network, or installed Tessera.",
+    "semantic_authority": "producer.py:E2M1_K2_PERFORMANT_MENU and performant_rungs",
+    "test_execution": "None. Input construction only; acceptance and legacy missing allowable_rungs checks delegated to main agent.",
+    "times": "10 us base fixture constant for each kernel and each paired pass, NOT observed measurements."
+  },
+  "construction_sources": [
+    {
+      "commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
+      "invocation": "fixture_v2('tcq', 'native_tcq')",
+      "method": "AST extraction of constructors only; no tests or module imports",
+      "path": "tests/test_rung_allowability.py",
+      "selected_functions": [
+        "fixture",
+        "fixture_v2"
+      ],
+      "sha256": "829ea94e504f43c20cf99a1b58a08a51ae98de8b438954d33ece21db51233043",
+      "size_bytes": 39770
+    },
+    {
+      "commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
+      "method": "Inspected as construction analogy only; copied dims and paths were not used",
+      "path": "tests/test_rung_performant_policy.py",
+      "reference_function": "approved_t4_table",
+      "sha256": "72538c802a4cb652044b3e28c36dc699a102673eaed3dc6339e1f5ccdf0166bd",
+      "size_bytes": 38308
+    }
+  ],
+  "counts": {
+    "geometry_classes": 20,
+    "measurements": 20,
+    "required_cells": 20,
+    "rungs": [
+      896
+    ],
+    "shapes": 4
+  },
+  "evidence_kind": "synthetic mechanics-only consumer test inputs",
+  "path": "src/tessera/rung_allowability.py",
+  "producer": {
+    "commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
+    "file": "producer.py",
+    "path": "src/tessera/rung_allowability.py",
+    "sha256": "c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c",
+    "size_bytes": 73615,
+    "verbatim": true
+  },
+  "qualification": {
+    "native_qualification_inherited": false,
+    "notice": "SYNTHETIC mechanics-only test fixture; times are fixtures, NOT observed measurements; no numerical, native, producer, or serving qualification.",
+    "numerical_qualification_inherited": false,
+    "producer_qualified_by_fixture": false,
+    "serving_qualification_inherited": false
+  },
+  "repository": "RobTand/tessera",
+  "scope": "test-only metadata snapshot; no runtime/kernel pin changes",
+  "sha256": "c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c",
+  "source_access": "Read-only git objects; no authentic private measurement access."
+}
