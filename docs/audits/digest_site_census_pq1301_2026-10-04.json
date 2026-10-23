@@ -8561,7 +8561,6 @@
    "hashlib:tools/expand_probe_onto_tessera_census.py::_bound",
    "hashlib:tools/expand_probe_onto_tessera_census.py::main",
    "hashlib:tools/full_kl_teacher_payload.py::tensor_descriptor",
-   "hashlib:tools/generate_transition_rewrites.py::_package_digest",
    "hashlib:tools/glm_mtp_capture.py::projection_phase",
    "hashlib:tools/inspect_t4_binding.py::main",
    "hashlib:tools/joint_prepare_startup_probe.py::main",
@@ -22760,14 +22759,45 @@
      "constraints": "Feed caller-ordered records. Keep Path sort order, file reads, and the result wrapper unchanged."
     },
     "contract_kind": "byte-digest",
-    "ratcheted": true,
-    "disposition": "migrate-exact-route",
-    "eligible": true,
-    "disposition_reason": "Use the exact owner route without changes to consumer policy.",
+    "ratcheted": false,
+    "disposition": "migrated-by-pq2648-2026-10-22",
+    "eligible": false,
+    "disposition_reason": "Routed through prismaquant.digests.LengthFramedSourceSha256 with identical bytes and refusal outcomes; no consumer policy or digests.py changes.",
+    "migrated_calls": [
+     {
+      "method": "LengthFramedSourceSha256",
+      "base_line": 40,
+      "original_expression": "hashlib.sha256()",
+      "routed_expression": "LengthFramedSourceSha256()",
+      "owner": "prismaquant.digests.LengthFramedSourceSha256"
+     }
+    ],
+    "migration_evidence": {
+     "issue": "prismaquant#2648",
+     "pre_route_commit": "1e73ed203ee2deee655d6e593b84e80221404eaa",
+     "previous_disposition": "migrate-exact-route",
+     "previous_ratcheted": true,
+     "previous_eligible": true,
+     "previous_cohort": "byte-digest:hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13",
+     "fixture": "tests/fixtures/digest_profiles_1301_files.json",
+     "fixture_census_id": "hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13",
+     "fixture_rows": 22,
+     "tests": [
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_keeps_its_bytes",
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_keeps_path_order_not_posix_order",
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_truncation_changes_the_digest",
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_refuses",
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_routes_through_the_framed_source_owner",
+      "tests/test_digest_profiles_1301_files.py::test_package_digest_generator_output_matches_frozen",
+      "tests/test_generate_transition_rewrites.py",
+      "tests/test_duplication_baseline.py"
+     ]
+    },
+    "note": "The id, source_blob, callee, consumer_evidence, and recipe above preserve the pre-route call, not the current constructor. The caller now feeds one update(name, payload) per Path-component-sorted record to the owner: be32 strict-UTF-8 name byte length, name bytes, be64 payload byte length, payload bytes, with no separator. File reads and the hexdigest wrapper remain at the caller. The 22 frozen fixture rows cover ASCII and Unicode inputs, an empty package, a/b.py before a.py regardless of insertion order, truncation, Unicode/type refusals, and a small generator rewrite block. The raw scope is removed from the primitive-site baseline and its pending cohort is retired; historical scan and source-blob evidence remain unchanged.",
     "retention_evidence": null,
     "epic_key": "k2",
     "epic": "prismaquant#2541",
-    "cohort": "byte-digest:hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13"
+    "cohort": null
    },
    {
     "id": "hashlib:tools/glm_mtp_capture.py::projection_phase@227:62",
@@ -135286,14 +135316,6 @@
     ]
    },
    {
-    "id": "byte-digest:hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13",
-    "epic": "prismaquant#2541",
-    "module": "tools/generate_transition_rewrites.py",
-    "calls": [
-     "hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13"
-    ]
-   },
-   {
     "id": "byte-digest:hashlib:tools/glm_mtp_capture.py::projection_phase@227:62",
     "epic": "prismaquant#2541",
     "module": "tools/glm_mtp_capture.py",
@@ -138225,7 +138247,7 @@
   },
   "summary": {
    "scopes": 320,
-   "ratcheted_scopes": 304,
+   "ratcheted_scopes": 303,
    "individual_calls": 420,
    "owner_calls": 16,
    "calls_by_family": {
@@ -138238,9 +138260,10 @@
    },
    "supplemental_calls": 275,
    "mutable_modules": 203,
-   "eligible_cohorts": 652,
+   "eligible_cohorts": 651,
    "calls_by_disposition": {
-    "migrate-exact-route": 270,
+    "migrate-exact-route": 269,
+    "migrated-by-pq2648-2026-10-22": 1,
     "retain": 25,
     "owner-implementation": 16,
     "add-exact-owner-recipe": 109
