@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+The D44 standalone campaign guard is owned by
+`prismaquant/d44_guard/campaign_launch.py` (PQ #2447). It routes to the delivered
+guard while binding the existing numerical workspace explicitly; it does not
+replace frozen numerical owners. Dry-run success is not scientific publication.
+See [D44 guard integration and CPU proof](design/d44_guard_publication_2447.md)
+for configuration, source identity, publication semantics, and bounded evidence.
+
 Re-stamped 2026-10-07 (`exec/pq-pin-fca4c6ce0`, PQ #2426): the Tessera pin names
 `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60, raw SHA-256
 `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.

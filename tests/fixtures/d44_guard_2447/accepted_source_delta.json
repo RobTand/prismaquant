@@ -1,0 +1,96 @@
+{
+  "accepted_head": "fa3775151f77dc713fd78882daf6e147ab471243",
+  "accepted_sha256": "38ca21ef9156eaf0f706643dd14dd3258db658aa652a98a2832c440f1d99d2e9",
+  "edits": [
+    {
+      "start": 16,
+      "stop": 16,
+      "accepted": "import hashlib\n"
+    },
+    {
+      "start": 25,
+      "stop": 30,
+      "accepted": "import stage1\nimport stage1 as S\n"
+    },
+    {
+      "start": 31,
+      "stop": 73,
+      "accepted": "OWNER = stage1.OWNERS\nsys.path.insert(0, str(OWNER))\nspec = importlib.util.spec_from_file_location('stage1_d30_owner', OWNER/'v2_launch.py')\nD30 = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(D30)\n"
+    },
+    {
+      "start": 76,
+      "stop": 77,
+      "accepted": ""
+    },
+    {
+      "start": 78,
+      "stop": 79,
+      "accepted": "        return\n"
+    },
+    {
+      "start": 86,
+      "stop": 87,
+      "accepted": ""
+    },
+    {
+      "start": 206,
+      "stop": 209,
+      "accepted": "def route_plan(path, out):\n    \"\"\"Route the launcher and native residency identifiers without changes to frozen inputs.\"\"\"\n    plan = S.load(path)\n"
+    },
+    {
+      "start": 211,
+      "stop": 227,
+      "accepted": "    S.require(index is not None, 'Plan has no encode_launch.py entry')\n    argv[index] = str(Path(argv[index]).with_name('campaign_launch.py'))\n"
+    },
+    {
+      "start": 244,
+      "stop": 244,
+      "accepted": "    sys.path.insert(0, '/mnt/shared/prismabuild-fleet/repo/src')\n"
+    },
+    {
+      "start": 260,
+      "stop": 262,
+      "accepted": ""
+    },
+    {
+      "start": 263,
+      "stop": 264,
+      "accepted": "        route_plan(route.plan, route.out)\n"
+    },
+    {
+      "start": 271,
+      "stop": 273,
+      "accepted": ""
+    },
+    {
+      "start": 274,
+      "stop": 279,
+      "accepted": ""
+    },
+    {
+      "start": 286,
+      "stop": 288,
+      "accepted": "        rc = subprocess.call([sys.executable, *payload])\n"
+    },
+    {
+      "start": 295,
+      "stop": 296,
+      "accepted": "    launch = S.load(D30.TEMPLATE)\n"
+    },
+    {
+      "start": 309,
+      "stop": 310,
+      "accepted": "    token = hashlib.sha256(json.dumps(command).encode()).hexdigest()[:20]\n"
+    },
+    {
+      "start": 351,
+      "stop": 352,
+      "accepted": "        child = start_container_client([sys.executable,'v2_launch.py','--container',json.dumps(container),json.dumps(command)])\n"
+    },
+    {
+      "start": 365,
+      "stop": 366,
+      "accepted": "            _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n            published = True\n"
+    }
+  ]
+}

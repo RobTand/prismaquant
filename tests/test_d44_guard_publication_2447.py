@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
+import os
 import sys
 import types
 from pathlib import Path
+
+import pytest
 
 
 def _load_guard(monkeypatch, tmp_path, *, path=None):
     """Load the guard with stub stage1/D30 owners."""
     target = Path(path) if path is not None else (
+        _install_approved_copy(tmp_path) if os.environ.get('D44_PROOF_APPROVED') == '1' else
         Path(__file__).resolve().parents[1] / "prismaquant/d44_guard/campaign_launch.py")
 
     stage1 = types.ModuleType("stage1")
@@ -41,6 +46,7 @@ def _load_guard(monkeypatch, tmp_path, *, path=None):
     stage1.save = _save  # type: ignore[attr-defined]
     stage1.sha = _sha  # type: ignore[attr-defined]
     stage1.OWNERS = owner  # type: ignore[attr-defined]
+    stage1.__file__ = str(owner / 'stage1.py')
     stage1.require = _require  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "stage1", stage1)
 
@@ -55,6 +61,10 @@ def _load_guard(monkeypatch, tmp_path, *, path=None):
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, "d44_guard_campaign_launch", module)
     spec.loader.exec_module(module)
+    if hasattr(module, 'configure_runtime'):
+        # Unit-level container transport double; fresh-process wiring is tested separately.
+        module.S = module.stage1 = stage1
+        module.configure_runtime(cuda=True)
     return module
 
 
@@ -78,7 +88,7 @@ def _batch(root: Path, *, manifest: str) -> Path:
 def _run_cpu_entry(monkeypatch, guard, root: Path, batch: Path, *, dry_run: bool,
                    child_rc: int = 0):
     """Run the CPU caller path of main. Report its return code."""
-    monkeypatch.setattr(guard.subprocess, "call", lambda argv: child_rc)
+    monkeypatch.setattr(guard.subprocess, "call", lambda argv, **kw: child_rc)
     argv = ["campaign_launch.py", "--device", "cpu", "--root", str(root),
             "--stage", "encode", "--batch", str(batch)]
     if dry_run:
@@ -87,14 +97,23 @@ def _run_cpu_entry(monkeypatch, guard, root: Path, batch: Path, *, dry_run: bool
     return guard.main()
 
 
+def _approved_source() -> str:
+    """Reconstruct exact accepted bytes from a small reverse-delta fixture, not history."""
+    fixed = Path(__file__).resolve().parents[1] / 'prismaquant/d44_guard/campaign_launch.py'
+    lines = fixed.read_text().splitlines(keepends=True)
+    fixture = Path(__file__).parent / 'fixtures/d44_guard_2447/accepted_source_delta.json'
+    delta = json.loads(fixture.read_text())
+    for edit in reversed(delta['edits']):
+        lines[edit['start']:edit['stop']] = edit['accepted'].splitlines(keepends=True)
+    approved = ''.join(lines)
+    assert hashlib.sha256(approved.encode()).hexdigest() == delta['accepted_sha256']
+    return approved
+
+
 def _install_approved_copy(tmp_path) -> Path:
-    """Write the approved defective source to a side path. Return it."""
-    approved = Path("/home/rob/tmp/cl2447-recover-campaign_launch.py")
-    assert approved.exists(), "approved owner source is absent"
-    digest = hashlib.sha256(approved.read_bytes()).hexdigest()
-    assert digest == "38ca21ef9156eaf0f706643dd14dd3258db658aa652a98a2832c440f1d99d2e9"
-    side = tmp_path / "approved-campaign_launch.py"
-    side.write_bytes(approved.read_bytes())
+    """Materialize only the digest-verified test baseline outside the worktree."""
+    side = tmp_path / 'approved-campaign_launch.py'
+    side.write_text(_approved_source())
     return side
 
 
@@ -113,11 +132,11 @@ class _Child:
 
 
 def _run_container_entry(monkeypatch, guard, root: Path, batch: Path, *, dry_run: bool,
-                         child_rc: int = 0):
+                         child_rc: int = 0, cleanup_ok: bool = True):
     """Run the container caller path of main. Report its return code."""
     monkeypatch.setattr(guard, "start_container_client", lambda argv: _Child(child_rc))
     monkeypatch.setattr(guard, "halt_child",
-                        lambda child, owner, reason, **kw: {"ok": True, "halt": reason})
+                        lambda child, owner, reason, **kw: {"ok": cleanup_ok, "halt": reason})
     monkeypatch.setenv(guard.OWNER_ENV, "0" * 64)
     argv = ["campaign_launch.py", "--device", "cuda", "--root", str(root),
             "--stage", "encode", "--batch", str(batch)]
@@ -306,7 +325,8 @@ def test_routed_entry_runs_corrected_guard(monkeypatch, tmp_path):
     routed_entry = Path(routed_argv[1])
     assert routed_entry.name == "campaign_launch.py"
     fixed = Path(__file__).resolve().parents[1] / "prismaquant/d44_guard/campaign_launch.py"
-    routed_entry.write_bytes(fixed.read_bytes())
+    assert routed_entry == fixed
+    assert not (entry.parent / 'campaign_launch.py').exists()
     selected = _load_guard(monkeypatch, tmp_path, path=routed_entry)
     root = tmp_path / "routed-dry"
     root.mkdir(parents=True, exist_ok=True)
@@ -318,26 +338,96 @@ def test_routed_entry_runs_corrected_guard(monkeypatch, tmp_path):
     assert not (root / "child.json").exists()
 
 
-def test_fix_changes_only_the_publication_lines(tmp_path):
-    """The fix differs from approved source in three lines only."""
-    _ = tmp_path
-    approved_path = Path("/home/rob/tmp/cl2447-recover-campaign_launch.py")
-    approved = approved_path.read_text()
-    assert hashlib.sha256(approved.encode()).hexdigest() == (
-        "38ca21ef9156eaf0f706643dd14dd3258db658aa652a98a2832c440f1d99d2e9")
-    fixed_path = Path(__file__).resolve().parents[1] / "prismaquant/d44_guard/campaign_launch.py"
-    fixed = fixed_path.read_text()
-    expect = approved.replace(
-        "    if dry_run:\n        return\n",
-        '    """Write the owned scientific result manifest. Report if the write ran."""\n'
-        "    if dry_run:\n        return False\n",
+def test_fix_preserves_accepted_memory_cancellation_and_cleanup_gates():
+    """Allow delivery/digest wiring changes, but preserve all accepted gate ASTs."""
+    approved = ast.parse(_approved_source())
+    fixed_path = Path(__file__).resolve().parents[1] / 'prismaquant/d44_guard/campaign_launch.py'
+    fixed = ast.parse(fixed_path.read_text())
+    def functions(tree):
+        return {node.name: ast.dump(node, include_attributes=False)
+                for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    before, after = functions(approved), functions(fixed)
+    for name in ('decide_commit', 'valid_owner', 'group_alive', '_docker',
+                 'owned_containers', 'halt_child', 'halt', 'monitor', 'on_signal'):
+        assert after[name] == before[name], name
+    # The entire container try/except/finally (including every cleanup gate) is
+    # identical except for owner path selection and the defective Boolean assignment.
+    before_main = next(n for n in approved.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+    after_main = next(n for n in fixed.body if isinstance(n, ast.FunctionDef) and n.name == 'main')
+    before_try = next(n for n in before_main.body if isinstance(n, ast.Try))
+    after_try = next(n for n in after_main.body if isinstance(n, ast.Try))
+    expected = ast.unparse(before_try).replace(
+        "sys.executable, 'v2_launch.py'", "sys.executable, str(Path(D30.__file__).resolve())"
     ).replace(
-        "                **{key: batch[key] for key in ('parent_key','plan_key','child_ordinal')}, 'results':results})\n",
-        "                **{key: batch[key] for key in ('parent_key','plan_key','child_ordinal')}, 'results':results})\n"
-        "    return True\n",
-    ).replace(
-        "            _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n"
-        "            published = True\n",
-        "            published = _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n",
+        '_publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)\n        published = True',
+        'published = _publish_batch_result(args.batch, args.root, args.stage, dry_run=args.dry_run)'
     )
-    assert fixed == expect
+    assert ast.dump(ast.parse(expected)) == ast.dump(ast.parse(ast.unparse(after_try)))
+
+
+@pytest.mark.parametrize('failure', ['missing_receipt', 'save_before', 'save_after'])
+def test_container_publication_failure_records_false(monkeypatch, tmp_path, failure):
+    guard = _load_guard(monkeypatch, tmp_path)
+    root = tmp_path / 'publish-failure'
+    batch = _batch(root, manifest='child.json')
+    if failure == 'missing_receipt':
+        (root / 'receipts/q.json').unlink()
+    else:
+        save = guard.S.save
+        def fail_save(path, value):
+            if Path(path) == root / 'child.json':
+                if failure == 'save_after':
+                    save(path, value)  # A flush/fsync failure may leave bytes behind.
+                raise OSError('publication write failed')
+            return save(path, value)
+        monkeypatch.setattr(guard.S, 'save', fail_save)
+    with pytest.raises(OSError):
+        _run_container_entry(monkeypatch, guard, root, batch, dry_run=False)
+    saved = _guard_record(root)
+    assert saved['published'] is False
+    assert saved['halt']['ok'] is True
+    assert (root / 'child.json').exists() == (failure == 'save_after')
+
+
+def test_cleanup_failure_prevents_publication(monkeypatch, tmp_path):
+    guard = _load_guard(monkeypatch, tmp_path)
+    root = tmp_path / 'cleanup-failure'
+    batch = _batch(root, manifest='child.json')
+    with pytest.raises(AssertionError, match='sweep not verified'):
+        _run_container_entry(monkeypatch, guard, root, batch, dry_run=False, cleanup_ok=False)
+    assert _guard_record(root)['published'] is False
+    assert not (root / 'child.json').exists()
+
+
+def test_cancel_before_decision_prevents_publication(monkeypatch, tmp_path):
+    guard = _load_guard(monkeypatch, tmp_path)
+    root = tmp_path / 'cancel'
+    batch = _batch(root, manifest='child.json')
+    def wait(child, timeout=None):
+        guard.signal.raise_signal(guard.signal.SIGTERM)
+        return 0
+    monkeypatch.setattr(_Child, 'wait', wait)
+    with pytest.raises(guard.LauncherSignal):
+        _run_container_entry(monkeypatch, guard, root, batch, dry_run=False)
+    saved = _guard_record(root)
+    assert saved['published'] is False
+    assert saved['commit_decision']['allowed'] is False
+    assert saved['halt']['ok'] is True
+    assert not (root / 'child.json').exists()
+
+
+def test_memory_start_floor_still_refuses(monkeypatch, tmp_path):
+    guard = _load_guard(monkeypatch, tmp_path)
+    root = tmp_path / 'memory-floor'
+    batch = _batch(root, manifest='child.json')
+    monkeypatch.setattr(guard.D30, 'available', lambda: 7 * 2**30)
+    with pytest.raises(AssertionError, match='8GiB start floor'):
+        _run_container_entry(monkeypatch, guard, root, batch, dry_run=False)
+    assert not list(root.glob('encode-launch-*.json'))
+    assert not (root / 'child.json').exists()
+
+
+@pytest.mark.parametrize('command', [[], ['python3', 'a b', {'z': 2, 'a': 1}], ['é', '\\u2603']])
+def test_token_retains_exact_accepted_byte_semantics(monkeypatch, tmp_path, command):
+    guard = _load_guard(monkeypatch, tmp_path)
+    assert guard._command_token(command) == hashlib.sha256(json.dumps(command).encode()).hexdigest()[:20]
