@@ -278,11 +278,13 @@ def test_retained_pages_go_after_the_last_consumer(tmp_path, monkeypatch):
         assert owner.release_retained_pages(keep=[second]) == ()
         assert owner.release_retained_pages() == (second.name,)
         owner.authenticate_complete_source()  # config.json: nobody reads it
-        config_fd = owner._files['config.json']['fd']
+        held_fds = [owner._files[name]['fd']
+                    for name in (first.name, second.name, 'config.json')]
         assert owner.receipt()['released_files'] == [first.name, second.name]
         advised.clear()
-    # Nothing the owner retained outlives it.
-    assert advised == [(config_fd, 0, 0, os.POSIX_FADV_DONTNEED)]
+    # The terminal reread can repopulate even previously released shards.
+    # Close advises every held file again, not just the untouched config.
+    assert advised == [(fd, 0, 0, os.POSIX_FADV_DONTNEED) for fd in held_fds]
     # A capture without the bounded page policy leaves page cache alone.
     advised.clear()
     with cc.record_capture_source(census, model=source) as owner:
@@ -534,11 +536,29 @@ def _glm_conv_kernel_is_cuda_only():
     return True
 
 
+def _isolate_capture_serving_menu(monkeypatch):
+    """Keep source/capture fixtures independent of the serving eligibility table.
+
+    One research rung suffices for the real producer's expert projection. Only
+    the menu builder is stubbed: traversal, projection, authentication, close,
+    capture writing and sealing still use their real implementations.
+    """
+    from types import SimpleNamespace
+    from prismaquant import tessera_menu
+
+    monkeypatch.setattr(tessera_menu, 'expand_tessera_menu',
+        lambda shape, **kwargs: [SimpleNamespace(format_name='TESSERA_E4M3_K1_R1024')])
+
+
 def _glm_source(tmp_path, monkeypatch, *, device):
     from test_capture_layer_chain_glm import _three_layer_config, _write_sharded_checkpoint
     from test_glm5_next_streamed_forward_parity import _build_model
-    from projection_producer_fixture import require_projection_producer
-    require_projection_producer(monkeypatch)
+    from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV, producer_plan_tool
+    # This capture-mechanism fixture uses the installed public producer CLI,
+    # not the separate host-bound producer-qualification interpreter.
+    monkeypatch.delenv(PRODUCER_PYTHON_ENV, raising=False)
+    assert producer_plan_tool() == 'tessera.producer_plan'
+    _isolate_capture_serving_menu(monkeypatch)
     monkeypatch.setenv('PRISMAQUANT_TMPDIR', str(tmp_path / 'staging'))
     if device == 'cpu':
         # The campaign places its model on CUDA whenever CUDA is available.
