@@ -1,0 +1,637 @@
+[
+  {
+    "original_id": "supplemental-json:prismaquant/autoscale.py::<module>@1351:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "72dff85418d013f4b1f2120c0cea139fd2491177",
+    "file": "prismaquant/autoscale.py",
+    "scope": "<module>",
+    "line": 1351,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax indent=2 JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "autoscale_1351.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+    ],
+    "syntax_sha256": "506c23e69ffa73e9756efcfdea1eb41491abf4702cd5633f030d9e0be78ab532"
+  },
+  {
+    "original_id": "primary:prismaquant/autoscale.py::streamed_calibration_resources@394:29",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "72dff85418d013f4b1f2120c0cea139fd2491177",
+    "file": "prismaquant/autoscale.py",
+    "scope": "streamed_calibration_resources",
+    "line": 394,
+    "callee": "DIRECT_ASCII_LAX.sha256",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "autoscale_394.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/day0_model_intake.py::main@277:65",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+    "file": "prismaquant/day0_model_intake.py",
+    "scope": "main",
+    "line": 277,
+    "callee": "indent2_json_file_bytes",
+    "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "day0_model_intake_277.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/day0_model_intake.py::main@278:56",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+    "file": "prismaquant/day0_model_intake.py",
+    "scope": "main",
+    "line": 278,
+    "callee": "indent2_json_file_bytes",
+    "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "day0_model_intake_278.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/day0_model_intake.py::main@288:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+    "file": "prismaquant/day0_model_intake.py",
+    "scope": "main",
+    "line": 288,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax indent=2 JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "day0_model_intake_288.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+    ],
+    "syntax_sha256": "b92c40ff381cacb0eaedabd1bc06bcb2682839843d010f578ba097ed2fe515c5"
+  },
+  {
+    "original_id": "primary:prismaquant/day0_model_intake.py::main@285:60",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+    "file": "prismaquant/day0_model_intake.py",
+    "scope": "main",
+    "line": 285,
+    "callee": "indent2_json_file_bytes",
+    "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "day0_model_intake_285.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_initialization.py::merge_streaming_selected_initialization_witnesses@237:24",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+    "file": "prismaquant/streaming_initialization.py",
+    "scope": "merge_streaming_selected_initialization_witnesses",
+    "line": 237,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_initialization_237.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_initialization.py::validate_mtp_layer_initialization_contract@344:32",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+    "file": "prismaquant/streaming_initialization.py",
+    "scope": "validate_mtp_layer_initialization_contract",
+    "line": 344,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_initialization_344.py",
+      "streaming_initialization_validate_mtp_layer_initialization_contract_original.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility",
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_mtp_validator"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/streaming_initialization.py::validate_mtp_layer_initialization_contract@351:22",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+    "file": "prismaquant/streaming_initialization.py",
+    "scope": "validate_mtp_layer_initialization_contract",
+    "line": 351,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "streaming_initialization_351.py",
+      "streaming_initialization_validate_mtp_layer_initialization_contract_original.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility",
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_mtp_validator"
+    ],
+    "syntax_sha256": "ccf75a3fee685fba92dbd87286589aeb7a31a140dc5ab06ed02ae7cde17c019e"
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_initialization.py::validate_streaming_prefix_initialization_contract@115:40",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+    "file": "prismaquant/streaming_initialization.py",
+    "scope": "validate_streaming_prefix_initialization_contract",
+    "line": 115,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_initialization_115.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_initialization.py::validate_streaming_selected_initialization_witness@179:40",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+    "file": "prismaquant/streaming_initialization.py",
+    "scope": "validate_streaming_selected_initialization_witness",
+    "line": 179,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_initialization_179.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::load_original_streaming_bootstrap@1991:59",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "load_original_streaming_bootstrap",
+    "line": 1991,
+    "callee": "indent2_json_file_bytes",
+    "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_1991.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::merge_selected_initialization_witnesses@123:24",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "merge_selected_initialization_witnesses",
+    "line": 123,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_123.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_selected@226:27",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_selected",
+    "line": 226,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "streaming_model_226.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+    ],
+    "syntax_sha256": "0de614366eaf7eb593e1ae6ec9d3878aee188801ea4d4f649c6a8d438d34a0fa"
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_prefix@251:27",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_prefix",
+    "line": 251,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "streaming_model_251.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+    ],
+    "syntax_sha256": "0de614366eaf7eb593e1ae6ec9d3878aee188801ea4d4f649c6a8d438d34a0fa"
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit._observe@178:35",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit._observe",
+    "line": 178,
+    "callee": "bytes_sha256hex",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_178.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete@212:28",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete",
+    "line": 212,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_212.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete@213:33",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete",
+    "line": 213,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_213.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_selected@238:28",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_selected",
+    "line": 238,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_238.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_selected@239:33",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_selected",
+    "line": 239,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_239.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_prefix@263:28",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_prefix",
+    "line": 263,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_263.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_prefix@264:33",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "file": "prismaquant/streaming_model.py",
+    "scope": "_StreamingInitializationAudit.complete_prefix",
+    "line": 264,
+    "callee": "_initialization_digest",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "streaming_model_264.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::_publish_gate_result@42:29",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "_publish_gate_result",
+    "line": 42,
+    "callee": "indent2_json_file_bytes",
+    "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_42.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/ship_gates.py::main@374:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "main",
+    "line": 374,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "ship_gates_374.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+    ],
+    "syntax_sha256": "e06d6f8153e90090d07a0bdc1239772c47c7e74c82ae4e94c75ab8336bef3430"
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::load_config@149:63",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "load_config",
+    "line": 149,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_149.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::_replay_quality@201:55",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "_replay_quality",
+    "line": 201,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_201.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::load_config@125:41",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "load_config",
+    "line": 125,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_125.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::main@368:61",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "main",
+    "line": 368,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_368.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::run_ship_gates@332:40",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "run_ship_gates",
+    "line": 332,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_332.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::run_ship_gates@311:44",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "run_ship_gates",
+    "line": 311,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_311.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/ship_gates.py::main@373:62",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "file": "prismaquant/ship_gates.py",
+    "scope": "main",
+    "line": 373,
+    "callee": "file_sha256hex",
+    "owner_route": "prismaquant.digests.file_sha256hex",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "ship_gates_373.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "primary:prismaquant/release_receipts.py::main@149:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "c14160869920edfb0252a12bb6504a14f35efe39",
+    "file": "prismaquant/release_receipts.py",
+    "scope": "main",
+    "line": 149,
+    "callee": "DIRECT_ASCII_INDENT2_LAX.text",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "status": "already_routed",
+    "blocker": null,
+    "fixtures": [
+      "release_receipts_149.py",
+      "release_receipts_main_original.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_primary_consumer_compatibility",
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_release_main"
+    ],
+    "syntax_sha256": null
+  },
+  {
+    "original_id": "supplemental-json:prismaquant/release_receipts.py::main@147:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "c14160869920edfb0252a12bb6504a14f35efe39",
+    "file": "prismaquant/release_receipts.py",
+    "scope": "main",
+    "line": 147,
+    "callee": "json.dumps",
+    "owner_route": null,
+    "status": "blocked",
+    "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+    "fixtures": [
+      "release_receipts_147.py",
+      "release_receipts_main_original.py"
+    ],
+    "test_nodes": [
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility",
+      "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_release_main"
+    ],
+    "syntax_sha256": "32cfd2ac02e310987d6b222ad3c689c33ea3e7aa4ccf67758f3196f258e0d9cc"
+  }
+]

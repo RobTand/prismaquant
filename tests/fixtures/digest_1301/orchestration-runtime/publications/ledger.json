@@ -1,0 +1,111 @@
+{
+  "publications": [
+    {
+      "original_id": "sorted-json:prismaquant/cluster_campaign.py::main@2454:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "81c73908bb8a15bd5da3372da72b7b5241e00b6a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_campaign_publication"
+      ],
+      "fixture_sha256": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/cluster_campaign.py::main@2460:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "81c73908bb8a15bd5da3372da72b7b5241e00b6a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_campaign_publication"
+      ],
+      "fixture_sha256": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::main@2000:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_stdout_publication"
+      ],
+      "fixture_sha256": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580"
+    }
+  ],
+  "recipe_gaps": [
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::_record_stage_settings@931:29",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_stage_settings.py"
+      ],
+      "fixture_sha256": "56c880976c05baff29fbff67704f57d7ec72eaaf2d360fe9c6584f94a55a567e",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::_record_unverified_reuse@773:33",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_unverified_reuse.py"
+      ],
+      "fixture_sha256": "84f39a9b8f0a3ae35ce1b1399a0c5c8bd8837f79a6f3b431349493f6645cb238",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::main@1967:23",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py"
+      ],
+      "fixture_sha256": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/artifact_registry.py::ArtifactRegistry._write@275:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "72e8da47a9d3b81ba27f4a8b468412429541898a",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/artifact_registry_ArtifactRegistry__write.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_registry_publication",
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_registry_sink_trace"
+      ],
+      "fixture_sha256": "ed1c8326101c57eb735e0be712d87a00e538b3a254108497072632403529dcc1",
+      "reason": "Missing owner streaming sink API equivalent to json.dump: text() buffers the whole payload, changing write partitions and partial-file bytes on TypeError; registry also requires original temporary-file trace, LF, flush, fsync, replace and cleanup ordering."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/pipeline.py::write_pipeline_spec@1407:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_write_pipeline_spec.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_file_publication"
+      ],
+      "fixture_sha256": "dcd63eb7e44213670c7001bc224c5dd9a9c28a9ee25f4f3733fd900d0a2063c9",
+      "reason": "Missing owner streaming sink API equivalent to json.dump: text() buffers the whole payload, changing write partitions and partial-file bytes on TypeError; registry also requires original temporary-file trace, LF, flush, fsync, replace and cleanup ordering."
+    }
+  ]
+}

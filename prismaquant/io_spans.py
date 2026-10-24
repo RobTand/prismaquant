@@ -56,6 +56,9 @@ thread, :class:`PeriodicSampler`, which every periodic sampler is built on
 """
 from __future__ import annotations
 
+# Keep both JSON encoders local: pq_profile_source loads this file by spec
+# without package initialization. The span default=str recipe is also distinct
+# from the rate reporter's no-fallback recipe; neither may be substituted.
 import json
 import math
 import os

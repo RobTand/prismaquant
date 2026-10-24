@@ -43,6 +43,8 @@ from typing import Any
 
 if __package__:
     from .digests import (
+        DIRECT_ASCII_INDENT2_LAX,
+        DIRECT_ASCII_SPACED_LAX,
         DIRECT_UTF8_INDENT2_STRICT,
         DIRECT_UTF8_STRICT,
         bytes_sha256hex,
@@ -52,6 +54,8 @@ if __package__:
 else:
     # Local workers execute this file directly without importing PQ/torch.
     from digests import (
+        DIRECT_ASCII_INDENT2_LAX,
+        DIRECT_ASCII_SPACED_LAX,
         DIRECT_UTF8_INDENT2_STRICT,
         DIRECT_UTF8_STRICT,
         bytes_sha256hex,
@@ -2451,13 +2455,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifest = load_campaign_manifest_v2(args.manifest)
     if args.command == "run":
         state = run_campaign_v2(manifest, args.state)
-        print(json.dumps(state, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text(state))
         return 0
     with _StateStore(args.state) as store:
         state = store.load(manifest)
     if state is None:
         raise CampaignContractError(f"campaign state does not exist: {args.state}")
-    print(json.dumps(state, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(state))
     return 0
 
 

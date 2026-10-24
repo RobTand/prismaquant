@@ -1,0 +1,621 @@
+{
+  "schema": 1,
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "audit_boundary": "Assigned orchestration-runtime files only. Per-call frozen research registry membership, not parent census or ratchet membership. Standalone json.loads supplemental observation is in standalone/retention_ledger.json and is outside encoder population. No supplemental completeness claim beyond inspected files.",
+  "completed_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/cluster_campaign.py::main@2454:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "81c73908bb8a15bd5da3372da72b7b5241e00b6a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_campaign_publication"
+      ],
+      "fixture_sha256": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942",
+      "file": "prismaquant/cluster_campaign.py",
+      "current_blob": "7d7b863512620a81d5440f68702deb747d350c6c",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/cluster_campaign.py::main@2460:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "81c73908bb8a15bd5da3372da72b7b5241e00b6a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_campaign_publication"
+      ],
+      "fixture_sha256": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942",
+      "file": "prismaquant/cluster_campaign.py",
+      "current_blob": "7d7b863512620a81d5440f68702deb747d350c6c",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/cluster_campaign_main.py": "68d7bf3c0c5518a0a2575503997d95efef228183d01508ffb5bc4fc85c63c942"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::main@2000:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_stdout_publication"
+      ],
+      "fixture_sha256": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580",
+      "file": "prismaquant/pipeline.py",
+      "current_blob": "a144e7fad5da62b8c748ed7591570f441011810b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580"
+      }
+    },
+    {
+      "original_id": "hashlib:prismaquant/io_engine.py::SealedBuffer.seal@261:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "393ae5755633992c900cbf55c24b3f50a0ca257d",
+      "current_blob": "04e9b84c5f1d2ac163828f43f0178102d86d0397",
+      "fixture_sha256": "1df125c154da9ef0ad0cdae9d43e220e82b9991129b74ae80d249afb10c6c080",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "witnesses": [
+        "empty, binary and Unicode payload; kernel seals, mapping and descriptor lifecycle; view release on digest failure",
+        "Independent proxy lifecycle trace: one owner feed for empty/nonempty input, preserved bytes, released view before map close, map close before kernel seals, return after seals"
+      ],
+      "file": "prismaquant/io_engine.py",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_engine_SealedBuffer_seal.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_sealed_buffer_consumer",
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_seal_releases_view_on_failure",
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_seal_lifecycle_order_and_owner_feed"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_engine_SealedBuffer_seal.py": "1df125c154da9ef0ad0cdae9d43e220e82b9991129b74ae80d249afb10c6c080"
+      }
+    }
+  ],
+  "blocked_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::_record_stage_settings@931:29",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_stage_settings.py"
+      ],
+      "fixture_sha256": "56c880976c05baff29fbff67704f57d7ec72eaaf2d360fe9c6584f94a55a567e",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ],
+      "file": "prismaquant/pipeline.py",
+      "current_blob": "a144e7fad5da62b8c748ed7591570f441011810b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_stage_settings.py": "56c880976c05baff29fbff67704f57d7ec72eaaf2d360fe9c6584f94a55a567e"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::_record_unverified_reuse@773:33",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_unverified_reuse.py"
+      ],
+      "fixture_sha256": "84f39a9b8f0a3ae35ce1b1399a0c5c8bd8837f79a6f3b431349493f6645cb238",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ],
+      "file": "prismaquant/pipeline.py",
+      "current_blob": "a144e7fad5da62b8c748ed7591570f441011810b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_record_unverified_reuse.py": "84f39a9b8f0a3ae35ce1b1399a0c5c8bd8837f79a6f3b431349493f6645cb238"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/pipeline.py::main@1967:23",
+      "reason": "No settled direct ASCII indent=1 lax profile without default=str; preserve TypeError rejection.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py"
+      ],
+      "fixture_sha256": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_indent1_gaps"
+      ],
+      "file": "prismaquant/pipeline.py",
+      "current_blob": "a144e7fad5da62b8c748ed7591570f441011810b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_main.py": "ce341ff11c1f1cbc889a14a30a3277d0a5c2ee33753f21b46bca4a5ea6a60580"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/artifact_registry.py::ArtifactRegistry._write@275:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "72e8da47a9d3b81ba27f4a8b468412429541898a",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/artifact_registry_ArtifactRegistry__write.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_registry_publication",
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_registry_sink_trace"
+      ],
+      "fixture_sha256": "ed1c8326101c57eb735e0be712d87a00e538b3a254108497072632403529dcc1",
+      "reason": "Missing owner streaming sink API equivalent to json.dump: text() buffers the whole payload, changing write partitions and partial-file bytes on TypeError; registry also requires original temporary-file trace, LF, flush, fsync, replace and cleanup ordering.",
+      "file": "prismaquant/artifact_registry.py",
+      "current_blob": "72e8da47a9d3b81ba27f4a8b468412429541898a",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/artifact_registry_ArtifactRegistry__write.py": "ed1c8326101c57eb735e0be712d87a00e538b3a254108497072632403529dcc1"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/pipeline.py::write_pipeline_spec@1407:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_write_pipeline_spec.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_publications.py::test_pipeline_file_publication"
+      ],
+      "fixture_sha256": "dcd63eb7e44213670c7001bc224c5dd9a9c28a9ee25f4f3733fd900d0a2063c9",
+      "reason": "Missing owner streaming sink API equivalent to json.dump: text() buffers the whole payload, changing write partitions and partial-file bytes on TypeError; registry also requires original temporary-file trace, LF, flush, fsync, replace and cleanup ordering.",
+      "file": "prismaquant/pipeline.py",
+      "current_blob": "a144e7fad5da62b8c748ed7591570f441011810b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/publications/pipeline_write_pipeline_spec.py": "dcd63eb7e44213670c7001bc224c5dd9a9c28a9ee25f4f3733fd900d0a2063c9"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/dev_mode.py::_shown@130:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1de4f205ed5fdd69ceadcc8716cdf801f9046ca2",
+      "current_blob": "0ac6e153b40d0b401602a83c2205e99de7a90f36",
+      "fixture_sha256": "f88879220b43d3363a8f06e90012daeea5788b5533d0b243cc1091a10026c0db",
+      "status": "blocked",
+      "owner_route": null,
+      "blocker": "No settled DIRECT_ASCII_SPACED_LAX_DEFAULT_REPR profile; retain json.dumps default=repr plus text.encode fallback. bytes_sha256hex(encoded)[:16] already owned.",
+      "witnesses": [
+        "spaced ASCII Unicode, repr vs str, long scalar, mixed keys fallback, circular fallback, escaped surrogate acceptance, dev warning and certified refusal"
+      ],
+      "file": "prismaquant/dev_mode.py",
+      "syntax_sha256": "2d2ce5ab9ea43aeef591cf5d8870f20e6fc59e82e9af22ea88c6d134e1edfbc6",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/dev_mode__shown.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_shown_consumer",
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_seal_warning_and_refusal"
+      ],
+      "disposition_reason": "Missing exact recipe is a migration blocker, not a justified retained disposition.",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/dev_mode__shown.py": "f88879220b43d3363a8f06e90012daeea5788b5533d0b243cc1091a10026c0db"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/autoscale.py::<module>@1351:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "72dff85418d013f4b1f2120c0cea139fd2491177",
+      "file": "prismaquant/autoscale.py",
+      "scope": "<module>",
+      "line": 1351,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax indent=2 JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/autoscale_1351.py"
+      ],
+      "syntax_sha256": "506c23e69ffa73e9756efcfdea1eb41491abf4702cd5633f030d9e0be78ab532",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+      ],
+      "current_blob": "72dff85418d013f4b1f2120c0cea139fd2491177",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/autoscale_1351.py": "2449d7ccd51ef24d9101918aa019818a4b113f7e80042f6b5437d430dd811f3b"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/day0_model_intake.py::main@288:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+      "file": "prismaquant/day0_model_intake.py",
+      "scope": "main",
+      "line": 288,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax indent=2 JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/day0_model_intake_288.py"
+      ],
+      "syntax_sha256": "b92c40ff381cacb0eaedabd1bc06bcb2682839843d010f578ba097ed2fe515c5",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+      ],
+      "current_blob": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/day0_model_intake_288.py": "f83c737c347a363a34e956759dc1016dd24c9e3870235458dd0d6c26fa105719"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/streaming_initialization.py::validate_mtp_layer_initialization_contract@351:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+      "file": "prismaquant/streaming_initialization.py",
+      "scope": "validate_mtp_layer_initialization_contract",
+      "line": 351,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_initialization_351.py",
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_initialization_validate_mtp_layer_initialization_contract_original.py"
+      ],
+      "syntax_sha256": "ccf75a3fee685fba92dbd87286589aeb7a31a140dc5ab06ed02ae7cde17c019e",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility",
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_mtp_validator"
+      ],
+      "current_blob": "3144123920c23f2bef6721922749d3765eccfa87",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_initialization_351.py": "bdfaa01019dc6cb0e896fe5b3b4e7af4e435681232d7b12f0413ffe59605a45b",
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_initialization_validate_mtp_layer_initialization_contract_original.py": "7b5e7270290cca63b17888f1cff59a3509ad7c738afaf8b79396f0bf1e9d0da4"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_selected@226:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+      "file": "prismaquant/streaming_model.py",
+      "scope": "_StreamingInitializationAudit.complete_selected",
+      "line": 226,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_model_226.py"
+      ],
+      "syntax_sha256": "0de614366eaf7eb593e1ae6ec9d3878aee188801ea4d4f649c6a8d438d34a0fa",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+      ],
+      "current_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_model_226.py": "ae12435c42d1533fcc80f4fa1ca84477ffe696c0ef745359eb22888c539f62e7"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_prefix@251:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+      "file": "prismaquant/streaming_model.py",
+      "scope": "_StreamingInitializationAudit.complete_prefix",
+      "line": 251,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_model_251.py"
+      ],
+      "syntax_sha256": "0de614366eaf7eb593e1ae6ec9d3878aee188801ea4d4f649c6a8d438d34a0fa",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+      ],
+      "current_blob": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/streaming_model_251.py": "ae12435c42d1533fcc80f4fa1ca84477ffe696c0ef745359eb22888c539f62e7"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/ship_gates.py::main@374:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+      "file": "prismaquant/ship_gates.py",
+      "scope": "main",
+      "line": 374,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/ship_gates_374.py"
+      ],
+      "syntax_sha256": "e06d6f8153e90090d07a0bdc1239772c47c7e74c82ae4e94c75ab8336bef3430",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility"
+      ],
+      "current_blob": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/ship_gates_374.py": "0755efacc0cab5c5bc2c344a5f7e4322ec15f9085014e656450be5f714359517"
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/release_receipts.py::main@147:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c14160869920edfb0252a12bb6504a14f35efe39",
+      "file": "prismaquant/release_receipts.py",
+      "scope": "main",
+      "line": 147,
+      "callee": "json.dumps",
+      "owner_route": null,
+      "status": "blocked",
+      "blocker": "No settled insertion-order ASCII lax default-spaced JSON recipe; sorted profiles change observable order.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/release_receipts_147.py",
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/release_receipts_main_original.py"
+      ],
+      "syntax_sha256": "32cfd2ac02e310987d6b222ad3c689c33ea3e7aa4ccf67758f3196f258e0d9cc",
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_supplemental_consumer_compatibility",
+        "tests/test_digest_1301/orchestration-runtime/test_operational.py::test_release_main"
+      ],
+      "current_blob": "c14160869920edfb0252a12bb6504a14f35efe39",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/release_receipts_147.py": "08e55272977e5b3e25e46b8c14c6cb5ac89c7ddbed16353e165183a5bc11e4de",
+        "tests/fixtures/digest_1301/orchestration-runtime/operational/release_receipts_main_original.py": "60dc90104b3c61af9bb137db2f05bdadca35c595378e331f7852c3465a48881c"
+      }
+    }
+  ],
+  "retained_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/io_spans.py::IoSpanLog.close@252:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2c028c05902347da251336d11009a846c5b171a",
+      "current_blob": "3619b83c362f3ee329d4692d0e10dc35c52b7028",
+      "fixture_sha256": "43f06e06baff5f2d6a3fb33f6980c5d29066cc3d85571bcbe36a020984b144fa",
+      "status": "retained",
+      "owner_route": null,
+      "blocker": "File-spec deployment imports no package; relative digest import unsupported by pq_profile_source.",
+      "witnesses": [
+        "default=str Unicode, marker text, NaN strict caught error, logging failure, workload error outcome"
+      ],
+      "file": "prismaquant/io_spans.py",
+      "syntax_sha256": "5662812b62d6742e6186f1d1443aa54aed73d18e605068dd365fa49ec6917768",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_spans_IoSpanLog_close.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_span_consumer",
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_file_spec_deployment"
+      ],
+      "missing_recipe": "No settled spaced ASCII strict default=str profile (separate from deployment retention).",
+      "retention_reason": "Supported stdlib-only file-spec deployment must not import the prismaquant package.",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_spans_IoSpanLog_close.py": "43f06e06baff5f2d6a3fb33f6980c5d29066cc3d85571bcbe36a020984b144fa"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit@415:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2c028c05902347da251336d11009a846c5b171a",
+      "current_blob": "3619b83c362f3ee329d4692d0e10dc35c52b7028",
+      "fixture_sha256": "13690e409f9066e13aa4dac1a62aae4a9422f8ce6b5a7c01db2a2c1181f991dc",
+      "status": "retained",
+      "owner_route": null,
+      "candidate_owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.encoded(record)",
+      "blocker": "DIRECT_ASCII_SPACED_STRICT matches bytes but relative owner import unsupported in stdlib-only file-spec deployment; retain without package import.",
+      "witnesses": [
+        "_emit full record marker bytes; strict NaN caught warning; lines increments only on successful emission; failed logger and state update"
+      ],
+      "file": "prismaquant/io_spans.py",
+      "syntax_sha256": "07d6116587f0e438da95ddb59763259864f7c18732f16dbe0f60a81bc46af255",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_spans_ReadRateReporter__emit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_rate_emit_consumer",
+        "tests/test_digest_1301/orchestration-runtime/test_runtime_io.py::test_file_spec_deployment"
+      ],
+      "retention_reason": "Supported stdlib-only file-spec deployment must not import the prismaquant package.",
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/runtime_io/io_spans_ReadRateReporter__emit.py": "13690e409f9066e13aa4dac1a62aae4a9422f8ce6b5a7c01db2a2c1181f991dc"
+      }
+    },
+    {
+      "original_id": "hashlib:prismaquant/container_runtime_identity.py::_receipt_sha256@198:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "hashlib:prismaquant/container_runtime_identity.py::image_content_sha256@81:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "hashlib:prismaquant/container_runtime_identity.py::prismaquant_source_sha256@125:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256@79:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/container_runtime_identity.py::main@424:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/container_runtime_identity.py::write_or_verify_identity@283:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "file": "prismaquant/container_runtime_identity.py",
+      "owner_route": null,
+      "current_blob": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tools/tessera_campaign_container.py:20-21 runpy.run_path before package import; tools/build_glm_derivative_image.py:19-20",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_identity_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/container_runtime_identity.py": "8fe3a1359fdefcf590fc2ec30e659fe9cc452337b08f727ec8b913fbf14e35ba"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/prismabuild_progress.py::commit@145:21",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "file": "prismaquant/prismabuild_progress.py",
+      "owner_route": null,
+      "current_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tests/test_tessera_campaign_container.py:180-190 run_path minimal-host contract; module commit explicitly supports container path loading with stamp disabled",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_progress_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py": "4b13c16396169fd998ab2ec1e66f7264e78eedbcb3665866185c976e0c889fd2"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait@235:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "file": "prismaquant/prismabuild_progress.py",
+      "owner_route": null,
+      "current_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tests/test_tessera_campaign_container.py:180-190 run_path minimal-host contract; module commit explicitly supports container path loading with stamp disabled",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_progress_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py": "4b13c16396169fd998ab2ec1e66f7264e78eedbcb3665866185c976e0c889fd2"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait@179:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "file": "prismaquant/prismabuild_progress.py",
+      "owner_route": null,
+      "current_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tests/test_tessera_campaign_container.py:180-190 run_path minimal-host contract; module commit explicitly supports container path loading with stamp disabled",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_progress_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py": "4b13c16396169fd998ab2ec1e66f7264e78eedbcb3665866185c976e0c889fd2"
+      }
+    },
+    {
+      "original_id": "sorted-json:prismaquant/prismabuild_progress.py::report@69:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "file": "prismaquant/prismabuild_progress.py",
+      "owner_route": null,
+      "current_blob": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+      "reason": "retain direct stdlib operation; no package context in supported path loader",
+      "witness": "tests/test_tessera_campaign_container.py:180-190 run_path minimal-host contract; module commit explicitly supports container path loading with stamp disabled",
+      "fixtures": [
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/orchestration-runtime/test_standalone_retention.py::test_progress_operations"
+      ],
+      "fixture_sha256s": {
+        "tests/fixtures/digest_1301/orchestration-runtime/standalone/prismabuild_progress.py": "4b13c16396169fd998ab2ec1e66f7264e78eedbcb3665866185c976e0c889fd2"
+      }
+    }
+  ],
+  "already_owned_evidence": "operational/ledger.json and runtime_io/ledger.json; owner calls predate research registry and are not new completions.",
+  "parent_closure": false
+}
