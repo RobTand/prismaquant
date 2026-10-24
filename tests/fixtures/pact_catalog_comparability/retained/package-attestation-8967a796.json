@@ -1,0 +1,7 @@
+{
+  "actual_package_sha256": "6bce2eb8c6324b56f09bf9c9e89ac878d21c780bc79b1207d66190984c330d42",
+  "head": "8967a796180bb1830c108fc44e6c7f83528fce4a",
+  "package_equal_companion": true,
+  "schema": "pact.test_only_head_package_attestation.v1",
+  "scope": "Read-only source attestation after a bounded test-only fixture change; no source or price adoption"
+}

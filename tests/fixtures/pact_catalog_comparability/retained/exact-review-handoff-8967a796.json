@@ -1,0 +1,44 @@
+{
+  "schema": "pact.exact_review_handoff.v1",
+  "head": "8967a796180bb1830c108fc44e6c7f83528fce4a",
+  "PR": "https://github.com/RobTand/prismaquant/pull/2277",
+  "source_artifact": "historical isolated branch only, not main",
+  "qualification_packet": {
+    "path": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/successor-preparation-code-qualification-8967a796.json",
+    "sha256": "f9a901bab85bca7caf6e73b966b6b84a14ab37ab5c89f8eec161378a5b001ea4"
+  },
+  "successor_preparation": {
+    "manifest_sha256": "cfe9bbdd20b42b19c42b8438f78e32d1ba78a8b62b91acfb8b9b570574ed06f5",
+    "proof_sha256": "3b8266f85f9df2c68027e54ddc79fa037c9a38efa632837ba023cc50a5750a4d",
+    "validation_CAS": "c7e0b9e441313d95f204f08ab4b2fc759593df272536f374fee67dfcb1c0c2c1",
+    "rows": 222,
+    "complete_targets": 2,
+    "published": false,
+    "launch_ready": false
+  },
+  "proof_fixture_populations": {
+    "configured": {
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0,
+      "receipt_sha256": "b8ec4cad8c8b40c6313fc3845aef6531f32531f75a21b78ead82cfe4b5696abe"
+    },
+    "unconfigured": {
+      "passed": 10,
+      "failed": 0,
+      "skipped": 18,
+      "skip_reason_verbatim": "PQ_TEST_GENUINE_ENCODER_PROOF is not configured; real retained encoder-proof integration is not exercised",
+      "receipt_sha256": "e56d1bb79a1899fe27649eec909eb70e956bc3cc7c11fc9510912c48e3df3c50",
+      "does_not_exercise_real_integration": true
+    },
+    "device": "device-less dl380g10",
+    "mode": "-n2 worksteal durations10 native1",
+    "before_failed": 3,
+    "source_gate_or_reader_edits": false
+  },
+  "native_hold": "NOT_READY/NOT_ACTIVE; SIGSTOP_NOT_CLEARED; no cooperative safe point, lock-free proof or prearmed finite identity-safe resume timer",
+  "no_4950_or_bg1106_interruption": true,
+  "no_new_controller_or_signal_or_withdrawal": true,
+  "full224_resource_and_StageB_join_must_wait_exact_companion_source_resource_input_acceptance": true,
+  "table_joint_pin_default_source_promotion": false
+}

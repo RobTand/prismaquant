@@ -1,0 +1,203 @@
+{
+  "schema": "pact.companion_source_default_control_readiness.v1",
+  "created_at": "2026-10-05T09:09:41.714Z",
+  "head_sha": "7daab5d32488790983ed1396458670a6028e1d20",
+  "source_branch": "campaign/pact-missing224-catalog-bridge",
+  "source_artifact_only": true,
+  "no_main_cutover": true,
+  "accepted_b522": {
+    "head": "b5221b25a90c70a03a4f8013a06f40fa701639fa",
+    "packet_sha256": "ce61fabbf1d433a7743c6010d64e9c99bcc8ff8131377d7185e2167abac2fa90",
+    "immutable": true,
+    "scope": "Only routedE4M3K1 actual83-to-A4 source/input controls, no dense/shared/raw83-to83/224joint/table/pin promotion"
+  },
+  "companion_feature": "b399ffcd99188cb95eccef9a6a0533dcd67b9559",
+  "actual_closure": {
+    "path": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/source-closure-7daab5d3.json",
+    "sha256": "6fed2fbeca9f6ae3f5d2c48a520883892b3686b97925de71a9e504e99ae09a59",
+    "package_sha256": "6bce2eb8c6324b56f09bf9c9e89ac878d21c780bc79b1207d66190984c330d42",
+    "changed_package_paths": [
+      "joint_catalog_extension.py",
+      "joint_served_activation.py",
+      "joint_stageb_resources.py"
+    ],
+    "package_files": 326,
+    "other323_files_byte_identical": true,
+    "accepted_b522_catalog_owner_byte_identical": true,
+    "accepted_b522_catalog_owner_sha256": "a2ed7c790368558100cb84778cc679a226688db4008f6aa59495fd577506d03f",
+    "numerical_encoder_loss_probe_calibration_model_quantizer_owners_unchanged": true
+  },
+  "metadata_control_tool": "tools/prepare_extended_joint_quanta.py",
+  "before": {
+    "action": "b72a2b34af76238c23c553914468ba468d424f7c4d5d0d0b58fbd6eaec29af54",
+    "passed": 37,
+    "failed": 16,
+    "skipped": 0,
+    "device": "device-less dl380g10",
+    "mode": "-n4 worksteal durations20 native1",
+    "actual_target_failure": "Stage B resources: added candidate roster differs at joint_stageb_resources.py140 for sparseR880 andR912 with full unchanged v1 A4 policy"
+  },
+  "after": {
+    "action": "116cd4af4f4d19defe40de3e1732393c79da146f97537bb845d735d28f7e8f08",
+    "passed": 161,
+    "failed": 0,
+    "skipped": 0,
+    "device": "device-less dl380g10",
+    "mode": "-n4 worksteal durations20 native1",
+    "scope": "Six targeted metadata/catalog/proof/join files only; not whole-suite/serving/CUDA surface",
+    "actual_receipt_sha256": "7da286690c1f25d4ceda4119b234dc502ff6df06dbe91cef69fdef2be2d517af"
+  },
+  "actual_default_v1": {
+    "path": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/companion-default-v1-controls/before-after-byte-control.json",
+    "sha256": "126825d3752c935eaceb53325b1c10cb50417731cecbc7f25521599c68482048",
+    "before_action": "4a941f98e4bef81e1fff819ee668f1c804a553f2f57304dbbd188b79def2aa58",
+    "after_action": "6820daae8822c80881501d83031fdd64866494229c5428b4ca184f459b5a2b78",
+    "resource_rederived_equal_original": true,
+    "resource_before_after_bytes_equal": true,
+    "resource_canonical_sha256": "78940eeab16a1f433ad430cd50083b0dd6d8bb784ff5f03e2303cc6e696e7a7a",
+    "activation_before_after_bytes_equal": true,
+    "activation_canonical_sha256": "d221bf2afb9d557533c1aa4269ace5f26a9ca4926b80949dcbe4fd45d8de5d0a",
+    "actual_default_activation_CLI_equal_original_e587": true,
+    "scope": "Real full retained pre-A4/T4 source resource policy and default-v1 bytes, not proposed224T8 resource qualification"
+  },
+  "terminal_CAS": {
+    "path": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/observed-tests-default-closure-receipts.json",
+    "sha256": "95e7a0beb049c9a6b6e60d28ea2c16d0f25269ca10358ab0577156d599438886",
+    "complete": true,
+    "timed_out": [],
+    "receipts": [
+      {
+        "action_key": "116cd4af4f4d19defe40de3e1732393c79da146f97537bb845d735d28f7e8f08",
+        "action_returncode": null,
+        "action_signal": null,
+        "attempts": 1,
+        "elapsed_s": 25.54899287223816,
+        "finished_unix": 1791189987.9316652,
+        "found": true,
+        "key_prefix": "116cd4af4f4d19defe40de3e1732393c79da146f97537bb845d735d28f7e8f08",
+        "receipt": {
+          "action_manifest_sha256": "667d2115f8d430d64e8b1e6e3d4279fbc26ca0634a180c26b6fb18af8cb1a749",
+          "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/11/116cd4af4f4d19defe40de3e1732393c79da146f97537bb845d735d28f7e8f08.json",
+          "present": true,
+          "receipt_sha256": "7da286690c1f25d4ceda4119b234dc502ff6df06dbe91cef69fdef2be2d517af",
+          "result": {
+            "bytes": 3547,
+            "sha256": "7eb5c15048c04001c51bac684d913ae79b805295cd65ee598f8e5678670b6e17"
+          }
+        },
+        "returncode": 0,
+        "state": "done",
+        "status": "executed",
+        "superseded": [],
+        "verdict": "green"
+      },
+      {
+        "action_key": "4a941f98e4bef81e1fff819ee668f1c804a553f2f57304dbbd188b79def2aa58",
+        "action_returncode": null,
+        "action_signal": null,
+        "attempts": 1,
+        "elapsed_s": 110.97857213020325,
+        "finished_unix": 1791189931.493915,
+        "found": true,
+        "key_prefix": "4a941f98e4bef81e1fff819ee668f1c804a553f2f57304dbbd188b79def2aa58",
+        "receipt": {
+          "action_manifest_sha256": "1bf4cf8df33ab710472f8190cfbe49800e033212069fcc3c5380ac5d5a18317e",
+          "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/4a/4a941f98e4bef81e1fff819ee668f1c804a553f2f57304dbbd188b79def2aa58.json",
+          "present": true,
+          "receipt_sha256": "1e7656e4c530a6fe67b0d816f21bf8987479e20d8e1216ba3cd13e9b0555c34e",
+          "result": {
+            "bytes": 728,
+            "sha256": "033c7c2c2aee35b9a13649a40cc0610fe00eb51c0ec09272b0e3e4cb23fcf9d7"
+          }
+        },
+        "returncode": 0,
+        "state": "done",
+        "status": "executed",
+        "superseded": [],
+        "verdict": "green"
+      },
+      {
+        "action_key": "6820daae8822c80881501d83031fdd64866494229c5428b4ca184f459b5a2b78",
+        "action_returncode": null,
+        "action_signal": null,
+        "attempts": 1,
+        "elapsed_s": 90.13459062576294,
+        "finished_unix": 1791190284.6937506,
+        "found": true,
+        "key_prefix": "6820daae8822c80881501d83031fdd64866494229c5428b4ca184f459b5a2b78",
+        "receipt": {
+          "action_manifest_sha256": "24324942990a0104484654364b525725fffcc576b96b9af3bfe265df6c34de58",
+          "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/68/6820daae8822c80881501d83031fdd64866494229c5428b4ca184f459b5a2b78.json",
+          "present": true,
+          "receipt_sha256": "f7f0d9a00ea4500b5c00823519b3450e81dc636fb1ab7a45958e912ef92a2796",
+          "result": {
+            "bytes": 2535,
+            "sha256": "da19b2a2c68a83e3e253f4937b5ca76987265a0770b1d4b3f0be74387633c92e"
+          }
+        },
+        "returncode": 0,
+        "state": "done",
+        "status": "executed",
+        "superseded": [],
+        "verdict": "green"
+      },
+      {
+        "action_key": "6ddc965edbf941e43fa6250b61a0345fa36a892175ea5280151a491ba2dad163",
+        "action_returncode": null,
+        "action_signal": null,
+        "attempts": 1,
+        "elapsed_s": 27.89619278907776,
+        "finished_unix": 1791190331.57564,
+        "found": true,
+        "key_prefix": "6ddc965edbf941e43fa6250b61a0345fa36a892175ea5280151a491ba2dad163",
+        "receipt": {
+          "action_manifest_sha256": "46c908750db61ea0be652bf0c6654eb1b79b48c017d1041688a529442e9ff8da",
+          "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/6d/6ddc965edbf941e43fa6250b61a0345fa36a892175ea5280151a491ba2dad163.json",
+          "present": true,
+          "receipt_sha256": "e13c72a9ecc7be1ef210856eebe3f326fd18789044f4e750bcb2191467a3a031",
+          "result": {
+            "bytes": 610,
+            "sha256": "4d80620e80e9ec825a1d1439e9cad543d327078965686c9cd46ad106444c5faa"
+          }
+        },
+        "returncode": 0,
+        "state": "done",
+        "status": "executed",
+        "superseded": [],
+        "verdict": "green"
+      }
+    ]
+  },
+  "fresh_x86_D1": {
+    "path": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/x86-disk-admission.json",
+    "sha256": "ab5f7920faa631ab6d45424963b64bba4eb26d53457ffdb1ef7213475d11b459"
+  },
+  "required_full224_resource_readiness": {
+    "qualified_new_A4_target_cells": 2,
+    "remaining_real_A4_reencoding_cells": 222,
+    "manifest_prepared": "/mnt/shared/tessera-measurements/pact-missing224-20261005/companion-b399/manifest.remaining222.actual-A4-b522.qualified-argv.prepared-not-published.json",
+    "candidate_producer": "Exact already scoped-approved historical b522/2d13 A4/genuine15b, not new7daa row adoption",
+    "published": false,
+    "reason": "Keep sole originalbg970 frozen publisher/cursor; no second publisher. Full224 A4 inputs and resource policy are not fabricated from raw083 anchors or cloned controls.",
+    "full224_resource_proof_complete": false
+  },
+  "hold_capability": {
+    "status": "NOT_READY",
+    "SIGSTOP": "NOT_CLEARED",
+    "receipt": "/mnt/shared/tessera-measurements/pact-missing224-20261005/window4-bg970-hold-capability-v2-not-ready.json",
+    "sha256": "a5a9c46cc3852d6ed4c72acefae67f49297a34a4d842335719fbde9ed7e51c54",
+    "cooperative_boundary_established": false,
+    "lock_free_safe_point_proved": false,
+    "finite_resume_timer_armed": false,
+    "signals_sent": [],
+    "hold_active": false,
+    "old_receipt_obsolete_unexercised": true
+  },
+  "original_source_publisher": "bg970 normal priority0/max-inflight4/D23 preserved, no second publisher or cancellation",
+  "unchanged_old_table_and_v1": true,
+  "source_or_row_adoption": false,
+  "joint_prices_admitted": 0,
+  "ten_rate_table": false,
+  "pin_or_default_promotion": false,
+  "new_exact_head_parent_D5_required": true
+}
