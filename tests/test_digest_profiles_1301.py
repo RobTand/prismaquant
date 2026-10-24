@@ -14,6 +14,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import os
 from pathlib import Path, PurePosixPath
 import sys
 
@@ -363,6 +364,32 @@ def test_census_site_freeze(census_id, tmp_path, monkeypatch):
         rows = _census_keystream_outcomes()
     for row in rows:
         GOLDEN.check(row)
+
+
+@pytest.mark.parametrize(("census_id", "kinds"), zip(_CENSUS_2660, (
+    ("returned",) * 2,
+    ("returned",) * 4 + ("builtins.ValueError",) * 5,
+    ("returned",) * 5,
+    ("returned", "builtins.SystemExit"),
+    ("returned",),
+    ("returned",),
+    ("returned", "returned", "builtins.UnicodeEncodeError"),
+), strict=True), ids=_CENSUS_2660)
+def test_census_fixture_has_complete_outcomes(census_id, kinds):
+    """All 23 required rows must exist, not merely the first row of each site.
+
+    The consumer checks above supply exact value/message comparisons. This
+    separate inventory pins the case count and refusal kinds, so recording
+    cannot silently bless a failed valid case as a new refusal. Honor the
+    existing recording directory when this module is generating its table.
+    """
+    directory = Path(os.environ.get("PQ_GOLDEN_RECORD", Path(__file__).with_name("fixtures")))
+    fixture = json.loads((directory / "digest_profiles_1301.json").read_text(encoding="utf-8"))
+    prefix = f"test_census_site_freeze[{census_id}]#"
+    observed = {key: row.get("raised", "returned")
+                for key, row in fixture.items() if key.startswith(prefix)}
+    expected = {f"{prefix}{index}": kind for index, kind in enumerate(kinds)}
+    assert observed == expected
 
 
 def _inputs(module_name: str, name: str) -> tuple:
