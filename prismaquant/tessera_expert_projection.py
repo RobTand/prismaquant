@@ -471,8 +471,17 @@ def carried_units(carried: Any) -> tuple[dict, dict[str, dict], dict[str, str]]:
 # ---------------------------------------------------------------------------
 # The source bytes the producer will read
 # ---------------------------------------------------------------------------
+class SourceUnitMetadataMismatch(Exception):
+    """Live/source mismatch detected before reading or pinning any payload."""
+
+    def __init__(self, shape, dtype):
+        self.shape, self.dtype = tuple(shape), dtype
+        super().__init__(f"source metadata {self.shape} {dtype}")
+
+
 def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: Mapping[str, Any],
-                       *, source_authentication=None):
+                       *, source_authentication=None, pin_memory: bool = False,
+                       expected_metadata=None):
     """Read the unit's whole source tensor from the shard the producer hashed.
 
     The exporter re-reads exactly this tensor (``packed_expert_weight`` on an
@@ -485,6 +494,18 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     row's layer loads do, with the same declared-file fallback (PQ #1529).
     With no map that seam hands back ``safe_open`` itself, so the unmapped read
     is the call it always was.
+
+    With ``pin_memory`` the returned tensor is page-locked for the device
+    check (PQ #2039): under a staged map the payload lands in the pinned
+    buffer itself with no second host copy, while the pool read and the
+    qualified-original owner pin their tensor with the same single copy the
+    device check always performed. Host consumers (stream head, export,
+    materialization) keep the pageable default.
+
+    ``expected_metadata=(shape, dtype)`` validates the live tensor's contract
+    from the same handle's metadata before fetching or pinning the payload.
+    A mismatch raises ``SourceUnitMetadataMismatch`` without consuming source
+    pages; a successful read still goes through the authenticated payload path.
     """
     from .layer_streaming import _source_safe_open
 
@@ -494,19 +515,63 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     except KeyError:
         raise ExpertProjectionError(f"{tensor}: not in the producer's hashed tensor roster")
     path = Path(model_path) / file
-    context = (_source_safe_open(str(path), framework="pt", device="cpu")
-               if source_authentication is None else
-               _source_safe_open(path, source_authentication=source_authentication,
-                                 framework="pt", device="cpu"))
-    with context as handle:
-        if tensor not in handle.keys():
-            raise ExpertProjectionError(f"{tensor}: absent from {path}")
-        weight = handle.get_tensor(tensor)
-    if list(weight.shape) != [unit["rows"], unit["cols"]]:
-        raise ExpertProjectionError(
-            f"{tensor}: source shape {list(weight.shape)} disagrees with the projection "
-            f"[{unit['rows']}, {unit['cols']}]")
-    return weight.contiguous()
+    # The qualified-original owner serves the sealed whole file and refuses
+    # any opener argument beyond framework/device, so the pin request never
+    # reaches it: its tensor is pinned below like the pool read (PQ #2039).
+    pin_after_read = (source_authentication is not None
+                      and getattr(source_authentication,
+                                  'is_qualified_original_material', False))
+    extra = {'pinned_host': True} if pin_memory and not pin_after_read else {}
+    def _open(**kwargs):
+        if source_authentication is None:
+            return _source_safe_open(str(path), framework="pt", device="cpu", **kwargs)
+        return _source_safe_open(path, source_authentication=source_authentication,
+                                 framework="pt", device="cpu", **kwargs)
+    # With no residency map the opener is ``safe_open`` itself, which takes
+    # no ``pinned_host`` argument: fall back to the plain open, then pin
+    # below. TypeError only, so staged-payload refusals still surface.
+    try:
+        context = _open(**extra)
+    except TypeError:
+        if not extra:
+            raise
+        context = _open()
+    weight = None
+    try:
+        with context as handle:
+            if tensor not in handle.keys():
+                raise ExpertProjectionError(f"{tensor}: absent from {path}")
+            if expected_metadata is not None:
+                import torch
+                from safetensors.torch import _TYPES
+
+                metadata = handle.get_slice(tensor)
+                shape, dtype = tuple(metadata.get_shape()), metadata.get_dtype()
+                del metadata  # do not retain a source slice in a failed read's traceback
+                # Raw safetensors returns a code; the strict reader already
+                # returns torch.dtype. Use safetensors' authoritative mapping.
+                if not isinstance(dtype, torch.dtype):
+                    dtype = _TYPES[dtype]
+                if list(shape) != [unit["rows"], unit["cols"]]:
+                    raise ExpertProjectionError(
+                        f"{tensor}: source shape {list(shape)} disagrees with the projection "
+                        f"[{unit['rows']}, {unit['cols']}]")
+                expected_shape, expected_dtype = expected_metadata
+                if shape != tuple(expected_shape) or dtype != expected_dtype:
+                    raise SourceUnitMetadataMismatch(shape, dtype)
+            weight = handle.get_tensor(tensor)
+        if list(weight.shape) != [unit["rows"], unit["cols"]]:
+            raise ExpertProjectionError(
+                f"{tensor}: source shape {list(weight.shape)} disagrees with the projection "
+                f"[{unit['rows']}, {unit['cols']}]")
+        weight = weight.contiguous()
+        if pin_memory and not weight.is_pinned():
+            weight = weight.pin_memory()
+        return weight
+    finally:
+        # A failed pin allocation can leave this frame in a preparation future.
+        # Drop the raw source alias before its caller retires the source pages.
+        weight = None
 
 
 # ---------------------------------------------------------------------------
