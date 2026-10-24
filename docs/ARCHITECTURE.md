@@ -17232,7 +17232,8 @@ for historical receipts; the missing declaration receives a named refusal.
 Re-stamped (2026-09-05, `codex/audit4-smoke-grammar`) for producer/consumer
 v9 smoke-record grammar parity (PrismaQuant #233). Before deriving admission,
 the reader delegates the entire record grammar to the pinned producer's pure
-`_evidence_smoke_record` validator. Nullable references and reference statuses
+`_evidence_smoke_record` validator (or the versioned public metadata API below).
+Nullable references and reference statuses
 survive parsed provenance and JSON round trips; unknown reference arms,
 nonportable instrument paths and duplicate `(prompt, form)` observations
 refuse. A missing validator is a named runtime mismatch. This changes no
@@ -17294,8 +17295,10 @@ and the attribution are re-derived by calling Tessera's own
 `derive_smoke_status` / `derive_smoke_attribution`, and a published value
 that disagrees with what they return is refused as a contract defect rather
 than resolved. The record grammar is also owned by Tessera:
-`_parse_smoke_record` calls the pinned metadata module's
-`_evidence_smoke_record` validator before converting its result to immutable
+`_parse_smoke_record` calls the pinned producer's legacy four-argument
+`_evidence_smoke_record` validator, or `tessera.metadata.parse_smoke_record`
+when the legacy name is absent and `METADATA_API_VERSION` is exactly
+`tessera.producer-metadata.v1`, before converting its result to immutable
 consumer dataclasses. This validates closed record and row members, known
 forms, interfaces and statuses, a portable repository-relative instrument
 path, a nonempty rule and nonempty rows. The reference is a known arm or
@@ -17303,9 +17306,11 @@ path, a nonempty rule and nonempty rows. The reference is a known arm or
 arm is named. Observation identity is `(prompt, form)`, so changing an
 interface or verdict cannot manufacture a second observation of that pair.
 A record beside a non-null v7 control is refused by the same owning validator.
-The immutable pin binds this private metadata API; its absence is a named
-refusal rather than a fallback grammar. Whether a cell's status was derived
-is asked through `smoke_status_is_derived` and carried into provenance.
+The immutable pin binds the producer API. Missing or incompatible validator
+capabilities are named refusals rather than a fallback grammar. Capability
+selection precedes validation; a producer rejection is never retried through
+the other API. This compatibility adapter changes no admission policy or pin.
+Whether a cell's status was derived is asked through `smoke_status_is_derived` and carried into provenance.
 
 **The pin names v23, so v10 is the CURRENT grammar, not one this reader
 merely accepts.** `LANE_ELIGIBILITY_SCHEMA_TESSERA` is

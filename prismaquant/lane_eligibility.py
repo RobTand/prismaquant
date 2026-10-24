@@ -1070,14 +1070,36 @@ def _parse_smoke_record(payload: Any, where: str, *,
 
     Validating only vocabularies before deriving a status is insufficient:
     observation identity, portable paths and nullable reference arms are also
-    producer grammar. The immutable pin binds this private metadata helper's
-    API; a runtime lacking it refuses by name through ``_tessera_published``.
-    No serving execution or kernel module is imported here.
+    producer grammar. Accept the legacy four-argument helper or the versioned
+    public metadata API. Select before calling: a producer rejection is never
+    retried through another validator. Missing or incompatible capabilities
+    refuse; no consumer grammar, serving execution or kernels live here.
     """
-    validate = _tessera_published("_evidence_smoke_record", where)
+    missing = object()
+    validate = getattr(_tessera_contract_module(), "_evidence_smoke_record", missing)
+    public = validate is missing
+    if public:
+        try:
+            from tessera import metadata
+        except ImportError as exc:
+            raise LaneEligibilityError(
+                f"{where} needs Tessera's _evidence_smoke_record or the "
+                "tessera.producer-metadata.v1 parse_smoke_record API; "
+                "re-pin the table/runtime pair, never restate its grammar here"
+            ) from exc
+        if getattr(metadata, "METADATA_API_VERSION", None) != "tessera.producer-metadata.v1":
+            raise LaneEligibilityError(
+                f"{where} needs Tessera's tessera.producer-metadata.v1 API; "
+                "the installed metadata API is missing or incompatible")
+        validate = getattr(metadata, "parse_smoke_record", None)
+    if not callable(validate):
+        raise LaneEligibilityError(
+            f"{where} needs a callable Tessera smoke-record validator "
+            f"({'parse_smoke_record' if public else '_evidence_smoke_record'})")
     try:
-        parsed = validate(payload, where, control, where.removesuffix(".record"))
-    except ValueError as exc:
+        parsed = (validate(payload, control=control, where=where) if public else
+                  validate(payload, where, control, where.removesuffix(".record")))
+    except (ValueError, TypeError) as exc:
         raise LaneEligibilityError(str(exc)) from exc
     if parsed is None:
         return None
