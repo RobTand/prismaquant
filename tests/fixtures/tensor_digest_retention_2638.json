@@ -1,0 +1,184 @@
+{
+  "provenance": "Reviewed from current checkout 9f35f1e45254a099fba7bc075aa887a87343257e; AST SHA256 uses ast.dump(include_attributes=False). File identities are an observation, not a current whole-repository regeneration. No behavioral passes are claimed by generating this fixture.",
+  "reviewed_source_commit": "9f35f1e45254a099fba7bc075aa887a87343257e",
+  "snapshot_source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0",
+  "snapshot_generated": "2026-10-09",
+  "snapshot_source_blobs": {
+    "prismaquant/stage_a_chain_seed.py": {
+      "git_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "mode": "100644",
+      "sha256": "f5dd1b54c93c88a1ec99c83c457b584d572de89bcb31a8f6a08b85e7eaa30097"
+    },
+    "prismaquant/production_weight_cache.py": {
+      "git_blob": "507e47aa3e5c0aca5569769f0bd342d359d2c193",
+      "mode": "100644",
+      "sha256": "eb02df7f7a36c8d9abb75758144692f7a60915d49d2338f3e12d8c298b6a53b0"
+    },
+    "prismaquant/tessera_hessian.py": {
+      "git_blob": "55f1af290bdf84eeee156e04d16f13f12c372c6e",
+      "mode": "100644",
+      "sha256": "3eba21f2e10d374891c19ce52dc0188f5dee8eccf28a4c43cc63730e4db267ec"
+    },
+    "prismaquant/tessera_export_lane.py": {
+      "git_blob": "a0d2c091698647ed8db55bcca8f84b436053ae91",
+      "mode": "100644",
+      "sha256": "8d247c911d540d8bcfd4a22e351503f180c61a2952b85496ad4494cfc3277d36"
+    },
+    "prismaquant/tensor_digests.py": {
+      "git_blob": "5c364c5d7c8fadf78ad9917668e72e1262546278",
+      "mode": "100644",
+      "sha256": "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037"
+    },
+    "prismaquant/digests.py": {
+      "git_blob": "a2f8936b77a09eda702bd704c40ea3d6970ff1ef",
+      "mode": "100644",
+      "sha256": "1cde1f0edd7b210beb5ff67b8efef6d06d05ae6008c84550b7b0db00a28be9b6"
+    }
+  },
+  "reviewed_source_files": {
+    "prismaquant/stage_a_chain_seed.py": {
+      "mode": "100644",
+      "git_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "sha256": "f5dd1b54c93c88a1ec99c83c457b584d572de89bcb31a8f6a08b85e7eaa30097"
+    },
+    "prismaquant/production_weight_cache.py": {
+      "mode": "100644",
+      "git_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "sha256": "d0900e311a2e88012f5863042f6d3047c47383bac52792a3d2079763eba0230e"
+    },
+    "prismaquant/tessera_hessian.py": {
+      "mode": "100644",
+      "git_blob": "55f1af290bdf84eeee156e04d16f13f12c372c6e",
+      "sha256": "3eba21f2e10d374891c19ce52dc0188f5dee8eccf28a4c43cc63730e4db267ec"
+    },
+    "prismaquant/tessera_export_lane.py": {
+      "mode": "100644",
+      "git_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "sha256": "90d178663643ff3a9bbaaca348e0ca71dae93af631b8839c2d84b7a3f645c6e8"
+    },
+    "prismaquant/tensor_digests.py": {
+      "mode": "100644",
+      "git_blob": "5c364c5d7c8fadf78ad9917668e72e1262546278",
+      "sha256": "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037"
+    },
+    "prismaquant/digests.py": {
+      "mode": "100644",
+      "git_blob": "65c98d3bdeb16035ef4b104dc159e986e2279897",
+      "sha256": "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18"
+    }
+  },
+  "contracts": {
+    "prismaquant/stage_a_chain_seed.py::tensor_payload_sha256": "9e90d4acbf3a36e498815b56428da2d9e71fada4427bfba3821cd7485afd84be",
+    "prismaquant/production_weight_cache.py::_cb_cache_tensor_identity": "e35ca1ff493731a09643c292eea0c64c34dba87da5261532adc32b7da3ded82a",
+    "prismaquant/production_weight_cache.py::_source_weight_value_identity": "4e849af1a41c6dcfe2516a8c43dfc04ff1f9f4dce54e40bbd6148998d7017413",
+    "prismaquant/production_weight_cache.py::_TENSOR_DIGEST_CHUNK_BYTES": "a0834a7ceb75a324225f25b341fe5caf4bc7ecbffa9d4eee65ed7c9deae27aa1",
+    "prismaquant/tessera_hessian.py::token_ids_sha256": "ffe0823869493a6c7e3f17273b63569ed6ed6dfdf23bac6161ae6d3018f2c058",
+    "prismaquant/tessera_export_lane.py::hessian_capture_sha256": "ec1dd643200abb750aa6a3e457a54b2659526cd2e7979a846b07c2943f5542fd",
+    "prismaquant/tessera_export_lane.py::_require_capture_context_roster": "0fa8948631c7a61856edd52be5584615b5664174e68e4c63cab72c23655d285d",
+    "prismaquant/tessera_export_lane.py::_capture_context_fields": "127993fa2f5a0d8db14477b6d7a206533ac2ee9c3a2feb100f5b2d367a3de6b3",
+    "prismaquant/tessera_export_lane.py::_tessera_capture_seal": "80839c40803cd919688ae7778babc921e9f00eff8bd6818aad3fa2a168c17544",
+    "prismaquant/tessera_export_lane.py::_is_hessian_reference": "6329fa164f94900156c0a4fadfd92b9b3c5d6749a2fde6ddb1705ac5ac582bc8",
+    "prismaquant/tessera_export_lane.py::_crosscheck_capture_seal": "79a914fecc7b613bf1352db9a225e2a6e2717acc49c22ce4ebc9d8832daa8276",
+    "prismaquant/tessera_export_lane.py::_bound_hessian_capture": "c4cfbb9c9669cbfb3afe4160035ea2afea0b3d3c52a607064969eba9bbe5d691",
+    "prismaquant/tessera_export_lane.py::PRICED_HESSIAN_IDENTITY_FIELDS": "692e0c9c900a3b968a8495bf6508223349f73fac58de2f34aaf2622f4853b96d",
+    "prismaquant/tessera_export_lane.py::HESSIAN_CAPTURE_SHA256_SCHEMA": "d1e6002398094dba2702a7eb69b79eb21c6965d2a1697ac05b0bb74937fbe331",
+    "prismaquant/tensor_digests.py::_host": "af3990a7b6feb09435ebdf3730e363e1e5de77ff1143cd59433d44eccde9f006",
+    "prismaquant/tensor_digests.py::_raw": "3f7756481c322b34fb33deae783eed541298b5dbdfd758bb7e13b1c78504c589",
+    "prismaquant/tensor_digests.py::tensor_host_bytes": "fa014ad211891f7378173168f30f1cfb478e85a8ad44cc7db1bb4174c266ed42",
+    "prismaquant/tensor_digests.py::tensor_sha256": "d87e90e458f42a5870dae03f6d02d4e889eeb63232f43b9243473cb1997a22db",
+    "prismaquant/tensor_digests.py::tensor_identity": "c792b8900c312dd585f18757ed60331b75e62b2e6ba6f19250ab30a01e182b90",
+    "prismaquant/tensor_digests.py::tensor_value_stamp": "6193291c2be114ea2d62e3296733a343d2b025cf47e07e499c5fee49ce221618",
+    "prismaquant/tensor_digests.py::tensor_hash_update": "e9a326138bb69acb6d019b715e28733488e6e7de5ca6f51d3e1a5d271d39efd1",
+    "prismaquant/digests.py::bytes_sha256hex": "c096b19a20fb9a18e741ceb5b03c38ef9236e5adb413bc21e67a30e03d614fe4"
+  },
+  "snapshot_calls": {
+    "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13": {
+      "id": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
+      "site": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
+      "family": "hashlib",
+      "file": "prismaquant/production_weight_cache.py",
+      "scope": "_cb_cache_tensor_identity",
+      "line": 3218,
+      "column": 13,
+      "end_line": 3218,
+      "source_blob": "507e47aa3e5c0aca5569769f0bd342d359d2c193"
+    },
+    "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13": {
+      "id": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
+      "site": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
+      "family": "hashlib",
+      "file": "prismaquant/production_weight_cache.py",
+      "scope": "_source_weight_value_identity",
+      "line": 2961,
+      "column": 13,
+      "end_line": 2961,
+      "source_blob": "507e47aa3e5c0aca5569769f0bd342d359d2c193"
+    },
+    "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13": {
+      "id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
+      "site": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/stage_a_chain_seed.py",
+      "scope": "tensor_payload_sha256",
+      "line": 421,
+      "column": 13,
+      "end_line": 421,
+      "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c"
+    },
+    "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:13": {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:13",
+      "site": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1605,
+      "column": 13,
+      "end_line": 1605,
+      "source_blob": "a0d2c091698647ed8db55bcca8f84b436053ae91"
+    },
+    "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1611:15": {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1611:15",
+      "site": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1611,
+      "column": 15,
+      "end_line": 1611,
+      "source_blob": "a0d2c091698647ed8db55bcca8f84b436053ae91"
+    },
+    "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256@114:13": {
+      "id": "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256@114:13",
+      "site": "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/tessera_hessian.py",
+      "scope": "token_ids_sha256",
+      "line": 114,
+      "column": 13,
+      "end_line": 114,
+      "source_blob": "55f1af290bdf84eeee156e04d16f13f12c372c6e"
+    },
+    "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1606:18": {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1606:18",
+      "site": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "family": "sorted-json",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1606,
+      "column": 18,
+      "end_line": 1608,
+      "source_blob": "a0d2c091698647ed8db55bcca8f84b436053ae91"
+    },
+    "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1612:20": {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1612:20",
+      "site": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "family": "sorted-json",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1612,
+      "column": 20,
+      "end_line": 1614,
+      "source_blob": "a0d2c091698647ed8db55bcca8f84b436053ae91"
+    }
+  }
+}
