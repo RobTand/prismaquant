@@ -63,7 +63,7 @@ Named attempt stdout/stderr sidecars were absent on inspection; only the attempt
 
 ## Observer alignment and limits
 
-Both in-process traces and retained telemetry are digest-bound below. First-layer trace has 382,023 events over about 10.804 s starting 13:18:42.124744 UTC; L5-install trace has 197,030 events over about 10.809 s starting 13:22:09.406235 UTC. CPU operations, CUDA runtime, kernels and copies are present. These are selected first-layer/L5-install observations, **not complete L41–L44 or whole-run kernel coverage**. Profiler no-warmup warning limits interpretation.
+Both in-process traces and retained telemetry have raw-file digest citations below. The two profiler-trace hashes are research observations, not previously published immutable producer bindings; telemetry hashes also match the producer result's declared hashes. First-layer trace has 382,023 events over about 10.804 s starting 13:18:42.124744 UTC; L5-install trace has 197,030 events over about 10.809 s starting 13:22:09.406235 UTC. CPU operations, CUDA runtime, kernels and copies are present. These are selected first-layer/L5-install observations, **not complete L41–L44 or whole-run kernel coverage**. Profiler no-warmup warning limits interpretation.
 
 Telemetry wrapper spans `1791206310.9772573`–`1791210517.6282334`. Netdata has 835 collection rounds, 1,670 host rows: sparky `1791206311.033952`–`1791210516.3671453`, sparklina `1791206311.0531657`–`1791210516.3838038`. Python sampler has 4,196 samples at `1791206310.997452`–`1791210517.4056053`. These align with the scorer and encompass the two trace windows, but start roughly 13.87 s after claim and stop 3.95 s before terminal completion. Trace alignment uses baseTimeNanoseconds `1790857026000000000` plus event ts in microseconds, not the displayTimeUnit label.
 
@@ -221,7 +221,15 @@ Relative to `/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/source
 
 ## Publication verification
 
-Current verification: `python -m pytest tests/test_issue2776_cpu_note.py -q -s --basetemp="$TMPDIR/pytest"` — **4 passed in 1.94 s**, exit code 0; retained stdout read back. The CPU reconstruction produced the values and 41.978664157% ratio reported above. An initial run had 3 passes and one citation-wording failure (singular “layer” did not satisfy the required plural topic); corrected without changing the result or tests.
+Merge-repair verification retains both CPU publication suites unchanged and preserves the supplied #2776 fixture README byte-for-byte. `python -m pytest tests/test_issue2776_cpu_note.py tests/test_pq2281_confirming_arm_report.py -q -s --basetemp="$TMPDIR/pytest"` — **7 passed in 0.68 s**, exit code 0; retained stdout read back. Reconstruction again yielded the signed deltas, paired SEs and 41.978664157% ratio above; this is arithmetic on retained bytes, not a new measurement.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"0596fa9de113ba95e582617241caf020cee1f13b5d1a76e439ccf5ca747ae699","size":712}},"operation":"3922c89261b4131381e54db0695a291a7ddcc0ec740e0a3e3cb33b1ee15339b7","receipt":"f0480eadf689ffec3a586da9ed77940bec463817b72458dcac3a0bb4c188c720"}]
+
+Documentation and duplication guards: `python -m pytest tests/test_architecture_doc.py tests/test_doc_claims_driver_truth.py tests/test_docs_entrypoints.py tests/test_docs_staleness.py tests/test_duplication_baseline.py -q --basetemp="$TMPDIR/pytest"` — **31 passed in 18.15 s**, exit code 0, with 14 `torch.jit.script_method` deprecation warnings; retained stdout read back.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"498522ce25f0aacd85093e9c133655a7c757bb38c169c9967b0c373ff5be72c9","size":750}},"operation":"f66d5b5177ac0a17339dd0ea84fdc066f1e6c7acd8c32085741678920f47c32c","receipt":"b4de583860b96c630ffb0b21e362f1a55198afd99d03d692fd7d23e2819180fb"}]
+
+Pre-merge verification: `python -m pytest tests/test_issue2776_cpu_note.py -q -s --basetemp="$TMPDIR/pytest"` — **4 passed in 1.94 s**, exit code 0; retained stdout read back. The CPU reconstruction produced the values and 41.978664157% ratio reported above. An initial run had 3 passes and one citation-wording failure (singular “layer” did not satisfy the required plural topic); corrected without changing the result or tests.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"01049c698d2e7ab3e5684fa4b64c0278c9b576e3bae22eeab2d015939fe4dc07","size":3072}},"operation":"6c92e983006a5f3a935735b0791926ad20ffd5954b09c8ab7f842b30862721b3","receipt":"373fe4beec565fa69938aefedd221e9866004edeeb1a6ae07899b36082d36f48"}]
 
@@ -229,6 +237,6 @@ Current verification: `python -m pytest tests/test_issue2776_cpu_note.py -q -s -
 
 The CPU acceptance check verifies numerical publication and required citation presence against retained fixtures; it does not authenticate every historical claim. O5 requires evidence review of the audit and its explicitly unavailable records.
 
-Historical verification preserved from the adopted report (not rerun here): `python -m pytest tests/test_pq2281_confirming_arm_report.py -q --basetemp="$TMPDIR/pytest"` — **3 passed in 0.59 s**, exit code 0; retained stdout read back. No GPU check was run or needed. The unavailable historical checks are identified above, not counted as passes.
+Historical verification preserved from the adopted report (original three-check run): `python -m pytest tests/test_pq2281_confirming_arm_report.py -q --basetemp="$TMPDIR/pytest"` — **3 passed in 0.59 s**, exit code 0; retained stdout read back. No GPU check was run or needed. The unavailable historical checks are identified above, not counted as passes.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"0a4669cdfa71de5e492f11a0bea2fb342e280c1d5fd396a3eab388fbb30a1336","size":268}},"operation":"cef456e606d021e067b1c33ff53a244f8ed0446b0aeb0e506b02934bfa47a2fa","receipt":"eaba879b57de3d5a1d997bbd2bcab12bcbf28dfa1cab057569c0a86aa80114f1"}]
