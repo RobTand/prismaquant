@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Reconcile served-task consumer PR #2470 onto current main (#2894). Every
+  authoritative binding requires the configured public producer verifier,
+  successful bounded process and strict offline verdict. Record independent
+  artifact/tokenizer facts and deployment identity as recorded launch evidence,
+  never current availability. Remove duplicate producer semantics; preserve HF
+  behavior. Served measurement/replay explicitly remain #2430. See
+  `docs/served-task-reconciliation.md` for configuration and CPU evidence limits.
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
   Bounded local reads retain digest-valid symlink behavior, independent of memo state.

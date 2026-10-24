@@ -1,5 +1,23 @@
 # PrismaQuant Architecture
 
+## Served task binding reconciliation (#2894)
+
+The existing PR #2470 `served_task_backend` / `served_task_public_verifier`
+boundaries are selectively reconciled from approved source head
+`80f95d02717d1e4c2a88dbe13683199041e340e4`, not a new adapter or delivery lane.
+Every authoritative binding requires a configured standalone producer verifier,
+a bounded successful process and one strict valid offline machine verdict.
+The old local producer-semantic transcription is removed, not patched.
+HF initialization, reader and replay behavior remain unchanged. Served preflight
+imports no serving runtime, starts no ranks, seals no identity, invokes no HF
+inference and never falls back to HF. Served measurement/replay bind then refuse
+explicitly pending #2430, before HF execution.
+
+See [served-task-reconciliation.md](served-task-reconciliation.md) for portable
+`backend.serving_runtime` configuration, authority and proof boundaries, producer
+provenance, synthetic versus real-evidence limits, and verification receipts.
+Offline success is recorded launch evidence, never current endpoint availability.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.

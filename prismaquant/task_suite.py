@@ -10,6 +10,13 @@ from .quality_stage import artifact, cli, finite_number, write_result
 
 def validate_config(config):
     backend, sampling, tasks = config.get("backend"), config.get("sampling"), config.get("tasks")
+    if isinstance(backend, dict) and backend.get("name") == "served":
+        from .served_task_backend import served_binding_problems
+        problems = served_binding_problems(config)
+        if problems:
+            raise ValueError("; ".join(problems))
+        _validate_sample_policy(sampling, tasks)
+        return config
     required = {"name", "pretrained", "tokenizer", "device", "dtype", "batch_size", "max_length", "trust_remote_code"}
     if not isinstance(backend, dict) or not required <= backend.keys() or backend["name"] != "hf":
         raise ValueError("task backend requires explicit hf model, tokenizer, device, dtype and batch settings")
@@ -23,6 +30,11 @@ def validate_config(config):
             raise ValueError(f"task backend {name} must be a positive integer")
     if type(backend["trust_remote_code"]) is not bool:
         raise ValueError("trust_remote_code must be explicit Boolean")
+    _validate_sample_policy(sampling, tasks)
+    return config
+
+
+def _validate_sample_policy(sampling, tasks):
     fields = {"limit", "num_fewshot", "random_seed", "numpy_seed", "torch_seed", "fewshot_seed"}
     if not isinstance(sampling, dict) or set(sampling) != fields:
         raise ValueError("task sampling requires limit, few-shot count and all four seeds")
@@ -37,7 +49,7 @@ def validate_config(config):
     names = [task if isinstance(task, str) else task.get("task") for task in tasks]
     if not all(isinstance(name, str) and name for name in names) or len(set(names)) != len(names):
         raise ValueError("task names must be nonempty and unique")
-    return config
+    return sorted(names)
 
 
 def task_metrics(raw):
@@ -108,6 +120,11 @@ def verify_task_result(result, config):
     from .schemas import strict_json_loads
     from .stage_inputs import read_bound
     validate_config(config)
+    if config["backend"].get("name") == "served":
+        from .served_task_backend import bind_served_task
+        bind_served_task(config)
+        raise ValueError("served task result replay lands in parent RobTand/prismaquant#2430; "
+                         "this issue wires the binding gate only")
     require_hf_reader(config["backend"])
     artifacts = result["artifacts"]
     if len(artifacts) != 1:
@@ -172,8 +189,29 @@ def _versions():
     return {name: version(name) for name in ("lm-eval", "torch", "transformers", "datasets")}
 
 
+def preflight_served(config):
+    """Bind recorded serving bytes through the public verifier, without inference."""
+    from .served_task_backend import bind_served_task
+    binding = bind_served_task(config)
+    names = _validate_sample_policy(config["sampling"], config["tasks"])
+    return {"identity": {"backend": "served",
+                         "witness_fingerprint": binding["witness_fingerprint"],
+                         "endpoint": binding["endpoint"],
+                         "served_alias": binding["served_alias"],
+                         "attempt_id": binding["attempt_id"],
+                         "ranks": binding["ranks"]},
+            "population": {"tasks": names, "sampling": config["sampling"],
+                           "device": "served", "skips": []},
+            "binding": binding,
+            "limitations": ["Served preflight binds recorded launch bytes only, "
+                             "not current endpoint state. It runs no model inference.",
+                             "Served measurement lands in parent RobTand/prismaquant#2430."]}
+
+
 def preflight_tasks(config):
     validate_config(config)
+    if config["backend"].get("name") == "served":
+        return preflight_served(config)
     backend = config["backend"]
     model_config = require_hf_reader(backend)
     from transformers import AutoTokenizer
@@ -190,6 +228,11 @@ def preflight_tasks(config):
 
 def measure_tasks(config, output):
     validate_config(config)
+    if config["backend"].get("name") == "served":
+        from .served_task_backend import bind_served_task
+        bind_served_task(config)
+        raise ValueError("served task measurement lands in parent RobTand/prismaquant#2430; "
+                         "this issue wires the binding gate only")
     require_hf_reader(config["backend"])
     import torch
     from lm_eval import simple_evaluate
