@@ -155,3 +155,60 @@ lane must supply authentic Qwen scope and wire cases. Only then can #2886 procee
 against the unchanged historical oracle, followed by #2887 inventory and conditional
 retirement review. These are readiness dependencies, not requests for credentials
 or a human physical action, and no duplicate issue or publication was made.
+
+## Campaign retirement-authority review (assigned O8 slice)
+
+Review base: `9fc3307f848a3b65cbac4dad27f8795bd427d7cc`. This addendum is
+limited to `campaign-retirement-authority`; the earlier source inspection and
+verification above remain historical evidence, not new inspection claims. Only
+this report is changed. No frozen GLM instrument, obsolete source, caller, live
+route, fixture, or acceptance test is removed or modified.
+
+**Decision: retain sources; retirement acceptance is incomplete.** The supplied
+issue discussions contain a requirement to obtain authority, not an attributable
+Campaign decision granting it. This does not assert that runs are still active;
+it states that their completion and permission to retire are not established by
+the available evidence.
+
+| Evidence and attribution | What it establishes | What it does not establish |
+| --- | --- | --- |
+| RobTand, [#2885](https://github.com/RobTand/prismaquant/issues/2885), 2026-10-23, supplied issue body | Three inspected D43 identities and a request for Campaign/source-owner designation | Current acceptance of the full closure or completion of active runs |
+| RobTand, [#2886](https://github.com/RobTand/prismaquant/issues/2886), 2026-10-23, supplied issue body | #2484/#2485 admission is required before consumer integration | Admission from an old package, deadline, or workflow marker |
+| RobTand, [#2887](https://github.com/RobTand/prismaquant/issues/2887), 2026-10-23, supplied issue body | Explicit direction to retain frozen sources until Campaign supplies active-run completion evidence and retirement authority | A retirement grant for any specific source |
+| RobTand, #2705 comments, 2026-10-21 and 2026-10-22, supplied binding instructions | That separate API migration is reported shipped in `91af4cb7273a17bd8666a806c501878f990de18f` | Campaign retirement authority, PACT equivalence, or permission to reopen that work |
+
+Historical D43 hashes, #2482/#2489 custody artifacts (including corrected
+execution lineage), successful CPU runs, and available source bundles can
+identify or preserve evidence. None is permission to retire active instruments.
+Source acceptance, active-run completion, and retirement authorization are
+separate decisions; acceptance of bytes alone cannot satisfy the latter two.
+Inherited historical excerpts are not selected as retirement authority here.
+
+The readiness gap stays in the existing #2486 → #2885 → #2886 → #2887 lane,
+with Campaign and its existing source-acceptance owner. The supplied open-issue
+list already includes #3007 for Campaign/source-acceptance readiness; this review
+does not create a duplicate issue or imply that its title supplies approval.
+Before any later removal, the existing lane needs an attributable Campaign
+record identifying the completed active runs and their evidence, the exact
+sources/revisions authorized for retirement, and the approved removal scope.
+That record must be reconciled with #2484/#2485 caller inventories and retained
+immutable evidence before direct caller changes/removal. This is a handoff
+condition, not a new harness, adapter, inventory-completeness claim, physical
+action request, or credential request. No workflow transition or publication is
+performed here. No parent closure or integrated acceptance is claimed.
+
+### Verification for this slice
+
+Re-ran the exact CPU command in the Verification section at the review base.
+Observed **4 failed, 318 passed, 14 warnings in 28.72s**, exit 1. Verified retained
+stdout: all four failures remain at the missing
+`tests/fixtures/pact_d43/binding.json` assertion. Downstream scientific and
+consumer assertions still have not run. This is an unmet artifact prerequisite,
+not an unrelated test defect and not a reason to change the acceptance file.
+The passing existing population is preservation evidence only; it cannot decide
+Campaign intent or authorize retirement. The report-only edit does not alter
+the tested application or test tree. No GPU, campaign replay, native or serving
+qualification was run; admitted-prerequisite importer/loader checks remain
+unavailable as described above.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"d78a2f4827b464e1e140a1876fa8382d8e7766a914cc8d4844060c8a82639c73","size":8182}},"operation":"8d090b00662b510af9bb6c5ab44475e5eb68be2dd9be9bdb914087d3648a584c","receipt":"e22cfadb912de9a8440617ee98b50ab31cffc50c1a17d8ea8656b5549a5bf44e"}]
