@@ -1,0 +1,2110 @@
+{
+  "schema": "prismaquant.digest-owner-interfaces.v1",
+  "piece": "owner-recipes",
+  "status": "Owner interfaces settled; consumers and serial integration pending. Not parent closure.",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "registry_sha256": "0255d6f2a6ef9af5607c6225bc6cc3104998fa54a1305817ef373c82397ba17c",
+  "scope": "Only existing digest owners, this interface agreement, and owner-recipes tests/fixtures. No consumer, scanner, baseline, census/historical record, acceptance file, deployment roster, pin or qualification edit.",
+  "design": {
+    "existing_subsystem": "prismaquant.digests and prismaquant.tensor_digests",
+    "new_mechanisms": "None: exact encoders and hashing recipes in their existing owners.",
+    "gpu_and_numerical_policy": "No numerical or GPU execution change; no resident-data or scheduling feature; no performance claim. Tensor CPU/transfer ordering is preserved from original source, not optimized.",
+    "ownership": "Supplied open-issue titles contain no demonstrated overlapping owner edit. git remote identifies the repository only. No live open-PR/session roster supplied or accessible through run tools; competing ownership is unverified, not inferred from retired waits."
+  },
+  "source_identities": {
+    "prismaquant/digests.py": {
+      "git_blob": "cfeee72310ae14484ea919629a0ae63d8bb5232c",
+      "sha256": "3144b0282f2462db05b3906508dbe7e121182d36d9bf82304069f8039974748b"
+    },
+    "prismaquant/tensor_digests.py": {
+      "git_blob": "54f3ab52942b02685a21ddcdbafc3864d241b923",
+      "sha256": "4a8c0b6d231cc07cf0d632187d89e313a44eb9add1042ae3db0c6ef5940e2400"
+    }
+  },
+  "consumer_source_blobs": {
+    "prismaquant/allocator.py": "edb5a2ae0cf799f33d570aef8deec513ec30ff65",
+    "prismaquant/container_runtime_identity.py": "be7bb7b8d36f3af29a0185c673e64b608f0797e2",
+    "prismaquant/export_gguf.py": "f4a93664c719d1e482393469041c89d6f2d148e3",
+    "prismaquant/glm_routing_replay.py": "91e76ed34850f4ef5090b35870b76d8501856654",
+    "prismaquant/io_engine.py": "393ae5755633992c900cbf55c24b3f50a0ca257d",
+    "prismaquant/joint_forward_resume.py": "c23724f01823b67f0d71ca57280ec23325089624",
+    "prismaquant/joint_prewarm_phases.py": "cd9d930bbcf4006bfcf53b5cc484f12f578c69a9",
+    "prismaquant/joint_replay_frontier.py": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+    "prismaquant/kernels/joint_projection_reduce.py": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+    "prismaquant/kernels/kda_chunk.py": "177fcad5bd5c731fb990534c3575d01eee243878",
+    "prismaquant/kl_fisher.py": "397e4a867f2bbcbc9672717c87fc67af6196c8d7",
+    "prismaquant/moe_imatrix.py": "cc1a06e7d675cb41e32fc239071a75e139259131",
+    "prismaquant/nvfp4_activation_contract.py": "3f2d970e8677e5c52467e0f5e0b990b2de66289e",
+    "prismaquant/perturbed_x_cache.py": "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
+    "prismaquant/production_weight_cache.py": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+    "prismaquant/sample_parallel_artifacts.py": "0edf909a40bbc2ea3b698822b9846b7563f7ca5a",
+    "prismaquant/shipcard.py": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+    "prismaquant/stage_a_chain_seed.py": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+    "prismaquant/tessera_calibration_cache.py": "4f0c835652f1513abe561341d715b7bfbc71f30e",
+    "prismaquant/tessera_census_cache.py": "b8158910df6d22720611dd9b8588bf51777170c4",
+    "prismaquant/tessera_census_union.py": "bb7a129e997f0ef5dcb380600838c3e96358a5aa",
+    "prismaquant/tessera_export_lane.py": "bb8faa99057289492fdd78f1a47e8be70f827149",
+    "prismaquant/tessera_hessian.py": "55f1af290bdf84eeee156e04d16f13f12c372c6e",
+    "prismaquant/tessera_sampled_stack_proposal.py": "6dc2025a81b7be1b03a5d9218649ea9c0977c513",
+    "prismaquant/validation_harness.py": "54ae2d8488a2a6d663fb2d282a07a9e7d2da387c",
+    "tools/audit_existing_t4.py": "6b4270fdfae274723e29021c7618819b02b42855",
+    "tools/audit_t4_render_paths.py": "558a60d9cab7ff14824faa9105819e3c9e065d65",
+    "tools/audit_tessera_selected_cache_slice.py": "3373b29c0f659b2ef1b1e9aec93c0fa2fe82d4eb",
+    "tools/band_serial_handoff_live_pair.py": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+    "tools/bench_fence_rehash.py": "eaa597282573cbde6276acf556f6cdcf3a953dc1",
+    "tools/benchmarks/joint_validation_pair.py": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+    "tools/build_diverse_calibration.py": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+    "tools/build_glm_derivative_image.py": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+    "tools/build_prismasnap_27b_campaign.py": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+    "tools/build_stagea_forward_recovery_package.py": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+    "tools/build_stagea_seed_package.py": "3c757d2facd27d6683e1bc9b58294db349028743",
+    "tools/build_stagea_split_package.py": "1986de8fed13572e0ead2407544d398cded295c9",
+    "tools/build_t4_recovery_request.py": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+    "tools/build_tessera_hessian_collection.py": "f302d3352923bcb74c9c74166d71242a16470fee",
+    "tools/build_tessera_mtp_cached_units.py": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+    "tools/capture_glm_routed_layers.py": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+    "tools/capture_glm_routing_replay.py": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+    "tools/chain_roll_bench.py": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+    "tools/check_readset_coverage.py": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+    "tools/check_t4_overlay_prepare.py": "4f6ef38d381927c8b75b9973778e51825ceb348d",
+    "tools/compose_tessera_cached_units.py": "de30add5ce229574617fe2d6b69c4bda9535e555",
+    "tools/derive_tessera_progress_grace.py": "8d5b2b81e755747f2348c93865f551a964d06aa8",
+    "tools/dsv4_wikitext_inputs.py": "c4d4a4a4f4ea0f55df6153897763d5ecffd50623",
+    "tools/duplication_inventory.py": "c5d24bb9f304add2d958668487b61b552a00ec11",
+    "tools/exl3_grouped_down_replay.py": "e80fa32dada1c952507f28ea58c61b12e8896a68",
+    "tools/expand_probe_onto_tessera_census.py": "b76526ad40622ff922651c7057c431b3231d61ef",
+    "tools/full_kl_teacher_payload.py": "a9e758e54cad4e1a27514f83df590f25d9f48954",
+    "tools/generate_transition_rewrites.py": "51c0b1b4031c34939e35067c163a9500076b9cf2",
+    "tools/glm_mtp_capture.py": "1434bd867c2787db03f31fde658b95bf145e0be0",
+    "tools/inspect_t4_binding.py": "ac692cfa831c1df621cf5231939f4660712c0172",
+    "tools/joint_prepare_startup_probe.py": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+    "tools/materialize_wikitext_corpus.py": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+    "tools/measure_served_gold.py": "6c686e18331320610a1d7aedb97b6f4082780a11",
+    "tools/measure_vllm_full_kl.py": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+    "tools/measure_vllm_wikitext_ppl.py": "3e2c8c2dcbaed200cc0aefacc3c68b11640f6ca5",
+    "tools/measure_wire_rehash_readers.py": "663156e3b25a095f5a8258e780fc9edca675207f",
+    "tools/pilot_existing_t4.py": "acce3e188d903f32757fcfdbf381324b84219b74",
+    "tools/pq282_equality/recheck_refusal_order.py": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+    "tools/prepare_dsv4_wikitext_inputs.py": "055fc7dc8137aba889f2193d8c06589486cfc706",
+    "tools/prepare_extended_joint_quanta.py": "e89b38ada4cba005d237aa8386e16de18b01f236",
+    "tools/prismaquant_runtime_snapshot.py": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+    "tools/profile_stage_b_head.py": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+    "tools/provision_tessera_pin.py": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "tools/publish_artifact.py": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "tools/pwc_window_load_bench.py": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+    "tools/qualify_t4_overlay.py": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+    "tools/rebind_t4_qualified_results.py": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+    "tools/regenerate_joint_quanta.py": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+    "tools/render_window_bench.py": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+    "tools/reselect_mtp_fixed.py": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+    "tools/seal_tessera_census_identity.py": "ea03883f184fef792f9a35bd511a01bb357e427e",
+    "tools/serve_fingerprint.py": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+    "tools/stage_b_preparation_submission.py": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+    "tools/stagea_produced_live_cycle.py": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+    "tools/staged_exact_read_bench.py": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+    "tools/staged_read_stream_ab.py": "6959fa59c745042d8d5873c2a2c56cb1f0b08c74",
+    "tools/tessera_campaign_container.py": "90870799094cacd764127a1619dbe616aa5f477a",
+    "tools/tessera_fleet/model_worker.py": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+    "tools/unit_journal_bench.py": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+    "prismaquant/anchored_cost.py": "3933112e0507574c05470e62ff2649c26399f585",
+    "prismaquant/cluster_campaign.py": "81c73908bb8a15bd5da3372da72b7b5241e00b6a",
+    "prismaquant/dev_mode.py": "1de4f205ed5fdd69ceadcc8716cdf801f9046ca2",
+    "prismaquant/glm53_stock_reprice.py": "e182a05eb4dbdd6fab935fbbcfb033d270cba765",
+    "prismaquant/io_spans.py": "b2c028c05902347da251336d11009a846c5b171a",
+    "prismaquant/joint_cost_quantum.py": "e2a806ac5b612cbfb1d606798f79f476c7333f2b",
+    "prismaquant/joint_cost_stage_a.py": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+    "prismaquant/model_walk.py": "12b652dbbf06b27bcfdc6856ea4d7084d1f8f3c5",
+    "prismaquant/native_receipt_table.py": "cc709b7141f3f3508f0e985858c5c8299dac2cfb",
+    "prismaquant/pipeline.py": "149fa62e47722c5bd3297141daf68a9a82e5f377",
+    "prismaquant/prefill_frontier.py": "dcd8b7cfcdea8df8e539b0e6779ff3e671be9041",
+    "prismaquant/prismabuild_progress.py": "8d2b281527a61910f2550857fadd3e88d5eed85e",
+    "prismaquant/select_validated_frontier.py": "8a4c45a5c142c540853deb34624509882eb3431c",
+    "prismaquant/stage_a_chain_resume.py": "ffecd485ef1d7d82d36c26260ef0ec1ad71894d2",
+    "prismaquant/stage_a_chain_split.py": "5618f539e2615595a6b842594be494fedbad8eb1",
+    "prismaquant/stage_a_retirement.py": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+    "prismaquant/stage_b_pass_profile.py": "c6d2b242275bf8e11c37f1ef653f3bd064aa8091",
+    "prismaquant/stage_b_workspace_profile.py": "985b9f0f653e1f24060d5167647d6cbcf95ca831",
+    "prismaquant/streamed_boundary_artifacts.py": "e31369f4fba6110070b19a994c0d3506980e765c",
+    "prismaquant/tessera_campaign.py": "b8f9fca7b62f35b1e03d324b961b5fbb79759fd5",
+    "prismaquant/tessera_expert_projection.py": "5557d36ed382c54f59d4d2afc9177eced82ac4f4",
+    "prismaquant/tessera_materialization.py": "4741b8832a44cd267e8af36acc19dabf74dc63a6",
+    "tools/assemble_t4_overlay.py": "0de406a560b46dfc0deebdd3fa2e7dfc75566cad",
+    "tools/build_sensitivity_ablation_assignments.py": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+    "tools/build_streamed_full_kl_teacher.py": "4d96704c35c345465d1fb37374f0860527994408",
+    "tools/build_t4_overlay_catalog.py": "b5be06210beb30099d88e48c1cf8d11ce14c7355",
+    "tools/build_tessera_census_cache.py": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+    "tools/check_stageb_a4_group_quantizer.py": "62e0231c7e199833dcf6272cab3b40f182ee6ec7",
+    "tools/check_stageb_a4_quantizer.py": "e81384e384a859f8c76953eebf299af97542a515",
+    "tools/compare_joint_layer_gate.py": "f60263a39812dd0c702adfdf6d0b932c05a6d333",
+    "tools/compare_stage_a_checkpoints.py": "95ebc85453000f49340f807cc1d788c429603a16",
+    "tools/derive_retained_window_budget.py": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+    "tools/device_envelope_probe.py": "5f74da24152382cc085c0eed1bb179d94b4b8363",
+    "tools/dispatch_joint_quanta.py": "fed78c6fc41679bee8ba655d319970117045c603",
+    "tools/dispatch_stage_a_split.py": "a7557cc31374258beaeed5e01aaece99f16d7670",
+    "tools/dispatch_tessera_campaign.py": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+    "tools/dspark_memavailable_sampler.py": "56cd115d2c8a3804c9552fc56e67171e87b2b2cf",
+    "tools/extract_layer8_native_metadata.py": "06d4bde199f2e2f03236961048637cb8bb02560f",
+    "tools/gold_engine_options.py": "7b70e98f5e55440a46dd1b19588ababff2e8013a",
+    "tools/make_uniform_assignment.py": "ad30b4285418759011db2f03675d5354249fed1b",
+    "tools/prismasnap.py": "1e1e69556bf066d5a60cd379bf790ac2e800e6be",
+    "tools/tessera_surface_replay.py": "ca3ada41ec2286ef738bf911bfd61a56d8340651",
+    "tools/test_qualify_t4_overlay.py": "66d47f5bd99cc890973c8fdf8e391c83e4530e06",
+    "tools/union_tessera_census_tables.py": "3c94e4eb8b3c4599a5d5622b0c8f0aea6b88bc49",
+    "tools/vllm_prompt_smoke.py": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+    "tools/wait_dsv4_aura_campaign.py": "03396f19089552a381d309169fe0ceaa97455394",
+    "prismaquant/activation_fair_pricing.py": "2bf469009c22d71124960ab47b8527dd5a2f6c6e",
+    "prismaquant/allocator_candidates.py": "90157dfdeb07aac21f8386c8017ead346115c7b3",
+    "prismaquant/artifact_registry.py": "72e8da47a9d3b81ba27f4a8b468412429541898a",
+    "prismaquant/aura_additivity_gate.py": "3b0150986337bbdf4da64b544df30a8a144e0ba9",
+    "prismaquant/autoscale.py": "72dff85418d013f4b1f2120c0cea139fd2491177",
+    "prismaquant/build_rtn_cache.py": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+    "prismaquant/campaign_data_manifests.py": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+    "prismaquant/compressed_route_sweep.py": "976f489cccdc658d9e997f2aca8b0fe0b1235e20",
+    "prismaquant/day0_model_intake.py": "03c17a21b636993f4cc03dcb37799b863d36ed2b",
+    "prismaquant/emu_forward_kl.py": "e30e713b5134434eab6f9f224d7ed6c5493cc58f",
+    "prismaquant/export_native_compressed.py": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+    "prismaquant/export_structure.py": "acbe7fe1ae2f8f02df3c2def904bb79e731c6d33",
+    "prismaquant/glm_mtp_selection.py": "a9f419847470068f8e86397a5164fe329c98d3bf",
+    "prismaquant/glm_source_derivative.py": "013fb3311b014cef293c1f7872fed290f496d1c0",
+    "prismaquant/index_entropy.py": "4bf28b1020b6264d4a607e5517c86d5c1e3172f8",
+    "prismaquant/joint_aura.py": "d758f400ca869e888fe161b809f1e21f75833ae5",
+    "prismaquant/joint_aura_retained_budget_transition.py": "0b4d1a0ed8b8bdd47d172cdeaabcab73c30ee60c",
+    "prismaquant/joint_aura_rows.py": "ebd08e79487bdc8975dbb90b45505f03a816dd4d",
+    "prismaquant/joint_aura_run_transition.py": "fb9876ee0f6943235dc3fb707feb103bb6869f0d",
+    "prismaquant/joint_aura_source_transition.py": "9d0e57e97913a4e2f4591d6eee845c12c44a1ece",
+    "prismaquant/joint_cost_read_schedule.py": "282ddbc6a8a74c52c2589ce4c872080fccc0c221",
+    "prismaquant/joint_layer_quanta.py": "d9fad1ddc5331094f447133221f4830119b7fddb",
+    "prismaquant/joint_served_activation.py": "bc0c8b90f625660c520c0ce4a72c6482d6b8fa61",
+    "prismaquant/mtp_rung_selection.py": "c9fea8964916b3fcdad055a690732ab250d99413",
+    "prismaquant/native_moe_panel.py": "b7a322ecd35e777fe9b0479af842969961e96c80",
+    "prismaquant/native_operator_panel.py": "e56b3f1510accb65e61d0e230f58af7636eb4dad",
+    "prismaquant/native_render_codec.py": "1b3e6129fc76a7d5d3a560f3f5e6d1c815d9e833",
+    "prismaquant/prepriced_cost.py": "42db860795d8f341fd733d2df7b53a6d5cc8d4cf",
+    "prismaquant/production_recache.py": "80603e42f3073d67c688ae7b4f6974fc5778490a",
+    "prismaquant/release_receipts.py": "c14160869920edfb0252a12bb6504a14f35efe39",
+    "prismaquant/sensitivity_card.py": "4e7976441a1187d104bf74f33b2374a28e5583c5",
+    "prismaquant/sensitivity_card_build.py": "7a26eeab69093d6424ae8d9946ff1a0562010233",
+    "prismaquant/sensitivity_probe.py": "61a910f57ac77bed1ac3e19b6dfd1e5a2931b034",
+    "prismaquant/shape_runtime_prices.py": "45b375b8242261e855d5f2474bc5231c28c9db9d",
+    "prismaquant/ship_gates.py": "77da46433ea6b5cb0e3fdb38cb63537c0459ed1c",
+    "prismaquant/shipcard_slots.py": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+    "prismaquant/streaming_initialization.py": "3144123920c23f2bef6721922749d3765eccfa87",
+    "prismaquant/streaming_model.py": "3f57ce2cfa91fe8e0e96076f31caf8090fec47fc",
+    "prismaquant/task_suite.py": "d1147322ee6d2ef852a68a927509cb17b546f4d6",
+    "prismaquant/tessera_campaign_reseal.py": "0c62424972a0001cbf1860e7c9de22c1c41e76ec",
+    "prismaquant/tessera_joint_allocation.py": "5953449b099c94eff9f5a73dc7e6f1b5e861e329",
+    "prismaquant/tessera_joint_aura.py": "b4fc115778d8625302169557c82e3eccbf79be89",
+    "prismaquant/tessera_plan_writer.py": "0030c483bd2514cfb6c44ddb8311b121f85ffd0d",
+    "prismaquant/tessera_route_receipt.py": "6c213081ca83e743eead89a9fd9d34d62164f4c8",
+    "prismaquant/tessera_tp_audit.py": "6cd2c62f4c91f7f86247592bbe73af721ea7917a",
+    "prismaquant/validate_assignments_kl.py": "d0325eb9b276e10fb19adb7667f25eaf1f6d1641",
+    "prismaquant/validate_quantized_model.py": "9369ccbcce1d127b15c0ac2a5a82533f2b0d710a",
+    "tools/accept_tessera_pin_provisioner.py": "a50ee2f70524df78d76ad029a3dee324d0811b17",
+    "tools/build_t4_logical_request.py": "bea89e00678c56b9948bdcbd3407548e2d3eae09",
+    "tools/freeze_refactor_checkout.py": "770ae71b91ae904745bc90410d12e14ac2ed8f1a",
+    "tools/g3job/g3_launch.py": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+    "tools/g3job/g3_offline_decoded_kl.py": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+    "tools/g3job/g3_one_arm_smoke.py": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+    "tools/g3job/g3_progress_launch.py": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+    "tools/g3job/g3_readset.py": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+    "tools/g3job/g3_real_arm_smoke.py": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+    "tools/g3job/g3_residency_smoke.py": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+    "tools/g3job/g3_v1_preflight.py": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+    "tools/measure_boundary_control.py": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+    "tools/measure_container_cache_quantum_row.py": "6c1be24cbe08ac9214943d5dae0625eec676553a",
+    "tools/paired_trade_report_proof.py": "01f22cbfb02b6db31209fe3268cfc1d210e2eaba",
+    "tools/pq282_equality/equality_diff.py": "01ddc233f72ff36370572df4cdb6e1698687848c",
+    "tools/pq_admitted_profile.py": "f6b4d55c17b89ba77108e9c23ddbe708f6d3e924",
+    "tools/pq_block_concentration.py": "bd5cadfc4daabfdf998f031f0b2149244e807d75",
+    "tools/pq_block_decode_estimate.py": "fa648ef0cb8c818f2a6fb76ddb9d722dc1151026",
+    "tools/pq_block_feasibility_intake.py": "3c80e2f4228115cde0e26675d76e7558de90c639",
+    "tools/pq_block_schedule_cost.py": "624863e47f2a64d9ef4e20073c387454ce38e7b0",
+    "tools/pq_block_trial.py": "329e3050ec149663459e07379a82d4f119dfb596",
+    "tools/pq_block_trial_math.py": "4e5d9602def6ca94db657e29cfbea26148b70674",
+    "tools/pq_profile_artifact.py": "fceeb6f5e127218598519947649ee8f2b71fc5d9",
+    "tools/pq_profile_child.py": "06d2d73fc1f22821ec4ad0121beda1e3c874d085",
+    "tools/pq_row_profile_observer.py": "649996745142c25e544c53c56436d93bf0ae2154",
+    "tools/profile_produced_group_lookup.py": "74063e14a0dc6fccfcd4bee3f43df4a32149bf60",
+    "tools/prove_glm_source_adoption.py": "1eba9361658b69b613c236cbf6d01b168d5bfa37",
+    "tools/quality_cpu_parity.py": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+    "tools/quality_cpu_smoke.py": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+    "tools/render_identity.py": "1e6dc70b15809067ae7a81fdd7803036e0c7b36d",
+    "tools/reseal_campaign_identity.py": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+    "tools/tessera_fleet/dispatch_ladder.py": "982243e3dc86da6a9c7828ae7bb783f509afcf5a",
+    "tools/tessera_fleet/dispatch_model.py": "90acb2b76d87219fb3b52c3f5321a2879f83a1d0",
+    "tools/tp2_budget_plan.py": "3fd352431ec4db129a4bbb4c9a71a9e8838edcd8",
+    "tools/tp_decode_feasibility.py": "a7ab066419b69b9237419b003839041e2d4adda8",
+    "tools/validate_card_zero_churn.py": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+    "tools/validate_probe_marginals.py": "31b708df3cffeee0edffab78e67c807af7eeea05",
+    "tools/verify_tessera_calibration_forward.py": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0"
+  },
+  "json_interface": {
+    "signature": "JsonProfile(name, ensure_ascii, allow_nan, default=None, separators=(\",\", \":\"), indent=None, sort_keys=True)",
+    "compatibility": "First six positional fields unchanged; sorting appended default True. All prior profiles and direct versus round-trip APIs unchanged. No automatic LF, normalization or fallback widening.",
+    "methods": {
+      "text(value)": "str via JSONEncoder.encode (dumps behavior)",
+      "encoded(value)": "text followed by strict UTF-8; lone-surrogate refusal unchanged",
+      "sha256(value)": "64-hex SHA-256 of encoded(value)",
+      "sha256_streamed(value)": "Existing iterencode UTF-8 chunk hashing, distinct dump/iterencode failure behavior, not silently substituted for text",
+      "dump(value, stream)": "New public streaming text writer: iterencode chunks, no _one_shot; same partial writes/native errors as json.dump. Returns None. No flush, close, publication, or LF."
+    },
+    "profiles": [
+      {
+        "profile": "DIRECT_UTF8_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_UTF8_STRICT",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": false,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/select_validated_frontier.py::main@1212:49",
+          "sorted-json:prismaquant/tessera_census_union.py::<module>@160:9"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [
+          "sorted-json:prismaquant/tessera_census_union.py::<module>@160:9"
+        ],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_UTF8_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_UTF8_LAX",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": true,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:tools/build_tessera_hessian_collection.py::publish_collection@58:11",
+          "sorted-json:tools/build_tessera_mtp_cached_units.py::main@90:15",
+          "sorted-json:tools/compose_tessera_cached_units.py::main@70:11",
+          "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv@2343:48",
+          "sorted-json:tools/dspark_memavailable_sampler.py::_append_sample@92:12"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/allocator.py::main@5360:25",
+          "sorted-json:tools/build_stagea_forward_recovery_package.py::main@179:26",
+          "sorted-json:tools/build_stagea_seed_package.py::manifest_wire@182:26",
+          "sorted-json:tools/build_t4_recovery_request.py::main@28:51",
+          "sorted-json:tools/extract_layer8_native_metadata.py::main@39:76",
+          "sorted-json:tools/gold_engine_options.py::headless_peer_argv@281:25",
+          "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:303",
+          "sorted-json:tools/rebind_t4_qualified_results.py::main@156:11",
+          "sorted-json:tools/serve_fingerprint.py::server_environment_snapshot@823:8"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:tools/serve_fingerprint.py::fingerprint@2315:16"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/cluster_campaign.py::main@2454:14",
+          "sorted-json:prismaquant/prismabuild_progress.py::commit@145:21",
+          "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait@235:29",
+          "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait@179:29",
+          "sorted-json:prismaquant/prismabuild_progress.py::report@69:29",
+          "sorted-json:prismaquant/stage_a_chain_split.py::main@536:10",
+          "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@621:14",
+          "sorted-json:prismaquant/tessera_campaign.py::_main@4664:37",
+          "sorted-json:prismaquant/tessera_export_lane.py::main@2863:56",
+          "sorted-json:tools/band_serial_handoff_live_pair.py::main@480:14",
+          "sorted-json:tools/build_stagea_forward_recovery_package.py::main@203:10",
+          "sorted-json:tools/build_tessera_mtp_cached_units.py::main@94:10",
+          "sorted-json:tools/capture_glm_routing_replay.py::main@103:57",
+          "sorted-json:tools/capture_glm_routing_replay.py::main@105:14",
+          "sorted-json:tools/check_stageb_a4_group_quantizer.py::<module>@56:6",
+          "sorted-json:tools/check_stageb_a4_quantizer.py::<module>@30:6",
+          "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4032:18",
+          "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4040:14",
+          "sorted-json:tools/expand_probe_onto_tessera_census.py::main@69:10",
+          "sorted-json:tools/measure_wire_rehash_readers.py::main@120:14",
+          "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>@32:24",
+          "sorted-json:tools/profile_stage_b_head.py::main@500:36",
+          "sorted-json:tools/qualify_t4_overlay.py::main@89:7",
+          "sorted-json:tools/reselect_mtp_fixed.py::main@190:10",
+          "sorted-json:tools/seal_tessera_census_identity.py::main@45:10",
+          "sorted-json:tools/staged_exact_read_bench.py::child_main@890:19",
+          "sorted-json:tools/tessera_fleet/model_worker.py::atomic_json@62:29",
+          "sorted-json:tools/tessera_fleet/model_worker.py::main@291:26"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": "str",
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:tools/band_serial_handoff_live_pair.py::consumer_role@452:10",
+          "sorted-json:tools/band_serial_handoff_live_pair.py::producer_role@357:10"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/container_runtime_identity.py::main@424:10",
+          "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit@415:24",
+          "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs@3776:9",
+          "sorted-json:tools/build_prismasnap_27b_campaign.py::main@1282:10",
+          "sorted-json:tools/capture_glm_routed_layers.py::main@163:11",
+          "sorted-json:tools/prismaquant_runtime_snapshot.py::main@476:10",
+          "sorted-json:tools/wait_dsv4_aura_campaign.py::main@305:10"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_UTF8_INDENT2_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_UTF8_INDENT2_STRICT",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": false,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "default": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:tools/build_prismasnap_27b_campaign.py::_pretty_bytes@138:8"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 1,
+          "default": "str",
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/stage_b_pass_profile.py::PassProfileSession.__exit__@348:12",
+          "sorted-json:tools/union_tessera_census_tables.py::main@39:10"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT2_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "default": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": false,
+        "consumer_ids": [
+          "sorted-json:prismaquant/allocator.py::main@3771:8",
+          "sorted-json:prismaquant/allocator.py::main@5294:25",
+          "sorted-json:prismaquant/allocator.py::main@5425:28",
+          "sorted-json:prismaquant/allocator.py::main@5452:47",
+          "sorted-json:prismaquant/allocator.py::main@5852:32",
+          "sorted-json:prismaquant/allocator.py::main@6043:16",
+          "sorted-json:prismaquant/allocator.py::main@6232:28",
+          "sorted-json:prismaquant/cluster_campaign.py::main@2460:10",
+          "sorted-json:prismaquant/glm53_stock_reprice.py::main@1243:24",
+          "sorted-json:prismaquant/glm53_stock_reprice.py::main@1324:14",
+          "sorted-json:prismaquant/pipeline.py::main@2000:14",
+          "sorted-json:prismaquant/select_validated_frontier.py::main@1344:33",
+          "sorted-json:prismaquant/select_validated_frontier.py::main@1357:31",
+          "sorted-json:prismaquant/select_validated_frontier.py::main@1396:28",
+          "sorted-json:prismaquant/stage_a_chain_split.py::main@534:48",
+          "sorted-json:prismaquant/tessera_campaign.py::_main@4419:64",
+          "sorted-json:prismaquant/tessera_campaign.py::_main@4659:21",
+          "sorted-json:prismaquant/tessera_export_lane.py::main@2844:27",
+          "sorted-json:prismaquant/tessera_sampled_stack_proposal.py::propose_from_bound_inputs@411:11",
+          "sorted-json:prismaquant/tessera_sampled_stack_proposal.py::propose_from_bound_inputs@418:9",
+          "sorted-json:tools/assemble_t4_overlay.py::doc@56:12",
+          "sorted-json:tools/build_sensitivity_ablation_assignments.py::_write_overlay@167:20",
+          "sorted-json:tools/build_sensitivity_ablation_assignments.py::main@291:29",
+          "sorted-json:tools/build_stagea_forward_recovery_package.py::main@192:54",
+          "sorted-json:tools/build_stagea_forward_recovery_package.py::main@200:44",
+          "sorted-json:tools/build_stagea_seed_package.py::build@218:18",
+          "sorted-json:tools/build_stagea_seed_package.py::build@244:37",
+          "sorted-json:tools/build_stagea_split_package.py::build@350:37",
+          "sorted-json:tools/build_streamed_full_kl_teacher.py::main@399:10",
+          "sorted-json:tools/build_t4_recovery_request.py::main@31:46",
+          "sorted-json:tools/build_tessera_census_cache.py::main@163:30",
+          "sorted-json:tools/check_t4_overlay_prepare.py::main@131:11",
+          "sorted-json:tools/compare_joint_layer_gate.py::main@201:29",
+          "sorted-json:tools/compare_stage_a_checkpoints.py::main@53:43",
+          "sorted-json:tools/derive_tessera_progress_grace.py::main@98:10",
+          "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@3965:14",
+          "sorted-json:tools/dispatch_joint_quanta.py::handoff_template@2814:15",
+          "sorted-json:tools/dispatch_stage_a_split.py::main@835:18",
+          "sorted-json:tools/dispatch_tessera_campaign.py::cmd_capture@536:56",
+          "sorted-json:tools/dispatch_tessera_campaign.py::cmd_census@505:55",
+          "sorted-json:tools/dispatch_tessera_campaign.py::cmd_plan@1146:45",
+          "sorted-json:tools/make_uniform_assignment.py::main@451:19",
+          "sorted-json:tools/make_uniform_assignment.py::main@487:22",
+          "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::main@211:10",
+          "sorted-json:tools/vllm_prompt_smoke.py::main@74:10",
+          "sorted-json:tools/vllm_prompt_smoke.py::main@78:24",
+          "supplemental-json:prismaquant/artifact_registry.py::ArtifactRegistry._write@275:16",
+          "supplemental-json:prismaquant/pipeline.py::write_pipeline_spec@1407:8",
+          "supplemental-json:prismaquant/prepriced_cost.py::_write_report@414:12"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:prismaquant/artifact_registry.py::ArtifactRegistry._write@275:16",
+          "supplemental-json:prismaquant/pipeline.py::write_pipeline_spec@1407:8",
+          "supplemental-json:prismaquant/prepriced_cost.py::_write_report@414:12"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "tests": [
+            "tests/test_digest_profiles_1301.py"
+          ],
+          "note": "Existing route unchanged; original owner suite remains authoritative."
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT1_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT1_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 1,
+          "default": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/glm53_stock_reprice.py::main@1208:37",
+          "sorted-json:prismaquant/model_walk.py::main@2056:23",
+          "sorted-json:prismaquant/model_walk.py::save_walk@957:12",
+          "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table@692:28",
+          "sorted-json:prismaquant/pipeline.py::_record_stage_settings@931:29",
+          "sorted-json:prismaquant/pipeline.py::_record_unverified_reuse@773:33",
+          "sorted-json:prismaquant/pipeline.py::main@1967:23",
+          "sorted-json:prismaquant/tessera_expert_projection.py::request_expert_projection@256:23",
+          "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+          "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+          "sorted-json:tools/derive_retained_window_budget.py::main@179:24",
+          "sorted-json:tools/device_envelope_probe.py::main@59:14",
+          "sorted-json:tools/device_envelope_probe.py::main@93:10",
+          "sorted-json:tools/duplication_inventory.py::main@283:28",
+          "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+          "sorted-json:tools/measure_wire_rehash_readers.py::main@124:30",
+          "sorted-json:tools/render_window_bench.py::_renders@90:40",
+          "sorted-json:tools/render_window_bench.py::cmd_analyze@438:39",
+          "sorted-json:tools/render_window_bench.py::cmd_child@357:33",
+          "sorted-json:tools/stage_b_preparation_submission.py::write_submission@199:22",
+          "sorted-json:tools/stage_b_preparation_submission.py::write_submission@228:9",
+          "sorted-json:tools/staged_exact_read_bench.py::driver_main@1001:41",
+          "sorted-json:tools/staged_exact_read_bench.py::driver_main@1020:20",
+          "sorted-json:tools/staged_exact_read_bench.py::driver_main@994:41",
+          "sorted-json:tools/unit_journal_bench.py::cmd_child@278:33",
+          "sorted-json:tools/unit_journal_bench.py::cmd_host@405:38"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT1_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT1_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 1,
+          "default": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table@710:19",
+          "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table@731:58",
+          "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+          "sorted-json:tools/regenerate_joint_quanta.py::_pretty@166:12",
+          "sorted-json:tools/seal_tessera_census_identity.py::main@40:15"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT2_STRICT",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "default": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/container_runtime_identity.py::write_or_verify_identity@283:8",
+          "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs@3756:8",
+          "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs@3763:9",
+          "sorted-json:prismaquant/prefill_frontier.py::main@1284:17",
+          "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15",
+          "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+          "sorted-json:prismaquant/tessera_materialization.py::_json@37:36",
+          "sorted-json:tools/build_tessera_census_cache.py::main@142:11",
+          "sorted-json:tools/dspark_memavailable_sampler.py::_record_error@130:16",
+          "sorted-json:tools/exl3_grouped_down_replay.py::result_json@432:11",
+          "sorted-json:tools/glm_mtp_capture.py::main@346:10",
+          "sorted-json:tools/glm_mtp_capture.py::projection_phase@223:11",
+          "sorted-json:tools/prismaquant_runtime_snapshot.py::materialize_snapshot@327:16",
+          "sorted-json:tools/prismasnap.py::_print@98:10"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:tools/check_readset_coverage.py::main@132:11",
+          "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3223:14"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_INDENT2_STRICT_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_STRICT_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "default": "str",
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/joint_cost_quantum.py::write_failure_counters@3713:19",
+          "sorted-json:prismaquant/stage_b_workspace_profile.py::write_profile@336:11"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_STRICT_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "default": "str",
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/io_spans.py::IoSpanLog.close@252:24"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_LAX_DEFAULT_REPR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_REPR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "repr",
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_SPACED_STRICT_DEFAULT_REPR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT_DEFAULT_REPR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "default": "repr",
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+          "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_ASCII_LAX_DEFAULT_REPR",
+        "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX_DEFAULT_REPR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "repr",
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/tessera_census_union.py::_json_key@60:11"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "DIRECT_UTF8_SPACED_LAX",
+        "owner_route": "prismaquant.digests.DIRECT_UTF8_SPACED_LAX",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": true,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "indent": null,
+          "sort_keys": true
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_SPACED_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_SPACED_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "sort_keys": false,
+          "default": null,
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "sorted-json:prismaquant/anchored_cost.py::_write_allocator_identity@106:8",
+          "sorted-json:prismaquant/anchored_cost.py::run_allocator_once@1475:8",
+          "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256@79:10",
+          "sorted-json:prismaquant/dev_mode.py::_shown@130:18",
+          "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1598:18",
+          "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1604:20",
+          "sorted-json:tools/build_diverse_calibration.py::_json_digest@136:14",
+          "sorted-json:tools/build_glm_derivative_image.py::main@99:18",
+          "sorted-json:tools/build_prismasnap_27b_campaign.py::_canonical_bytes@125:15",
+          "sorted-json:tools/build_t4_overlay_catalog.py::main@320:10",
+          "sorted-json:tools/build_t4_recovery_request.py::main@18:103",
+          "sorted-json:tools/build_t4_recovery_request.py::main@20:50",
+          "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id@2741:24",
+          "sorted-json:tools/full_kl_teacher_payload.py::atomic_json_write@1097:11",
+          "sorted-json:tools/measure_served_gold.py::_canonical_sha256@116:26",
+          "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@135:29",
+          "sorted-json:tools/prismaquant_runtime_snapshot.py::_closure_sha256@160:14",
+          "sorted-json:tools/publish_artifact.py::_freeze_artifact@841:38",
+          "sorted-json:tools/pwc_window_load_bench.py::run_window@209:34",
+          "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:217",
+          "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:77",
+          "sorted-json:tools/qualify_t4_overlay.py::main.read_task@71:186",
+          "sorted-json:tools/qualify_t4_overlay.py::main.read_task@72:72",
+          "sorted-json:tools/rebind_t4_qualified_results.py::cell_sha256@44:15",
+          "sorted-json:tools/serve_fingerprint.py::_canonical_sha256@764:16",
+          "sorted-json:tools/serve_fingerprint.py::artifact_binding@1712:16",
+          "sorted-json:tools/tessera_fleet/model_worker.py::digest_json@50:26",
+          "sorted-json:tools/tessera_surface_replay.py::main@25:18",
+          "sorted-json:tools/test_qualify_t4_overlay.py::test_partial_checkpoint_corruption_is_not_adopted@57:32",
+          "supplemental-json:prismaquant/allocator.py::main._write_layer_config@4627:42",
+          "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2457:15",
+          "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2481:15",
+          "supplemental-json:prismaquant/export_gguf.py::export_gguf@409:8",
+          "supplemental-json:prismaquant/export_structure.py::main@160:14",
+          "supplemental-json:prismaquant/glm_mtp_selection.py::_main@704:10",
+          "supplemental-json:prismaquant/glm_source_derivative.py::bind_source_derivative@210:22",
+          "supplemental-json:prismaquant/joint_aura_retained_budget_transition.py::main@522:10",
+          "supplemental-json:prismaquant/joint_aura_run_transition.py::main@443:10",
+          "supplemental-json:prismaquant/joint_aura_source_transition.py::main@418:10",
+          "supplemental-json:prismaquant/joint_cost_quantum.py::main@4454:10",
+          "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3521:18",
+          "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3545:10",
+          "supplemental-json:prismaquant/joint_layer_quanta.py::seal_manifest_bytes@124:18",
+          "supplemental-json:prismaquant/joint_replay_frontier.py::_framed@131:14",
+          "supplemental-json:prismaquant/joint_replay_frontier.py::roster_sha256@141:14",
+          "supplemental-json:prismaquant/joint_served_activation.py::main@234:10",
+          "supplemental-json:prismaquant/model_walk.py::main@2016:32",
+          "supplemental-json:prismaquant/model_walk.py::main@2020:32",
+          "supplemental-json:prismaquant/moe_imatrix.py::canonical_imatrix_sha256@867:16",
+          "supplemental-json:prismaquant/mtp_rung_selection.py::select_rung@524:4",
+          "supplemental-json:prismaquant/native_render_codec.py::gptq_obs_rounding_nvfp4_swept@1273:40",
+          "supplemental-json:prismaquant/native_render_codec.py::gptq_obs_rounding_nvfp4_swept@1322:24",
+          "supplemental-json:prismaquant/prefill_frontier.py::_as_json@883:22",
+          "supplemental-json:prismaquant/production_recache.py::recache_production_weight_cache@429:12",
+          "supplemental-json:prismaquant/production_weight_cache.py::fill_production_weight_cache@6789:16",
+          "supplemental-json:prismaquant/release_receipts.py::main@147:14",
+          "supplemental-json:prismaquant/sensitivity_card.py::SensitivityCard.to_npz@554:16",
+          "supplemental-json:prismaquant/shape_runtime_prices.py::main@1521:14",
+          "supplemental-json:prismaquant/ship_gates.py::main@374:10",
+          "supplemental-json:prismaquant/shipcard_slots.py::_verify_route_sweep_record@1044:27",
+          "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@918:23",
+          "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@942:38",
+          "supplemental-json:prismaquant/streaming_initialization.py::validate_mtp_layer_initialization_contract@351:22",
+          "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_prefix@251:27",
+          "supplemental-json:prismaquant/streaming_model.py::_StreamingInitializationAudit.complete_selected@226:27",
+          "supplemental-json:prismaquant/tessera_campaign.py::_campaign_identity_metadata_plan@1243:26",
+          "supplemental-json:prismaquant/tessera_campaign.py::run_streamed_calibration.visit@3739:14",
+          "supplemental-json:prismaquant/tessera_campaign.py::run_streamed_calibration@3653:18",
+          "supplemental-json:prismaquant/tessera_campaign_reseal.py::plan_row@598:30",
+          "supplemental-json:prismaquant/tessera_joint_allocation.py::main@346:10",
+          "supplemental-json:prismaquant/tessera_joint_aura.py::main@3476:14",
+          "supplemental-json:prismaquant/tessera_joint_aura.py::main@3509:14",
+          "supplemental-json:prismaquant/tessera_joint_aura.py::main@3525:10",
+          "supplemental-json:prismaquant/tessera_joint_aura.py::prepare_cache@2315:18",
+          "supplemental-json:prismaquant/tessera_route_receipt.py::_check_runtime_image_declaration@415:51",
+          "supplemental-json:prismaquant/tessera_sampled_stack_proposal.py::main@518:10",
+          "supplemental-json:prismaquant/validate_quantized_model.py::_post_json@225:11",
+          "supplemental-json:prismaquant/validate_quantized_model.py::format_report_md@845:29",
+          "supplemental-json:tools/assemble_t4_overlay.py::main@271:10",
+          "supplemental-json:tools/audit_t4_render_paths.py::main@28:113",
+          "supplemental-json:tools/audit_tessera_selected_cache_slice.py::main@60:10",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@59:10",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@109:37",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@132:18",
+          "supplemental-json:tools/build_glm_derivative_image.py::main@154:10",
+          "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@133:26",
+          "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@85:26",
+          "supplemental-json:tools/build_t4_logical_request.py::main@149:10",
+          "supplemental-json:tools/build_t4_overlay_catalog.py::main@325:10",
+          "supplemental-json:tools/build_t4_recovery_request.py::main@31:100",
+          "supplemental-json:tools/build_tessera_census_cache.py::main@166:10",
+          "supplemental-json:tools/capture_glm_routed_layers.py::main.publish@131:14",
+          "supplemental-json:tools/capture_glm_routed_layers.py::main@166:10",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_child@477:19",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_host@226:19",
+          "supplemental-json:tools/check_t4_overlay_prepare.py::main@104:10",
+          "supplemental-json:tools/check_t4_overlay_prepare.py::main@115:10",
+          "supplemental-json:tools/check_t4_overlay_prepare.py::main@137:10",
+          "supplemental-json:tools/derive_retained_window_budget.py::main@124:42",
+          "supplemental-json:tools/derive_retained_window_budget.py::main@125:13",
+          "supplemental-json:tools/dispatch_joint_quanta.py::_container_wrap@1850:28",
+          "supplemental-json:tools/dispatch_stage_a_split.py::main@796:18",
+          "supplemental-json:tools/dispatch_stage_a_split.py::main@811:18",
+          "supplemental-json:tools/dispatch_stage_a_split.py::main@816:22",
+          "supplemental-json:tools/dispatch_stage_a_split.py::main@831:22",
+          "supplemental-json:tools/dispatch_stage_a_split.py::row_template@214:26",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_derived_data_manifests@1406:12",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1817:14",
+          "supplemental-json:tools/extract_layer8_native_metadata.py::main@39:173",
+          "supplemental-json:tools/freeze_refactor_checkout.py::main@49:10",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@110:32",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@152:6",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@154:67",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@174:36",
+          "supplemental-json:tools/g3job/g3_offline_decoded_kl.py::run_multi@1193:29",
+          "supplemental-json:tools/g3job/g3_one_arm_smoke.py::compare_one_arm@24:55",
+          "supplemental-json:tools/g3job/g3_progress_launch.py::main@131:29",
+          "supplemental-json:tools/g3job/g3_readset.py::main@254:25",
+          "supplemental-json:tools/g3job/g3_readset.py::main@255:10",
+          "supplemental-json:tools/g3job/g3_real_arm_smoke.py::compare_real_arm_passes@170:81",
+          "supplemental-json:tools/g3job/g3_real_arm_smoke.py::compare_real_arm_passes@187:10",
+          "supplemental-json:tools/g3job/g3_real_arm_smoke.py::prepare_real_arm_plan@57:21",
+          "supplemental-json:tools/g3job/g3_real_arm_smoke.py::prepare_real_arm_plan@58:10",
+          "supplemental-json:tools/g3job/g3_real_arm_smoke.py::progress@22:35",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::main@88:10",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@45:44",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@46:36",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@47:10",
+          "supplemental-json:tools/g3job/g3_v1_preflight.py::<module>@75:6",
+          "supplemental-json:tools/inspect_t4_binding.py::main@12:327",
+          "supplemental-json:tools/measure_boundary_control.py::main@163:10",
+          "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:45",
+          "supplemental-json:tools/measure_served_gold.py::_cmd_dump@414:30",
+          "supplemental-json:tools/measure_served_gold.py::_post_completion@330:42",
+          "supplemental-json:tools/measure_vllm_full_kl.py::_student@724:46",
+          "supplemental-json:tools/measure_vllm_wikitext_ppl.py::main@519:35",
+          "supplemental-json:tools/paired_trade_report_proof.py::fixture@87:45",
+          "supplemental-json:tools/pilot_existing_t4.py::main@35:103",
+          "supplemental-json:tools/pq_admitted_profile.py::run_observed@49:12",
+          "supplemental-json:tools/pq_block_concentration.py::main@284:14",
+          "supplemental-json:tools/pq_block_concentration.py::main@287:10",
+          "supplemental-json:tools/pq_block_feasibility_intake.py::main@140:10",
+          "supplemental-json:tools/pq_block_schedule_cost.py::main@944:10",
+          "supplemental-json:tools/pq_block_trial.py::run_encode@878:10",
+          "supplemental-json:tools/pq_block_trial.py::run_preflight@762:10",
+          "supplemental-json:tools/pq_block_trial.py::run_score@1245:10",
+          "supplemental-json:tools/pq_profile_artifact.py::finish_profile_status@40:8",
+          "supplemental-json:tools/pq_profile_child.py::run_profile_workload@34:8",
+          "supplemental-json:tools/pq_row_profile_observer.py::<module>@186:35",
+          "supplemental-json:tools/pq_row_profile_observer.py::<module>@212:53",
+          "supplemental-json:tools/pq_row_profile_observer.py::<module>@243:35",
+          "supplemental-json:tools/pq_row_profile_observer.py::collect_netdata@125:28",
+          "supplemental-json:tools/pq_row_profile_observer.py::event@60:16",
+          "supplemental-json:tools/prepare_extended_joint_quanta.py::prepare@380:10",
+          "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+          "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+          "supplemental-json:tools/publish_artifact.py::main@1386:15",
+          "supplemental-json:tools/qualify_t4_overlay.py::main.commit_task@84:8",
+          "supplemental-json:tools/qualify_t4_overlay.py::main@67:8",
+          "supplemental-json:tools/quality_cpu_parity.py::main@86:10",
+          "supplemental-json:tools/quality_cpu_smoke.py::main@112:10",
+          "supplemental-json:tools/quality_cpu_smoke.py::main@88:35",
+          "supplemental-json:tools/rebind_t4_qualified_results.py::main@160:10",
+          "supplemental-json:tools/render_window_bench.py::cmd_child@358:19",
+          "supplemental-json:tools/render_window_bench.py::cmd_host@122:19",
+          "supplemental-json:tools/render_window_bench.py::cmd_host@126:19",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_bundle@66:10",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@21:14",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@37:18",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@39:14",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify.display@50:14",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify@57:14",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+          "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+          "supplemental-json:tools/staged_exact_read_bench.py::driver_main@1017:22",
+          "supplemental-json:tools/staged_exact_read_bench.py::driver_main@985:41",
+          "supplemental-json:tools/staged_read_stream_ab.py::main@236:10",
+          "supplemental-json:tools/tessera_campaign_container.py::main@1021:10",
+          "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@201:10",
+          "supplemental-json:tools/test_qualify_t4_overlay.py::test_partial_checkpoint_corruption_is_not_adopted@56:19",
+          "supplemental-json:tools/test_qualify_t4_overlay.py::test_partial_checkpoint_corruption_is_not_adopted@63:20",
+          "supplemental-json:tools/unit_journal_bench.py::cmd_host@344:19",
+          "supplemental-json:tools/unit_journal_bench.py::cmd_host@397:27",
+          "supplemental-json:tools/unit_journal_bench.py::cmd_host@400:35",
+          "supplemental-json:tools/unit_journal_bench.py::cmd_host@403:31",
+          "supplemental-json:tools/verify_tessera_calibration_forward.py::main@157:10"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:tools/pq_admitted_profile.py::run_observed@49:12",
+          "supplemental-json:tools/pq_profile_artifact.py::finish_profile_status@40:8",
+          "supplemental-json:tools/pq_profile_child.py::run_profile_workload@34:8"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_SPACED_STRICT",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_SPACED_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "sort_keys": false,
+          "default": null,
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22",
+          "supplemental-json:prismaquant/joint_aura.py::require_native_source_execution@117:4",
+          "supplemental-json:prismaquant/native_moe_panel.py::freeze_moe_panel@1670:22",
+          "supplemental-json:prismaquant/native_operator_panel.py::freeze_native_panel@491:22"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_SPACED_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_SPACED_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "sort_keys": false,
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:tools/audit_existing_t4.py::main@18:20",
+          "supplemental-json:tools/audit_existing_t4.py::main@23:17",
+          "supplemental-json:tools/inspect_t4_binding.py::main@11:61",
+          "supplemental-json:tools/pq282_equality/equality_diff.py::report@43:57",
+          "supplemental-json:tools/pq282_equality/equality_diff.py::report@44:43",
+          "supplemental-json:tools/pq282_equality/equality_diff.py::report@46:31",
+          "supplemental-json:tools/pq282_equality/equality_diff.py::report@47:31",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@26:29"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_UTF8_SPACED_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_UTF8_SPACED_LAX",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": true,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "sort_keys": false,
+          "default": null,
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/tessera_census_union.py::manifest_chunks.walk@245:25",
+          "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@357:17",
+          "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@359:21"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "sort_keys": false,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/activation_fair_pricing.py::_rows_digest@377:14",
+          "supplemental-json:prismaquant/allocator_candidates.py::aggregate_fused_siblings@2851:20",
+          "supplemental-json:prismaquant/allocator_candidates.py::aggregate_fused_siblings@2855:20",
+          "supplemental-json:prismaquant/allocator_candidates.py::aggregate_packed_serving_groups@3375:20",
+          "supplemental-json:prismaquant/allocator_candidates.py::aggregate_packed_serving_groups@3389:20",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@115:8"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@115:8"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_STRICT",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "sort_keys": false,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/glm_mtp_selection.py::_main@701:11",
+          "supplemental-json:prismaquant/joint_aura_rows.py::_ValidatedProbeIdentity.__init__@64:18",
+          "supplemental-json:tools/reselect_mtp_fixed.py::main@187:11"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "sort_keys": false,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1710:16"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_UTF8_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_UTF8_LAX",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": true,
+          "sort_keys": false,
+          "default": null,
+          "separators": [
+            ",",
+            ":"
+          ],
+          "indent": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/joint_cost_read_schedule.py::_bind_runtime@386:28"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_INDENT1_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_INDENT1_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 1,
+          "sort_keys": false,
+          "default": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/aura_additivity_gate.py::main@196:11",
+          "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8",
+          "supplemental-json:tools/accept_tessera_pin_provisioner.py::main@120:10",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_analyze@670:37",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_child@476:33",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_drive@283:44",
+          "supplemental-json:tools/chain_roll_bench.py::cmd_manifest@179:30",
+          "supplemental-json:tools/derive_retained_window_budget.py::main@180:10",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1888:14",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1900:10",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_submit_aqua@2072:14",
+          "supplemental-json:tools/g3job/g3_launch.py::<module>@151:23",
+          "supplemental-json:tools/materialize_wikitext_corpus.py::main@97:47",
+          "supplemental-json:tools/profile_produced_group_lookup.py::main@117:10",
+          "supplemental-json:tools/provision_tessera_pin.py::_write_manifest@247:11",
+          "supplemental-json:tools/provision_tessera_pin.py::main@520:18",
+          "supplemental-json:tools/provision_tessera_pin.py::main@545:14",
+          "supplemental-json:tools/provision_tessera_pin.py::main@549:14",
+          "supplemental-json:tools/provision_tessera_pin.py::main@578:18",
+          "supplemental-json:tools/provision_tessera_pin.py::main@594:14",
+          "supplemental-json:tools/provision_tessera_pin.py::main@597:10",
+          "supplemental-json:tools/pwc_window_load_bench.py::run_ab@610:9",
+          "supplemental-json:tools/pwc_window_load_bench.py::run_quantum@312:35",
+          "supplemental-json:tools/pwc_window_load_bench.py::run_setup@153:39",
+          "supplemental-json:tools/pwc_window_load_bench.py::run_window@234:35",
+          "supplemental-json:tools/render_identity.py::main@115:14",
+          "supplemental-json:tools/render_window_bench.py::cmd_host@156:35",
+          "supplemental-json:tools/reseal_campaign_identity.py::cmd_hash_tree@15:10",
+          "supplemental-json:tools/staged_read_stream_ab.py::main@235:12",
+          "supplemental-json:tools/tessera_fleet/dispatch_ladder.py::main@88:14",
+          "supplemental-json:tools/unit_journal_bench.py::cmd_host@406:19"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8",
+          "supplemental-json:tools/staged_read_stream_ab.py::main@235:12"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 1,
+          "sort_keys": false
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:tools/pwc_window_load_bench.py::run_ab@609:38",
+          "supplemental-json:tools/pwc_window_load_bench.py::run_identity@496:39"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_INDENT2_LAX",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_INDENT2_LAX",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": false,
+          "default": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/allocator.py::_write_bit_attribution_reports@1297:24",
+          "supplemental-json:prismaquant/allocator.py::main._write_layer_config@4631:16",
+          "supplemental-json:prismaquant/autoscale.py::<module>@1351:10",
+          "supplemental-json:prismaquant/build_rtn_cache.py::main@688:12",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@171:12",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@225:16",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@245:8",
+          "supplemental-json:prismaquant/day0_model_intake.py::main@288:14",
+          "supplemental-json:prismaquant/emu_forward_kl.py::main@520:11",
+          "supplemental-json:prismaquant/export_native_compressed.py::IncrementalSafetensorsWriter.finalize@5819:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache._refuse@4728:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache@4737:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_main_impl@5589:8",
+          "supplemental-json:prismaquant/export_native_compressed.py::write_config_with_quantization@5905:8",
+          "supplemental-json:prismaquant/export_native_compressed.py::write_sharded_safetensors@5880:8",
+          "supplemental-json:prismaquant/index_entropy.py::main@143:11",
+          "supplemental-json:prismaquant/perturbed_x_cache.py::capture_perturbed_activation_cache@3642:8",
+          "supplemental-json:prismaquant/production_recache.py::recache_production_weight_cache@436:37",
+          "supplemental-json:prismaquant/production_weight_cache.py::fill_packed_expert_cache_entries._persist_expert_sidecar@8214:23",
+          "supplemental-json:prismaquant/sensitivity_card_build.py::main@324:10",
+          "supplemental-json:prismaquant/sensitivity_probe.py::_stage_text_only_impl@268:8",
+          "supplemental-json:prismaquant/sensitivity_probe.py::stage_multimodal@320:8",
+          "supplemental-json:prismaquant/tessera_plan_writer.py::build_serving_plan@529:15",
+          "supplemental-json:prismaquant/tessera_plan_writer.py::main@757:23",
+          "supplemental-json:prismaquant/tessera_tp_audit.py::_write@250:11",
+          "supplemental-json:prismaquant/validate_assignments_kl.py::main@1805:26",
+          "supplemental-json:tools/audit_tessera_selected_cache_slice.py::main@56:24",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@58:52",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@131:45",
+          "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@94:49",
+          "supplemental-json:tools/build_glm_derivative_image.py::main@151:40",
+          "supplemental-json:tools/build_stagea_forward_recovery_package.py::main@194:45",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_pbcampaign@576:28",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::_publish_submitted_manifest@1541:15",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_capture@534:24",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_census@503:24",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1312:24",
+          "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1313:41",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::main@87:8",
+          "supplemental-json:tools/g3job/g3_v1_preflight.py::<module>@74:4",
+          "supplemental-json:tools/measure_served_gold.py::_cmd_kl@566:30",
+          "supplemental-json:tools/measure_served_gold.py::_cmd_kl@567:10",
+          "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@640:30",
+          "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@641:10",
+          "supplemental-json:tools/paired_trade_report_proof.py::main@189:44",
+          "supplemental-json:tools/pilot_existing_t4.py::main@35:63",
+          "supplemental-json:tools/pq282_equality/recheck_refusal_order.py::<module>@50:39",
+          "supplemental-json:tools/pq_block_decode_estimate.py::main@159:10",
+          "supplemental-json:tools/pq_block_feasibility_intake.py::main@139:24",
+          "supplemental-json:tools/pq_row_profile_observer.py::<module>@94:60",
+          "supplemental-json:tools/prove_glm_source_adoption.py::<module>@26:50",
+          "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@144:14",
+          "supplemental-json:tools/tp2_budget_plan.py::main@997:23",
+          "supplemental-json:tools/tp_decode_feasibility.py::_write_json@412:20",
+          "supplemental-json:tools/validate_card_zero_churn.py::main@110:10",
+          "supplemental-json:tools/validate_card_zero_churn.py::main@113:12",
+          "supplemental-json:tools/validate_probe_marginals.py::main@188:10",
+          "supplemental-json:tools/validate_probe_marginals.py::main@192:12",
+          "supplemental-json:tools/vllm_prompt_smoke.py::main@50:14"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:prismaquant/allocator.py::main._write_layer_config@4631:16",
+          "supplemental-json:prismaquant/build_rtn_cache.py::main@688:12",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@171:12",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@225:16",
+          "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@245:8",
+          "supplemental-json:prismaquant/export_native_compressed.py::IncrementalSafetensorsWriter.finalize@5819:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache._refuse@4728:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache@4737:12",
+          "supplemental-json:prismaquant/export_native_compressed.py::_main_impl@5589:8",
+          "supplemental-json:prismaquant/export_native_compressed.py::write_config_with_quantization@5905:8",
+          "supplemental-json:prismaquant/export_native_compressed.py::write_sharded_safetensors@5880:8",
+          "supplemental-json:prismaquant/perturbed_x_cache.py::capture_perturbed_activation_cache@3642:8",
+          "supplemental-json:prismaquant/sensitivity_probe.py::_stage_text_only_impl@268:8",
+          "supplemental-json:prismaquant/sensitivity_probe.py::stage_multimodal@320:8",
+          "supplemental-json:tools/g3job/g3_residency_smoke.py::main@87:8",
+          "supplemental-json:tools/g3job/g3_v1_preflight.py::<module>@74:4",
+          "supplemental-json:tools/validate_card_zero_churn.py::main@113:12",
+          "supplemental-json:tools/validate_probe_marginals.py::main@192:12"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_INDENT2_STRICT",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_INDENT2_STRICT",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": false,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": false,
+          "default": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:tools/build_tessera_census_cache.py::main@100:27",
+          "supplemental-json:tools/build_tessera_census_cache.py::main@131:13",
+          "supplemental-json:tools/measure_vllm_full_kl.py::_strict_json_text@79:15",
+          "supplemental-json:tools/measure_vllm_wikitext_ppl.py::_strict_json@82:11",
+          "supplemental-json:tools/pq_block_concentration.py::main@286:22",
+          "supplemental-json:tools/pq_block_trial_math.py::write_trial_json@21:20"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR",
+        "owner_route": "prismaquant.digests.INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR",
+        "options": {
+          "ensure_ascii": true,
+          "allow_nan": true,
+          "default": "str",
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": false
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1696:15",
+          "supplemental-json:prismaquant/validate_quantized_model.py::format_report_md@859:25",
+          "supplemental-json:tools/audit_existing_t4.py::main@24:63",
+          "supplemental-json:tools/serve_fingerprint.py::_cmd_show@2475:10",
+          "supplemental-json:tools/serve_fingerprint.py::_cmd_write@2461:19"
+        ],
+        "dump_consumer_ids": [],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      },
+      {
+        "profile": "INSERTION_UTF8_INDENT2_STRICT",
+        "owner_route": "prismaquant.digests.INSERTION_UTF8_INDENT2_STRICT",
+        "options": {
+          "ensure_ascii": false,
+          "allow_nan": false,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "indent": 2,
+          "sort_keys": false,
+          "default": null
+        },
+        "new_in_this_piece": true,
+        "consumer_ids": [
+          "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+          "supplemental-json:tools/measure_boundary_control.py::main@86:8"
+        ],
+        "dump_consumer_ids": [
+          "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+          "supplemental-json:tools/measure_boundary_control.py::main@86:8"
+        ],
+        "encoder_leaf_consumer_ids": [],
+        "compatibility": {
+          "fixtures": [
+            "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+          ],
+          "tests": [
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+            "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors"
+          ]
+        }
+      }
+    ],
+    "custom_fallback_routes": [
+      {
+        "original_id": "supplemental-json:prismaquant/task_suite.py::measure_tasks@218:25",
+        "source_blob": "d1147322ee6d2ef852a68a927509cb17b546f4d6",
+        "owner_route": "prismaquant.digests.JsonProfile",
+        "signature": "JsonProfile(name, True, False, default=handle_non_serializable, separators=(\", \", \": \"), sort_keys=False).text(raw)",
+        "contract": "Callable is supplied by caller from lm_eval; preserve json.loads after text. Do not import lm_eval into owners. Existing callable-default API is sufficient; no new named profile with an external dependency.",
+        "fixtures": [
+          "tests/fixtures/digest_1301/owner-recipes/json_recipes.json"
+        ],
+        "tests": [
+          "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_caller_supplied_custom_fallback"
+        ]
+      }
+    ],
+    "inventory_boundary": "consumer_ids are frozen original JSON call option matches, including reference/protected consumers. They are recipe membership, NOT migration authorization or a current completion census. New named profiles have independent original expressions; unchanged profiles use existing coverage. No public iterencode API added: no remaining independent iterencode caller found outside owners."
+  },
+  "byte_interfaces": [
+    {
+      "owner_route": "prismaquant.digests.bytes_sha256digest",
+      "signature": "(data: bytes | bytearray | memoryview) -> bytes",
+      "recipe": "Native 32-byte SHA-256. No text encoding, framing, slicing, endian conversion or seed mask.",
+      "consumer_ids": [
+        "hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15"
+      ],
+      "reference_only_ids": [
+        "hashlib:prismaquant/kl_fisher.py::fisher_probe_scalar@166:42",
+        "hashlib:prismaquant/moe_imatrix.py::synthesize_packed_expert_col_weights@496:24"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_bytes_native_vectors",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_scientific_seed_raw_sha_only"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json"
+      ]
+    },
+    {
+      "owner_route": "prismaquant.digests.bytes_blake2b8digest",
+      "signature": "(data: bytes | bytearray | memoryview) -> bytes",
+      "recipe": "BLAKE2b digest_size=8; eight native bytes, not truncation of default-width BLAKE2b. Caller retains domain, u32LE group-byte-length frame, validation and <II unpacking.",
+      "consumer_ids": [
+        "hashlib:prismaquant/sample_parallel_artifacts.py::activation_priority_key@109:13"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_activation_priority_full_original",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_activation_priority_validation_stays_caller_owned"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json"
+      ]
+    },
+    {
+      "owner_route": "prismaquant.digests.bytes_blake2b16hex",
+      "signature": "(data: bytes | bytearray | memoryview) -> str",
+      "recipe": "BLAKE2b digest_size=16; 32 lowercase hex characters. Caller retains canonical_layer_config_json and UTF-8.",
+      "consumer_ids": [
+        "hashlib:prismaquant/validation_harness.py::_compute_metrics@267:15"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_calibration_exact_original_expression",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_bytes_native_vectors"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json"
+      ]
+    },
+    {
+      "owner_route": "prismaquant.digests.chunks_sha256hex",
+      "signature": "(chunks: Iterable[bytes | bytearray | memoryview]) -> str",
+      "recipe": "Ordered unframed concatenation, each update before acquiring the next chunk; no join, copy, coercion, accumulator exposure or IO ownership. Empty stream hashes empty bytes. Consumer owns exact transcript generator and refusal order. Not an interleaved guarded serializer sink API.",
+      "consumer_ids": [
+        "hashlib:prismaquant/nvfp4_activation_contract.py::routed_moe_stages_sha256@1193:13",
+        "hashlib:prismaquant/nvfp4_activation_contract.py::stage_values_sha256@1171:13",
+        "hashlib:prismaquant/nvfp4_activation_contract.py::target_values_sha256@1380:13",
+        "hashlib:prismaquant/moe_imatrix.py::canonical_imatrix_sha256@855:13"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_nvfp4_original_chunks_exact_transcript",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_nvfp4_conversion_errors_preserve_partial_feed",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_chunks_one_pass_update_before_next_and_errors"
+      ],
+      "consumer_proof_boundary": "Only target_values_sha256 transcript composition is exercised here, with explicit policy resolver stub. Full original scientific/attestation callers must supply their own independent tests before migration.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json"
+      ]
+    },
+    {
+      "owner_route": "bytes.fromhex(prismaquant.digests.length_framed_bytes_sha256(items, prefix=domain))",
+      "signature": "Existing length_framed_bytes_sha256(items: Iterable[bytes], *, prefix: bytes = b\"\") -> str; decode only when original returns bytes",
+      "recipe": "Domain followed by each ordered u64BE byte length and item. _framed retains its compact insertion-order Unicode tuple JSON and 32-byte result; roster retains separate domain, input order and hex result.",
+      "consumer_ids": [
+        "hashlib:prismaquant/joint_replay_frontier.py::_framed@129:13",
+        "hashlib:prismaquant/joint_replay_frontier.py::roster_sha256@139:13"
+      ],
+      "new_in_this_piece": false,
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_joint_replay_native_binary_existing_length_frames",
+        "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_joint_replay_frame_order_and_boundaries"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json"
+      ]
+    }
+  ],
+  "tensor_interfaces": [
+    {
+      "owner_route": "prismaquant.tensor_digests.tensor_payload_sha256",
+      "signature": "(tensor, *, chunk_bytes: int = 1 << 26) -> str",
+      "recipe": "detach/contiguous/flatten; element-aligned chunks of max(1,int(chunk_bytes)//max(element_size,1)); each .to(\"cpu\").view(uint8).numpy() fed before next acquisition. Shape/dtype absent; 64 hex. Whole contiguous() may copy device storage. Scalar accepted after reshape.",
+      "consumer_ids": [
+        "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/bounded_tensors.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_tiny_cpu_records",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_edge_behavior",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_first_error_operation_trace"
+      ],
+      "boundary_test": "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_payload_chunk_boundary_trace"
+    },
+    {
+      "owner_route": "prismaquant.tensor_digests.source_weight_value_identity",
+      "signature": "(weight: torch.Tensor) -> tuple[list[int], str]",
+      "recipe": "as_tensor/detach; recursive C-order <=4M-element slices; CPU float32 contiguous -> numpy astype(\"<f4\",copy=False).tobytes(order=\"C\"); del cpu before next chunk. Return original shape then full64hex; not dtype-bit identity.",
+      "consumer_ids": [
+        "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@3345:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/bounded_tensors.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_tiny_cpu_records",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_edge_behavior",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_first_error_operation_trace"
+      ],
+      "boundary_test": "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_source_c_order_chunk_boundary_trace"
+    },
+    {
+      "owner_route": "prismaquant.tensor_digests.cb_cache_tensor_identity",
+      "signature": "(tensor: torch.Tensor) -> dict[str, object]",
+      "recipe": "detach/to(cpu)/contiguous whole host copy; uint8 numpy memoryview.cast(\"B\"), 8MiB byte-window feeds without a second full bytes allocation; empty bypasses cast; existing scalar uint8-view refusal preserved. Key order shape,dtype,logical_bytes,content_sha256.",
+      "consumer_ids": [
+        "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3602:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "fixtures": [
+        "tests/fixtures/digest_1301/owner-recipes/bounded_tensors.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_tiny_cpu_records",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_edge_behavior",
+        "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_first_error_operation_trace"
+      ],
+      "boundary_test": "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_cb_memoryview_window_boundary_trace"
+    }
+  ],
+  "existing_routes": [
+    {
+      "owner_route": "prismaquant.digests.bytes_sha256hex / text_sha256hex",
+      "contract": "Exact existing raw-buffer / strict UTF-8 text full64 hex. Caller truncation remains local (allocator Pareto keeps [:12]); no new allocator profile needed."
+    },
+    {
+      "owner_route": "prismaquant.digests.file_sha256hex / file_digest_sha256hex",
+      "contract": "Path-open/block-read versus caller-owned hashlib.file_digest are not interchangeable. Preserve descriptor position, chunk sizes, fences, guards, page release and acquisition; same hash is not proof of same read contract."
+    },
+    {
+      "owner_route": "prismaquant.digests.LengthFramedSourceSha256 / LegacyNulSourceSha256 / source_tree_profiles",
+      "contract": "Existing named source framing only: u32BE names/u64BE contents versus legacy NUL framing. Preserve order/domain and v2 identity separation."
+    },
+    {
+      "owner_route": "prismaquant.digests.canonical_pickle_bytes",
+      "contract": "Existing explicit protocol4 canonical sharing recipe only. Do not replace highest-protocol pickle or shared probe/menu identity graphs; ordinary serializer memo sharing remains caller-owned."
+    },
+    {
+      "owner_route": "prismaquant.tensor_digests.tensor_host_bytes / tensor_sha256 / tensor_identity / tensor_value_stamp / tensor_hash_update",
+      "contract": "Existing whole-host raw-bit recipes unchanged, including scalar uint8-view refusal. Not substitutes for new bounded/FP32 profiles."
+    }
+  ],
+  "incompatible_contracts": [
+    {
+      "kind": "authoritative-guarded-scientific",
+      "witness": "tests/test_guarded_read_digest_retention_2637.py::IDS and CURRENT_REFERENCES",
+      "contract": "All six original retentions remain authoritative. Do not route serializer write-time hashing, read-exact/stat-fenced reads, activation calibration BLAKE2 feeds/seeds or dense-blob verification through a new owner merely because algorithm names match. Source-identity revalidation belongs serial census integration.",
+      "historical_rows": [
+        {
+          "id": "hashlib:prismaquant/perturbed_x_cache.py::SerializedEntryDigest.__init__@207:21",
+          "file": "prismaquant/perturbed_x_cache.py",
+          "scope": "SerializedEntryDigest.__init__",
+          "retention_evidence": {
+            "kind": "write-sink",
+            "reference": "tests/test_exact_activation_entry_read_amplification.py::test_write_hashes_the_serialized_bytes_without_rereading_the_entry",
+            "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        },
+        {
+          "id": "hashlib:prismaquant/perturbed_x_cache.py::_read_exact_entry@2117:14",
+          "file": "prismaquant/perturbed_x_cache.py",
+          "scope": "_read_exact_entry",
+          "retention_evidence": {
+            "kind": "guarded-read",
+            "reference": "tests/test_exact_activation_entry_read_amplification.py::test_prefetch_reads_each_entry_once",
+            "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        },
+        {
+          "id": "hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13",
+          "file": "prismaquant/perturbed_x_cache.py",
+          "scope": "_seed_from",
+          "retention_evidence": {
+            "kind": "scientific-seed",
+            "reference": "tests/test_perturbed_x_cache.py::test_perturbed_cache_shares_row_subsample_for_fused_siblings",
+            "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        },
+        {
+          "id": "hashlib:prismaquant/perturbed_x_cache.py::calibration_data_hash@2375:8",
+          "file": "prismaquant/perturbed_x_cache.py",
+          "scope": "calibration_data_hash",
+          "retention_evidence": {
+            "kind": "scientific-seed",
+            "reference": "tests/test_sample_parallel_probe.py::test_prepare_artifact_binds_every_local_slice",
+            "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        },
+        {
+          "id": "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17",
+          "file": "prismaquant/perturbed_x_cache.py",
+          "scope": "load_verified_activation_cache_entry",
+          "retention_evidence": {
+            "kind": "guarded-read",
+            "reference": "tests/test_verified_capture_load.py::test_large_tensor_uses_readinto_and_releases_buffer_before_return",
+            "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        },
+        {
+          "id": "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13",
+          "file": "prismaquant/tessera_census_cache.py",
+          "scope": "_verify_dense_blob",
+          "retention_evidence": {
+            "kind": "consumed-size",
+            "reference": "tests/test_tessera_census_cache.py::test_same_size_changed_blob_refuses_at_export_intake_or_under_hash_blobs",
+            "source_blob": "a7e64371421c65c16b3c587c8034b5a15336963e",
+            "manifest": "refresh_2540",
+            "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "scientific-seeds",
+      "consumer_ids": [
+        "hashlib:prismaquant/kl_fisher.py::fisher_probe_scalar@166:42",
+        "hashlib:prismaquant/moe_imatrix.py::synthesize_packed_expert_col_weights@496:24"
+      ],
+      "contract": "Binary hash equality is owner recipe evidence, not authorization to alter seed domain, seed algorithm/endian/mask, sampling or scientific inputs. Leaf consumer must provide its current qualification witness."
+    },
+    {
+      "kind": "independent-reference",
+      "consumer_ids": [
+        "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1597:13",
+        "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1603:15"
+      ],
+      "witness": "tests/test_guarded_read_digest_retention_2637.py and prismaquant/tessera_export_lane.py::hessian_capture_sha256 reference-algorithm role",
+      "contract": "Nested JSON/NUL/dtype/shape/tensor SHA reference remains independent; do not replace its oracle with production owner."
+    },
+    {
+      "kind": "deployment",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py",
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout",
+        "tests/test_profile_observer_bootstrap_1942.py"
+      ],
+      "contract": "Single-file/file-spec/staged-worker deployment needs a separately proved owner-presence contract. Recipe matches grant no package import or roster expansion. In particular io_spans.ReadRateReporter._emit has an existing spaced strict match, but its file-spec deployment eligibility must be resolved by deployment owner, not by adding package import."
+    },
+    {
+      "kind": "deprecated-gguf",
+      "witness": "AGENTS.md and CLAUDE.md: GGUF deprecated as of 2026-10-17",
+      "contract": "Retain deprecated GGUF implementation, no refactoring/fixes/enhancements or owner dispatch here."
+    },
+    {
+      "kind": "serializer-memo",
+      "witnesses": [
+        "prismaquant/joint_quanta_join.py shared probe identity and HIGHEST_PROTOCOL publication",
+        "prismaquant/tessera_census_union.py::manifest_chunks and publish paths"
+      ],
+      "contract": "Canonical pickle is not compatible with ordinary pickle memo sharing, protocol, streamed partitioning or identity-keyed leaf JSON memoization. Only leaf encoding options may route; traversal/ordering/caches remain consumer owned."
+    }
+  ],
+  "audit_boundaries": {
+    "primary_registry": "Frozen provenance used for demonstrated requirements; not a compatibility oracle, not refreshed here.",
+    "supplemental_json": "Grouped original dump/dumps/JSONEncoder option requirements outside owners; no ratchet enlargement. This option inventory is not a current source-pinned census.",
+    "validators": "Digest-format validators and refusal policy remain caller owned; no new validator consolidation.",
+    "incremental_algorithms": "Read-only source inspection found LE/mixed transcripts, serializer sink interleaving and memoized JSON traversals. Named tensor owners and ordered chunk stream cover demonstrated eligible acquisition/feed gaps; no constructor factory or arbitrary serializer callback API added.",
+    "aliases_dynamic_options": "Frozen AST call registry resolves known imports only. Runtime rebinding, callable custom encoders/kwargs and dynamic options outside it are not proven exhaustive. Custom lm_eval default uses existing JsonProfile callable field; dependency remains caller supplied.",
+    "generated_code": "Not enumerated exhaustively by owner work; source-generating templates require separate consumer/deployment audit, no generated fixture corpus added.",
+    "shell_deployment": "Shell/deployment digest populations not enumerated exhaustively here, no shell, roster, pin or qualification source changed."
+  },
+  "completed_calls": [],
+  "completion_note": "No research-base consumer call replaced in this piece. Owner compatibility fixtures enable O3 but are not per-consumer completion evidence. Consumer pieces must provide ledger fragments and actual publication/read/refusal tests; immutable parent acceptance tests cannot be cited as compatibility nodes.",
+  "integration_dependencies": [
+    {
+      "task": "Migrate three bounded tensor consumers after owner settlement, retaining independent full consumer tests; then rerun unchanged duplication ratchet.",
+      "files": [
+        "prismaquant/stage_a_chain_seed.py",
+        "prismaquant/production_weight_cache.py"
+      ],
+      "observed": "Staged owner source necessarily duplicates original implementations until consumer delegation: four new near-duplicate pairs and tensor_payload_sha256 same-name group."
+    },
+    {
+      "task": "Serial integration updates existing profile-count assertion from 11 to35 with uniqueness coverage; owner slice cannot edit this test.",
+      "files": [
+        "tests/test_digest_profiles_1301.py"
+      ],
+      "observed": "test_profile_names_are_unique fails only hard-coded count; no existing profile removed."
+    },
+    {
+      "task": "Serial current-tree revalidation of existing #2637 owner source identities without changing six protected retained contracts or historical records.",
+      "files": [
+        "tests/test_guarded_read_digest_retention_2637.py"
+      ],
+      "observed": "36 #2637 cases stop on stale owner source blob identity after owner extensions."
+    }
+  ],
+  "verification": {
+    "combined_command": "python -m pytest tests/test_digest_1301/owner-recipes tests/test_digest_profiles_1301.py tests/test_digest_profiles_1301_files.py tests/test_guarded_read_digest_retention_2637.py tests/test_stdlib_tools_no_package_1605.py tests/test_duplication_baseline.py -q --basetemp=\"$TMPDIR/pytest\"",
+    "combined_observed": "1620 passed,39 failed,16 warnings. Failures: one existing hard-coded profile count,36 source-pin checks requiring serial revalidation,two duplication checks requiring consumer delegation. No assertion weakened here.",
+    "test_evidence": [
+      "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"065add26eff617d6b187a804747e3e503b2b0e53a0d6ee06f7b0b5d15502f4dd\",\"size\":122160}},\"operation\":\"50cd39f611cb37bc627b233aa1157bcabc0c430fe601c7621889ac2470f560f0\",\"receipt\":\"c670477a843c585538c84d824c6ee8cccc0bbe9e1f215822b932e4eedd314495\"}]",
+      "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"52c54f2cc51f58a59a41d731fa516c9b799c8a4626be486d1c4cf10ecf2dffbd\",\"size\":3767}},\"operation\":\"3591d53e240f103ee62d1d9486f7699c320a7d2d4c3794ec44355a80b0e13501\",\"receipt\":\"a08fb8781b968fae029a151bda7b1af17eb3730701c5fe90c69d36307a836768\"}]",
+      "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"21acb2130ae01c419f6a991e37648385888b6d56478da45154276931f8061a9c\",\"size\":3281}},\"operation\":\"9983948f0feeadadfcd13280612df1cab9385a121bc15b82285831b879bc4766\",\"receipt\":\"834e430c7bc9b82aa49c9c8e0268f4af7ddbc7ff4eda120181c001a5ba75d5a4\"}]"
+    ],
+    "targeted_command": "python -m pytest tests/test_digest_1301/owner-recipes tests/test_tensor_digests_1384.py tests/test_digest_profiles_1301.py tests/test_digest_profiles_1301_files.py tests/test_stdlib_tools_no_package_1605.py -q -k 'not test_profile_names_are_unique' --basetemp=\"$TMPDIR/pytest\"",
+    "targeted_observed": "1612 passed,6 skipped,1 deselected,16 warnings. Only the known hardcoded profile-count assertion was deselected; six existing CUDA tensor checks skipped on CPU. This is not a full O5 pass.",
+    "independent_review": "Read-only review inspected owner diff, fixture independence, callback/dump semantics and original bounded tensor recipes: no actionable owner defect. Custom callback cases were then added durably. No GPU memory, consumer migration or parent-closure claim. Historical source audit automation on test arms is unavailable by design; committed independent snippets require no Git history at runtime.",
+    "static_diff": "git diff --check passed; final diff inspected. Only assigned owners, agreement and owner-recipes tests/fixtures changed.",
+    "final_command": "python -m pytest tests/test_digest_1301/owner-recipes -q --basetemp=\"$TMPDIR/pytest\" (followed by stdlib AST/source-identity and agreement-node validation in the same run)",
+    "final_observed": "1465 passed,2 warnings; no skips or deselections. Agreement source identities,35 profiles and22 AST-resolvable repository test nodes verified. No consumer or GPU qualification claimed."
+  }
+}
