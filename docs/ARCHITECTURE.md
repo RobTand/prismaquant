@@ -18935,6 +18935,44 @@ marginal pricing without a paired baseline and default `z=0` prices stay
 unchanged. CPU fixtures in `tests/test_paired_rate_trade.py` qualify this source
 policy, not corrected model prices, held-out KL, GPU execution or #2281.
 
+Routed-depth price-policy boundary (#2535 / #2774): the shared
+`CostPricingPolicy` consumes `prismaquant.routed_depth_profile.v1` records for
+the explicit `joint_t8_routed` / `all_rates` scope. Under
+`band_loss_multiplier.v1`, complete per-band loss multipliers apply to
+already-normalized per-probe losses and paired deltas without changing raw
+source rows or repeating Fisher/activation normalization. Paired covariance
+and expert-dominance statistics use those scaled contributions, not a
+post-hoc multiplier on marginal UCB. Stock, uniform-rate and unrelated
+unscoped inputs retain legacy prices and metadata.
+
+No authentic complete numeric interim-flat authorization was located in the
+bounded local docs/ref inspection. A missing profile, `flat`, or `interim_flat`
+therefore halts affected allocation, even in research; synthetic fixtures and
+hashes cannot provide the missing decision. Receipt-bound
+`research_calibrated` profiles remain unvalidated. `qualified` price admission
+requires matching passing measured-arm-agreement and independent held-out-arm
+receipts bound to the source table, band roster, parameters and numerical
+contract. `routed_depth_pricing` metadata carries state, validation status and
+receipt links. This checks recorded intake consistency, not receipt
+authenticity, actual arm/sample independence, measurement authority or an
+artifact's release. `validated=true` is the receipt-state result, not an
+end-to-end safety certificate. Consumers enforce immutable per-coordinate
+measurement digests and reject replacement rows, including independently
+valid ones. Complete scientific joint point prices receive the transform
+without changing their existing hedge semantics; unrelated fixed currencies
+do not. Finite effective contributions, prices and paired uncertainty are
+checked at consumption, since finite parameters alone are insufficient.
+Admission is a no-op for absent or
+nonmatching scope; it does not independently verify the selected allocation
+mode or an authorized model population. The roster is source-table
+`.experts.` keys, not a model-manifest completeness check. Independent
+additivity/held-out quality, measured
+runtime/resource, fused-sibling, expert-dominance, export, pinned runtime/cell,
+and serving release gates remain in force. No actual numeric authorization,
+GPU qualification, default-menu or serving-pin change is established here.
+See [the depth-policy contract](design/joint_aura_runtime_allocation.md#receipt-bound-routed-depth-prices-2535--2774)
+for the local-inspection limits and admission states.
+
 Re-stamped 2026-10-08 (#2288): menu pruning on expert dominance applies only
 when the priced decision group covers its complete routed layer. A
 subgroup-scoped verdict stays in provenance and reprices the option without

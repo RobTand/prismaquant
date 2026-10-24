@@ -20,6 +20,75 @@ from .activation_fair_pricing import (APPLIED_MARKER_KEY, ActivationFairPricing,
 class CostPricingPolicy:
     ucb_z: float
     fisher_output_mse: bool
+    _depth_profile: dict | None = None
+    _depth_multipliers: tuple[tuple[str, float], ...] = ()
+    _depth_rows: tuple = ()
+
+    @property
+    def depth_profile(self) -> dict | None:
+        """Owned provenance view; callers cannot widen the admitted policy."""
+        from copy import deepcopy
+        return deepcopy(self._depth_profile)
+
+    @classmethod
+    def from_depth_profile(cls, payload, *, profile_record, production,
+                           ucb_z=0.0, fisher_output_mse=False):
+        from .routed_depth_profile import admit_depth_profile
+        if type(production) is not bool:
+            raise ValueError("depth profile production purpose must be boolean")
+        if isinstance(ucb_z, bool) or not math.isfinite(float(ucb_z)) or float(ucb_z) < 0:
+            raise ValueError("depth profile UCB z must be finite and nonnegative")
+        metadata, multipliers = admit_depth_profile(payload, profile_record,
+                                                    production=production)
+        # Store immutable encodings of every admitted field, not aliases to
+        # caller-owned arrays. Derived consumer annotations may be added later.
+        rows = tuple((name, fmt, tuple((key, joint_aura_rows.joint_identity_sha256(value))
+                                      for key, value in row.items()))
+                     for name, _ in multipliers
+                     for fmt, row in payload["costs"][name].items())
+        return cls(float(ucb_z), fisher_output_mse, metadata, multipliers, rows)
+
+    def loss_multiplier(self, row: dict) -> float:
+        """Scale already-normalized loss samples, never signed projections.
+
+        Paired readers apply this to each cell's 0.5*x2 samples BEFORE
+        differencing/summing and computing their covariance-aware stderr.
+        """
+        if self._depth_profile is None:
+            return 1.0
+        operator = row.get("joint_operator_identity")
+        if operator is None:
+            return 1.0  # unrelated non-joint and exact passthrough controls
+        if not joint_aura_rows.validate_joint_aura_entry(row):
+            raise ValueError("depth profile requires joint AURA rows")
+        name = operator["qname"]
+        for member, factor in self._depth_multipliers:
+            if member == name:
+                fields = next((fields for unit, fmt, fields in self._depth_rows
+                               if unit == name and fmt == operator["format"]), None)
+                scientific_optional = {"quality_scope", "canonical_quality", "canonical_members",
+                                       "canonical_anchors"}
+                if (fields is not None and
+                        (scientific_optional & row.keys()) - dict(fields).keys()):
+                    raise ValueError("depth profile scientific quantity differs from admitted source")
+                if fields is None or any(key not in row or
+                        joint_aura_rows.joint_identity_sha256(row[key]) != fingerprint
+                        for key, fingerprint in fields):
+                    raise ValueError("depth profile measurement differs from admitted source")
+                # Check contributions too: cancellation must not hide overflow.
+                for value in row["x2_per_probe"]:
+                    self.transform_loss(0.5 * value, factor)
+                return factor
+        if ".experts." in name:
+            raise ValueError("depth profile row is outside admitted band roster")
+        return 1.0
+
+    @staticmethod
+    def transform_loss(value: float, factor: float) -> float:
+        effective = value * factor
+        if not math.isfinite(effective):
+            raise ValueError("depth profile effective loss must be finite")
+        return effective
 
     @classmethod
     def from_environment(cls):
@@ -97,6 +166,9 @@ def _price_basis(stats_entry: dict, cost_entry: dict, format_name: str | None,
 def _basis_dloss(basis: _PriceBasis, stats_entry: dict, cost_entry: dict, *,
                  gain: float, format_name: str | None, policy: CostPricingPolicy) -> float:
     if isinstance(basis, _FixedPrice):
+        if (policy._depth_profile is not None and
+                joint_aura_rows.cost_entry_is_joint_aura(cost_entry)):
+            return policy.transform_loss(basis.value, policy.loss_multiplier(cost_entry))
         return basis.value
     if isinstance(basis, _JointPrice):
         if float(gain) != 1.0 or cost_entry.get(APPLIED_MARKER_KEY) is True:
@@ -104,7 +176,9 @@ def _basis_dloss(basis: _PriceBasis, stats_entry: dict, cost_entry: dict, *,
         if (format_name is not None and
                 cost_entry["joint_operator_identity"]["format"] != format_name):
             raise ValueError("joint AURA row cannot price a different format")
-        return cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy)
+        return policy.transform_loss(
+            cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=1.0, policy=policy),
+            policy.loss_multiplier(cost_entry))
     if isinstance(basis, _OutputPrice):
         return cost_entry_measured_activation_dloss(stats_entry, cost_entry, gain=gain, policy=policy)
     base = cost_entry_weight_only_dloss(stats_entry, cost_entry, gain=gain, policy=policy)

@@ -926,6 +926,7 @@ def calibrate_activation_fair_pricing(
 def price_paired_rate_trade(
     costs: Mapping, assignment: Mapping[str, str], baseline_assignment: Mapping[str, str],
     *, profile, ucb_z: float,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> dict:
     """Price an explicit candidate-minus-baseline trade in the row's currency.
 
@@ -980,6 +981,40 @@ def price_paired_rate_trade(
         for expert, names in experts.items():
             groups[f"{layer}.{expert}"] = names
     result = paired_assignment_difference(candidate, baseline, attribution_groups=groups)
+    # Authenticate the original rows and cross-arm bindings above. A depth
+    # policy changes the already-normalized quadratic loss, not the signed
+    # measurements or their Fisher normalization. Keep derived sample columns
+    # separate from the immutable receipt-bound rows and pair them BEFORE
+    # taking moments, so covariance and expert attribution use the same price.
+    factors = ({name: (pricing_policy.loss_multiplier(candidate[name]),
+                       pricing_policy.loss_multiplier(baseline[name]))
+                for name in candidate} if pricing_policy is not None else {})
+    if any(left != 1.0 or right != 1.0 for left, right in factors.values()):
+        from .joint_aura import _paired_probe_values, _probe_moments
+
+        def priced_samples(names):
+            pairs = [tuple({"x2_per_probe": [pricing_policy.transform_loss(value, factor)
+                                             for value in row["x2_per_probe"]],
+                            "probe_ids": row["probe_ids"]}
+                           for row, factor in zip((candidate[name], baseline[name]), factors[name]))
+                     for name in sorted(names)]
+            values = _paired_probe_values(pairs, "additive")
+            mean, stderr = _probe_moments(values)
+            # Use the empirical variance operation order of paired squared
+            # probes for ordinary finite values; retain the overflow-safe
+            # moments fallback for extreme samples.
+            try:
+                variance = math.fsum((value - mean) ** 2 for value in values) / (len(values) - 1)
+                if math.isfinite(variance):
+                    stderr = math.sqrt(variance / len(values))
+            except OverflowError:
+                pass
+            return {"difference_per_probe": values, "mean_difference": mean,
+                    "paired_standard_error": stderr}
+
+        result.update(priced_samples(candidate))
+        for group, names in groups.items():
+            result["group_differences"][group].update(priced_samples(names))
     routed = {}
     for layer, experts in sorted(layers.items()):
         layer_summary = result["group_differences"][layer]
@@ -1000,8 +1035,22 @@ def price_paired_rate_trade(
                          "dominant_experts": dominant, "refused": bool(dominant),
                          "refusal_reason": ("indeterminate_cancellation" if dominant and delta == 0
                                             else "expert_dominance" if dominant else None)}
-    base = sum(row["predicted_dloss"] for row in candidate.values())
+    base = sum(row["predicted_dloss"] * factors[name][0]
+               for name, row in candidate.items()) if factors else sum(
+                   row["predicted_dloss"] for row in candidate.values())
     hedge = ucb_z * result["paired_standard_error"]
+    if factors:
+        def require_finite_depth_trade(value):
+            if isinstance(value, Mapping):
+                for item in value.values():
+                    require_finite_depth_trade(item)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    require_finite_depth_trade(item)
+            elif isinstance(value, (int, float)) and not math.isfinite(value):
+                raise ValueError("depth profile effective paired loss must be finite")
+        require_finite_depth_trade((result, routed, base, hedge,
+                                    base + hedge, result["mean_difference"] + hedge))
     return {**result, "routed_layers": routed,
             "refused": any(layer["refused"] for layer in routed.values()),
             "ucb_z": ucb_z, "hedged_difference": result["mean_difference"] + hedge,
@@ -1143,6 +1192,7 @@ def _priced_trade_covers_complete_routed_layers(trade: Mapping, baseline_assignm
 def reprice_paired_candidates(
     stats: Mapping, costs: Mapping, candidates: Mapping, baseline_assignment: Mapping,
     *, profile, ucb_z: float, report: dict,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> dict:
     """Reprice expanded recipes before the final menu reduction, not per member.
 
@@ -1166,7 +1216,9 @@ def reprice_paired_candidates(
         report[name] = {}
         for candidate in menu:
             assignment = candidate.member_formats or {m: candidate.fmt for m in members}
-            trade = price_paired_rate_trade(costs, assignment, baseline, profile=profile, ucb_z=ucb_z)
+            trade = price_paired_rate_trade(
+                costs, assignment, baseline, profile=profile, ucb_z=ucb_z,
+                pricing_policy=pricing_policy)
             report[name][candidate.fmt] = summarize_paired_rate_trade(trade)
             # Subgroup verdicts reprice without pruning (#2288): only a group
             # covering its complete routed layer may drop an option here. The
@@ -1184,7 +1236,10 @@ def reprice_paired_candidates(
     return out
 
 
-def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
+def _super_item_ucb_hedge(
+    member_terms, ucb_z: float,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
+) -> tuple[float, float]:
     """Separate member hedges and retain a conservative group stderr bound.
 
     AURA rows share probe samples, so distinct members do not establish
@@ -1220,7 +1275,8 @@ def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
         if joint_aura_rows.cost_entry_is_joint_aura(cost_entry):
             # The family transfer never scaled the full-residual member, so
             # it must not scale the hedge removed from that member either.
-            gain = 1.0
+            gain = (pricing_policy.loss_multiplier(cost_entry)
+                    if pricing_policy is not None else 1.0)
         # Mirror cost_entry_predicted_dloss: the stderr hedge is only applied
         # on the explicit predicted_dloss branch. This must track the PRICING
         # predicate, not the provenance one — a band-interpolated member priced
@@ -2326,6 +2382,7 @@ def tessera_group_composites(
     costs: Mapping | None = None,
     baseline_assignment: Mapping[str, str] | None = None,
     profile=None,
+    pricing_policy: priced_cell.CostPricingPolicy | None = None,
 ) -> list["Candidate"]:
     """The group's exact knapsack, over the fields the CONTRACT frees (#132).
 
@@ -2515,7 +2572,7 @@ def tessera_group_composites(
                     raise ValueError(f"mixed-rate baseline_assignment missing members: {missing}")
                 trade = price_paired_rate_trade(
                     costs, member_formats, {m: baseline_assignment[m] for m in members},
-                    profile=profile, ucb_z=float(ucb_z))
+                    profile=profile, ucb_z=float(ucb_z), pricing_policy=pricing_policy)
                 total_cost = trade["predicted_dloss"]
                 if report is not None:
                     report.setdefault("__paired_trades__", {})[
@@ -2714,7 +2771,7 @@ def aggregate_fused_siblings(
             # conservative stderr bound so grouped-table consumers preserve
             # the uncertainty price. Shared probes do not justify quadrature.
             hedge_linear, stderr_agg = _super_item_ucb_hedge(
-                member_terms, ucb_z)
+                member_terms, ucb_z, pricing_policy)
             base_pred = sum_pred - hedge_linear
             effective_mse = base_pred / (0.5 * sum_h) if sum_h > 0 else 0.0
             super_cost[spec.name] = {
@@ -2833,7 +2890,8 @@ def aggregate_fused_siblings(
                     raise ValueError(f"paired baseline_assignment missing members of {super_name}: {missing}")
                 trade = price_paired_rate_trade(
                     costs, {m: spec.name for m in members},
-                    {m: baseline_assignment[m] for m in members}, profile=profile, ucb_z=ucb_z)
+                    {m: baseline_assignment[m] for m in members}, profile=profile, ucb_z=ucb_z,
+                    pricing_policy=pricing_policy)
                 predicted = trade["predicted_dloss"]
                 entry.update(predicted_dloss=trade["candidate_point_cost"],
                              predicted_dloss_stderr=trade["paired_standard_error"],
@@ -2903,7 +2961,8 @@ def aggregate_fused_siblings(
                 members, candidates, n_params, licence=fused_licence,
                 ucb_z=ucb_z, report=group_report,
                 preserve_runtime_frontier=preserve_runtime_frontier,
-                costs=costs, baseline_assignment=baseline_assignment, profile=profile)
+                costs=costs, baseline_assignment=baseline_assignment, profile=profile,
+                pricing_policy=pricing_policy)
             if fold_enabled and columns_reason is None else []
         )
         if columns_reason is not None:
@@ -3345,7 +3404,7 @@ def aggregate_packed_serving_groups(
                     * act_penalty,
                 ))
             hedge_linear, stderr_agg = _super_item_ucb_hedge(
-                member_terms, ucb_z)
+                member_terms, ucb_z, pricing_policy)
             base_pred = sum_pred - hedge_linear
             hedged_pred = base_pred + ucb_z * stderr_agg
             memory_by_fmt[spec.name] = total_bytes

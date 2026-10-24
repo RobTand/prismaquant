@@ -44,7 +44,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from .priced_cell import CostPricingPolicy
 
 # ``SOURCE_IDENTITY_KEYS`` is the key set ``tessera.serving_parts.source_identity``
 # publishes; it, the error and the record check are lane-neutral (PQ #1555).
@@ -756,7 +759,9 @@ def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
 
 def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
                                 assignment: Mapping[str, str], *, byte_budget: int,
-                                reserve_bytes: int = 0) -> tuple[dict[str, str], dict]:
+                                reserve_bytes: int = 0,
+                                pricing_policy: CostPricingPolicy | None = None,
+                                ) -> tuple[dict[str, str], dict]:
     """Spend a hard serialized-byte budget at per-unit routed granularity.
 
     This is the allocator the D36 ruling asked for (PrismaQuant #2319): the
@@ -816,6 +821,12 @@ def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
         spec, rung = parsed
         return (spec.base + ("" if spec.arity == 1 else f"x{spec.arity}"), int(rung))
 
+    def policy_price(row, *, unit, fmt):
+        dloss, wire = _priced_row(row, unit=unit, fmt=fmt)
+        if pricing_policy is not None:
+            dloss = pricing_policy.transform_loss(dloss, pricing_policy.loss_multiplier(row))
+        return dloss, wire
+
     current: dict[str, tuple[float, int]] = {}
     for unit, fmt in assignment.items():
         rows = costs.get(unit)
@@ -828,7 +839,7 @@ def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
         shape = _grid_rung(fmt)
         if shape is None:
             continue  # a non-Tessera baseline has no wire rows to climb
-        current[unit] = _priced_row(baseline, unit=unit, fmt=fmt)
+        current[unit] = policy_price(baseline, unit=unit, fmt=fmt)
 
     current_fmt = {unit: assignment[unit] for unit in current}
     spent = 0
@@ -856,7 +867,7 @@ def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
                         "upgrade allocator prices exact campaign rows only")
                 if "predicted_dloss" not in row or "wire_bytes" not in row:
                     continue  # an aggregated/sampled cell is not an exact price
-                dloss, wire = _priced_row(row, unit=unit, fmt=fmt)
+                dloss, wire = policy_price(row, unit=unit, fmt=fmt)
                 delta = wire - base_wire
                 if delta <= 0:
                     continue  # only upgrades spend the headroom

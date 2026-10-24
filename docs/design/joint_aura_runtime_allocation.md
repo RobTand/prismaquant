@@ -140,6 +140,128 @@ z-score is descriptive and assumes independent probe and sequence errors;
 this helper does not certify the supplied held-out dataset or estimate
 generalization from probe variance.
 
+## Receipt-bound routed-depth prices (#2535 / #2774)
+
+This is a scoped extension of the shared `CostPricingPolicy` pricing path,
+not a second allocator, a fit, or a qualification run. The affected intake is
+explicit cost provenance `depth_price_scope` with lane `joint_t8_routed`,
+allocation `all_rates`, and a nonempty model identity. Stock, uniform-rate,
+and unrelated unscoped inputs retain legacy prices and metadata; the policy
+must not infer model identity or depth bands from deployment paths.
+
+This is an explicit-provenance boundary, not detection of every affected run.
+`admit_depth_profile` returns a no-op when `depth_price_scope` is absent or
+its lane/allocation differs, even if a profile was supplied. The allocator
+calls admission before source preparation and assignment publication, but
+that ordering does not independently check that the declared scope matches
+the selected lane or all-rates mode. Omitting or relabeling provenance can
+therefore avoid this guard. Within matching scope, the complete roster means
+all source-table keys containing `.experts.`, not an independently authorized
+model population. An omitted expert is not detected against a model manifest.
+These are unresolved scope/trust-boundary concerns; no authorized model or
+member population is established here, and none should be invented to widen
+the guard.
+
+### Numeric decision boundary: flat remains halted
+
+No authentic, attributable, complete numeric decision authorizing the interim
+flat profile is present in the inspected local evidence. Consequently `flat`
+and `interim_flat` remain halted, including for research; a missing profile
+is not permission to proceed with flat prices on the affected scope. An
+`authorization` label, issue reference, digest, or synthetic test permit cannot
+supply the missing numeric values or establish their authority. Positive
+application of an actual interim profile remains decision-blocked. This
+change neither selects values nor declares CEO authorization or issue closure.
+
+The bounded local inspection covered documentation searches for #2535 and
+`interim_flat`, local ref names and relevant commit subjects, and the retained
+test-only delivery `d8b03b074cf9bc7889c2df871fb1cad174350c03`. That delivery
+contains tests, not a numeric authorization record. No qualifying decision
+was located. This is an absence in inspected local material, not proof that
+no decision exists elsewhere; uninspected remote issues or records remain
+uncertain. Do not convert that uncertainty into an invented default.
+
+### Research intake and numerical contract
+
+`prismaquant.routed_depth_profile.v1` records scope, explicit complete routed
+member bands, per-band parameters, and a measurement receipt. Its supported
+`band_loss_multiplier.v1` contract applies each positive finite
+`loss_multiplier` to the band's already-normalized per-probe loss and to its
+candidate-minus-baseline loss contributions. Signed source projections still
+square before this loss scaling; source rows, samples and their digests stay
+unchanged. This is not a global scalar gain disguised as bands: incomplete,
+duplicate, foreign or scalar-only bands refuse.
+
+Receipt bindings include `source_table_sha256`, `band_roster_sha256`,
+`calibration_contract`, and `parameters_sha256`; scope, joint currency and
+compatible probe identities must also agree. The measurement receipt binds
+an arm identity and sample-roster digest and must record completion. A
+self-consistent hash does not make incompatible source semantics valid. These
+are consistency checks, not receipt authentication: the reader does not
+verify a signature, a trusted issuer, actual measurement completion, or the
+scientific authority of a measurement. Distinct arm IDs and roster digests
+check recorded inequality, not actual disjoint samples or independent runs.
+
+### Consumption requirements and current implementation limits
+
+Intake binding is not sufficient to bind later consumption. A policy must
+recognize the admitted scientific row (including its measurement identity),
+not just its qname/format, and reject replacement measurements when used by
+cell pricing, paired pricing, or routed-unit selection. A complete scientific
+joint-AURA fixed price must receive the band transform exactly once without
+changing its existing hedge semantics; a different fixed-price currency such
+as served KL must not inherit that transform. Bindings and parameters must
+remain owned snapshots rather than mutable intake aliases.
+
+The policy retains copied profile metadata, immutable member/factor pairs and
+immutable per-coordinate field digests. Consumers compare every admitted field,
+including arrays and scientific scope, before applying the factor; adding a
+new complete scientific quantity also refuses. Harmless derived consumer
+annotations do not replace the admitted measurements. Complete scientific
+joint prices retain their existing point-price/hedge semantics and receive
+one band transform; unrelated fixed-price currencies retain their prices.
+The protected consumption regressions exercise replacement rows, caller
+mutation and complete scientific prices.
+
+Positive finite parameters and valid finite raw measurements also do not
+imply finite effective losses: multiplication can overflow, as can later
+paired aggregation and uncertainty calculations. Consumers must reject
+nonfinite transformed losses, paired samples, covariance/uncertainty and
+final solver/selector prices before ranking or allocation. The current
+consumers check transformed per-probe contributions, effective cell/selector
+prices and paired summary/uncertainty results before use. Admission alone is
+not sufficient: `qualified` and `validated=true` describe receipt admission,
+not a substitute for consumption checks or scientific success.
+
+`research_calibrated` admits receipt-bound opt-in research prices only. They
+remain **unvalidated** (`validated=false`), not production-qualified. The
+policy must not renormalize Fisher, multiply h-trace, apply a second activation
+correction or token divisor, mutate raw rows, or scale a post-hoc marginal
+UCB instead of propagating band-scaled paired samples. Recompute paired
+covariance, uncertainty and expert-dominance reports from those contributions;
+retain the explicit baseline and complete-roster rules above.
+
+### Qualified price admission is not artifact release
+
+`qualified` price admission requires both matching
+`measured_arm_agreement` and `held_out_arm` qualification receipts with
+`passed=true`. Each binds
+the same source table, band roster, contract and parameters plus its arm and
+sample roster. Both qualification arms and sample rosters must be independent
+of one another and of the measurement/fit arm and sample roster.
+Research receipts alone cannot become production admission by changing a
+state label. `routed_depth_pricing` metadata retains the profile state,
+validation status and receipt links for audit; synthetic CPU fixtures test
+that intake contract, not actual GPU-qualified prices or generalization.
+
+Even `qualified` / `validated=true` means price-policy admission only. It
+does not bypass the independent additivity/held-out quality screen, measured
+runtime and resource admission, fused-sibling and expert-dominance checks,
+export eligibility, pinned Tessera runtime and cell evidence, or eager/graph
+serving and downstream quality release gates. No default menu or runtime pin
+changes, new measured KL, full-model speed result, or release authorization
+follow from this documentation or receipt validation.
+
 ## Per-sequence/per-block signed attribution (descriptive, #1962)
 
 The cost row can carry an opt-in `sequence_attribution` sidecar: a
