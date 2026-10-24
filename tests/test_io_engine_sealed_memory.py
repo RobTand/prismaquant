@@ -1,50 +1,29 @@
-"""Read-ahead bytes leave the row's committed memory when they are freed (PQ #1291).
+"""Real PWC read-ahead owns sealed mappings, not allocator-retained copies.
 
-The IO engine's depth is a live reading of the row's committed memory, and
-its reclaim frees read-ahead bytes so that a check can pass. Both work only if
-freeing a value actually lowers that reading. On the GB10 torch build
-(2.11+cu130, aarch64) a ``torch`` CPU tensor does not: ``libc10`` bundles
-mimalloc as the CPU allocator, and mimalloc keeps the pages it frees. The
-PrismaBuild probe of 2026-09-25 allocated 3.84 GB of ``torch.empty`` tensors
-and freed them all; 3.85 GB stayed in RssAnon, where the same bytes in a
-``bytearray`` went back. Stage B's first read-ahead row then evicted 1.95 GB
-of renders to pass a check, the guard's reading did not move, and the row was
-refused. So the engine never decodes a stream entry into a ``torch.empty``
-style allocation: it reads each file into a sealed memfd, and the PWC decoder
-maps the memfd (``torch.load(..., mmap=True)``), so freeing the tensor unmaps
-the only reference and the kernel frees the pages.
-
-This test runs the real path: real Torch archives the size of a Stage B
-render, the PWC's own stream entries, and the committed-memory reading the
-capture guard admits against (``memory_management.committed_cgroup_bytes``),
-read from this process's own cgroup. It checks both ways bytes are freed: a
-reclaim of entries read ahead, and a consumer that takes a group, drops it and
-releases it. Each drop must be the freed files' pages, to within the page
-rounding each memfd carries, and it must come out of ``shmem``, where the
-memfd pages live, and not out of ``anon``: the committed reading counts
-``shmem`` as it counts ``anon``, so the depth and the reclaim see these bytes.
-A take alone frees nothing, which is why the stream charges a taken group to
-its budget until the consumer releases it. It must run where it can read its
-cgroup; a missing cgroup fails it rather than skipping it, because a skipped
-probe certifies nothing. It must also be the only test process in that cgroup
-(``own_cgroup``): beside other pytest-xdist workers it skips, since their
-allocations land in the same reading.
+PQ #1291 needs disposal of the backing objects, not just zero byte counters.
+Observe this process's uniquely labelled memfds: reclaim unmaps only the
+farthest entries, take transfers ownership, and consumer drop unmaps them.
+No observer retains tensors or storages. This proves mapping lifetime, not an
+exact physical-memory delta in a cgroup shared with unrelated processes.
+Fixture-based committed-memory semantics live in test_committed_memory_1157.py.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+import hashlib
+import itertools
+import os
+from pathlib import Path
+import threading
+
 import pytest
+import torch
 
 from prismaquant import io_engine
+from prismaquant.production_weight_cache import ProductionWeightCache
 
-from cgroup_readings import READING_GRAIN, own_cgroup as _own_cgroup
-from cgroup_readings import committed as _committed, pages as _pages
-from cgroup_readings import quiet as _quiet, renders
-
-pytestmark = pytest.mark.own_cgroup
-
-# A Stage B render file: 16 MiB of storage, as the GLM layer's renders are.
-RENDER_SHAPE = (2048, 4096)
-PER_GROUP = 8
+RENDER_SHAPE = (128, 128)
+PER_GROUP = 2
 
 
 @pytest.fixture(autouse=True)
@@ -53,62 +32,107 @@ def _no_residency_map(monkeypatch):
 
 
 def test_freed_read_ahead_leaves_the_committed_reading(tmp_path):
-    scope = _own_cgroup()
-    procs = (scope / "cgroup.procs").read_text().split()
-    cache, keys, each = renders(tmp_path, 2 * PER_GROUP, RENDER_SHAPE)
+    paths = {}
+    for index in range(2 * PER_GROUP):
+        key = (f"model.layers.0.unit{index:02d}", "NVFP4")
+        paths[key] = tmp_path / f"unit{index:02d}.pt"
+        torch.save(torch.full(RENDER_SHAPE, float(index), dtype=torch.bfloat16), paths[key])
+    cache = ProductionWeightCache(
+        weights={key: str(path) for key, path in paths.items()}, levers={})
+    keys = list(paths)
+    each = paths[keys[0]].stat().st_size
+    assert all(path.stat().st_size == each for path in paths.values())
+    cache.enable_lru(len(keys) * each)
     entries = [entry for group in range(2)
                for entry in cache.retained_read_entries(
                    keys[group * PER_GROUP:(group + 1) * PER_GROUP], group=group)]
+
+    # Labels are never recycled during this test. No inode, fd number or
+    # virtual address is treated as backing-object identity.
+    prefix = "pq-test-" + hashlib.sha256(os.fsencode(tmp_path)).hexdigest()[:24] + "-"
+    labels = itertools.count()
+    decoded = {}
+    label_lock = threading.Lock()
+
+    def owned_mappings():
+        return [line.split(maxsplit=5)[5] for line in
+                Path("/proc/self/maps").read_text().splitlines()
+                if f"/memfd:{prefix}" in line]
+
+    def owned_descriptors():
+        targets = []
+        for fd in Path("/proc/self/fd").iterdir():
+            try:
+                target = os.readlink(fd)
+            except FileNotFoundError:  # the directory iterator's own fd
+                continue
+            if target.startswith(f"/memfd:{prefix}"):
+                targets.append(target)
+        return targets
+
+    create = io_engine._create_memfd
+
+    def labelled_memfd(name, flags):
+        with label_lock:
+            label = prefix + str(next(labels))
+        return create(label, flags)
+
+    def observe_decoder(index, decode):
+        def observed(raw, receipt, staged):
+            assert isinstance(raw, io_engine.SealedBuffer)
+            with open(raw.path, "rb") as handle:
+                assert io_engine.kernel_seal_bits(handle.fileno()) & 0xF == 0xF
+            label = os.readlink(raw.path)
+            value = decode(raw, receipt, staged)  # the real PWC/Torch mmap path
+            with label_lock:
+                decoded[index] = label  # strings only; never retain the value
+            return value
+        return observed
+
+    entries = [replace(entry, decoder=observe_decoder(i, entry.decoder))
+               for i, entry in enumerate(entries)]
     budget = io_engine.FixedBudget(buffer_bytes=PER_GROUP * each, headroom=1 << 40)
+    assert owned_mappings() == []
+    assert owned_descriptors() == []
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(io_engine, "_create_memfd", labelled_memfd)
+        with io_engine.read_stream(entries, budget=budget) as stream:
+            with stream._cond:
+                assert stream._cond.wait_for(
+                    lambda: not stream._active and not stream._gating, timeout=60
+                ), "reader never published completion"
+            with stream.paused():
+                assert stream.held_bytes() == len(entries) * each
+                assert stream.held_actual_bytes() == len(entries) * each
+                assert set(decoded) == set(range(len(entries)))
+                assert len(set(decoded.values())) == len(entries)
+                assert sorted(owned_mappings()) == sorted(decoded.values())
+                # The raw buffer descriptors have closed; only Torch mappings
+                # own the sealed files now, independently of byte accounting.
+                assert owned_descriptors() == []
+                dropped = PER_GROUP // 2
+                assert stream.reclaim(dropped * each) == dropped * each
+                remaining = [decoded[i] for i in range(len(entries) - dropped)]
+                assert sorted(owned_mappings()) == sorted(remaining)
+                assert stream.counters["evictions"] == dropped
+                assert stream.held_bytes() == (len(entries) - dropped) * each
+                assert stream.held_actual_bytes() == (len(entries) - dropped) * each
 
-    def check(label, before, after, dropped):
-        # Each memfd holds its file's pages; nothing else of the entry may
-        # stay behind, and nothing more than those pages may go, to within
-        # the grain of the reading.
-        low = dropped * each - READING_GRAIN
-        high = dropped * _pages(each) + READING_GRAIN
-        assert dropped == 0 or low > 0, "the reading's grain hides the freed pages"
-        for measure in ("committed", "anon_shmem", "shmem"):
-            drop = before[measure] - after[measure]
-            assert low <= drop <= high, (
-                f"{label}: {measure} dropped {drop} bytes; freeing {dropped} "
-                f"entries of {each} bytes must drop between {low} and {high} "
-                f"(cgroup {scope}, {len(procs)} processes; before {before}, after {after})")
-        # The pages were shared memory, not anonymous memory the allocator
-        # could keep: anon does not move beyond the reading's grain.
-        moved = before["anon"] - after["anon"]
-        assert abs(moved) <= READING_GRAIN, (
-            f"{label}: anon moved {moved} bytes; the freed pages must be shmem "
-            f"(before {before}, after {after})")
-
-    with io_engine.read_stream(entries, budget=budget) as stream:
-        held = _quiet(stream)
-        # Each reading is taken with the stream paused, so no read of its own
-        # lands between the two readings.
-        with stream.paused():
-            # A reclaim of the farthest entries read ahead.
-            before = _committed(scope)
-            freed = stream.reclaim(PER_GROUP // 2 * each)
-            after = _committed(scope)
-        assert freed == PER_GROUP // 2 * each
-        check("reclaim", before, after, PER_GROUP // 2)
-        _quiet(stream)
-        # A consumer takes a group: the take alone frees nothing, since the
-        # consumer holds the values it was handed.
-        with stream.paused():
-            before = _committed(scope)
-        delivered = stream.take(0)
-        with stream.paused():
-            after = _committed(scope)
-        check("take", before, after, 0)
-        # The consumer drops the group, and releases it.
-        assert [float(item.value[0, 0]) for item in delivered] == \
-            [float(index) for index in range(PER_GROUP)]
-        with stream.paused():
-            before = _committed(scope)
-            delivered = None
-            after = _committed(scope)
-        check("take, drop", before, after, PER_GROUP)
-        stream.release()
-    # Every render read ahead held its whole file's pages.
-    assert held == 2 * PER_GROUP * each
+                delivered = stream.take(0)
+                assert len(delivered) == PER_GROUP
+                assert sorted(owned_mappings()) == sorted(remaining)
+                assert all(torch.equal(item.value, torch.full(
+                    RENDER_SHAPE, float(index), dtype=torch.bfloat16))
+                    for index, item in enumerate(delivered))
+                assert stream.held_bytes() == (PER_GROUP - dropped) * each
+                assert stream.held_actual_bytes() == (PER_GROUP - dropped) * each
+                delivered = None
+                assert sorted(owned_mappings()) == sorted(
+                    decoded[i] for i in range(PER_GROUP, len(entries) - dropped))
+                stream.release()
+                # Keep read-ahead paused so reclaimed entries cannot be read
+                # again before closure proves disposal of the remaining group.
+                stream.close()
+                assert stream.held_bytes() == stream.held_actual_bytes() == 0
+        assert owned_mappings() == []
+        assert owned_descriptors() == []

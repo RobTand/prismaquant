@@ -1291,10 +1291,13 @@ class ReadStream:
                 self._cursor = min(self._cursor, index)
                 self.counters["ahead_failures"] += 1
                 self._group_state[group] = "deferred"
+            # Transfer ownership before completion becomes observable. A
+            # consumer may reclaim or take/drop as soon as this lock opens,
+            # even if this worker is descheduled immediately afterwards.
+            result = None
             release = self._drained(group)
             self._pump()
             self._cond.notify_all()
-        result = None
         if release:
             self._unpin_quietly(group)
 
