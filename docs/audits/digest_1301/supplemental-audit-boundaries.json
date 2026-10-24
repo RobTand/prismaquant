@@ -1,0 +1,55 @@
+{
+  "issue": "prismaquant#1301",
+  "reviewed_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "research_base": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "status": "blocked_before_final_serial_review",
+  "reason": "Only research acceptance files are integrated; current_1301 and its completion ledger are absent.",
+  "exhaustive_supplemental_coverage_claimed": false,
+  "ratchet_population_changed": false,
+  "observed_syntactic_population": {
+    "method": "Read-only AST enumeration using existing _files, three-value _iter_scoped_calls and _resolved_callee; individual calls counted independently of baseline scopes. Git blob identities computed from raw source bytes. No current census exists for identity comparison.",
+    "primary_calls": 378,
+    "primary_scopes_including_owners": 294,
+    "supplemental_json_calls": 300,
+    "gated_scopes": 277,
+    "baseline_scopes": 277,
+    "baseline_missing_scopes": 0,
+    "baseline_stale_scopes": 0,
+    "scope_set_matches_digest_sites": true,
+    "scanned": ["prismaquant", "tools"],
+    "owners": ["prismaquant/digests.py", "prismaquant/tensor_digests.py"],
+    "excluded_parts": ["vendored", "archive", "__pycache__", "serving_runtime_patches"],
+    "limitations": "Static imports are not data-flow resolution. Enumeration is not proof of classification, eligibility, recipe equivalence or supplemental exhaustiveness."
+  },
+  "inspected": [
+    "AGENTS.md and CLAUDE.md deprecation/support instructions",
+    "Git integration delta, clean initial worktree and unchanged production/scanner/baseline/historical census blobs relative to research base",
+    "Top-level census sections and refresh_2540 population sizes",
+    "Scanner populations, owner declarations, exclusions and traversal contract",
+    "Acceptance source and retained output for all four parent-completion failures",
+    "Focused CPU regression execution including all tests in test_guarded_read_digest_retention_2637.py, standalone imports, profiles and duplication baseline"
+  ],
+  "deferred_until_integrated_final_tree": [
+    {"population": "all live primary and supplemental calls", "required": "Per-call source identity, consumer classification, exact recipe and current retention witness review against current_1301"},
+    {"population": "completed research-base calls", "required": "Original-to-current correspondence, per-call ledger coverage, independent original fixture provenance and execution of every referenced consumer node"},
+    {"population": "io_spans.ReadRateReporter._emit", "required": "Inspect actual supported file-spec publication and deployment roster; neither historical disposition nor help-only launch is proof"},
+    {"population": "six authoritative #2637 guarded/scientific retentions", "required": "Inspect each current read/scientific witness; focused tests passed but manual per-retention audit has not been completed"},
+    {"population": "GGUF", "required": "Account for supported deprecation/retention under AGENTS.md without restarting refactoring"},
+    {"population": "protected source rosters and source-qualified kernels/tools", "required": "Check current deployment and qualification witnesses and preserved blobs, not generic unusual-recipe claims"},
+    {"population": "validators and incremental hash state/aliases", "required": "Inspect data-flow and validation contracts outside scanner syntax; not exhaustively enumerated here"},
+    {"population": "dynamic JSON options and generated Python", "required": "Inspect runtime options, generated source and serializer behavior beyond literal call enumeration"},
+    {"population": "non-registry tools, scripts and .github scripts/workflows", "required": "Independently inventory digest/encoding operations and establish actual shipping/support boundaries"},
+    {"population": "shell, Docker and deployment fragments", "required": "Inspect embedded Python, command-line digests and supported deployment rosters without changing them"},
+    {"population": "excluded archived, vendored and serving-runtime populations", "required": "Establish supported shipping scope and source-bound/reference reasons independently; exclusion is not irrelevance"}
+  ],
+  "outside_supported_shipping_scope_confirmed": [],
+  "shipping_scope_uncertainty": "No excluded population was certified outside supported shipping scope in this prerequisite-only check.",
+  "verification": {
+    "focused_cpu_operation": "6afe76aa31e18d7cd9ac55e8eb81da3999eed157e45d202c04a9251405defeba",
+    "focused_cpu_result": "4 failed, 202 passed, 14 warnings; exit 1",
+    "ledger_consumer_operation": "33500115578c730e4dadfd7625184d0dd1a089594243667207ac571259ddf298",
+    "ledger_consumer_result": "KeyError: current_1301 before consumer pytest execution; exit 1",
+    "evidence_lines": "See independent-final-review.md for full Test evidence receipts and initial command transcription error.",
+    "whole_suite_gpu_serving_numerical_performance_qualification": false
+  }
+}
