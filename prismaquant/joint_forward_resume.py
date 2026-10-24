@@ -11,7 +11,6 @@ capsule it resumed from. Every segment is re-verified against PB on load.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -19,7 +18,7 @@ import stat
 
 from .dev_mode import seal_check
 from .file_identity import file_stat_signature
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, file_sha256hex
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -60,13 +59,10 @@ def _read(path, expected=None):
             expected is None and before.st_size > PROOF_READ_MAX_BYTES):
         raise ForwardRecoveryRefused('recovery proof is not a bounded regular file')
     if expected is not None:
-        digest = hashlib.sha256()
-        with path.open('rb') as handle:
-            for chunk in iter(lambda: handle.read(1 << 20), b''):
-                digest.update(chunk)
+        digest = file_sha256hex(path, block_size=1 << 20)
         if file_stat_signature(path.lstat()) != file_stat_signature(before):
             raise ForwardRecoveryRefused('recovery proof changed during read')
-        if digest.hexdigest() != expected:
+        if digest != expected:
             raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     raw = path.read_bytes()
     if file_stat_signature(path.lstat()) != file_stat_signature(before):

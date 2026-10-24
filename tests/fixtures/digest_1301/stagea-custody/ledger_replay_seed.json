@@ -1,0 +1,159 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "scope": [
+    "prismaquant/joint_replay_frontier.py",
+    "prismaquant/joint_forward_resume.py",
+    "prismaquant/stage_a_chain_seed.py"
+  ],
+  "completed_calls": [
+    {
+      "original_id": "hashlib:prismaquant/joint_forward_resume.py::_read@63:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c23724f01823b67f0d71ca57280ec23325089624",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.file_sha256hex(path, block_size=1 << 20)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_pinned_and_unpinned",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_wrong_pin_before_loading",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_stat_fences",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_regular_and_declared_bounds"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/joint_replay_frontier.py::_framed@129:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.length_framed_bytes_sha256(frames, prefix=caller_domain)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_sealed_consumer",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_seed_package_free_prewarm_end_to_end_1301"
+      ],
+      "standalone_owner_route": "When __package__ is absent, importlib.util loads sibling digests.py under a path-derived private module name, as joint_prewarm_phases already does. Normal package loading uses .digests."
+    },
+    {
+      "original_id": "hashlib:prismaquant/joint_replay_frontier.py::roster_sha256@139:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.length_framed_bytes_sha256(frames, prefix=caller_domain)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_sealed_consumer",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_seed_package_free_prewarm_end_to_end_1301"
+      ],
+      "standalone_owner_route": "When __package__ is absent, importlib.util loads sibling digests.py under a path-derived private module name, as joint_prewarm_phases already does. Normal package loading uses .digests."
+    }
+  ],
+  "retentions": [
+    {
+      "original_id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.tensor_digests.tensor_host_bytes / tensor_hash_update / tensor_sha256 (not equivalent: whole-payload host materialization or additional framing)",
+      "reason": "BLOCKER: no exact bounded tensor owner route. tensor_host_bytes materializes the whole host payload and tensor_hash_update adds shape/dtype framing; the seed copies only max(1, chunk_bytes // element_size) elements at a time. Preserve per-chunk host copies, empty/scalar/noncontiguous behavior and payload-only digest. No new owner permitted.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_seed_tensor_bounded_original"
+      ],
+      "disposition": "retain-blocked"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_replay_frontier.py::_framed@131:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.digests.json_bytes(..., profile=DIRECT_UTF8_LAX) (not equivalent: sorted keys)",
+      "reason": "BLOCKER: no exact unsorted compact UTF-8 lax JSON byte route. Original json.dumps omits sort_keys and accepts nested mappings without sorting. Existing DIRECT_UTF8_LAX uses sort_keys=True; a typed string-only happy path is not proof of exact existing behavior. Keep JSON caller-local until an exact owner API exists.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes"
+      ],
+      "disposition": "retain-blocked"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_replay_frontier.py::roster_sha256@141:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.digests.json_bytes(..., profile=DIRECT_UTF8_LAX) (not equivalent: sorted keys)",
+      "reason": "BLOCKER: no exact unsorted compact UTF-8 lax JSON byte route. Original json.dumps omits sort_keys and accepts nested mappings without sorting. Existing DIRECT_UTF8_LAX uses sort_keys=True; a typed string-only happy path is not proof of exact existing behavior. Keep JSON caller-local until an exact owner API exists.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes"
+      ],
+      "disposition": "retain-blocked"
+    }
+  ],
+  "boundaries": [
+    "Ledger shard only; no owner, shared census, baseline, scanner, acceptance, or pin edits. Frozen registry was read, not changed.",
+    "Replay domains and ordered frames stay caller-owned, including 8-byte big-endian lengths. _framed stays 32 binary bytes via bytes.fromhex; roster/read-order stay 64 lowercase hex characters.",
+    "Recovery pre-hash block size stays 1 MiB. Existing lstat regular-file/size checks, stat identity fences, second-read hash, wrong-pin refusal before read_bytes, unpinned proof bound, and pinned declared-group bound are unchanged. Existing path reopening/descriptor lifetimes are retained; no TOCTOU redesign claimed.",
+    "Seed tensor function is unchanged. Keep detach/contiguous/flatten, dtype/shape-excluding bytes, bounded host chunks, max(1, ...) step and existing exceptions. GPU behavior not verified by CPU-only checks.",
+    "Independent selected functions and required dependencies were extracted with git show during development from research base, not copied from migrated owners. Executable tests load checked-in snippets and never invoke git.",
+    "This shard does not claim parent closure: three original calls remain blocked on missing exact routes. Shared inventory reconciliation belongs to its owner."
+  ],
+  "current_source_witnesses": {
+    "prismaquant/joint_replay_frontier.py": {
+      "sha256": "0918cc21326ee58e153ffb03f674a78311740a83f557d9c1f333f365a9195e3f",
+      "git_blob": "0056bc8fec92cfaa2a97e0e806d1d5f867530af5"
+    },
+    "prismaquant/joint_forward_resume.py": {
+      "sha256": "fab53f3c857c14a229821c3dcf2adfff1adc6bffcac94862ca549713bad4de18",
+      "git_blob": "137c1e229d46c1294d03d19681c7e46847fda47e"
+    },
+    "prismaquant/stage_a_chain_seed.py": {
+      "sha256": "f5dd1b54c93c88a1ec99c83c457b584d572de89bcb31a8f6a08b85e7eaa30097",
+      "git_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c"
+    },
+    "prismaquant/joint_prewarm_phases.py": {
+      "sha256": "ba9d862bf961d081d4df53acdb91be2f685860ac619864976ee2c433d64a4f28",
+      "git_blob": "62cb9818cffd32e054e1d5addb90daa3987ca85a"
+    },
+    "prismaquant/digests.py": {
+      "sha256": "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18",
+      "git_blob": "65c98d3bdeb16035ef4b104dc159e986e2279897"
+    },
+    "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py": {
+      "sha256": "2c89c04b1646aeabdd58a035973e2d9cc1073263b2d3c5f153fb31428675cd1e",
+      "git_blob": "50ebf040f7488a53904e47cc8ca0cb3ba919dfc1"
+    }
+  },
+  "integration_evidence": {
+    "command": "python -m pytest -q tests/test_digest_1301/stagea-custody/test_stagea_consumers.py tests/test_joint_replay_frontier_607.py tests/test_joint_forward_resume.py tests/test_glm_joint_data_manifest_at_submit.py tests/test_stdlib_tools_no_package_1605.py --basetemp=\"$TMPDIR/pytest\"",
+    "result": "102 passed, 14 warnings in 5.02s; exit 0. Warnings are torch.jit.script_method deprecations under Python 3.14.",
+    "regression": "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_seed_package_free_prewarm_end_to_end_1301",
+    "regression_scope": "Isolated python -I process from temporary cwd; forbids prismaquant and torch imports; loads real joint_prewarm_phases.py by path; hashes and reads a manifest, validates nonempty sealed replay frontier, and asserts starts/frontier/phases.",
+    "prior_failed_checks": [
+      "152166747c990e00a678a36939aa0b54115fd874731d1ee737561b3c2b7a5d7e: exit 4, no tests; incorrect test filename corrected.",
+      "7576cf8a326da1af2bf735784f6fa911988ef0aff363012634271ccb555c0b26: 1 failed, 101 passed; new test ROOT typo corrected.",
+      "46c5e02ef982df740ede83ff77c55851995c8f950177303046cc2f0a9ace34f0: 1 failed, 101 passed; new test expected phase spelling corrected."
+    ],
+    "evidence": "Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"05d6055fa1152caf5b78424b9e04ec74c7297daa004f7e4140698a30cf78512c\",\"size\":902}},\"operation\":\"c68cc4ba9343485eec121c81fa42c9aca23824c93128110c456857135f774a04\",\"receipt\":\"487fc89bce982e3df0154c66ad5659558ecf6567d7e1bf1ecbb1d9c3437518f6\"}"
+  },
+  "standalone_layout_inspection": {
+    "checkout_prewarm": "campaign_data_manifests.py source read-set includes digests.py, joint_prewarm_phases.py, and joint_replay_frontier.py. Existing checkout-local loading is supported without changing its roster.",
+    "independent_standalone_roster": "tests/test_stdlib_tools_no_package_1605.py::_copy_tool explicitly copies its own source roster without digests.py; it does not include replay/prewarm/resume. That layout and its existing local digest behavior are unchanged; no owner dependency or deployment roster was added. All tests in that file passed in the recorded run.",
+    "limit": "Does not claim replay can be copied alone without its checkout-local digests.py owner."
+  }
+}

@@ -1,0 +1,425 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "scope": "stagea-custody",
+  "status": "partial_missing_exact_owner_routes",
+  "completed_calls": [
+    {
+      "original_id": "hashlib:prismaquant/joint_prewarm_phases.py::load_prepare_read_set@61:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cd9d930bbcf4006bfcf53b5cc484f12f578c69a9",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_prewarm_phases.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_prewarm_standalone"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "current_node_id": "bytes_sha256hex:prismaquant/joint_prewarm_phases.py::load_prepare_read_set@81:7",
+      "current_expression": "bytes_sha256hex(blob)",
+      "current_source_blob": "62cb9818cffd32e054e1d5addb90daa3987ca85a"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_split.py::main@534:48",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5618f539e2615595a6b842594be494fedbad8eb1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_split.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.encoded",
+      "current_node_id": "DIRECT_ASCII_INDENT2_LAX.encoded:prismaquant/stage_a_chain_split.py::main@536:47",
+      "current_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(receipt)",
+      "current_source_blob": "5ff142fb96b14b2d5b9cc10bf482581918d096d9"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_split.py::main@536:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5618f539e2615595a6b842594be494fedbad8eb1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_split.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "current_node_id": "DIRECT_ASCII_SPACED_LAX.text:prismaquant/stage_a_chain_split.py::main@537:10",
+      "current_expression": "DIRECT_ASCII_SPACED_LAX.text(receipt)",
+      "current_source_blob": "5ff142fb96b14b2d5b9cc10bf482581918d096d9"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@621:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_retirement.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retirement_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "current_node_id": "DIRECT_ASCII_SPACED_LAX.text:prismaquant/stage_a_retirement.py::apply_retirement@621:14",
+      "current_expression": "DIRECT_ASCII_SPACED_LAX.text(report)",
+      "current_source_blob": "a1f13f61260158871bc2cf165f5f8076d08e882a"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ffecd485ef1d7d82d36c26260ef0ec1ad71894d2",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_resume.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_strict_publication_and_conflicts"
+      ],
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "current_node_id": "indent2_json_file_bytes:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:14",
+      "current_expression": "indent2_json_file_bytes(record)",
+      "current_source_blob": "9c8cc4a3407e81a8754f031cdb5d2cdebddd997e"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e31369f4fba6110070b19a994c0d3506980e765c",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "status": "completed",
+      "reason": "Exact existing named owner: sorted ASCII indent-2 strict JSON plus one LF, default separators, UTF-8 encoding. Atomic publication and streamed artifact policy remain consumer-owned.",
+      "current_source_witness": {
+        "file": "prismaquant/streamed_boundary_artifacts.py",
+        "sha256": "d34001e3bb6732de60b2819bdc3379d021dff3d462c26fb9cfc7897e026d381f",
+        "ast_node_id": "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+        "original_syntax_sha256": "d6c282d2a878f31999c61c87fbce40cd0fb5b0ab8aaca4cdc6a8a27fc9384558",
+        "current_call": "indent2_json_file_bytes(data)",
+        "current_ast_location": {
+          "line": 881,
+          "column": 12
+        },
+        "syntax_sha256": "3fc548ee7b267618d51e55fbe3da1ac7b1b7958a12fd605b1c392192b5f6734c"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_streamed_boundary_artifacts.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded policy identity and telemetry remain unnormalized",
+        "owner and retained debt envelopes",
+        "working_artifacts_reusable false",
+        "readonly and absent-directory no-op",
+        "strict NaN refusal preserves previous status",
+        "atomic writer file fsync then replace then directory fsync"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/joint_forward_resume.py::_read@63:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c23724f01823b67f0d71ca57280ec23325089624",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.file_sha256hex(path, block_size=1 << 20)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_pinned_and_unpinned",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_wrong_pin_before_loading",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_stat_fences",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_resume_regular_and_declared_bounds"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/joint_replay_frontier.py::_framed@129:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.length_framed_bytes_sha256(frames, prefix=caller_domain)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_sealed_consumer",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_seed_package_free_prewarm_end_to_end_1301"
+      ],
+      "standalone_owner_route": "When __package__ is absent, importlib.util loads sibling digests.py under a path-derived private module name, as joint_prewarm_phases already does. Normal package loading uses .digests."
+    },
+    {
+      "original_id": "hashlib:prismaquant/joint_replay_frontier.py::roster_sha256@139:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": "prismaquant.digests.length_framed_bytes_sha256(frames, prefix=caller_domain)",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_sealed_consumer",
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_seed_package_free_prewarm_end_to_end_1301"
+      ],
+      "standalone_owner_route": "When __package__ is absent, importlib.util loads sibling digests.py under a path-derived private module name, as joint_prewarm_phases already does. Normal package loading uses .digests."
+    }
+  ],
+  "blocked_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_failure_record_containment",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+      "current_expression": "json.dumps({\n                    \"schema\": \"prismaquant.stage_a.produced_output_failure.v1\",\n                    \"unix\": time.time(),\n                    \"error\": f\"{type(error).__name__}: {error}\"[:2000],\n                    **block}, sort_keys=True, default=repr, allow_nan=False)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "4d02fd07857affe4c8e2a062ada93023ca37f7b8cebf30ad8bee38e992abac65",
+      "required_route": "sorted ASCII spaced strict JSON with default=repr; preserve json.loads roundtrip when present"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_failure_record_containment",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+      "current_expression": "json.dumps(\n            report, sort_keys=True, default=repr, allow_nan=False)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "2904b8187e6bbb21a47551b8e713e99b202d3c742cfb399693cb7a490a93b3f0",
+      "required_route": "sorted ASCII spaced strict JSON with default=repr; preserve json.loads roundtrip when present"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_retirement.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retirement_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_strict_publication_and_conflicts",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+      "current_expression": "json.dumps(plan.record, sort_keys=True, indent=1, allow_nan=False)",
+      "current_source_blob": "a1f13f61260158871bc2cf165f5f8076d08e882a",
+      "syntax_sha256": "a2c35b6c01e9115309483c55f8b248cf87fd1ae660e54d3032eb3ddfe03842c7",
+      "required_route": "sorted ASCII strict indent=1 JSON with trailing newline"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3521:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::main@3521:18",
+      "current_expression": "json.dumps(report)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "49ba8a5e30aecb5f01b23e042c09c5210810c9e640e9fbef4fe08be6d706d910",
+      "required_route": "unsorted ASCII spaced lax JSON stdout text, insertion order preserved",
+      "boundary": "AST retention witness only; full joint_cost_stage_a CLI/GPU capture not executed."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3545:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::main@3545:10",
+      "current_expression": "json.dumps({key: result[key] for key in (\n        \"command\", \"passed\", \"stride\", \"checkpoints\", \"plane_comparison\",\n        \"split_receipt\") if key in result})",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "4189b2d0e3a160e88de94136c448abb421a9d200a8dfcfa252564c219bdb6a18",
+      "required_route": "unsorted ASCII spaced lax JSON stdout text, insertion order preserved",
+      "boundary": "AST retention witness only; full joint_cost_stage_a CLI/GPU capture not executed."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2457:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order ASCII indent-1 lax JSON owner without default=str. All existing JsonProfiles sort keys.",
+      "current_source_witness": {
+        "file": "prismaquant/campaign_data_manifests.py",
+        "sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+        "ast_node_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2457:15",
+        "syntax_sha256": "d8b72f3c5c93b167a75f63b88c0758b1e4f52ddb53b3794d9dddbd2f4b4200e7"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_campaign_data_manifests.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded annotations counts and bytes",
+        "produced_by provenance",
+        "out_rows original row keys and appended data_manifest",
+        "manifest LF and report SHA-256",
+        "row files replace before output rows replace"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2481:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order ASCII indent-1 lax JSON owner without default=str. All existing JsonProfiles sort keys.",
+      "current_source_witness": {
+        "file": "prismaquant/campaign_data_manifests.py",
+        "sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+        "ast_node_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2481:15",
+        "syntax_sha256": "252449759eac86bb42152b219f4a515ef6b5376aef6832482de6747902f0c2d8"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_campaign_data_manifests.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded annotations counts and bytes",
+        "produced_by provenance",
+        "out_rows original row keys and appended data_manifest",
+        "manifest LF and report SHA-256",
+        "row files replace before output rows replace"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_layer_quanta.py::seal_manifest_bytes@124:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d9fad1ddc5331094f447133221f4830119b7fddb",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order compact ASCII lax JSON owner. Existing JsonProfiles sort keys; gzip/LF envelope stays consumer-owned.",
+      "current_source_witness": {
+        "file": "prismaquant/joint_layer_quanta.py",
+        "sha256": "bd3cf50d2ab13b571b29a45d31769224c9d8944e6ba1b93b68196e3668374afd",
+        "ast_node_id": "supplemental-json:prismaquant/joint_layer_quanta.py::seal_manifest_bytes@124:18",
+        "syntax_sha256": "e8bfaa7f4f0f53e38d6bfa76ba4323b8d44ca0ec0bec7a0e591762458075a674"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_joint_layer_quanta.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "nested manifest mappings retain insertion order",
+        "NaN and negative zero retained",
+        "compact JSON LF inside deterministic mtime=0 gzip member",
+        "dict-only and chained canonical-data refusal"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.tensor_digests.tensor_host_bytes / tensor_hash_update / tensor_sha256 (not equivalent: whole-payload host materialization or additional framing)",
+      "reason": "BLOCKER: no exact bounded tensor owner route. tensor_host_bytes materializes the whole host payload and tensor_hash_update adds shape/dtype framing; the seed copies only max(1, chunk_bytes // element_size) elements at a time. Preserve per-chunk host copies, empty/scalar/noncontiguous behavior and payload-only digest. No new owner permitted.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_seed_tensor_bounded_original"
+      ],
+      "disposition": "retain-blocked"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_replay_frontier.py::_framed@131:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.digests.json_bytes(..., profile=DIRECT_UTF8_LAX) (not equivalent: sorted keys)",
+      "reason": "BLOCKER: no exact unsorted compact UTF-8 lax JSON byte route. Original json.dumps omits sort_keys and accepts nested mappings without sorting. Existing DIRECT_UTF8_LAX uses sort_keys=True; a typed string-only happy path is not proof of exact existing behavior. Keep JSON caller-local until an exact owner API exists.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes"
+      ],
+      "disposition": "retain-blocked"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_replay_frontier.py::roster_sha256@141:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/original_consumers.py",
+        "tests/fixtures/digest_1301/stagea-custody/outcomes.json"
+      ],
+      "owner_route": null,
+      "examined_route": "prismaquant.digests.json_bytes(..., profile=DIRECT_UTF8_LAX) (not equivalent: sorted keys)",
+      "reason": "BLOCKER: no exact unsorted compact UTF-8 lax JSON byte route. Original json.dumps omits sort_keys and accepts nested mappings without sorting. Existing DIRECT_UTF8_LAX uses sort_keys=True; a typed string-only happy path is not proof of exact existing behavior. Keep JSON caller-local until an exact owner API exists.",
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_stagea_consumers.py::test_replay_original_outcomes"
+      ],
+      "disposition": "retain-blocked"
+    }
+  ],
+  "retentions": [],
+  "shards": [
+    "ledger_chains.json",
+    "ledger_manifests.json",
+    "ledger_replay_seed.json"
+  ],
+  "audit_boundaries": {
+    "population": "20 frozen research-base primary and supplemental calls in the 11 assigned files; 9 completed, 11 blocked, no approved permanent retentions. Does not enlarge the scanner ratchet.",
+    "supplemental": "Incremental updates/finalizers audited with their constructor; no independent exhaustive generated-code, shell, dynamic-alias or deployment census claimed. See per-shard boundaries and fixture evidence.",
+    "fixtures": "Original source functions/modules and original outcomes captured independently of replacement owners. CPU consumer tests use controlled IO/PB seams, not fleet/GPU qualification.",
+    "integration": "No shared owner, census, baseline, scanner, acceptance or pin edits. Shared reconciliation remains integrator-owned."
+  }
+}

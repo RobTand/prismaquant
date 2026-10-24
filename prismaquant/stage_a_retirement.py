@@ -68,7 +68,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from .schemas import strict_json_loads
 
 RETIREMENT_SCHEMA = "prismaquant.stage_a.retirement.v1"
@@ -618,7 +618,7 @@ def apply_retirement(plan: Retirement) -> dict:
     if refused:
         raise RetirementRefused(
             f"PrismaBuild kept {len(refused)} batch(es) charged: {refused}; report: "
-            + json.dumps(report, sort_keys=True))
+            + DIRECT_ASCII_SPACED_LAX.text(report))
     return report
 
 

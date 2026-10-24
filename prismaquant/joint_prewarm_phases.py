@@ -3,9 +3,29 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
+import sys
+
+if __package__:
+    from .digests import bytes_sha256hex
+else:
+    # Manifest builders load this module by path without the GPU package.
+    # Bind the stdlib-only owner from this checkout, never another snapshot.
+    _owner_path = Path(__file__).resolve().parent / "digests.py"
+    _owner_name = "_prismaquant_standalone_digest_owner_" + os.fsencode(_owner_path).hex()
+    if _owner_name not in sys.modules:
+        _owner_spec = importlib.util.spec_from_file_location(_owner_name, _owner_path)
+        _owner_module = importlib.util.module_from_spec(_owner_spec)
+        sys.modules[_owner_name] = _owner_module
+        try:
+            _owner_spec.loader.exec_module(_owner_module)
+        except BaseException:
+            del sys.modules[_owner_name]
+            raise
+    bytes_sha256hex = sys.modules[_owner_name].bytes_sha256hex
 
 
 # Smaller than the storage role's 192 GiB nominal ARC budget even when a
@@ -58,7 +78,7 @@ def load_prepare_read_set(
     announces it.
     """
     blob = Path(path).read_bytes()
-    if hashlib.sha256(blob).hexdigest() != sha256:
+    if bytes_sha256hex(blob) != sha256:
         raise RuntimeError("joint prepare data manifest changed after submission")
     decoded = gzip.decompress(blob) if path.endswith(".gz") else blob
     manifest = json.loads(decoded)

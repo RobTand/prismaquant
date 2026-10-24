@@ -1,0 +1,15 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "roster": ["层.é", "a\n\""],
+  "cells": {"层.é": ["f2", "f1"], "a\n\"": []},
+  "roster_sha256": "6f010d96b7e71751a48a834fc187e097b5f36accb940116fdf1cc2249a20c3f1",
+  "read_order_sha256": "46d2ae9391d0f985679eba2b51e904b42a6e654c83aa26c0672f1e59dc64e3f9",
+  "empty_roster_sha256": "945c4dceda0f932fefe6bfe85bc267746811fe11df09ad22dcfc806534cd763a",
+  "empty_read_order_sha256": "3ce8648c10c357bcf0c225941556cde475f7204d2fba93d6b6b0ee762c763083",
+  "proof_raw": "{\"ok\":true}\n",
+  "proof_document": {"ok": true},
+  "wrong_pin_refusal": "recovery proof SHA256 mismatch",
+  "mutation_refusal": "recovery proof changed during read",
+  "nonregular_refusal": "recovery proof is not a bounded regular file",
+  "tensor_empty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

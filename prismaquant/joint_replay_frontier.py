@@ -34,9 +34,31 @@ broken row alive, which is the one thing the watchdog exists not to do.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Iterable, Mapping, Sequence
+
+if __package__:
+    from .digests import length_framed_bytes_sha256
+else:
+    # Like joint_prewarm_phases, bind the stdlib-only checkout-local owner
+    # when manifest builders load this module by path without the package.
+    import importlib.util
+    import os
+    from pathlib import Path
+    import sys
+
+    _owner_path = Path(__file__).resolve().parent / "digests.py"
+    _owner_name = "_prismaquant_standalone_digest_owner_" + os.fsencode(_owner_path).hex()
+    if _owner_name not in sys.modules:
+        _owner_spec = importlib.util.spec_from_file_location(_owner_name, _owner_path)
+        _owner_module = importlib.util.module_from_spec(_owner_spec)
+        sys.modules[_owner_name] = _owner_module
+        try:
+            _owner_spec.loader.exec_module(_owner_module)
+        except BaseException:
+            del sys.modules[_owner_name]
+            raise
+    length_framed_bytes_sha256 = sys.modules[_owner_name].length_framed_bytes_sha256
 
 
 #: The qualification journal's stage string. Held against
@@ -126,22 +148,22 @@ def replay_read_items(
 
 def _framed(items: Sequence[tuple[str, str, str | None]]) -> bytes:
     """Length-framed items, so adjacent rows cannot be read two ways."""
-    digest = hashlib.sha256(b"prismaquant.joint_prepare.replay_read_order.v1\n")
-    for kind, name, fmt in items:
-        row = json.dumps((kind, name, fmt), ensure_ascii=False,
-                         separators=(",", ":")).encode("utf-8")
-        digest.update(len(row).to_bytes(8, "big"))
-        digest.update(row)
-    return digest.digest()
+    frames = (
+        json.dumps((kind, name, fmt), ensure_ascii=False,
+                   separators=(",", ":")).encode("utf-8")
+        for kind, name, fmt in items
+    )
+    return bytes.fromhex(length_framed_bytes_sha256(
+        frames, prefix=b"prismaquant.joint_prepare.replay_read_order.v1\n"))
 
 
 def roster_sha256(roster: Iterable[str]) -> str:
-    digest = hashlib.sha256(b"prismaquant.joint_prepare.replay_roster.v1\n")
-    for name in roster:
-        row = json.dumps(name, ensure_ascii=False, separators=(",", ":")).encode()
-        digest.update(len(row).to_bytes(8, "big"))
-        digest.update(row)
-    return digest.hexdigest()
+    frames = (
+        json.dumps(name, ensure_ascii=False, separators=(",", ":")).encode()
+        for name in roster
+    )
+    return length_framed_bytes_sha256(
+        frames, prefix=b"prismaquant.joint_prepare.replay_roster.v1\n")
 
 
 def read_order_sha256(items: Sequence[tuple[str, str, str | None]]) -> str:

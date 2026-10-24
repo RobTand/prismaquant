@@ -1,0 +1,270 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "completed_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e31369f4fba6110070b19a994c0d3506980e765c",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "status": "completed",
+      "reason": "Exact existing named owner: sorted ASCII indent-2 strict JSON plus one LF, default separators, UTF-8 encoding. Atomic publication and streamed artifact policy remain consumer-owned.",
+      "current_source_witness": {
+        "file": "prismaquant/streamed_boundary_artifacts.py",
+        "sha256": "d34001e3bb6732de60b2819bdc3379d021dff3d462c26fb9cfc7897e026d381f",
+        "ast_node_id": "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+        "original_syntax_sha256": "d6c282d2a878f31999c61c87fbce40cd0fb5b0ab8aaca4cdc6a8a27fc9384558",
+        "current_call": "indent2_json_file_bytes(data)",
+        "current_ast_location": {
+          "line": 881,
+          "column": 12
+        },
+        "syntax_sha256": "3fc548ee7b267618d51e55fbe3da1ac7b1b7958a12fd605b1c392192b5f6734c"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_streamed_boundary_artifacts.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded policy identity and telemetry remain unnormalized",
+        "owner and retained debt envelopes",
+        "working_artifacts_reusable false",
+        "readonly and absent-directory no-op",
+        "strict NaN refusal preserves previous status",
+        "atomic writer file fsync then replace then directory fsync"
+      ]
+    }
+  ],
+  "retentions": [
+    {
+      "original_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2457:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order ASCII indent-1 lax JSON owner without default=str. All existing JsonProfiles sort keys.",
+      "current_source_witness": {
+        "file": "prismaquant/campaign_data_manifests.py",
+        "sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+        "ast_node_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2457:15",
+        "syntax_sha256": "d8b72f3c5c93b167a75f63b88c0758b1e4f52ddb53b3794d9dddbd2f4b4200e7"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_campaign_data_manifests.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded annotations counts and bytes",
+        "produced_by provenance",
+        "out_rows original row keys and appended data_manifest",
+        "manifest LF and report SHA-256",
+        "row files replace before output rows replace"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2481:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order ASCII indent-1 lax JSON owner without default=str. All existing JsonProfiles sort keys.",
+      "current_source_witness": {
+        "file": "prismaquant/campaign_data_manifests.py",
+        "sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+        "ast_node_id": "supplemental-json:prismaquant/campaign_data_manifests.py::publish_row_manifests@2481:15",
+        "syntax_sha256": "252449759eac86bb42152b219f4a515ef6b5376aef6832482de6747902f0c2d8"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_campaign_data_manifests.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "embedded annotations counts and bytes",
+        "produced_by provenance",
+        "out_rows original row keys and appended data_manifest",
+        "manifest LF and report SHA-256",
+        "row files replace before output rows replace"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_layer_quanta.py::seal_manifest_bytes@124:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d9fad1ddc5331094f447133221f4830119b7fddb",
+      "owner_route": null,
+      "status": "route_gap",
+      "reason": "No insertion-order compact ASCII lax JSON owner. Existing JsonProfiles sort keys; gzip/LF envelope stays consumer-owned.",
+      "current_source_witness": {
+        "file": "prismaquant/joint_layer_quanta.py",
+        "sha256": "bd3cf50d2ab13b571b29a45d31769224c9d8944e6ba1b93b68196e3668374afd",
+        "ast_node_id": "supplemental-json:prismaquant/joint_layer_quanta.py::seal_manifest_bytes@124:18",
+        "syntax_sha256": "e8bfaa7f4f0f53e38d6bfa76ba4323b8d44ca0ec0bec7a0e591762458075a674"
+      },
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_joint_layer_quanta.py",
+        "tests/fixtures/digest_1301/stagea-custody/manifest_original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_original_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_manifest_consumers.py::test_manifest_retention_witnesses"
+      ],
+      "embedded_boundaries": [
+        "nested manifest mappings retain insertion order",
+        "NaN and negative zero retained",
+        "compact JSON LF inside deterministic mtime=0 gzip member",
+        "dict-only and chained canonical-data refusal"
+      ]
+    }
+  ],
+  "source_witnesses": {
+    "prismaquant/campaign_data_manifests.py": {
+      "fixture": "manifest_original_campaign_data_manifests.py",
+      "source_blob": "222734510cdd1255d36b1eaa9d02cd422c52d4f0",
+      "current_sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+      "original_sha256": "2b0a365b30c9defa48e42d3b02a2dcf6f473fe99c8553f64ae95a35fd3d87ed6",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_size_bytes": 123390,
+      "fixture_size_bytes": 2754,
+      "fixture_sha256": "5b1b0c1b09f1857d60719cc87058a9d91087c395e307ed0449f5ada2048f182f",
+      "selected_original_source": [
+        {
+          "kind": "import",
+          "source_start_line": 8,
+          "source_end_line": 8,
+          "source_start_byte": 273,
+          "source_end_byte": 285,
+          "fixture_start_line": 1,
+          "fixture_end_line": 1,
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "kind": "import",
+          "source_start_line": 9,
+          "source_end_line": 9,
+          "source_start_byte": 285,
+          "source_end_byte": 295,
+          "fixture_start_line": 3,
+          "fixture_end_line": 3,
+          "sha256": "3727adff524e0616022eadd8f4af21a0778b29fc4c77bdfefd1afce2cbf5e4b7"
+        },
+        {
+          "kind": "publish_row_manifests",
+          "source_start_line": 2435,
+          "source_end_line": 2500,
+          "source_start_byte": 120661,
+          "source_end_byte": 123390,
+          "fixture_start_line": 5,
+          "fixture_end_line": 70,
+          "sha256": "1b6a3875090106179acf4d0850cc3439c92803af40506f74387462a946412258"
+        }
+      ],
+      "dependency_scope": "Only selected imports execute from fixture. Original consumer AST executes with the explicit namespace in consumer(); campaign inputs are controlled bindings, digest helpers are hashlib-backed, and status atomic_write_bytes is imported by the original method."
+    },
+    "prismaquant/joint_layer_quanta.py": {
+      "fixture": "manifest_original_joint_layer_quanta.py",
+      "source_blob": "d9fad1ddc5331094f447133221f4830119b7fddb",
+      "current_sha256": "bd3cf50d2ab13b571b29a45d31769224c9d8944e6ba1b93b68196e3668374afd",
+      "original_sha256": "bd3cf50d2ab13b571b29a45d31769224c9d8944e6ba1b93b68196e3668374afd",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_size_bytes": 158657,
+      "fixture_size_bytes": 840,
+      "fixture_sha256": "f154c8840b0e885c812356f68b31c28d488251c4834a5aaa4e6409797ef2a1c4",
+      "selected_original_source": [
+        {
+          "kind": "import",
+          "source_start_line": 57,
+          "source_end_line": 57,
+          "source_start_byte": 3418,
+          "source_end_byte": 3430,
+          "fixture_start_line": 1,
+          "fixture_end_line": 1,
+          "sha256": "27fe0461ff4b26894ab6a6739662ba03e2fa5fc02c6fb22f144eb902c6d1099d"
+        },
+        {
+          "kind": "import",
+          "source_start_line": 58,
+          "source_end_line": 58,
+          "source_start_byte": 3430,
+          "source_end_byte": 3442,
+          "fixture_start_line": 3,
+          "fixture_end_line": 3,
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "kind": "seal_manifest_bytes",
+          "source_start_line": 113,
+          "source_end_line": 128,
+          "source_start_byte": 5609,
+          "source_end_byte": 6422,
+          "fixture_start_line": 5,
+          "fixture_end_line": 20,
+          "sha256": "3f9335d98124c9555690216eed3cf721ce94bcbb1581f0c2db5fad034751ecff"
+        }
+      ],
+      "dependency_scope": "Only selected imports execute from fixture. Original consumer AST executes with the explicit namespace in consumer(); campaign inputs are controlled bindings, digest helpers are hashlib-backed, and status atomic_write_bytes is imported by the original method."
+    },
+    "prismaquant/streamed_boundary_artifacts.py": {
+      "fixture": "manifest_original_streamed_boundary_artifacts.py",
+      "source_blob": "e31369f4fba6110070b19a994c0d3506980e765c",
+      "current_sha256": "d34001e3bb6732de60b2819bdc3379d021dff3d462c26fb9cfc7897e026d381f",
+      "original_sha256": "fe306dd67f48975968087815ee6e658445ccd8743302993df3df0f8a55d9c5b7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_size_bytes": 267560,
+      "fixture_size_bytes": 868,
+      "fixture_sha256": "6c393b855a29f3bef24dd3384f3e7ce93fb626b5a3497982a6d37b317531ebf3",
+      "selected_original_source": [
+        {
+          "kind": "import",
+          "source_start_line": 7,
+          "source_end_line": 7,
+          "source_start_byte": 211,
+          "source_end_byte": 223,
+          "fixture_start_line": 1,
+          "fixture_end_line": 1,
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "kind": "class_header",
+          "source_start_line": 261,
+          "source_end_line": 261,
+          "source_start_byte": 10810,
+          "source_end_byte": 10843,
+          "fixture_start_line": 3,
+          "fixture_end_line": 3,
+          "sha256": "31282be20141e3a839280c634c8ff780d92581b3e9ca121a8351c288f90a1f24"
+        },
+        {
+          "kind": "_publish_status",
+          "source_start_line": 866,
+          "source_end_line": 881,
+          "source_start_byte": 44462,
+          "source_end_byte": 45282,
+          "fixture_start_line": 5,
+          "fixture_end_line": 20,
+          "sha256": "cab4d57a25a30067a69a353d0d51fb40420d919a9607022ba39628d358ee614e"
+        }
+      ],
+      "dependency_scope": "Only selected imports execute from fixture. Original consumer AST executes with the explicit namespace in consumer(); campaign inputs are controlled bindings, digest helpers are hashlib-backed, and status atomic_write_bytes is imported by the original method."
+    }
+  },
+  "slice_verification": {
+    "focused_result": "11 passed in 0.80s; full frozen outcome bytes and refusals unchanged",
+    "test_evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"edc3ea42c8e462935fb8cddfaab82b9263616d396209324a4fb2e85f907635dc\",\"size\":269}},\"operation\":\"e69cc3ea9357cb380e999e81a5d9e3643ce38eaf13949539d7c41dc73a21844e\",\"receipt\":\"61886a81c30892994d023919d3e7ae06ef93e7007994c3af49b072a00f53608a\"}]",
+    "additional_provenance_check": "Campaign and quanta slices independently matched git cat-file original blobs and whole-source SHA-256. Streamed blob unavailable locally; original provenance preserved, not repaired or claimed independently verified. Commit:path lookup also unavailable for campaign at the recorded commit.",
+    "additional_check_operations": [
+      "0a0fe2c93445b2ff25909bd3516ebe4898f426c50d3caf8c27eeef4267c3e915",
+      "a50ee1e8fc0cfd8e197d6b1b1ad3291aa0348cfcc788ea3c0038dbd052e0951c"
+    ]
+  }
+}
