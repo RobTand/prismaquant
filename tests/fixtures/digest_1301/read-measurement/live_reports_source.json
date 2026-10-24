@@ -1,0 +1,212 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "snippets": [
+    {
+      "original_id": "hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 154,
+      "SOURCE": "head_raw = hashlib.sha256(b\"band-serial live pair head\").digest() * (HEAD_BYTES // 32)",
+      "expression": "hashlib.sha256(b\"band-serial live pair head\")"
+    },
+    {
+      "original_id": "hashlib:tools/joint_prepare_startup_probe.py::main@46:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "file": "tools/joint_prepare_startup_probe.py",
+      "line": 46,
+      "SOURCE": "actual = hashlib.sha256(plan_path.read_bytes()).hexdigest()",
+      "expression": "hashlib.sha256(plan_path.read_bytes())"
+    },
+    {
+      "original_id": "hashlib:tools/profile_stage_b_head.py::load_record@242:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "file": "tools/profile_stage_b_head.py",
+      "line": 242,
+      "SOURCE": "if hashlib.sha256(raw).hexdigest() != sha256:\n    raise SystemExit(f\"record digest mismatch at {path}\")",
+      "expression": "hashlib.sha256(raw)"
+    },
+    {
+      "original_id": "hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 55,
+      "SOURCE": "return hashlib.sha256(raw).hexdigest()",
+      "expression": "hashlib.sha256(raw)"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::consumer_role@452:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 452,
+      "SOURCE": "print(json.dumps(out, sort_keys=True, default=str))",
+      "expression": "json.dumps(out, sort_keys=True, default=str)"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::main@480:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 480,
+      "SOURCE": "print(json.dumps(derive(args.root, args.handoff, args.handoff_sha256),\n                 sort_keys=True))",
+      "expression": "json.dumps(derive(args.root, args.handoff, args.handoff_sha256),\n                         sort_keys=True)"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 178,
+      "SOURCE": "raw = (json.dumps(record, sort_keys=True, indent=1) + \"\\n\").encode()",
+      "expression": "json.dumps(record, sort_keys=True, indent=1)"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 192,
+      "SOURCE": "_write_new(root / PAIR, (json.dumps(pair, sort_keys=True, indent=1) + \"\\n\").encode())",
+      "expression": "json.dumps(pair, sort_keys=True, indent=1)"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::producer_role@357:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "line": 357,
+      "SOURCE": "print(json.dumps(out, sort_keys=True, default=str))",
+      "expression": "json.dumps(out, sort_keys=True, default=str)"
+    },
+    {
+      "original_id": "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "file": "tools/joint_prepare_startup_probe.py",
+      "line": 83,
+      "SOURCE": "print(json.dumps(record, indent=1, sort_keys=True), flush=True)",
+      "expression": "json.dumps(record, indent=1, sort_keys=True)"
+    },
+    {
+      "original_id": "sorted-json:tools/profile_stage_b_head.py::main@500:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "file": "tools/profile_stage_b_head.py",
+      "line": 500,
+      "SOURCE": "print(\"STAGE_B_HEAD_PROFILE \" + json.dumps(report, sort_keys=True), flush=True)",
+      "expression": "json.dumps(report, sort_keys=True)"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "file": "tools/profile_stage_b_head.py",
+      "line": 442,
+      "SOURCE": "print(\"STAGE_B_HEAD_PROFILE_STOPPED \" + json.dumps(\n    {\"limit_ms\": args.stop_read_rtt_ms, \"mean_ms\": stopped[\"mean_ms\"],\n     \"trace\": guard_trace,\n     \"scope\": None if scope is None else list(scope),\n     \"workers\": args.head_walk_workers, \"sweep\": sweep}), flush=True)",
+      "expression": "json.dumps(\n                {\"limit_ms\": args.stop_read_rtt_ms, \"mean_ms\": stopped[\"mean_ms\"],\n                 \"trace\": guard_trace,\n                 \"scope\": None if scope is None else list(scope),\n                 \"workers\": args.head_walk_workers, \"sweep\": sweep})"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "file": "tools/profile_stage_b_head.py",
+      "line": 452,
+      "SOURCE": "print(\"STAGE_B_HEAD_PROFILE_STOPPED \" + json.dumps(\n    {\"reason\": reason, \"trace\": guard_trace,\n     \"scope\": None if scope is None else list(scope),\n     \"workers\": args.head_walk_workers, \"sweep\": sweep}),\n    flush=True)",
+      "expression": "json.dumps(\n                {\"reason\": reason, \"trace\": guard_trace,\n                 \"scope\": None if scope is None else list(scope),\n                 \"workers\": args.head_walk_workers, \"sweep\": sweep})"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 305,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 327,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 367,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 481,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 559,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 576,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 665,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 740,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 767,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "line": 847,
+      "SOURCE": "print(json.dumps(report))",
+      "expression": "json.dumps(report)"
+    }
+  ]
+}

@@ -1,0 +1,288 @@
+{
+  "agreement": "S; existing settled owners only; no shared changes",
+  "entries": [
+    {
+      "original_id": "hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact raw digest-bytes owner"
+    },
+    {
+      "original_id": "hashlib:tools/joint_prepare_startup_probe.py::main@46:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#hashlib:tools/joint_prepare_startup_probe.py::main@46:17"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "hashlib:tools/profile_stage_b_head.py::load_record@242:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#hashlib:tools/profile_stage_b_head.py::load_record@242:7"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::consumer_role@452:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/band_serial_handoff_live_pair.py::consumer_role@452:10"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_role_report_boundaries"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::main@480:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/band_serial_handoff_live_pair.py::main@480:14"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_derive_report"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::producer_role@357:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/band_serial_handoff_live_pair.py::producer_role@357:10"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_role_report_boundaries"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/joint_prepare_startup_probe.py::main@83:10"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None"
+    },
+    {
+      "original_id": "sorted-json:tools/profile_stage_b_head.py::main@500:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#sorted-json:tools/profile_stage_b_head.py::main@500:36"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_profile_report"
+      ],
+      "status": "replaced"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json#supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10"
+      ],
+      "tests": [],
+      "status": "blocker",
+      "blocker": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None"
+    }
+  ]
+}

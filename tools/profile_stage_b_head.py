@@ -237,9 +237,9 @@ def scoped_walk_sweep(config, *, start, slice_units, workers_order, walk=None):
 
 
 def load_record(path, sha256):
-    import hashlib
+    from prismaquant.digests import bytes_sha256hex
     raw = Path(path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != sha256:
+    if bytes_sha256hex(raw) != sha256:
         raise SystemExit(f"record digest mismatch at {path}")
     return json.loads(raw)
 
@@ -497,7 +497,8 @@ def main(argv=None) -> int:
         "local_journal_written": written,
         **result,
     }
-    print("STAGE_B_HEAD_PROFILE " + json.dumps(report, sort_keys=True), flush=True)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
     return 0
 
 

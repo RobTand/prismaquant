@@ -71,6 +71,17 @@ ROW_041_RECORD = ('/mnt/shared/tessera-measurements/glm-campaign-takeover-202609
                   'r13-stageb-20260923/meta-045-fae344d/records/layer-041.json')
 
 
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+DIRECT_ASCII_SPACED_LAX = profile_digest_owner().DIRECT_ASCII_SPACED_LAX
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+
+
 def _log(message):
     print(f"[pwc-bench {time.strftime('%H:%M:%S')}] {message}", flush=True)
 
@@ -137,7 +148,7 @@ def run_setup(args):
         blob = path.read_bytes()
         staged = stage / path.name
         staged.write_bytes(blob)
-        digests[str(path)] = hashlib.sha256(blob).hexdigest()
+        digests[str(path)] = bytes_sha256hex(blob)
         rows[f"u{index}"] = (path, staged, None)
         entries[residency_map_key(str(path), 0)] = (path, staged)
     strict._pb_publish(rl, map_mod, fixture_root / 'residency', stage, consumer,
@@ -206,10 +217,9 @@ def run_window(args):
                     tensor = renders[key]
                     file_receipt = cache.file_load_receipt(key, tensor)
                     identity = cache.resident_render_identity(*key, tensor)
-                    digest.update(json.dumps(
-                        [list(key), list(tensor.shape), str(tensor.dtype),
+                    digest.update(DIRECT_ASCII_SPACED_LAX.text([list(key), list(tensor.shape), str(tensor.dtype),
                          {k: v for k, v in file_receipt.items() if k != 'path'},
-                         identity], sort_keys=True).encode())
+                         identity]).encode())
                     digest.update(tensor.contiguous().view(torch.uint8).numpy().tobytes())
                 digest = digest.hexdigest()
             digested = time.perf_counter()
@@ -278,7 +288,7 @@ def run_quantum(args):
         # source, so it differs between two trees by design. One fixed value
         # on both trees leaves every other leaf, and every digest over them,
         # comparable.
-        pinned = hashlib.sha256(b'pwc-window-load-bench source').hexdigest()
+        pinned = bytes_sha256hex(b'pwc-window-load-bench source')
         for module in [module for name, module in sys.modules.items()
                        if name.startswith('prismaquant') and module is not None]:
             for attribute in ('_production_cache_source_sha256', '_aura_source_sha256', 'producer_package_sha256'):
@@ -290,7 +300,7 @@ def run_quantum(args):
             output_root=output_root, plan_sha=runtime._hex('d'),
             prepared_sha=runtime._hex('e'))
     root = Path(record['output_space']['root'])
-    files = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+    files = {str(path.relative_to(root)): bytes_sha256hex(path.read_bytes())
              for path in sorted(root.rglob('*')) if path.is_file()}
     # Whole-object digests also cover wall times and run ids, which differ
     # between two runs of one tree. Leaf digests let the host tell those
@@ -307,10 +317,10 @@ def run_quantum(args):
         elif path.suffix == '.json':
             _leaves(json.loads(path.read_text()), name, leaves)
         else:
-            leaves[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            leaves[name] = bytes_sha256hex(path.read_bytes())
     import prismaquant
     Path(args.out_json).write_text(json.dumps({
-        'payload_sha256': hashlib.sha256(pickle.dumps(payload)).hexdigest(),
+        'payload_sha256': bytes_sha256hex(pickle.dumps(payload)),
         'costs': len(payload['costs']), 'files': files, 'leaves': leaves,
         'package': str(Path(prismaquant.__file__).parent)}, indent=1))
 
@@ -342,13 +352,13 @@ def _leaves(obj, path: str, out: dict | None = None) -> dict:
         try:
             inner = pickle.loads(obj)
         except Exception:  # not a pickle: compare the bytes
-            out[path] = f'bytes:{hashlib.sha256(obj).hexdigest()}'
+            out[path] = f'bytes:{bytes_sha256hex(obj)}'
         else:
             _leaves(inner, f'{path}<pickle>', out)
     else:
         text = repr(obj)
         out[path] = text if len(text) <= 160 else (
-            f'{type(obj).__name__}:{hashlib.sha256(text.encode()).hexdigest()}')
+            f'{type(obj).__name__}:{bytes_sha256hex(text.encode())}')
     return out
 
 

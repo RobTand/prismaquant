@@ -54,7 +54,6 @@ Reads only the declared inputs; writes under ``--scratch`` and ``--out``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -69,17 +68,24 @@ MARKER = "CHAIN-ROLL-BENCH "
 HEAD_EXCLUDE = ("model.visual.",)
 
 
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+file_sha256hex = profile_digest_owner().file_sha256hex
+
+
 def _sha256_file(path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256hex(path, block_size=1 << 20)
 
 
 def load_verified_json(path, sha256):
     raw = Path(path).read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if digest != sha256:
         raise SystemExit(f"{path}: sha256 {digest} is not {sha256}")
     return json.loads(raw)
