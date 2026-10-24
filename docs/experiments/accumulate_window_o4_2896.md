@@ -23,8 +23,9 @@ reason to weaken the recipe.
 ## Inputs and deployment configuration
 
 Run from the repository root in the project's known-good environment. Supply
-locations as environment configuration, visible at the **same paths inside the
-configured execution containers**. Use the existing campaign spec mechanisms
+locations through the existing sourced deployment environment configuration,
+visible at the **same paths inside the configured execution containers**.
+Use the existing campaign spec mechanisms
 for image, code mount, PB executable, demand, resource/progress limits and
 container environment; do not inherit an old fleet's paths or placement.
 Keep model and original inputs immutable. Record checkout commit, installed
@@ -44,6 +45,7 @@ not an arbitrary host Python. The input JSON files below are reviewed,
 | `BODY_PLAN` | Bound body plan for the original draw and authenticated canonical body capture |
 | `BODY_PREPARED` | Genuine completed body prepare with last-layer `source_execution` expert dispatch |
 | `BOUNDARIES` | Genuine exact body boundary manifest, including every original row entering the last body layer |
+| `MTP_OFFLOAD_FOLDER` | Writable scratch directory for final-hidden source offload, visible inside the configured execution container |
 | `CAMPAIGN_SPEC` | Current dispatch spec for the new MTP census/capture, same original R1024 candidate/recipe menu |
 | `JOINT_TEMPLATE` | Complete current joint-plan configuration preserving original MTP window policy, resources, source prefetch and objective |
 
@@ -59,10 +61,10 @@ canonical capture; capture checks final-hidden source and expert projection.
 ```bash
 set -euo pipefail
 : "${MODEL:?}" "${REFERENCE_COST:?}" "${CALIBRATION_INPUT:?}" "${O4_ROOT:?}"
-: "${BODY_PLAN:?}" "${BODY_PREPARED:?}" "${BOUNDARIES:?}"
+: "${BODY_PLAN:?}" "${BODY_PREPARED:?}" "${BOUNDARIES:?}" "${MTP_OFFLOAD_FOLDER:?}"
 : "${CAMPAIGN_SPEC:?}" "${JOINT_TEMPLATE:?}"
 export MODEL REFERENCE_COST CALIBRATION_INPUT O4_ROOT
-export BODY_PLAN BODY_PREPARED BOUNDARIES CAMPAIGN_SPEC JOINT_TEMPLATE
+export BODY_PLAN BODY_PREPARED BOUNDARIES MTP_OFFLOAD_FOLDER CAMPAIGN_SPEC JOINT_TEMPLATE
 # Portable SHA-256: no dependency on sha256sum versus shasum spelling.
 sha() { python - "$1" <<'PY'
 import hashlib, sys
@@ -115,7 +117,7 @@ python -m tools.glm_mtp_capture --phase projection \
 python -m tools.glm_mtp_capture --phase final-hidden \
   --plan "$BODY_PLAN" --plan-sha256 "$BODY_PLAN_SHA" \
   --boundaries "$BOUNDARIES" --boundaries-sha256 "$BOUNDARIES_SHA" \
-  --out "$O4_ROOT/final-hidden"
+  --out "$O4_ROOT/final-hidden" --offload-folder "$MTP_OFFLOAD_FOLDER"
 python -m tools.glm_mtp_capture --phase capture \
   --plan "$BODY_PLAN" --plan-sha256 "$BODY_PLAN_SHA" \
   --prepared "$BODY_PREPARED" --prepared-sha256 "$BODY_PREPARED_SHA" \
@@ -332,11 +334,20 @@ prevent executing the recipe; planning is not artifact production.
 
 ## Portable validation evidence
 
-The required adjacent CPU suite passed: 141 passed, 3 skipped (CPU only).
-No GPU run, source authentication, regeneration, prepare, Arm-A numerical
+The required adjacent CPU suite plus installed-callback and recipe-argument
+regressions passed: **145 passed, 3 skipped** (CPU only). The callback test runs
+`compute_mtp_cost` through the installed research backward, real statistics lease,
+prewarmed torch projection and report writer on a tiny MTP model. Its 710 synthetic
+unchanged-weight aliases prove successful report/exit behavior and rejection of
+value and signed-zero mismatches, not the historical population's numerical
+match. GPU telemetry is stubbed. The recipe test parses all three documented MTP
+commands with the current CLI, including the configured offload directory; it
+does not produce artifacts.
+
+No GPU run, full source authentication, regeneration, prepare, Arm-A numerical
 comparison or performance measurement was performed. This proves the portable
 instrumentation contract, not W2's actual 710-term match.
 
-Command: `python -m pytest tests/test_accumulate_window_research.py tests/test_tessera_joint_encoder_reuse.py tests/test_tessera_joint_aura.py tests/test_stageb_prepared_inputs_bridge.py -q --basetemp="$TMPDIR/pytest"`
+Command: `python -m pytest tests/test_accumulate_window_research.py tests/test_tessera_joint_encoder_reuse.py tests/test_tessera_joint_aura.py tests/test_stageb_prepared_inputs_bridge.py tests/test_accumulate_window_integration.py tests/test_accumulate_window_o4_arguments.py -q --basetemp="$TMPDIR/pytest"`
 
-Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"a8b7e2fd3e2d8429bea2b3e50f3df8cb3ddd3468f32d2b508a9b1bedff7c495c","size":914}},"operation":"9971c3d79df57e603ce2e896f73f5a929d1062db37e3dbe6864c29e2e0e524c6","receipt":"bf21a9a70e68698cfc33c5bd8e007a645670e6b4b3acab24b6999bbced7830c1"}
+Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"95e2ac45b717253ecd5382eab799640a95983b48a2bfd1581211dd2cc2d59bd8","size":994}},"operation":"d262074980d56d66edfa921d5926764fd622ddb1d326c2dab0cf310e0a6f2508","receipt":"0160a7b52044bc9a647aa8990a09f86b26a8f6aeba73d4cc1ed4702590731a53"}

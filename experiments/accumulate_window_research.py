@@ -509,6 +509,9 @@ def install(args) -> None:
             raise RuntimeError("arm A differs from the published payload: the torch-backend substitution is invalid")
         os._exit(0)
 
+    # compute_mtp_cost's backward callback resolves this module-global owner.
+    # Install both halves so the research lease gets per-sequence instrumentation.
+    glm_mtp_quantum.mtp_backward = one_window_backward
     jsr.observe_and_project_windows = research_windows
 
 
