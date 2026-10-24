@@ -1,0 +1,151 @@
+{
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "fixture_policy": "Verbatim pre-edit decoder_provenance and main (including nested read_task/commit_task), not an entire source copy. Runtime tests do not consult Git. Research commit/blob identify provenance, not immutable current retention. No current immutable pin is claimed; census eligibility permits routing.",
+  "preedit_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "preedit_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+  "scope": "Only qualifier application, qualifier tests and qualifier-prefixed fixtures. Independent tools/test_qualify_t4_overlay.py remains unchanged.",
+  "calls": [
+    {
+      "original_id": "hashlib:tools/qualify_t4_overlay.py::decoder_provenance@19:303",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_decoder_provenance_text_hash"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:217",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:303",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:77",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.read_task@71:186",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.read_task@72:72",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main@89:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/qualify_t4_overlay.py::main.commit_task@84:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": null,
+      "status": "unsettled-owner-gap",
+      "gap": "Unsorted stdout json.dumps has no settled insertion-order owner; left unchanged.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/qualify_t4_overlay.py::main@67:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": null,
+      "status": "unsettled-owner-gap",
+      "gap": "Unsorted stdout json.dumps has no settled insertion-order owner; left unchanged.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    }
+  ]
+}

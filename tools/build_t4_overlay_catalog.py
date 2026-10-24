@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.cost_stage_checkpoint import _load_unit, canonical_json_sha256, unit_path
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
 from prismaquant.joint_catalog_extension import (
     CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2, R13_ADDED_FORMAT, added_format_recipes, catalog_sources, catalog_stat_fence,
     catalog_view)
@@ -317,7 +317,7 @@ def main():
                    'cell_sources': cell_sources, 'carried_from': carried_from}
     catalog_view(catalog)
     assert len(catalog_sources(catalog)) == len(sources)
-    raw = json.dumps(catalog, sort_keys=True, separators=(',', ':')).encode() + b'\n'
+    raw = DIRECT_ASCII_LAX.encoded(catalog) + b'\n'
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)

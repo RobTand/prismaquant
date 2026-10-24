@@ -4,8 +4,9 @@ Runs only as a script; nothing executes at import. The output path (pilot.json i
 campaign root when it was first written) is an argument and must not exist.
 """
 import argparse
-import json,pickle,hashlib,time
+import json,pickle,time
 from pathlib import Path
+from prismaquant.digests import bytes_sha256hex, text_sha256hex
 import torch
 from tessera.cached_unit import verify_cached_unit
 from prismaquant.tessera_joint_aura import _decode_wire
@@ -15,9 +16,9 @@ from prismaquant.production_weight_cache import _canonical_rendered_weight_tenso
 def main():
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--out',required=True);args=p.parse_args()
  base=Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911')
- q='model.language_model.layers.10.mlp.experts.0.down_proj';fmt='TESSERA_E2M1_K2_R896';fname=hashlib.sha256(q.encode()).hexdigest()+'.pkl'
+ q='model.language_model.layers.10.mlp.experts.0.down_proj';fmt='TESSERA_E2M1_K2_R896';fname=text_sha256hex(q)+'.pkl'
  def unit(folder):
-  outer=pickle.loads((folder/'cost.anchors.json.parts/units'/fname).read_bytes());assert hashlib.sha256(outer['payload']).hexdigest()==outer['payload_sha256'];return pickle.loads(outer['payload'])
+  outer=pickle.loads((folder/'cost.anchors.json.parts/units'/fname).read_bytes());assert bytes_sha256hex(outer['payload'])==outer['payload_sha256'];return pickle.loads(outer['payload'])
  a4=unit(base/'extension-e2m1-01/workspace/merged-c92826fa4')
  a8=unit(base/'extension-r1024-02/workspace/rows/row-0045')
  r=a4['wire_records'][fmt]; old=next(iter(a8['wire_records'].values()))

@@ -1,0 +1,164 @@
+{
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "fixture_policy": "Verbatim original functions extracted at research base; imports/constants supplied independently. Rebind excludes unchanged cell_task_id; tests supply its independent hashlib/json equivalent. No test reads Git history. Existing deployment roots are redirected by test-only path adapters, not new application assumptions.",
+  "validation": {
+    "command": "python -m pytest tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py tests/test_assemble_t4_overlay_original_pair.py tests/test_t4_overlay_catalog_anchors.py --basetemp=\"$TMPDIR/pytest\" -q",
+    "result": "54 passed, 14 torch Python 3.14 deprecation warnings",
+    "initial_check": "Initial focused run: 4 passed, 2 failed because the owner API is encoded(), not bytes(). Corrected both publication calls; focused rerun: 6 passed.",
+    "evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"2869187c6a80aa20b5ed980c273175dc77170d1eb42617e18c58dea6f6b213cb\",\"size\":821}},\"operation\":\"18be78b6cdffd7e1a76389376503c93b1ccce9b7df9cc6023cb2be00c420129b\",\"receipt\":\"c2d7e9d5525d8fbc0004aff7a9b0ad99d81df4dda0a5f219748bf8f3d14003d3\"}]"
+  },
+  "calls": [
+    {
+      "original_id": "hashlib:tools/build_t4_recovery_request.py::sha@5:20",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.bytes_sha256hex (import alias sha)",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_aliases_and_lax_recipes"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/rebind_t4_qualified_results.py::sha@40:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.bytes_sha256hex (import alias sha)",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_aliases_and_lax_recipes"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@18:103",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@20:50",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@28:51",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@31:46",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/rebind_t4_qualified_results.py::cell_sha256@44:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/rebind_t4_qualified_results.py::main@156:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_t4_recovery_request.py::main@31:100",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": null,
+      "status": "gap",
+      "gap": "Missing unsorted JSON recipe: json.dumps defaults sort_keys=False, ensure_ascii=True, allow_nan=True, separators=(comma-space, colon-space); stdout remains raw.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/rebind_t4_qualified_results.py::main@160:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": null,
+      "status": "gap",
+      "gap": "Missing unsorted JSON recipe: json.dumps defaults sort_keys=False, ensure_ascii=True, allow_nan=True, separators=(comma-space, colon-space); stdout remains raw.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication"
+      ]
+    }
+  ]
+}

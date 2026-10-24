@@ -1,0 +1,19 @@
+{
+  "assemble_t4_overlay": {
+    "original_source": "def doc(value):\n    return (json.dumps(value, sort_keys=True, indent=2) + '\\n').encode()",
+    "kind": "doc"
+  },
+  "build_t4_overlay_catalog": {
+    "original_source": "raw = json.dumps(catalog, sort_keys=True, separators=(',', ':')).encode() + b'\\n'\nout.parent.mkdir(parents=True, exist_ok=True)\nwith out.open('xb') as handle:\n        handle.write(raw)\ncounts = {fmt: sum(1 for cell in cells if cell['format'] == fmt) for fmt in formats}\nprint(json.dumps({'path': str(out), 'sha256': sha(raw), 'schema': catalog['schema'], 'cells': len(cells),\n                      'cells_by_format': counts, 'carried_from': carried_from,\n                      'seconds': time.monotonic() - started, 'status': catalog['status']}), flush=True)",
+    "kind": "publication"
+  },
+  "check_t4_overlay_prepare": {
+    "original_source": "raw = (json.dumps(result, sort_keys=True, indent=2) + '\\n').encode()\nout.parent.mkdir(parents=True, exist_ok=True)\nwith out.open('xb') as handle:\n        handle.write(raw)\n        handle.flush()\n        os.fsync(handle.fileno())\nprint(json.dumps({**result, 'result': {'path': str(out), 'sha256': sha(raw)}}), flush=True)",
+    "kind": "publication",
+    "original_bound_json": "def sha(raw):\n    return hashlib.sha256(raw).hexdigest()\n\ndef bound_json(binding):\n    raw = Path(binding['path']).read_bytes()\n    assert sha(raw) == binding['sha256'], binding\n    return json.loads(raw)"
+  },
+  "extract_layer8_native_metadata": {
+    "original_source": "out=ROOT/f'layer{layer}-native-metadata.json'\nassert not out.exists()\nraw=(json.dumps(result,sort_keys=True,separators=(',',':'))+'\\n').encode()\nout.write_bytes(raw)\nprint(json.dumps({'path':str(out),'sha256':sha(raw),'qnames':len(rows),'cells':len(rows)*len(FORMATS),'group_static_scales':groups}),flush=True)",
+    "kind": "publication"
+  }
+}

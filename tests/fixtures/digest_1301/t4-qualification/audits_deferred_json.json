@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "eligible_gaps": [
+    {
+      "original_id": "tools/audit_existing_t4.py:23:17",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "6b4270fdfae274723e29021c7618819b02b42855",
+      "expression": "json.dumps(summary,default=str)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_existing_t4]",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "c093f0ecf357dc34d3566da5346e6823804f87db7871939a2081394ad2ec3380"
+    },
+    {
+      "original_id": "tools/audit_existing_t4.py:18:20",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "6b4270fdfae274723e29021c7618819b02b42855",
+      "expression": "json.dumps(cost['provenance'],default=str)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_existing_t4]",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "c093f0ecf357dc34d3566da5346e6823804f87db7871939a2081394ad2ec3380"
+    },
+    {
+      "original_id": "tools/audit_existing_t4.py:24:63",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "6b4270fdfae274723e29021c7618819b02b42855",
+      "expression": "json.dumps(summary,indent=2,default=str)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_existing_t4]",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "c093f0ecf357dc34d3566da5346e6823804f87db7871939a2081394ad2ec3380"
+    },
+    {
+      "original_id": "tools/audit_t4_render_paths.py:28:113",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "558a60d9cab7ff14824faa9105819e3c9e065d65",
+      "expression": "json.dumps({k:v for k,v in summary.items() if k!='rows'})",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_t4_render_paths.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_t4_render_paths]",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "149fe03908f11a44c5820143025e32685ffd6834a2a9966594d31981feaa7d8d"
+    },
+    {
+      "original_id": "tools/audit_tessera_selected_cache_slice.py:60:10",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "3373b29c0f659b2ef1b1e9aec93c0fa2fe82d4eb",
+      "expression": "json.dumps({\"status\": \"passed\", \"units\": len(results), \"out\": str(args.out)})",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_tessera_selected_cache_slice.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_tessera_selected_cache_slice]",
+      "fixture_main_start_line": 23,
+      "fixture_sha256": "ebd7a9ad7b2008f283ba3ca88be1d3e5b544302d0c8b7280b397be1edb62fe21"
+    },
+    {
+      "original_id": "tools/audit_tessera_selected_cache_slice.py:56:24",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "3373b29c0f659b2ef1b1e9aec93c0fa2fe82d4eb",
+      "expression": "json.dumps({\"schema\": \"prismaquant.tessera_selected_cache_slice_audit.v1\",\n                                    \"checkpoint_identity_sha256\": next(iter(seals)),\n                                    \"scope\": \"two self-receipt wire parses; root checkpoint and source/H not re-read\",\n                                    \"units\": results}, indent=2)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_audit_tessera_selected_cache_slice.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[audit_tessera_selected_cache_slice]",
+      "fixture_main_start_line": 23,
+      "fixture_sha256": "ebd7a9ad7b2008f283ba3ca88be1d3e5b544302d0c8b7280b397be1edb62fe21"
+    },
+    {
+      "original_id": "tools/inspect_t4_binding.py:11:61",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "ac692cfa831c1df621cf5231939f4660712c0172",
+      "expression": "json.dumps(c.metadata['verified_cells'][k],default=str)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_inspect_t4_binding.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[inspect_t4_binding]",
+      "fixture_main_start_line": 9,
+      "fixture_sha256": "0df419ddf8941f30f8c02c8cea9836fab95ded668305dd35a6ea2db1b85c2631"
+    },
+    {
+      "original_id": "tools/inspect_t4_binding.py:12:327",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "ac692cfa831c1df621cf5231939f4660712c0172",
+      "expression": "json.dumps(u['wire_records'][k[1]]['identity'])",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_inspect_t4_binding.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[inspect_t4_binding]",
+      "fixture_main_start_line": 9,
+      "fixture_sha256": "0df419ddf8941f30f8c02c8cea9836fab95ded668305dd35a6ea2db1b85c2631"
+    },
+    {
+      "original_id": "tools/pilot_existing_t4.py:35:103",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "json.dumps(result)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_pilot_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[pilot_existing_t4]",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77"
+    },
+    {
+      "original_id": "tools/pilot_existing_t4.py:35:63",
+      "source_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "json.dumps(result,indent=2)",
+      "status": "deferred_missing_owner",
+      "reason": "Unsorted JSON recipe has no owner in owner-recipes dependency; eligible gap, not retention.",
+      "fixture": "audits_original_pilot_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main[pilot_existing_t4]",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77"
+    }
+  ]
+}
