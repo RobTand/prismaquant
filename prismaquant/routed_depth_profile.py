@@ -24,6 +24,20 @@ def _require_depth_profile_mapping(value, where):
     return value
 
 
+def _depth_band_loss_multiplier(parameter):
+    parameter = _require_depth_profile_mapping(parameter, "band parameter")
+    if set(parameter) != {"loss_multiplier"}:
+        raise ValueError("depth profile unsupported numerical parameter")
+    factor = parameter["loss_multiplier"]
+    try:
+        valid = type(factor) in (int, float) and math.isfinite(factor) and factor > 0
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ValueError("depth profile loss multiplier must be positive and finite")
+    return factor
+
+
 def _sample_receipt(receipt, bindings, schema):
     receipt = _require_depth_profile_mapping(receipt, "receipt")
     if receipt.get("schema") != schema:
@@ -93,12 +107,7 @@ def admit_depth_profile(payload, record, *, production, authorized_interim_recor
             raise ValueError("depth profile requires named nonempty bands")
         if any(not isinstance(name, str) or name not in roster for name in names):
             raise ValueError("depth profile contains foreign roster members")
-        parameter = _require_depth_profile_mapping(parameters[band], "band parameter")
-        if set(parameter) != {"loss_multiplier"}:
-            raise ValueError("depth profile unsupported numerical parameter")
-        factor = parameter["loss_multiplier"]
-        if type(factor) not in (int, float) or not math.isfinite(factor) or factor <= 0:
-            raise ValueError("depth profile loss multiplier must be positive and finite")
+        factor = _depth_band_loss_multiplier(parameters[band])
         factors.append(factor)
         members.extend(names)
         prices.extend((name, float(factor)) for name in names)
@@ -137,8 +146,19 @@ def admit_depth_profile(payload, record, *, production, authorized_interim_recor
         for key in ("decision_ref", "decided_by", "decided_at"):
             if not isinstance(decision.get(key), str) or not decision[key].strip():
                 raise ValueError("depth profile authorization requires complete attribution")
-        if any(decision.get(key) != record[key]
-               for key in (*_BINDINGS, "scope", "bands", "parameters")):
+        decision_parameters = _require_depth_profile_mapping(
+            decision.get("parameters"), "authorization parameters")
+        for parameter in decision_parameters.values():
+            _depth_band_loss_multiplier(parameter)
+        decision_bands = _require_depth_profile_mapping(decision.get("bands"), "authorization bands")
+        if (decision.get("parameters_sha256") != digest(decision_parameters) or
+                decision.get("band_roster_sha256") != digest(decision_bands)):
+            raise ValueError("depth profile authorization roster or parameter digest mismatch")
+        # Compare the recorded JSON values, not Python numeric equality:
+        # True == 1.0 and 1 == 1.0 must not excuse different decision bytes.
+        if (any(decision.get(key) != record[key] for key in _BINDINGS) or
+                any(digest(decision.get(key)) != digest(record[key])
+                    for key in ("scope", "bands", "parameters"))):
             raise ValueError("depth profile authorization decision binding mismatch")
         if record.get("authorization_sha256") != digest(decision):
             raise ValueError("depth profile authorization digest mismatch")

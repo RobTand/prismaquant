@@ -49,9 +49,12 @@ class CostPricingPolicy:
                      for fmt, row in payload["costs"][name].items())
         return cls(float(ucb_z), fisher_output_mse, metadata, multipliers, rows)
 
-    def loss_multiplier(self, row: dict) -> float:
+    def loss_multiplier(self, row: dict, *, expected_unit: str | None = None,
+                        expected_format: str | None = None) -> float:
         """Scale already-normalized loss samples, never signed projections.
 
+        Table consumers supply the enclosing coordinate so a row cannot choose
+        another admitted identity or become an unbound non-joint passthrough.
         Paired readers apply this to each cell's 0.5*x2 samples BEFORE
         differencing/summing and computing their covariance-aware stderr.
         """
@@ -59,9 +62,14 @@ class CostPricingPolicy:
             return 1.0
         operator = row.get("joint_operator_identity")
         if operator is None:
+            if any(member == expected_unit for member, _ in self._depth_multipliers):
+                raise ValueError("depth profile admitted coordinate requires joint AURA rows")
             return 1.0  # unrelated non-joint and exact passthrough controls
         if not joint_aura_rows.validate_joint_aura_entry(row):
             raise ValueError("depth profile requires joint AURA rows")
+        if ((expected_unit is not None and operator["qname"] != expected_unit) or
+                (expected_format is not None and operator["format"] != expected_format)):
+            raise ValueError("depth profile row coordinate differs from admitted source")
         name = operator["qname"]
         for member, factor in self._depth_multipliers:
             if member == name:

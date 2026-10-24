@@ -50,6 +50,16 @@
   (#3013 / #3019). No numeric defaults, rollout, scientific qualification or
   release claim follows; independent quality and serving gates are unchanged.
 
+### Fixed — depth-policy authorization and consumption bindings (#2774)
+
+- Independently validate decision multipliers and recompute their own parameter
+  and roster digests. Compare scope, bands and parameters as type-sensitive
+  canonical JSON rather than accepting Python's `True == 1.0` equality.
+- Authenticate per-unit prices against the enclosing unit/format, rejecting
+  non-joint replacements and relocated admitted measurements, including
+  multiplier-1.0 bands. Unrelated controls and serialized-byte policy remain
+  unchanged; these synthetic checks do not authorize actual rollout.
+
 ### Added
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.

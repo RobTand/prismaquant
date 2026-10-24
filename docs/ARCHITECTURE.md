@@ -18954,8 +18954,11 @@ is `prismaquant.routed_depth_authorization.v1`, with nonblank `decision_ref`,
 `calibration_contract` must exactly match the profile, together with
 `source_table_sha256`, `band_roster_sha256` and `parameters_sha256`; the
 profile's `authorization_sha256` must match the complete decision digest.
-Admission keeps owned `deepcopy` profile and decision provenance in
-`routed_depth_pricing`. Only `band_loss_multiplier.v1` is supported.
+Decision numeric values are independently validated and their parameter and
+roster digests recomputed; scope, bands and parameters match as type-sensitive
+canonical JSON, not Python numeric equality. Admission keeps owned `deepcopy`
+profile and decision provenance in `routed_depth_pricing`.
+Only `band_loss_multiplier.v1` is supported.
 An authorized `interim_flat` remains `validated=false`, even for production
 purpose: interim policy authority is not scientific qualification or release.
 
@@ -18974,7 +18977,10 @@ authenticity, actual arm/sample independence, measurement authority or an
 artifact's release. `validated=true` is the receipt-state result, not an
 end-to-end safety certificate. Consumers enforce immutable per-coordinate
 measurement digests and reject replacement rows, including independently
-valid ones. Complete scientific joint point prices receive the transform
+valid ones. Per-unit selection binds each priced row to the enclosing unit
+and format before passthrough or scaling, refusing non-joint replacements at
+admitted coordinates and relocated measurements while preserving unrelated
+non-joint controls. Complete scientific joint point prices receive the transform
 without changing their existing hedge semantics; unrelated fixed currencies
 do not. Finite effective contributions, prices and paired uncertainty are
 checked at consumption, since finite parameters alone are insufficient.

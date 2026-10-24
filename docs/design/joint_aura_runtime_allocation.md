@@ -178,8 +178,11 @@ contain nonblank string attribution fields `decision_ref`, `decided_by`, and
 must exactly match the profile, as must `source_table_sha256`,
 `band_roster_sha256`, and `parameters_sha256`. Those bindings are checked
 against the actual source table, complete routed roster and parameters. The
-profile's `authorization_sha256` must equal the digest of the complete
-decision. Admission retains owned `deepcopy` snapshots of the profile and
+decision's own parameter values are validated independently (booleans are not
+numeric multipliers), and its parameter and roster digests are recomputed.
+Scope, bands and parameters match as type-sensitive canonical JSON, not Python
+numeric equality. The profile's `authorization_sha256` must equal the digest
+of the complete decision. Admission retains owned `deepcopy` snapshots of the profile and
 decision in `routed_depth_pricing` provenance, not caller-mutable aliases.
 These checks establish recorded consistency, not decision authenticity or
 authority; a synthetic record or self-consistent digest cannot supply either.
@@ -249,7 +252,11 @@ annotations do not replace the admitted measurements. Complete scientific
 joint prices retain their existing point-price/hedge semantics and receive
 one band transform; unrelated fixed-price currencies retain their prices.
 The protected consumption regressions exercise replacement rows, caller
-mutation and complete scientific prices.
+mutation and complete scientific prices. The per-unit selector also supplies
+the enclosing unit and format to `loss_multiplier`; an admitted coordinate
+cannot become a non-joint passthrough or use an intact measurement relocated
+from another coordinate. This includes admitted bands with multiplier 1.0.
+Genuinely unrelated non-joint units retain legacy prices and wire bytes.
 
 Positive finite parameters and valid finite raw measurements also do not
 imply finite effective losses: multiplication can overflow, as can later

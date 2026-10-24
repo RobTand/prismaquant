@@ -824,7 +824,8 @@ def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],
     def policy_price(row, *, unit, fmt):
         dloss, wire = _priced_row(row, unit=unit, fmt=fmt)
         if pricing_policy is not None:
-            dloss = pricing_policy.transform_loss(dloss, pricing_policy.loss_multiplier(row))
+            dloss = pricing_policy.transform_loss(dloss, pricing_policy.loss_multiplier(
+                row, expected_unit=unit, expected_format=fmt))
         return dloss, wire
 
     current: dict[str, tuple[float, int]] = {}
