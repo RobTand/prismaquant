@@ -1,9 +1,12 @@
-"""PACT frontier and price adapter over the model profile.
+"""PACT profile metadata and frontier-manifest overlay.
 
-Move the D43 frontier and the measured-price adapter into prismaquant
-without moving any baseline. Read layers, bands, vocab, prefix ids,
-hidden layout and TP rules from the model profile. Keep the running
-GLM measurement paths bit-identical until those runs finish (D50 item 3).
+This is the profile-contract slice of the D43 frontier and measured-price
+adapter migration (D50 item 3), not the scientific price reducer. It reads
+layers, bands, vocab, prefix ids, hidden layout and declared TP metadata
+from the model profile. It neither reduces energy/gain inputs into prices
+nor accounts for serialized wire bytes. ``glm_paths_identical`` compares
+cohort fields, not scientific prices or actual wire-byte equivalence.
+Keep the running GLM measurement paths unchanged until those runs finish.
 
 Boundary: D50 item 4 runs under testcost (parent
 testcost-d50-next-model-quality-20261007). Leave live mixed G3 and PACT
@@ -12,7 +15,7 @@ shared profile needs through the existing owner. Never build a parallel
 model map. This module therefore adds no profile class and no registry.
 It reads only the existing owner API and plain config dicts.
 
-Sources (read-only, never edited here):
+Historical source pointers (read-only, not accepted immutable W1 pins):
 - harness /home/rob/tmp/eng-pact-pricing-20261006
 - frontier /mnt/shared/tessera-measurements/pact-frontier-d43-20261006/frontier.py
 - adapter checkout /home/rob/tmp/eng-pact-energy-20261007

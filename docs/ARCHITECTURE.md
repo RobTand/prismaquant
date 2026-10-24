@@ -5009,6 +5009,37 @@ PB `a3474080b037` exercises the revised GLM and Qwen3 public contracts and compi
 It preserves explicit alias precedence, an empty Qwen3 prefix list, and the real GLM KDA owner.
 These CPU results do not qualify model output, serving, or performance.
 
+**PACT scientific-adapter migration boundary (#2427, #2961).**
+The repository owner `prismaquant/pact_frontier_profile.py` currently supplies
+profile-derived cohort, band, hidden-layout and declared TP metadata plus a
+manifest overlay. It does not reduce authenticated energy/gain inputs into
+scientific quality prices or account for actual serialized wire bytes.
+`glm_paths_identical` compares cohort fields only. The module's historical
+external source pointers are not accepted immutable W1 source/artifact pins;
+the profile and synthetic replay fixtures do not establish scientific adapter
+equivalence or a complete live/frozen caller disposition.
+
+Before migration or scientific equivalence-fixture authoring resumes, the
+existing Campaign/#2485 and #2960–#2961 owners must deliver the accepted W1
+source and artifact identities, authenticated energy/gain/anchor/actual-wire
+inputs and expected results, dependency closure, complete live/frozen caller
+dispositions, and any prior implementation with its exact independent review.
+Reconcile the existing #3008/#2999 dependencies under canonical #2427 with
+#2973–#2975's harness work; coordinate replay delivery with #2482/#2489 rather
+than duplicating those owners.
+
+The runtime consumers are not yet migrated: `rank_local_member_shapes` and
+`served_operator` still derive geometry and expert roles from projection
+spellings, and their allocator, rung-allowability and native-panel bindings do
+not supply a matching profile. Declared PACT TP metadata alone does not prove
+a runtime cut rule. Scientific quality prices must remain distinct from exact
+whole-unit runtime resources (`build_runtime_resources`), authenticated shape
+timing (`build_shape_runtime_resources`), wire bytes, memory and workspace.
+Receipt authentication, native admission and canonical rung allowability
+remain authoritative. Baseline CPU regression results do not establish W1
+acceptance, scientific price/wire equivalence, GPU, full-price or serving
+qualification. This boundary clarification changes no implementation or
+active Campaign GLM source or scientific expectation.
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
