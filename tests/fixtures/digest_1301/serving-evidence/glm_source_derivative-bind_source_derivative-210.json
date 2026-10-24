@@ -1,0 +1,12 @@
+{
+  "original_id": "supplemental-json:prismaquant/glm_source_derivative.py::bind_source_derivative@210:22",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+  "file": "prismaquant/glm_source_derivative.py",
+  "scope": "bind_source_derivative",
+  "callee": "json.dumps",
+  "syntax_sha256": "293b0d9c0eab138a76084c6aaa0be6560494c3f191994ab0efb8e1e4b8ec8367",
+  "function_source": "def bind_source_derivative(model, profile, value):\n    \"\"\"Issue a model-local binding only after observing the declared runtime.\"\"\"\n    policy = normalize_source_derivative(value)\n    if policy is None:\n        _require(model not in _BINDINGS, 'cannot remove a live derivative binding')\n        _reject_unbound_corrected_runtime(model)\n        return None\n    _require(profile.source_derivative_contract() == declaration(), 'profile does not declare this correction')\n    build = validate_image_build(bound_json(policy['image_build'], 'image build'))\n    _require(os.environ.get('PRISMAQUANT_CONTAINER_CONTENT_SHA256') == build['corrected_image_content_sha256'],\n             'actual container image content differs from build')\n    observed = _observe(model, build)\n    identity = dict(**observed, image_build_sha256=policy['image_build']['sha256'])\n    prior = _BINDINGS.get(model)\n    _require(prior is None or prior['identity'] == identity, 'cannot change a live derivative binding')\n    _BINDINGS[model] = dict(identity=identity, policy=policy, build=build)\n    return json.loads(json.dumps(identity))",
+  "expression": "json.loads(json.dumps(identity))",
+  "roundtrip": true
+}

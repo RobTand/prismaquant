@@ -1,0 +1,286 @@
+{
+  "schema": "digest_1301.serving-evidence.plans.v1",
+  "frozen_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "replacements": [
+    {
+      "original_id": "sorted-json:prismaquant/tessera_export_lane.py::main@2844:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.encoded (caller retains final LF)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ],
+      "test_node_ids": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/tessera_export_lane.py::main@2863:56",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ],
+      "test_node_ids": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/tessera_materialization.py::_json@37:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4741b8832a44cd267e8af36acc19dabf74dc63a6",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_atomic_json_bytes",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_strict_refusal_preserves_publication"
+      ],
+      "test_node_ids": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_atomic_json_bytes",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_strict_refusal_preserves_publication"
+      ]
+    }
+  ],
+  "source_blobs": {
+    "prismaquant/tessera_export_lane.py": "bb8faa99057289492fdd78f1a47e8be70f827149",
+    "prismaquant/tessera_materialization.py": "4741b8832a44cd267e8af36acc19dabf74dc63a6",
+    "prismaquant/tessera_plan_writer.py": "0030c483bd2514cfb6c44ddb8311b121f85ffd0d"
+  },
+  "whole_file_accounting": {
+    "prismaquant/tessera_export_lane.py": [
+      {
+        "scope": "require_platform_executes_derived_from_contract",
+        "line": 391,
+        "expression": "DIRECT_ASCII_SPACED_LAX.text(stated)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "require_platform_executes_derived_from_contract",
+        "line": 393,
+        "expression": "DIRECT_ASCII_SPACED_LAX.text(derived)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "write_cached_expert_units",
+        "line": 1159,
+        "expression": "indent2_json_file_bytes(manifest)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "hessian_capture_sha256",
+        "line": 1599,
+        "expression": "json.dumps({'schema': HESSIAN_CAPTURE_SHA256_SCHEMA, 'identity': identity}, sort_keys=True, default=str)",
+        "status": "justified-retention-independent-external-algorithm",
+        "reason": "Preserve independent Hessian algorithm including JSON fragments; external reference witness and roster check inspected.",
+        "population": "primary"
+      },
+      {
+        "scope": "hessian_capture_sha256",
+        "line": 1605,
+        "expression": "json.dumps({'dtype': str(value.dtype), 'shape': list(value.shape)}, sort_keys=True)",
+        "status": "justified-retention-independent-external-algorithm",
+        "reason": "Preserve independent Hessian algorithm including JSON fragments; external reference witness and roster check inspected.",
+        "population": "primary"
+      },
+      {
+        "scope": "_write_plan_assignment",
+        "line": 2448,
+        "expression": "indent2_json_file_bytes(projected)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "read_cached_unit_bundle",
+        "line": 2475,
+        "expression": "DIRECT_ASCII_SPACED_LAX.text(warning)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "main",
+        "line": 2845,
+        "expression": "DIRECT_ASCII_INDENT2_LAX.encoded(report['build'])",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "main",
+        "line": 2864,
+        "expression": "DIRECT_ASCII_SPACED_LAX.text(report['serving_target'])",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      }
+    ],
+    "prismaquant/tessera_materialization.py": [
+      {
+        "scope": "_json",
+        "line": 37,
+        "expression": "indent2_json_file_bytes(value)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "main",
+        "line": 552,
+        "expression": "DIRECT_ASCII_INDENT2_LAX.text(result)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      }
+    ],
+    "prismaquant/tessera_plan_writer.py": [
+      {
+        "scope": "build_serving_plan",
+        "line": 529,
+        "expression": "json.dumps(disagreements[:3], indent=2)",
+        "status": "blocked-eligible",
+        "reason": "Insertion-order indent2 lax recipe has no existing named owner/profile. Do not sort, normalize, or add an owner in this slice.",
+        "population": "supplemental"
+      },
+      {
+        "scope": "main",
+        "line": 755,
+        "expression": "indent2_json_file_bytes(plan)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "main",
+        "line": 757,
+        "expression": "json.dumps(provenance, indent=2)",
+        "status": "blocked-eligible",
+        "reason": "Insertion-order indent2 lax recipe has no existing named owner/profile. Do not sort, normalize, or add an owner in this slice.",
+        "population": "supplemental"
+      },
+      {
+        "scope": "main",
+        "line": 760,
+        "expression": "indent2_json_file_bytes(setup)",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      },
+      {
+        "scope": "main",
+        "line": 813,
+        "expression": "indent2_json_file_bytes(stack_plan(control.plan, stack_members, layouts))",
+        "status": "owner-routed",
+        "reason": "Exact existing sorted recipe; no new profile.",
+        "population": "owner-route"
+      }
+    ]
+  },
+  "missing_profiles": {
+    "insertion_order_indent2_lax": "blocked-eligible: plan_writer build_serving_plan diagnostic and main provenance sidecar; not justified retentions",
+    "sorted_ascii_indent2_strict": "No named JsonProfile exists and none was added. However digests.indent2_json_file_bytes already implements the EXACT materialization _json recipe including strictness and LF; that existing helper is used, not a lax profile."
+  },
+  "hessian": {
+    "status": "justified-retention-independent-external-algorithm",
+    "registry_ids": [
+      "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256"
+    ],
+    "algorithm": "Sorted stdlib spaced ASCII schema/identity JSON (default=str); NUL + sorted name + NUL + tensor dtype/shape/raw-byte SHA256 hex per unit. Independent implementation unchanged.",
+    "external_witness": "tests/test_tessera_priced_export_inputs.py::test_the_digest_rule_is_tesseras_capture_seal",
+    "external_reference": "tessera.export.ActivationSource.capture_sha256",
+    "current_runtime_crosscheck": "prismaquant.tessera_export_lane._crosscheck_capture_seal",
+    "roster_guard": "prismaquant.tessera_export_lane._require_capture_context_roster",
+    "availability": "Witness requires installed pinned Tessera; test outcome recorded separately. No assertion that an unavailable witness passed."
+  },
+  "scope": "Only these three production files; plan_writer has no supported remaining inline replacement. Reservation, acquisition and publication flow unchanged.",
+  "primitive_hash_accounting": [
+    {
+      "original_registry_id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
+      "scope": "hessian_capture_sha256",
+      "calls": [
+        "digest = hashlib.sha256()",
+        "unit = hashlib.sha256()"
+      ],
+      "status": "justified-retention-independent-external-algorithm",
+      "reason": "External independent capture-seal witness; not a missing-profile retention."
+    }
+  ],
+  "json_decode_accounting": {
+    "prismaquant/tessera_export_lane.py": [
+      {
+        "line": 138,
+        "expression": "json.loads((source / 'config.json').read_text())"
+      },
+      {
+        "line": 419,
+        "expression": "json.loads(config_path.read_text(encoding='utf-8'))"
+      },
+      {
+        "line": 1865,
+        "expression": "json.loads(Path(assignment_path).read_text())"
+      },
+      {
+        "line": 2394,
+        "expression": "json.loads(raw)"
+      },
+      {
+        "line": 1689,
+        "expression": "json.loads(sidecar.read_text(encoding='utf-8'))"
+      },
+      {
+        "line": 1220,
+        "expression": "json.loads(Path(contract_path).read_text(encoding='utf-8'))"
+      }
+    ],
+    "prismaquant/tessera_materialization.py": [
+      {
+        "line": 61,
+        "expression": "json.loads(Path(path).read_text())"
+      },
+      {
+        "line": 159,
+        "expression": "json.loads(Path(plan_path).read_text())"
+      },
+      {
+        "line": 419,
+        "expression": "json.loads((group_root / 'complete.json').read_text())"
+      }
+    ],
+    "prismaquant/tessera_plan_writer.py": [
+      {
+        "line": 733,
+        "expression": "json.loads(args.layer_config.read_text())"
+      },
+      {
+        "line": 284,
+        "expression": "json.loads((Path(model) / 'config.json').read_text())"
+      },
+      {
+        "line": 692,
+        "expression": "json.loads((Path(model) / 'config.json').read_text())"
+      }
+    ]
+  },
+  "source_blobs_note": "Frozen research registry blobs, before the completed per-call replacements; whole_file_accounting describes the current consumer and includes owner-route calls outside the raw scanner population."
+}

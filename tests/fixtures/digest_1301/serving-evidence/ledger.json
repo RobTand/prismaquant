@@ -1,0 +1,716 @@
+{
+  "schema": "digest_1301.serving-evidence.fragment.v1",
+  "research_base": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "integration_required": {
+    "baseline_scope_removals": [
+      "hashlib:prismaquant/glm_routing_replay.py::glm_route_record",
+      "sorted-json:prismaquant/tessera_export_lane.py::main",
+      "sorted-json:prismaquant/tessera_materialization.py::_json"
+    ],
+    "policy": "Agreement S prohibits baseline and shared-owner edits in this slice. These three genuine scope removals must be integrated serially. Fourteen blocked eligible calls need shared owner recipes before this slice can close; no gap is classified as retention."
+  },
+  "boundary": "Local fragment only. Shared owners, census, scanner, baseline and immutable acceptance files unchanged. Not parent closure. Exact raw primary/supplemental calls in all ten assigned consumers and two protected kernels; decoders and owner calls are not raw encoders. Additional protected operations documented separately; no exhaustive repository/shell/generated-code claim.",
+  "source_blobs": {
+    "prismaquant/tessera_export_lane.py": {
+      "git_blob": "a5f1ac84e67b17b6eb9af51a83ad48220f6b7a2f",
+      "sha256": "5afe47ab7215a412c64b04365d37f85b146fc8aadef28bb5859150a43d805ea0"
+    },
+    "prismaquant/tessera_materialization.py": {
+      "git_blob": "2d451f766ab417a535e890bdb6d1866a9a49e075",
+      "sha256": "efc564ab02ffb89903fce7a1e1a7f56a77f9b5e0f2342fd1d838f8661394e070"
+    },
+    "prismaquant/tessera_plan_writer.py": {
+      "git_blob": "0030c483bd2514cfb6c44ddb8311b121f85ffd0d",
+      "sha256": "01e4f8d0569c962bc6ed0f78942beb4835a094a8d76224b86d82668b7a74d73b"
+    },
+    "prismaquant/tessera_route_receipt.py": {
+      "git_blob": "6c213081ca83e743eead89a9fd9d34d62164f4c8",
+      "sha256": "f4c2e6345f191a2bcc19e6871f6ce467155506570092900e0d7b0b8057a1fffc"
+    },
+    "prismaquant/tessera_tp_audit.py": {
+      "git_blob": "6cd2c62f4c91f7f86247592bbe73af721ea7917a",
+      "sha256": "d9c609cc23bc7fdb0fe630f64bd0b8b33553573002fbf8497eb88cc3df8b3333"
+    },
+    "prismaquant/glm_routing_replay.py": {
+      "git_blob": "e27b75977a877aef38c5278effe440bcb2e828d7",
+      "sha256": "2ee5761dc503ca7ed18ddc29c4e6031b3dfd14b98f33bd24a289e5db49aed3ce"
+    },
+    "prismaquant/glm_source_derivative.py": {
+      "git_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+      "sha256": "1f3c7c185f9bf2d5d210be3484026f2fb59d2b8eaa5dd3937fd093a8ffee635a"
+    },
+    "prismaquant/compressed_route_sweep.py": {
+      "git_blob": "976f489cccdc658d9e997f2aca8b0fe0b1235e20",
+      "sha256": "de509dd1a2ef41c37c2a5b24f4a5eefe71a915e043e86a9ee5052149eb5671a0"
+    },
+    "prismaquant/shipcard.py": {
+      "git_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+      "sha256": "6b01cb2839c3ea7dbc8fcd3e9030a29f90c55325e2875b150923e1908dad763f"
+    },
+    "prismaquant/shipcard_slots.py": {
+      "git_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "sha256": "30562ac054a358fa883ed5b7825d3a2068e117721243031c7258f7b31820c088"
+    },
+    "prismaquant/kernels/joint_projection_reduce.py": {
+      "git_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+      "sha256": "f92d13bd79c5688c5e62c7a02e0b6a8a0a38ea762c5bf74060dae3cca1ef77dd"
+    },
+    "prismaquant/kernels/kda_chunk.py": {
+      "git_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f"
+    }
+  },
+  "completed_calls": [
+    {
+      "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@179:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/replay_original_179.py",
+        "tests/fixtures/digest_1301/serving-evidence/replay_registry.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_matches_original",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_errors_propagate",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_encoding_error_propagates",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_whole_file_call_accounting"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@159:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/replay_original_159.py",
+        "tests/fixtures/digest_1301/serving-evidence/replay_registry.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_matches_original",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_errors_propagate",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_encoding_error_propagates",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_whole_file_call_accounting"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/tessera_export_lane.py::main@2844:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.encoded (caller retains final LF)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/tessera_export_lane.py::main@2863:56",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_build_bytes_and_digest",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_export_main_refusal_does_not_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:prismaquant/tessera_materialization.py::_json@37:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4741b8832a44cd267e8af36acc19dabf74dc63a6",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/plans_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_atomic_json_bytes",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_plans.py::test_materialization_strict_refusal_preserves_publication"
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1598:13",
+      "family": "hashlib",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1598,
+      "column": 13,
+      "source_blob": "a5f1ac84e67b17b6eb9af51a83ad48220f6b7a2f",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "    identity.update({field: provenance.get(field)\n                     for field in CAPTURE_CONTEXT_FIELDS})\n    digest = hashlib.sha256()\n    digest.update(json.dumps({\"schema\": HESSIAN_CAPTURE_SHA256_SCHEMA,\n                              \"identity\": identity},\n                             sort_keys=True, default=str).encode())",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Independent external Hessian capture seal reference; current executable witness in ledger_plans.json."
+    },
+    {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1599:18",
+      "family": "sorted-json",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1599,
+      "column": 18,
+      "source_blob": "a5f1ac84e67b17b6eb9af51a83ad48220f6b7a2f",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"schema\": HESSIAN_CAPTURE_SHA256_SCHEMA,\n                              \"identity\": identity},\n                             sort_keys=True, default=str)",
+      "classification": "load-bearing",
+      "consumer_evidence": "                     for field in CAPTURE_CONTEXT_FIELDS})\n    digest = hashlib.sha256()\n    digest.update(json.dumps({\"schema\": HESSIAN_CAPTURE_SHA256_SCHEMA,\n                              \"identity\": identity},\n                             sort_keys=True, default=str).encode())\n    for name in sorted(hessians):\n        value = hessians[name].detach().cpu().contiguous()\n        unit = hashlib.sha256()",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "{'schema': HESSIAN_CAPTURE_SHA256_SCHEMA, 'identity': identity}"
+        ],
+        "explicit_options": {
+          "sort_keys": "True",
+          "default": "str"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Independent external Hessian capture seal reference; current executable witness in ledger_plans.json."
+    },
+    {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1604:15",
+      "family": "hashlib",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1604,
+      "column": 15,
+      "source_blob": "a5f1ac84e67b17b6eb9af51a83ad48220f6b7a2f",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "    for name in sorted(hessians):\n        value = hessians[name].detach().cpu().contiguous()\n        unit = hashlib.sha256()\n        unit.update(json.dumps({\"dtype\": str(value.dtype),\n                                \"shape\": list(value.shape)},\n                               sort_keys=True).encode())",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Independent external Hessian capture seal reference; current executable witness in ledger_plans.json."
+    },
+    {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:20",
+      "family": "sorted-json",
+      "file": "prismaquant/tessera_export_lane.py",
+      "scope": "hessian_capture_sha256",
+      "line": 1605,
+      "column": 20,
+      "source_blob": "a5f1ac84e67b17b6eb9af51a83ad48220f6b7a2f",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"dtype\": str(value.dtype),\n                                \"shape\": list(value.shape)},\n                               sort_keys=True)",
+      "classification": "load-bearing",
+      "consumer_evidence": "        value = hessians[name].detach().cpu().contiguous()\n        unit = hashlib.sha256()\n        unit.update(json.dumps({\"dtype\": str(value.dtype),\n                                \"shape\": list(value.shape)},\n                               sort_keys=True).encode())\n        unit.update(b\"\\0\")\n        unit.update(tensor_host_bytes(value))\n        digest.update(b\"\\0\" + name.encode() + b\"\\0\")",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "{'dtype': str(value.dtype), 'shape': list(value.shape)}"
+        ],
+        "explicit_options": {
+          "sort_keys": "True"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Independent external Hessian capture seal reference; current executable witness in ledger_plans.json."
+    },
+    {
+      "id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@750:18",
+      "family": "hashlib",
+      "file": "prismaquant/shipcard.py",
+      "scope": "_verify_open_safetensors_fd",
+      "line": 750,
+      "column": 18,
+      "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "    \"\"\"Hash one container and all tensor spans in one forward traversal.\"\"\"\n\n    full_digest = hashlib.sha256()\n    raw_length, read_calls = _read_exact_fd(\n        fd, 8, digest=full_digest, capture=True\n    )",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_shipcard.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: incremental raw SHA256 state needed for simultaneous descriptor traversal."
+    },
+    {
+      "id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:24",
+      "family": "hashlib",
+      "file": "prismaquant/shipcard.py",
+      "scope": "_verify_open_safetensors_fd",
+      "line": 771,
+      "column": 24,
+      "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "    bytes_read = 8 + header_length\n    for start, end, tensor_name in spans:\n        tensor_digest = hashlib.sha256()\n        _ignored, calls = _read_exact_fd(\n            fd,\n            end - start,",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_shipcard.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: incremental raw SHA256 state needed for simultaneous descriptor traversal."
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/joint_projection_reduce.py::_source_digest@22:13",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "_source_digest",
+      "line": 22,
+      "column": 13,
+      "source_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "\ndef _source_digest():\n    digest = hashlib.sha256()\n    for suffix in ('.cpp', '.cu'):\n        digest.update(Path(__file__).with_suffix(suffix).read_bytes())\n    digest.update(str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)).encode())",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_protected.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Qualification-bound source with packaged qualification and admission consumers."
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::source_sha256@352:11",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "source_sha256",
+      "line": 352,
+      "column": 11,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256(Path(__file__).read_bytes())",
+      "classification": "load-bearing",
+      "consumer_evidence": "\ndef source_sha256() -> str:\n    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()\n\n\ndef _code_sha256(cubin: bytes) -> str:",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_protected.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [
+          "Path(__file__).read_bytes()"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Qualification-bound source with packaged qualification and admission consumers."
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::_code_sha256@374:13",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "_code_sha256",
+      "line": 374,
+      "column": 13,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])",
+      "classification": "load-bearing",
+      "consumer_evidence": "\n    names_offset = section(names_index)[4]\n    digest = hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])  # type, machine, version, flags\n    for index in range(count):\n        name_at, kind, flags, _address, offset, size = section(index)[:6]\n        name = cubin[names_offset + name_at:cubin.index(b\"\\0\", names_offset + name_at)]",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_protected.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [
+          "cubin[16:24] + cubin[48:52]"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Qualification-bound source with packaged qualification and admission consumers."
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::probe_digest@422:13",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "probe_digest",
+      "line": 422,
+      "column": 13,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "classification": "load-bearing",
+      "consumer_evidence": "    out, _ = chunk_kimi_delta_attention(*inputs, use_qk_l2norm_in_kernel=True)\n    torch.autograd.backward([out], [stimulus])\n    digest = hashlib.sha256()\n    for tensor in (out, *(x.grad for x in inputs)):\n        digest.update(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())\n    return {\"shape\": list(shape), \"sha256\": digest.hexdigest()}",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_protected.json",
+      "disposition": "justified-retention",
+      "recipe": {
+        "primitive": "hashlib.sha256",
+        "arguments": [],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "retention_reason": "Qualification-bound source with packaged qualification and admission consumers."
+    }
+  ],
+  "supplemental_calls": [
+    {
+      "id": "supplemental-json:prismaquant/tessera_plan_writer.py::build_serving_plan@529:15",
+      "family": "supplemental-json",
+      "file": "prismaquant/tessera_plan_writer.py",
+      "scope": "build_serving_plan",
+      "line": 529,
+      "column": 15,
+      "source_blob": "0030c483bd2514cfb6c44ddb8311b121f85ffd0d",
+      "callee": "json.dumps",
+      "expression": "json.dumps(disagreements[:3], indent=2)",
+      "classification": "ephemeral",
+      "consumer_evidence": "            f\"{len(disagreements)} fused module(s) do not share one scheme \"\n            f\"(family, grid, body, scale plane): \"\n            f\"{json.dumps(disagreements[:3], indent=2)}\\n\"\n            f\"vLLM builds ONE quantization method per fused module, so the exporter would pass \"\n            f\"the whole group through as BF16.  That is a finding about the allocation -- it \"\n            f\"chose an assignment this serving path cannot express.  Differing RUNGS are not \"",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "disagreements[:3]"
+        ],
+        "explicit_options": {
+          "indent": "2"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Diagnostic disagreement refusal text only.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/tessera_plan_writer.py::main@757:23",
+      "family": "supplemental-json",
+      "file": "prismaquant/tessera_plan_writer.py",
+      "scope": "main",
+      "line": 757,
+      "column": 23,
+      "source_blob": "0030c483bd2514cfb6c44ddb8311b121f85ffd0d",
+      "callee": "json.dumps",
+      "expression": "json.dumps(provenance, indent=2)",
+      "classification": "load-bearing",
+      "consumer_evidence": "    args.out.write_bytes(indent2_json_file_bytes(plan))\n    sidecar = args.out.with_suffix(args.out.suffix + \".provenance.json\")\n    sidecar.write_text(json.dumps(provenance, indent=2))\n    if setup is not None:\n        args.export_setup_json.parent.mkdir(parents=True, exist_ok=True)\n        args.export_setup_json.write_bytes(indent2_json_file_bytes(setup))",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "provenance"
+        ],
+        "explicit_options": {
+          "indent": "2"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/tessera_route_receipt.py::_check_runtime_image_declaration@415:51",
+      "family": "supplemental-json",
+      "file": "prismaquant/tessera_route_receipt.py",
+      "scope": "_check_runtime_image_declaration",
+      "line": 415,
+      "column": 51,
+      "source_blob": "6c213081ca83e743eead89a9fd9d34d62164f4c8",
+      "callee": "json.dumps",
+      "expression": "json.dumps(dict(record))",
+      "classification": "load-bearing",
+      "consumer_evidence": "        replay = image_metadata.declared_reference(requested, env={\n            image_metadata.CENSUS_IMAGE_ENV: image,\n            image_metadata.CENSUS_DECLARATION_ENV: json.dumps(dict(record)),\n        })\n    except image_metadata.RuntimeImageError as exc:\n        raise TesseraRouteReceiptError(f\"{exc.payload['reason']}: {exc}\") from exc",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "dict(record)"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/tessera_tp_audit.py::_write@250:11",
+      "family": "supplemental-json",
+      "file": "prismaquant/tessera_tp_audit.py",
+      "scope": "_write",
+      "line": 250,
+      "column": 11,
+      "source_blob": "6cd2c62f4c91f7f86247592bbe73af721ea7917a",
+      "callee": "json.dumps",
+      "expression": "json.dumps(receipt, indent=2, sort_keys=False)",
+      "classification": "load-bearing",
+      "consumer_evidence": "\ndef _write(receipt: dict[str, Any], out: str) -> None:\n    text = json.dumps(receipt, indent=2, sort_keys=False)\n    if out == \"-\":\n        sys.stdout.write(text + \"\\n\")\n        return",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "receipt"
+        ],
+        "explicit_options": {
+          "indent": "2",
+          "sort_keys": "False"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22",
+      "family": "supplemental-json",
+      "file": "prismaquant/glm_source_derivative.py",
+      "scope": "normalize_source_derivative",
+      "line": 72,
+      "column": 22,
+      "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+      "callee": "json.dumps",
+      "expression": "json.dumps(value, allow_nan=False)",
+      "classification": "load-bearing",
+      "consumer_evidence": "    build = value['image_build']\n    _require(isinstance(build, dict) and set(build) == {'path', 'sha256'}, 'image build must be byte-bound')\n    return json.loads(json.dumps(value, allow_nan=False))\n\n\ndef corrected_source(raw):",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "value"
+        ],
+        "explicit_options": {
+          "allow_nan": "False"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/glm_source_derivative.py::bind_source_derivative@210:22",
+      "family": "supplemental-json",
+      "file": "prismaquant/glm_source_derivative.py",
+      "scope": "bind_source_derivative",
+      "line": 210,
+      "column": 22,
+      "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+      "callee": "json.dumps",
+      "expression": "json.dumps(identity)",
+      "classification": "load-bearing",
+      "consumer_evidence": "    _require(prior is None or prior['identity'] == identity, 'cannot change a live derivative binding')\n    _BINDINGS[model] = dict(identity=identity, policy=policy, build=build)\n    return json.loads(json.dumps(identity))\n\n\n#: Every definition in the module, as a whole (PQ #1341).",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "identity"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8",
+      "family": "supplemental-json",
+      "file": "prismaquant/compressed_route_sweep.py",
+      "scope": "write_sweep",
+      "line": 297,
+      "column": 8,
+      "source_blob": "976f489cccdc658d9e997f2aca8b0fe0b1235e20",
+      "callee": "json.dump",
+      "expression": "json.dump(record, handle, indent=1, sort_keys=False)",
+      "classification": "load-bearing",
+      "consumer_evidence": "def write_sweep(path: str, record: dict) -> str:\n    with open(path, \"w\", encoding=\"utf-8\") as handle:\n        json.dump(record, handle, indent=1, sort_keys=False)\n        handle.write(\"\\n\")\n    return path",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dump",
+        "arguments": [
+          "record",
+          "handle"
+        ],
+        "explicit_options": {
+          "indent": "1",
+          "sort_keys": "False"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1696:15",
+      "family": "supplemental-json",
+      "file": "prismaquant/shipcard.py",
+      "scope": "_publish_shipcard",
+      "line": 1696,
+      "column": 15,
+      "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+      "callee": "json.dumps",
+      "expression": "json.dumps(card, indent=2, default=str)",
+      "classification": "load-bearing",
+      "consumer_evidence": "\ndef _publish_shipcard(out: Path, card: Mapping[str, Any]) -> Path:\n    encoded = (json.dumps(card, indent=2, default=str) + \"\\n\").encode(\"utf-8\")\n    reserved = card.get(\"reserved_file_bytes\")\n    if reserved is not None:\n        if isinstance(reserved, bool) or not isinstance(reserved, int) or reserved <= 0:",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_shipcard.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "card"
+        ],
+        "explicit_options": {
+          "indent": "2",
+          "default": "str"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1710:16",
+      "family": "supplemental-json",
+      "file": "prismaquant/shipcard.py",
+      "scope": "_publish_shipcard",
+      "line": 1710,
+      "column": 16,
+      "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+      "callee": "json.dumps",
+      "expression": "json.dumps(card, separators=(\",\", \":\"), default=str)",
+      "classification": "load-bearing",
+      "consumer_evidence": "            # before refusing.\n            encoded = (\n                json.dumps(card, separators=(\",\", \":\"), default=str) + \"\\n\"\n            ).encode(\"utf-8\")\n        if len(encoded) > reserved:\n            raise ValueError(",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_shipcard.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "card"
+        ],
+        "explicit_options": {
+          "separators": "(',', ':')",
+          "default": "str"
+        },
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@918:23",
+      "family": "supplemental-json",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "make_uniform_control_record",
+      "line": 918,
+      "column": 23,
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "callee": "json.dumps",
+      "expression": "json.dumps(dict(control_block))",
+      "classification": "load-bearing",
+      "consumer_evidence": "            f\"gold_metric_key must be one of {list(UNIFORM_CONTROL_METRIC_KEYS)}\"\n        )\n    block = json.loads(json.dumps(dict(control_block)))\n    schemas = uniform_control_schemas()\n    if block.get(\"schema\") not in schemas:\n        raise ValueError(",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "dict(control_block)"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@942:38",
+      "family": "supplemental-json",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "make_uniform_control_record",
+      "line": 942,
+      "column": 38,
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "callee": "json.dumps",
+      "expression": "json.dumps(dict(control_arm))",
+      "classification": "load-bearing",
+      "consumer_evidence": "        extra={\n            \"uniform_control\": block,\n            \"control_arm\": json.loads(json.dumps(dict(control_arm))),\n        },\n    )\n",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "dict(control_arm)"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    },
+    {
+      "id": "supplemental-json:prismaquant/shipcard_slots.py::_verify_route_sweep_record@1044:27",
+      "family": "supplemental-json",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "_verify_route_sweep_record",
+      "line": 1044,
+      "column": 27,
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "callee": "json.dumps",
+      "expression": "json.dumps(row.get(\"sweep\"))",
+      "classification": "load-bearing",
+      "consumer_evidence": "    try:\n        verdict = gate.compare_route_sweeps(\n            [(row[\"rank\"], json.dumps(row.get(\"sweep\"))) for row in sweeps],\n            expected_ranks=expected, config=json.loads(config_json))\n    except (gate.CompressedRouteSweepError, ValueError) as exc:\n        return problems + [f\"{slot}: REFUSED on replay: {exc}\"]",
+      "contract_evidence": "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+      "disposition": "blocked-eligible",
+      "recipe": {
+        "primitive": "json.dumps",
+        "arguments": [
+          "row.get('sweep')"
+        ],
+        "explicit_options": {},
+        "contract": "See enclosing original consumer witness and current expression; no normalization, error wrapping, reordering or additional traversal authorized."
+      },
+      "classification_reason": "Published evidence, normalization for evidence, content verification, source/qualification binding, or independently verified capture seal; preserve exact result and source.",
+      "blocked_reason": "Shared owner integration not present: exact insertion-order JSON profile needed (options and ordering must remain unchanged)."
+    }
+  ],
+  "counts": {
+    "completed_calls": 5,
+    "current_primary_calls": 10,
+    "current_supplemental_calls": 12,
+    "blocked_eligible_calls": 14,
+    "justified_retained_calls": 8
+  },
+  "fragments": [
+    "tests/fixtures/digest_1301/serving-evidence/ledger_replay.json",
+    "tests/fixtures/digest_1301/serving-evidence/ledger_protected.json",
+    "tests/fixtures/digest_1301/serving-evidence/ledger_values.json",
+    "tests/fixtures/digest_1301/serving-evidence/ledger_plans.json",
+    "tests/fixtures/digest_1301/serving-evidence/ledger_shipcard.json"
+  ]
+}

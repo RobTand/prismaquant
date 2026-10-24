@@ -1,0 +1,12 @@
+{
+  "original_id": "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+  "file": "prismaquant/glm_source_derivative.py",
+  "scope": "normalize_source_derivative",
+  "callee": "json.dumps",
+  "syntax_sha256": "ad222f8bb2e446d2d1db8ca8d676db7c5a1787dc291e2b7a87eff0fd6fe2483f",
+  "function_source": "def normalize_source_derivative(value):\n    if value is None:\n        return None\n    _require(isinstance(value, dict) and set(value) == {'schema', 'version', 'image_build'}, 'closed policy required')\n    _require(value['schema'] == SCHEMA and value['version'] == VERSION, 'unknown derivative contract')\n    build = value['image_build']\n    _require(isinstance(build, dict) and set(build) == {'path', 'sha256'}, 'image build must be byte-bound')\n    return json.loads(json.dumps(value, allow_nan=False))",
+  "expression": "json.loads(json.dumps(value, allow_nan=False))",
+  "roundtrip": true
+}

@@ -6,12 +6,13 @@ does not borrow live producer files, reconstruct routes or execute experts.
 from __future__ import annotations
 
 import ast
-import hashlib
 import inspect
 from pathlib import Path
 import textwrap
 
 import torch
+
+from .digests import bytes_sha256hex, text_sha256hex
 
 
 def select_original_routes(module, args, kwargs, *, sequence_length, expert_bias=None):
@@ -156,7 +157,7 @@ def glm_route_record(runner, module, router, captured, *, layer, calibration,
         weights_contract="post_renormalization_and_routed_scaling", topk_method="noaux_tc",
         n_group=router.num_group, topk_group=router.topk_group, swiglu_limit=module.swiglu_limit,
         source_protocol=dict(router_class=f"{type(router).__module__}.{type(router).__qualname__}",
-            router_source_sha256=hashlib.sha256(inspect.getsource(type(router)).encode()).hexdigest(),
+            router_source_sha256=text_sha256hex(inspect.getsource(type(router))),
             scoring_func="sigmoid", topk_method="noaux_tc", normalization_epsilon=epsilon,
             correction_bias={k: tensor_identity["expert_bias"][k] for k in ("content_sha256", "dtype")},
             expert_bias_affects="selection_only", norm_topk_prob=router.norm_topk_prob))
@@ -176,7 +177,7 @@ def glm_route_record(runner, module, router, captured, *, layer, calibration,
         "attention_implementation": "eager",
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},
-        "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "capture_source_sha256": bytes_sha256hex(Path(__file__).read_bytes()),
         "replay": {"schema": "prismaquant.glm_routing_boundary_replay.v1", "layer": layer,
                    "parent_boundary": parent_boundary, "source": replay_source,
                    "sample": 0, "stop": "before_original_packed_experts_forward"},

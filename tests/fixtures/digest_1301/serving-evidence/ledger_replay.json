@@ -1,0 +1,46 @@
+{
+  "schema": "prismaquant.digest-replay-ledger.v1",
+  "file": "prismaquant/glm_routing_replay.py",
+  "whole_file_call_accounting": {
+    "original_raw_hash_calls": 2,
+    "replaced_calls": 2,
+    "remaining_raw_hash_calls": 0,
+    "text_sha256hex_calls": 1,
+    "bytes_sha256hex_calls": 1,
+    "unchanged_other_digest_calls": 0
+  },
+  "replacements": [
+    {
+      "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@179:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/replay_original_179.py",
+        "tests/fixtures/digest_1301/serving-evidence/replay_registry.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_matches_original",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_errors_propagate",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_encoding_error_propagates",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_whole_file_call_accounting"
+      ]
+    },
+    {
+      "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@159:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/replay_original_159.py",
+        "tests/fixtures/digest_1301/serving-evidence/replay_registry.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_matches_original",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_acquisition_errors_propagate",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_source_encoding_error_propagates",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_replay.py::test_whole_file_call_accounting"
+      ]
+    }
+  ]
+}
