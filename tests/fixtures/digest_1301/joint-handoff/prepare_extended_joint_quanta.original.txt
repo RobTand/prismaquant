@@ -1,0 +1,8 @@
+def bind(path):
+    path = Path(path).resolve()
+    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name),
+                  'catalog_extension': extension,
+                  'produced_batches': [] if publication is None else publication.batches}))

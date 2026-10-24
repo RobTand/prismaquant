@@ -1,0 +1,876 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "status": "incomplete: exact owner recipes pending; shared census and baseline integration deliberately excluded",
+  "completed_calls": [
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::load_original@76:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_pins_and_source_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@180:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@197:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@200:62",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::_pin@188:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_pins_and_source_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@202:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@221:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@232:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_split_package.py::_describe@299:59",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_split_describe_and_chain_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_split_package.py::load_round@131:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_load_round_checkpoint_digest"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@179:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@192:54",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@200:44",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@203:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::build@218:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::build@244:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::manifest_wire@182:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_manifest_wire_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_split_package.py::build@350:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_split_describe_and_chain_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/generate_transition_rewrites.py::_package_digest@40:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "51c0b1b4031c34939e35067c163a9500076b9cf2",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/generate_transition_rewrites.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_package_order_and_selection",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_package_unicode_and_surrogate_parity"
+      ],
+      "owner_route": "prismaquant.digests.LengthFramedSourceSha256"
+    },
+    {
+      "original_id": "hashlib:tools/prepare_extended_joint_quanta.py::bind@40:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e89b38ada4cba005d237aa8386e16de18b01f236",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/prepare_extended_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::_build_head_slices@770:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_head_slices_bind_exact_emitted_bytes",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::_load_json@140:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_load_json_wire_verification_before_decode",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::_load_production_cache@721:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_cache_mismatch_before_unpickle",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::_prior_slice_manifest@360:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_prior_slice_refuses_unverified_bytes",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::main@1086:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/relocation.block.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_main_relocation_authorization_transaction",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::main@1460:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/publication.block.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_main_publication_transaction",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::main@1468:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/publication.block.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_main_publication_transaction",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::main@1477:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/publication.block.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_main_publication_transaction",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/regenerate_joint_quanta.py::main@1487:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/publication.block.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_main_publication_transaction",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/stage_b_preparation_submission.py::prepare_reads@132:31",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_prepare_reads_extension_wire_digest",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/stage_b_preparation_submission.py::write_submission@210:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_submission_published_wire_and_strict_flags",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/stage_b_preparation_submission.py::write_submission@213:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_submission_published_wire_and_strict_flags",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/stage_b_preparation_submission.py::write_submission@219:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/outcomes.json",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_original_digest_outcomes",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_submission_published_wire_and_strict_flags",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex"
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@3965:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_dry_run_document"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4032:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_published_status"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4040:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_waiting_status"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template@2814:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_handoff_template_written_bytes"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id@2741:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_handoff_template_identity"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv@2343:48",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_quantum_argv_grace_recipe",
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_quantum_argv_grace_consumer"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_stage_a_split.py::main@835:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_split_main_report"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "hashlib:tools/check_readset_coverage.py::_load_json@51:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/readset_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_readset.py::test_readset_hash_before_decode"
+      ]
+    }
+  ],
+  "unresolved_calls": [
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::main@194:45",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@133:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_unresolved_recovery_roundtrip"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@85:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_unresolved_recovery_roundtrip"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/regenerate_joint_quanta.py::_pretty@166:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/regenerate_joint_quanta.original.txt"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_unresolved_serialization",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged"
+      ],
+      "reason": "Exact profile unavailable: sorted direct JSON, indent=1, separators=(\",\", \": \"), ensure_ascii=True, allow_nan=False, no fallback serializer. Caller owns UTF-8 encoding and final LF. DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR differs in both nonfinite refusal and default=str; DIRECT_UTF8_INDENT2_STRICT differs in escaping and indent.",
+      "status": "API-gap unresolved"
+    },
+    {
+      "original_id": "sorted-json:tools/stage_b_preparation_submission.py::write_submission@199:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_unresolved_serialization",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_submission_published_wire_and_strict_flags",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "reason": "Exact profile unavailable: sorted direct JSON, indent=1, separators=(\",\", \": \"), ensure_ascii=True, allow_nan=True, no fallback serializer. Caller owns UTF-8 encoding and final LF. DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR accepts unsupported objects via default=str where this consumer raises TypeError.",
+      "status": "API-gap unresolved"
+    },
+    {
+      "original_id": "sorted-json:tools/stage_b_preparation_submission.py::write_submission@228:9",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/stage_b_preparation_submission.consumers.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/consumer_excerpts.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_unresolved_serialization",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_submission_published_wire_and_strict_flags",
+        "tests/test_digest_1301/joint-handoff/test_transition_consumers.py::test_consumer_excerpt_provenance"
+      ],
+      "reason": "Exact profile unavailable: sorted direct JSON, indent=1, separators=(\",\", \": \"), ensure_ascii=True, allow_nan=True, no fallback serializer. Caller owns UTF-8 encoding and final LF. DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR accepts unsupported objects via default=str where this consumer raises TypeError.",
+      "status": "API-gap unresolved"
+    },
+    {
+      "original_id": "supplemental-json:tools/prepare_extended_joint_quanta.py::prepare@380:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e89b38ada4cba005d237aa8386e16de18b01f236",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/prepare_extended_joint_quanta.original.txt"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_frozen_original_provenance",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_unresolved_serialization",
+        "tests/test_digest_1301/joint-handoff/test_transitions.py::test_excerpted_functions_unchanged"
+      ],
+      "reason": "Exact profile unavailable: unsorted insertion-order direct JSON, default spaced separators, ensure_ascii=True, allow_nan=True, no fallback serializer. JsonProfile always sets sort_keys=True; DIRECT_ASCII_SPACED_LAX therefore changes key order. stdout is eligible supplemental serialization, not an exemption.",
+      "status": "API-gap unresolved"
+    },
+    {
+      "original_id": "sorted-json:tools/check_readset_coverage.py::main@132:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+      "reason": "Pending owner-recipes: sorted ASCII indent2 lax JSON with default=str has no exact finished owner profile. DIRECT_ASCII_INDENT2_LAX refuses fallback objects. This publication is eligible, not a justified retention.",
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_readset.py::test_readset_publication_and_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3223:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_coverage_default_str"
+      ],
+      "reason": "Eligible unresolved API gap: sorted indent=2, default=str JSON; existing owners have no exact recipe. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_joint_quanta.py::_container_wrap@1850:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@796:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@811:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@816:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@831:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::row_template@214:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    }
+  ],
+  "supplemental_embedded_retentions": [
+    {
+      "original_id": "embedded:tools/dispatch_stage_a_split.py::_BAND_SET",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "retained",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/target_deployment_witness.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_embedded_band_set_target_deployment"
+      ],
+      "reason": "Separate deployment retention: isolated target executes the unchanged embedded command with the existing runtime roster and no prismaquant.digests installed. Routing would add an unavailable target dependency. Preserve read order, first-band header, JSON order and newline. Missing unsorted recipe alone would NOT justify retention; this witness does not claim a live fleet lacks the owner."
+    }
+  ],
+  "audit_boundary": "Ten assigned tool files, direct frozen registry calls plus separately inspected embedded _BAND_SET. Does not assert exhaustive dynamic alias, shell, generated or remote deployment enumeration."
+}

@@ -28,7 +28,6 @@ covered and 3 when it is not.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -42,13 +41,14 @@ from prismaquant.readset_coverage import (  # noqa: E402
     quantum_rows_gaps, source_read_gaps, stage_a_prefetch_targets,
 )
 from prismaquant.source_read_plan import roster_layers_prefix  # noqa: E402
+from prismaquant.digests import bytes_sha256hex  # noqa: E402
 
 EXIT_GAPS = 3
 
 
 def _load_json(path: str, sha256: str | None = None):
     raw = Path(path).read_bytes()
-    if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
+    if sha256 is not None and bytes_sha256hex(raw) != sha256:
         raise ValueError(f"{path} does not hash to {sha256}")
     return json.loads(raw)
 

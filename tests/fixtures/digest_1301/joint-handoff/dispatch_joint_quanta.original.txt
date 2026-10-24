@@ -1,0 +1,102 @@
+# Frozen executable excerpts; synthetic wrappers isolate original JSON expressions.
+
+def _container_wrap():
+    json.dumps(spec)
+
+
+def quantum_argv():
+    json.dumps(
+            grace_stamps, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+def handoff_template_id(quantum_id: str, template: Mapping) -> str:
+    body = {key: value for key, value in template.items() if key != "template_id"}
+    digest = _sha_bytes(json.dumps(body, sort_keys=True,
+                                   separators=(",", ":")).encode())
+    return f"{HANDOFF_TEMPLATE_ID_PREFIX}{quantum_id}-{digest[:16]}"
+
+def handoff_template(record: Mapping, *, plan: Mapping,
+                     adjoint_slice: Mapping, tier: str, output_root: Path,
+                     template_id: str | None = None) -> tuple[Path, bytes]:
+    from prismaquant.streamed_boundary_artifacts import normalize_boundary_storage
+    from prismaquant.joint_campaign_ledger import quantum_id as layer_quantum_id
+    from prismaquant.joint_quantum_handoff import handoff_root
+    from prismaquant.stage_a_produced_output import build_boundary_template
+    quantum_id = record["quantum_id"]
+    storage = plan.get("execution", {}).get("boundary_storage")
+    if not isinstance(storage, dict):
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: the plan seals no boundary storage for a "
+            "handoff")
+    try:
+        space = (Path(output_root) / "layer-quanta"
+                 / layer_quantum_id(record["layer"]))
+        policy = normalize_boundary_storage({
+            **storage, "directory": str(handoff_root(space))})
+        tensors = [int(entry["tensor_bytes"]) for entry in
+                   adjoint_slice["checkpoint"]["activation_entries"]]
+
+        def build(name: str) -> dict:
+            return build_boundary_template(
+                output_prefix=policy["directory"], tier=str(tier),
+                artifact_max_bytes=int(policy["max_artifact_bytes"]),
+                group_size=int(policy["prefetch_batches"]),
+                max_entry_tensor_bytes=max(tensors), template_id=name,
+                write_only=True, export_rate_family=HANDOFF_EXPORT_RATE_FAMILY)
+
+        template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
+                         if template_id is None else template_id)
+        if template_id is None:
+            template = build(handoff_template_id(quantum_id, template))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DispatchRefused(
+            f"quantum {quantum_id!r}: no handoff template derives from the "
+            f"plan and slice: {exc}") from exc
+    payload = (json.dumps(template, sort_keys=True, indent=2) + "\n").encode()
+    path = (_band_serial_root(output_root)
+            / f"{quantum_id}.handoff-template.{_sha_bytes(payload)[:16]}.json")
+    return path, payload
+
+
+def check_source_coverage():
+    json.dumps(gaps_report(gaps, rows=len(coverage_rows)),
+                             indent=2, sort_keys=True, default=str)
+
+
+def _dispatch():
+    json.dumps({"consumer_tags": list(tags), "priority": priority,
+                              "execution_plan": execution_stamp,
+                              "stage_a_terminal": bool(stage_a_keys) and bool(
+                                  receipt_ok),
+                              "stage_a_pending": [record["quantum_id"] for _, record in records
+                                                  if record["quantum_id"] not in publishable],
+                              "band_serial_pending": band_pending,
+                              "rows": [{"kind": row["kind"],
+                                        "quantum_id": row.get("quantum_id"),
+                                        "identity_sha256": row.get("identity_sha256"),
+                                        "manifest_sha256": row.get("manifest_sha256"),
+                                        **({"cotangent_source": row["cotangent_source"],
+                                            "handoff_template": row["handoff_template"],
+                                            "handoff_template_sha256": row[
+                                                "handoff_template_sha256"],
+                                            "handoff_template_document": row[
+                                                "handoff_template_document"],
+                                            "band_serial_readset": row[
+                                                "band_serial_readset"],
+                                            "link": row["link"],
+                                            "progress_grace": row["progress_grace"],
+                                            "pilot_admission": row["pilot_admission"]}
+                                           if row["kind"] == "quantum" else {}),
+                                        **({"slice_sha256": publishable[row["quantum_id"]],
+                                            **{key: by_id[row["quantum_id"]]["adjoint"][key]
+                                               for key in ("checkpoint_boundary", "chain_layers")}}
+                                           if row["kind"] == "quantum" else {}),
+                                        "argv": row["argv"]}
+                                       for row in rows]},
+                             indent=2, sort_keys=True)
+    json.dumps({"published": row.get("quantum_id", "stage-a"),
+                                  "action_key": answer["action_key"],
+                                  "status": answer.get("status", "")},
+                                 sort_keys=True)
+    json.dumps({"band_serial_pending": waiting["quantum_id"],
+                              "reason": waiting["reason"]}, sort_keys=True)
+

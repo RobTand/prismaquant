@@ -16,7 +16,6 @@ left out.
 """
 import argparse
 import gzip
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -25,6 +24,8 @@ import string
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import (DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX,
+                                 bytes_sha256hex, DIRECT_ASCII_INDENT2_LAX)
 from prismaquant.joint_forward_resume import _read, chain_documents
 from prismaquant.stage_a_head import drop_source_head_walk_reads
 
@@ -73,7 +74,7 @@ def load_original(path, campaign, plan):
     not bind.
     """
     wire = Path(path).read_bytes()
-    if hashlib.sha256(wire).hexdigest() != campaign.get('original_manifest_sha256'):
+    if bytes_sha256hex(wire) != campaign.get('original_manifest_sha256'):
         raise ValueError('original scientific read manifest changed')
     if plan['sha256'] != campaign.get('campaign_bindings', {}).get('plan_sha256'):
         raise ValueError('the plan is not the one the campaign binds')
@@ -176,8 +177,8 @@ def main():
     manifest = recovery_manifest(original, capsule, bound)
     from prismaquant.staged_lease import sdk_submodule
     sdk_submodule('core').validate_data_manifest(manifest)
-    wire = gzip.compress((json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode(), mtime=0)
-    digest = hashlib.sha256(wire).hexdigest()
+    wire = gzip.compress((DIRECT_ASCII_LAX.text(manifest) + '\n').encode(), mtime=0)
+    digest = bytes_sha256hex(wire)
     # Render before writing anything, so a field error leaves no package.
     launcher = render_launcher(campaign, label=label, source_head=args.source_head,
                                manifest_sha256=digest, capsule=bound)
@@ -189,23 +190,23 @@ def main():
         shutil.copyfile(prior / name, root / name)
     template = json.loads((prior / 'stagea-512-template-r7.json').read_text())
     template['template_id'] = template['template_id'].removesuffix('-r9') + '-' + label
-    (root / 'stagea-512-template-r7.json').write_text(json.dumps(template, sort_keys=True, indent=2) + '\n')
+    (root / 'stagea-512-template-r7.json').write_text(DIRECT_ASCII_INDENT2_LAX.text(template) + '\n')
     names.append('stagea-512-template-r7.json')
     (root / 'launch-fields.json').write_text(json.dumps({
         'campaign': campaign, 'label': label, 'source_head': args.source_head,
         'manifest_sha256': digest, 'capsule': bound, 'head_walk_reads_dropped': dropped,
-        'template_sha256': hashlib.sha256(TEMPLATE.read_bytes()).hexdigest()},
+        'template_sha256': bytes_sha256hex(TEMPLATE.read_bytes())},
         indent=2) + '\n')
     names.append('launch-fields.json')
-    (root / 'package-pins.json').write_text(json.dumps({name: hashlib.sha256((root/name).read_bytes()).hexdigest()
-                                                     for name in names}, sort_keys=True, indent=2) + '\n')
+    (root / 'package-pins.json').write_text(DIRECT_ASCII_INDENT2_LAX.text({name: bytes_sha256hex((root/name).read_bytes())
+                                                     for name in names}) + '\n')
     (root / f'launch-{label}.py').write_text(launcher)
-    print(json.dumps({'package': str(root), 'source_head': args.source_head,
+    print(DIRECT_ASCII_SPACED_LAX.text({'package': str(root), 'source_head': args.source_head,
         'data_manifest_sha256': digest, 'capsule': bound, 'frontier': capsule['frontier'],
         'head_walk_reads_dropped': dropped,
         'phases': len(manifest['read_plan']['phases']),
         'max_phase_bytes': max(p['bytes'] for p in manifest['read_plan']['phases']),
-        'runtime_pin_pending': True}, sort_keys=True))
+        'runtime_pin_pending': True}))
 
 
 if __name__ == '__main__':

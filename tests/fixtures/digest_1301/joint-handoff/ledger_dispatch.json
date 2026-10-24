@@ -1,0 +1,271 @@
+{
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "entries": [
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@3965:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_dry_run_document"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4032:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_published_status"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4040:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_dispatch_waiting_status"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3223:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_coverage_default_str"
+      ],
+      "reason": "Eligible unresolved API gap: sorted indent=2, default=str JSON; existing owners have no exact recipe. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template@2814:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_handoff_template_written_bytes"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id@2741:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_handoff_template_identity"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv@2343:48",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_quantum_argv_grace_recipe",
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_quantum_argv_grace_consumer"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_stage_a_split.py::main@835:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "replaced",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json",
+        "tests/fixtures/digest_1301/joint-handoff/original_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_split_main_report"
+      ],
+      "reason": null
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_joint_quanta.py::_container_wrap@1850:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_joint_quanta.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@796:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@811:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@816:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::main@831:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_stage_a_split.py::row_template@214:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "unresolved_api_gap",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/provenance.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_unresolved_unsorted_payloads"
+      ],
+      "reason": "Eligible unresolved API gap: unsorted JSON with default separators, insertion order and native clone/payload/stdout behavior. Existing owners have no exact recipe; supplemental JSON remains eligible despite stdout classification. Pending owner-recipes blocker; not justified retention.",
+      "blocker": "pending-owner-recipes"
+    },
+    {
+      "original_id": "embedded:tools/dispatch_stage_a_split.py::_BAND_SET",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "status": "retained",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/dispatch_stage_a_split.original.txt",
+        "tests/fixtures/digest_1301/joint-handoff/target_deployment_witness.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_embedded_band_set_target_deployment"
+      ],
+      "reason": "Separate deployment retention: isolated target executes the unchanged embedded command with the existing runtime roster and no prismaquant.digests installed. Routing would add an unavailable target dependency. Preserve read order, first-band header, JSON order and newline. Missing unsorted recipe alone would NOT justify retention; this witness does not claim a live fleet lacks the owner."
+    }
+  ],
+  "counts": {
+    "registry_calls": 14,
+    "additional_embedded_sites": 1,
+    "replaced": 7,
+    "eligible_unresolved_api_gaps": 7,
+    "justified_deployment_retentions": 1
+  },
+  "blockers": [
+    {
+      "id": "pending-owner-recipes",
+      "status": "pending",
+      "owner": "prismaquant.digests (external to this slice; do not modify owners)",
+      "required_recipes": [
+        {
+          "recipe": "Unsorted direct JSON; ensure_ascii=True, default separators, allow_nan=True, no default hook; preserve insertion order and native errors.",
+          "sites": 6
+        },
+        {
+          "recipe": "Sorted direct JSON; ensure_ascii=True, indent=2, allow_nan=True, default=str; preserve pretty whitespace, fallback conversion and errors.",
+          "sites": 1
+        }
+      ],
+      "resolution": "Owner must supply reviewed exact recipes before these seven eligible callers can route; existing sorted or no-default profiles are not equivalent. Missing recipe is an unresolved API gap, not justified retention. No owner change made in this slice."
+    }
+  ]
+}

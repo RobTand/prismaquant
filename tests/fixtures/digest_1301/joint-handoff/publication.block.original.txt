@@ -1,0 +1,92 @@
+try:
+    # With --produced-output, inside the admitted PrismaBuild action, the
+    # files are produced outputs committed at their origin (PQ #1070);
+    # without it they are published directly, as before.
+    publication = bind_preparation_publication(
+        metadata_root, required=args.produced_output)
+    # Publication order is the recoverability contract: every
+    # referenced manifest is published and hash-verified BEFORE any
+    # record or index names it, so no discoverable record ever points
+    # at absent or different bytes. A crash between manifests and
+    # records reruns to completion (same bytes are idempotent);
+    # differing bytes refuse instead of overwriting.
+    control = [(Path(record["read_set"]["manifest_path"]),
+                seal_manifest_bytes(produced["slice_manifests"][record["quantum_id"]]),
+                "slice manifest")
+               for record in produced["records"]]
+    # Bound boundary readsets land at their own producer-named absolute
+    # paths -- a new immutable generation beside the records, never an
+    # edit of a sealed file.
+    control += [(Path(manifest_path), seal_manifest_bytes(manifest), "bound readset")
+                for manifest_path, manifest, _ in bound_manifests]
+    # Each layer's Stage B head slice (PQ #1010) lands at the path its
+    # record's executable readset names, before the record exists.
+    control += [(Path(sealed["binding"]["path"]), sealed["bytes"], "Stage B head slice")
+                for _, sealed in sorted(head_slices.items())]
+    # Each bound record's stage-A slice (PQ #993) lands at the path the
+    # record names, as its canonical bytes, before the record exists.
+    control += [(Path(record["adjoint"]["slice_path"]),
+                 adjoint_slice_bytes(adjoint_slices[record["quantum_id"]]),
+                 "stage-A slice")
+                for record in produced["records"]
+                if record["adjoint"].get("slice_path") is not None]
+    publish_files(publication, "manifests", control)
+    for _, sealed in sorted(head_slices.items()):
+        binding = sealed["binding"]
+        if hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() \
+                != binding["sha256"]:
+            return _fail(f"head slice at {binding['path']} does not hash "
+                         "to the sealed digest")
+    for record in produced["records"]:
+        slice_path = record["adjoint"].get("slice_path")
+        if slice_path is None:
+            continue
+        if hashlib.sha256(Path(slice_path).read_bytes()).hexdigest() != \
+                record["adjoint"]["slice_sha256"]:
+            return _fail(f"stage-A slice at {slice_path} does not hash to "
+                         "the sealed digest")
+    # Resolution verification: every bound path must name the exact
+    # file just published, whose bytes hash to the sealed digest.
+    for record in produced["records"]:
+        manifest_path = Path(record["read_set"]["manifest_path"])
+        try:
+            sealed = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            return _fail(f"slice manifest unreadable at {manifest_path}: "
+                          f"{exc}")
+        if sealed != record["read_set"]["manifest_sha256"]:
+            return _fail(f"slice manifest at {manifest_path} does not "
+                          f"hash to the sealed digest")
+    for manifest_path, _, manifest_sha256 in bound_manifests:
+        path = Path(manifest_path)
+        try:
+            sealed = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            return _fail(f"bound readset unreadable at {path}: {exc}")
+        if sealed != manifest_sha256:
+            return _fail(f"bound readset at {path} does not hash to "
+                          f"the sealed digest")
+    # Records and the index publish last: nothing discoverable names
+    # bytes that were not just verified above. Slice manifests land at
+    # the producer-named absolute paths the records bind -- never
+    # beside the record files. The adjoint manifest is the phase
+    # worker's file and is never written here.
+    records = [(out / f"{record['quantum_id']}.json", _pretty(record),
+                "quantum record") for record in produced["records"]]
+    if args.adjoint_band and args.adjoint_receipt is None:
+        # Band granularity (PQ #993): one index per band, so a later run
+        # with more bands adds indexes and never rewrites one.
+        for boundary, band in sorted(band_index.items()):
+            layers = set(band["band"]["layers"])
+            records.append((out / f"records.band-{boundary:03d}.json",
+                            _pretty([record for record in produced["records"]
+                                     if record["layer"] in layers]),
+                            "band records index"))
+    else:
+        records.append((out / "records.json", _pretty(produced["records"]),
+                        "records index"))
+    records.append((out / "derivation.json", _pretty(produced["derivation"]),
+                    "derivation"))
+    publish_files(publication, "records", records)
+except (ValueError, OSError, PreparationPublicationRefused) as exc:
+    return _fail(str(exc))

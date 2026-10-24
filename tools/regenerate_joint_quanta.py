@@ -95,7 +95,6 @@ writes exactly as before.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -110,6 +109,8 @@ else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
     from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
+
+from prismaquant.digests import bytes_sha256hex
 
 EXIT_REFUSED = 3
 
@@ -137,7 +138,7 @@ def _load_json(path: Path, *, digest: str | None, where: str):
         raw = read_input(path, sha256=digest, where=where)
     except OSError as exc:
         raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
-    if digest is not None and hashlib.sha256(raw).hexdigest() != digest:
+    if digest is not None and bytes_sha256hex(raw) != digest:
         raise ValueError(f"{where} digest mismatch at {path}")
     if raw[:2] == _GZIP_MAGIC:
         # wbits=31 decodes the gzip wrapper; the decompressor -- not a
@@ -357,7 +358,7 @@ def _prior_slice_manifest(record: dict, *, where: str) -> dict:
     except OSError as exc:
         raise ValueError(f"{where}: prior slice manifest unreadable at "
                          f"{path}: {exc}") from exc
-    if hashlib.sha256(raw).hexdigest() != manifest_sha256:
+    if bytes_sha256hex(raw) != manifest_sha256:
         raise ValueError(
             f"{where}: prior slice manifest bytes at {path} do not hash to "
             f"the digest the prior record sealed ({manifest_sha256}): "
@@ -718,7 +719,7 @@ def _load_production_cache(prepared: dict):
     except OSError as exc:
         raise ValueError(f"production cache unreadable at {path}: "
                          f"{exc}") from exc
-    if hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+    if bytes_sha256hex(raw) != reference["sha256"]:
         raise ValueError(f"production cache digest mismatch at {path}")
     try:
         cache = pickle.loads(raw)
@@ -767,7 +768,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
         raw = head_slice_bytes(head_slice)
         sealed[layer] = {"bytes": raw, "binding": {
             "path": head_slice_path(output_root, layer, metadata_root=metadata_root),
-            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+            "sha256": bytes_sha256hex(raw), "bytes": len(raw),
             "schema": HEAD_SLICE_SCHEMA,
             "head_files": [dict(row) for row in head_slice["head_files"]]}}
     print(f"Stage B head slices: {len(sealed)} layers from one head intake of "
@@ -1083,9 +1084,8 @@ def main(argv=None) -> int:
                     # the prior record before the relocation is judged.
                     _prior_slice_manifest(
                         old_by_id[qid], where=f"Gate 1 relocation {qid}")
-                    produced_slice_sha = hashlib.sha256(
-                        seal_manifest_bytes(
-                            moved["slice_manifests"][qid])).hexdigest()
+                    produced_slice_sha = bytes_sha256hex(seal_manifest_bytes(
+                            moved["slice_manifests"][qid]))
                     _check_authorized_metadata_diff(
                         old_by_id[qid], record,
                         original_root=str(args.original_root),
@@ -1457,7 +1457,7 @@ def main(argv=None) -> int:
         publish_files(publication, "manifests", control)
         for _, sealed in sorted(head_slices.items()):
             binding = sealed["binding"]
-            if hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() \
+            if bytes_sha256hex(Path(binding["path"]).read_bytes()) \
                     != binding["sha256"]:
                 return _fail(f"head slice at {binding['path']} does not hash "
                              "to the sealed digest")
@@ -1465,7 +1465,7 @@ def main(argv=None) -> int:
             slice_path = record["adjoint"].get("slice_path")
             if slice_path is None:
                 continue
-            if hashlib.sha256(Path(slice_path).read_bytes()).hexdigest() != \
+            if bytes_sha256hex(Path(slice_path).read_bytes()) != \
                     record["adjoint"]["slice_sha256"]:
                 return _fail(f"stage-A slice at {slice_path} does not hash to "
                              "the sealed digest")
@@ -1474,7 +1474,7 @@ def main(argv=None) -> int:
         for record in produced["records"]:
             manifest_path = Path(record["read_set"]["manifest_path"])
             try:
-                sealed = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+                sealed = bytes_sha256hex(manifest_path.read_bytes())
             except OSError as exc:
                 return _fail(f"slice manifest unreadable at {manifest_path}: "
                               f"{exc}")
@@ -1484,7 +1484,7 @@ def main(argv=None) -> int:
         for manifest_path, _, manifest_sha256 in bound_manifests:
             path = Path(manifest_path)
             try:
-                sealed = hashlib.sha256(path.read_bytes()).hexdigest()
+                sealed = bytes_sha256hex(path.read_bytes())
             except OSError as exc:
                 return _fail(f"bound readset unreadable at {path}: {exc}")
             if sealed != manifest_sha256:

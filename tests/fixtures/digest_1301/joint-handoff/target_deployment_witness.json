@@ -1,0 +1,21 @@
+{
+  "kind": "isolated target deployment behavioral witness, not a live fleet claim",
+  "payload": "tools/dispatch_stage_a_split.py::_BAND_SET",
+  "launcher": "_cpu_row: pbrun --cwd checkout -- python -c payload",
+  "runtime_roster": [
+    "prismaquant.joint_adjoint_slices.band_set",
+    "prismaquant.joint_adjoint_slices.stage_a_run_header",
+    "prismaquant.joint_adjoint_slices.stage_a_run_header_sha256"
+  ],
+  "owner_absent_on_isolated_target": true,
+  "owner_present_in_frozen_source_checkout": true,
+  "frozen_owner_blob": "65c98d3bdeb16035ef4b104dc159e986e2279897",
+  "test": "tests/test_digest_1301/joint-handoff/test_dispatch.py::test_embedded_band_set_target_deployment",
+  "unchanged_behavior": [
+    "read bands via json.load(open(p)) in argv order",
+    "band_set before stage_a_run_header",
+    "sorted indexed boundaries",
+    "first band header",
+    "unsorted default JSON stdout with print newline"
+  ]
+}

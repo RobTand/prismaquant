@@ -39,7 +39,6 @@ from __future__ import annotations
 import argparse
 import copy
 import gzip
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -47,7 +46,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)  # noqa: E402
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import (DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX,
+                                 bytes_sha256hex, DIRECT_ASCII_INDENT2_LAX)
 from prismaquant.joint_adjoint_slices import checkpoint_manifest_entry  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
 from prismaquant.stage_a_chain_seed import (  # noqa: E402
@@ -179,13 +179,12 @@ def assemble_phases(manifest, by_name, names, added) -> dict:
 
 def manifest_wire(manifest) -> bytes:
     """The manifest's sealed bytes: sorted compact JSON, gzip without a timestamp."""
-    return gzip.compress((json.dumps(manifest, sort_keys=True, separators=(",", ":"))
-                          + "\n").encode(), mtime=0)
+    return gzip.compress((DIRECT_ASCII_LAX.text(manifest) + "\n").encode(), mtime=0)
 
 
 def _pin(path, sha256, what) -> dict:
     raw = Path(path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != sha256:
+    if bytes_sha256hex(raw) != sha256:
         raise SeedPackageRefused(f"the {what} {path} does not have the pinned digest {sha256}")
     return {"path": str(path), "sha256": sha256}
 
@@ -199,7 +198,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     names; its ``inputs`` say which head entries are the head walk's.
     """
     wire = Path(original_manifest).read_bytes()
-    if hashlib.sha256(wire).hexdigest() != original_manifest_sha256:
+    if bytes_sha256hex(wire) != original_manifest_sha256:
         raise SeedPackageRefused("the source manifest does not have the pinned digest")
     original = json.loads(gzip.decompress(wire) if wire[:2] == b"\x1f\x8b" else wire)
     try:
@@ -215,10 +214,10 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     record = load_pinned_checkpoint(spec["checkpoint"], "checkpoint")
     reference = (None if spec["compare"] is None
                  else load_pinned_checkpoint(spec["compare"], "compare checkpoint"))
-    spec_bytes = (json.dumps(spec, indent=2, sort_keys=True) + "\n").encode()
+    spec_bytes = (DIRECT_ASCII_INDENT2_LAX.text(spec) + "\n").encode()
     root = Path(output)
     spec_entry = _entry(root / SPEC_NAME, len(spec_bytes),
-                        hashlib.sha256(spec_bytes).hexdigest())
+                        bytes_sha256hex(spec_bytes))
     manifest = seed_manifest(original, spec=spec, spec_entry=spec_entry,
                              checkpoint=record, compare=reference)
     if validate is not None:
@@ -229,7 +228,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
         "schema": PACKAGE_SCHEMA,
         "seed_spec": {"path": spec_entry["path"], "sha256": spec_entry["sha256"]},
         "data_manifest": {"path": str(root / MANIFEST_NAME),
-                          "sha256": hashlib.sha256(manifest_bytes).hexdigest()},
+                          "sha256": bytes_sha256hex(manifest_bytes)},
         "source_manifest": {"path": str(original_manifest),
                             "sha256": original_manifest_sha256},
         "phases": [{"name": phase["name"], "bytes": phase["bytes"],
@@ -241,7 +240,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     root.mkdir(parents=True, exist_ok=False)
     (root / SPEC_NAME).write_bytes(spec_bytes)
     (root / MANIFEST_NAME).write_bytes(manifest_bytes)
-    (root / PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
+    (root / PACKAGE_NAME).write_text(DIRECT_ASCII_INDENT2_LAX.text(package) + "\n")
     return package
 
 

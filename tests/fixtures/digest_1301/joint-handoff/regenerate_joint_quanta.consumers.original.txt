@@ -1,0 +1,140 @@
+def _load_json(path: Path, *, digest: str | None, where: str):
+    """Read, digest-verify, and parse a JSON document, gzip-transparent.
+
+    The digest always covers the wire bytes. Detection is by gzip magic,
+    never by suffix; the gunzip output is bounded and trailing garbage
+    after a gzip member refuses rather than being silently ignored."""
+    from prismaquant.stage_b_prep_io import read_input
+    try:
+        raw = read_input(path, sha256=digest, where=where)
+    except OSError as exc:
+        raise ValueError(f"{where} unreadable at {path}: {exc}") from exc
+    if digest is not None and hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError(f"{where} digest mismatch at {path}")
+    if raw[:2] == _GZIP_MAGIC:
+        # wbits=31 decodes the gzip wrapper; the decompressor -- not a
+        # filename or member count -- reports truncation (eof) and trailing
+        # bytes (unused_data), and output past the bound refuses.
+        decompressor = zlib.decompressobj(31)
+        try:
+            raw = decompressor.decompress(raw, MAX_DECODED_MANIFEST_BYTES + 1)
+        except zlib.error as exc:
+            raise ValueError(f"{where} is not valid gzip at {path}: "
+                             f"{exc}") from exc
+        if decompressor.unused_data:
+            raise ValueError(f"{where} has trailing bytes after its gzip "
+                             f"member at {path}: refusing")
+        if not decompressor.eof or len(raw) > MAX_DECODED_MANIFEST_BYTES:
+            raise ValueError(f"{where} gzip member is truncated or its "
+                             f"decoded document exceeds "
+                             f"{MAX_DECODED_MANIFEST_BYTES} bytes at {path}")
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeError) as exc:
+        raise ValueError(f"{where} is not JSON at {path}: {exc}") from exc
+
+def _prior_slice_manifest(record: dict, *, where: str) -> dict:
+    """Decode a prior generation's slice manifest, first refusing unless its
+    raw wire bytes hash to the digest the prior record sealed (the bytes are
+    verified before any semantic part of them is compared)."""
+    read_set = record.get("read_set")
+    if not isinstance(read_set, dict):
+        raise ValueError(f"{where}: the prior record seals no read_set")
+    manifest_path = read_set.get("manifest_path")
+    manifest_sha256 = read_set.get("manifest_sha256")
+    if type(manifest_path) is not str or not manifest_path \
+            or type(manifest_sha256) is not str:
+        raise ValueError(f"{where}: the prior record names no slice manifest")
+    path = Path(manifest_path)
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"{where}: prior slice manifest unreadable at "
+                         f"{path}: {exc}") from exc
+    if hashlib.sha256(raw).hexdigest() != manifest_sha256:
+        raise ValueError(
+            f"{where}: prior slice manifest bytes at {path} do not hash to "
+            f"the digest the prior record sealed ({manifest_sha256}): "
+            f"refusing to compare unverified bytes")
+    return _load_verified_json(path, manifest_sha256, where=f"{where} slice")
+
+def _load_production_cache(prepared: dict):
+    """Load the prepared completion's production weight cache, once (PQ #917).
+
+    The ``production_cache`` binding names independently bound path/SHA256;
+    the bytes are digest-verified before unpickling and the result must be
+    a ``ProductionWeightCache``. The single load serves every layer's
+    prepared-input derivation; render payloads are never rehashed (digests
+    come from the cache's sealed verified cells, sizes from current stat).
+    """
+    import pickle
+
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    reference = prepared.get("production_cache")
+    if not isinstance(reference, dict) or set(reference) != {
+            "path", "sha256"}:
+        raise ValueError("the prepared completion names no bound production "
+                         "cache (path/SHA256): refusing")
+    from prismaquant.stage_b_prep_io import read_input
+    path = Path(reference["path"])
+    try:
+        raw = read_input(path, sha256=reference["sha256"], where="production cache")
+    except OSError as exc:
+        raise ValueError(f"production cache unreadable at {path}: "
+                         f"{exc}") from exc
+    if hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+        raise ValueError(f"production cache digest mismatch at {path}")
+    try:
+        cache = pickle.loads(raw)
+    except Exception as exc:
+        raise ValueError(f"production cache does not unpickle at {path}: "
+                         f"{exc}") from exc
+    if not isinstance(cache, ProductionWeightCache):
+        raise ValueError("the prepared production cache is not a "
+                         "ProductionWeightCache: refusing")
+    return cache
+
+def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
+                       prepared_binding: dict, production_cache, layers,
+                       output_root: str, metadata_root) -> dict:
+    """Run the Stage B head intake ONCE and seal one slice per layer (PQ #1010).
+
+    The walk is the one every quantum used to repeat -- the plan's inputs,
+    existing renders required, payloads unverified, the plan's historical
+    encoder allowance -- with no head journal: it runs here, in the metadata
+    producer, and nothing it reads is re-read by a quantum. Returns
+    ``{layer: {"bytes", "binding"}}``; nothing is written.
+    """
+    from prismaquant.aura_provenance import producer_package_sha256
+    from prismaquant.joint_layer_quanta import qname_layer
+    from prismaquant.joint_stage_b_head import (
+        HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
+    from prismaquant.tessera_joint_aura import (
+        load_measured_anchor_input, resolve_file_hash_workers)
+    from prismaquant.tessera_reader import load_declared_reader
+
+    started = time.monotonic()
+    data = load_measured_anchor_input(
+        plan["inputs"], reader=load_declared_reader(plan.get("reader")),
+        synthesis_device="cpu", progress_phase=None,
+        require_existing_renders=True, verify_payloads=False,
+        historical_encoder_reuse=plan.get("historical_encoder_reuse"),
+        file_hash_workers=resolve_file_hash_workers(plan))
+    slices = build_head_slices(
+        config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
+        completion=prepared, production_cache=production_cache, data=data,
+        layers=layers, layer_of=qname_layer,
+        implementation_sha256=producer_package_sha256())
+    sealed = {}
+    for layer, head_slice in slices.items():
+        raw = head_slice_bytes(head_slice)
+        sealed[layer] = {"bytes": raw, "binding": {
+            "path": head_slice_path(output_root, layer, metadata_root=metadata_root),
+            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+            "schema": HEAD_SLICE_SCHEMA,
+            "head_files": [dict(row) for row in head_slice["head_files"]]}}
+    print(f"Stage B head slices: {len(sealed)} layers from one head intake of "
+          f"{len(data.formats_by_qname)} units / {len(data.cells)} cells in "
+          f"{time.monotonic() - started:.1f}s")
+    return sealed

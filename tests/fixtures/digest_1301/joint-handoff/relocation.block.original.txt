@@ -1,0 +1,27 @@
+try:
+    if metadata_root is None:
+        for record in moved["records"]:
+            _check_authorized_diff(
+                old_by_id[record["quantum_id"]], record,
+                old_root=str(args.original_root),
+                bound=receipt is not None,
+                where=f"move to {output_root}")
+    else:
+        for record in moved["records"]:
+            qid = record["quantum_id"]
+            # The prior slice bytes are digest-verified against
+            # the prior record before the relocation is judged.
+            _prior_slice_manifest(
+                old_by_id[qid], where=f"Gate 1 relocation {qid}")
+            produced_slice_sha = hashlib.sha256(
+                seal_manifest_bytes(
+                    moved["slice_manifests"][qid])).hexdigest()
+            _check_authorized_metadata_diff(
+                old_by_id[qid], record,
+                original_root=str(args.original_root),
+                metadata_root=metadata_root,
+                slice_sha256=produced_slice_sha,
+                bound=receipt is not None,
+                where=f"relocation to {metadata_root}")
+except (ValueError, KeyError) as exc:
+    return _fail(str(exc))

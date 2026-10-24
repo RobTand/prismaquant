@@ -54,7 +54,6 @@ from __future__ import annotations
 import argparse
 import copy
 import gzip
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,6 +63,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_INDENT2_LAX,
     DIRECT_ASCII_SPACED_LAX,
     bytes_sha256hex,
     indent2_json_file_bytes,
@@ -128,7 +128,7 @@ def load_round(output_root, chain_state_sha256, checkpoint_sha256) -> dict:
         raise SplitPackageRefused("the run has no sealed checkpoint to split from")
     boundary = min(sealed)
     path = Path(sealed[boundary][1]) / "checkpoint.json"
-    if hashlib.sha256(path.read_bytes()).hexdigest() != checkpoint_sha256:
+    if bytes_sha256hex(path.read_bytes()) != checkpoint_sha256:
         raise SplitPackageRefused(
             f"the lowest sealed checkpoint {path} does not have the pinned digest "
             f"{checkpoint_sha256}")
@@ -296,7 +296,7 @@ def source_bytes(manifest, prefix="chain-") -> int:
 
 def _describe(path, wire, manifest, stat, prefix="chain-") -> dict:
     phases = manifest["read_plan"]["phases"]
-    return {"data_manifest": {"path": str(path), "sha256": hashlib.sha256(wire).hexdigest()},
+    return {"data_manifest": {"path": str(path), "sha256": bytes_sha256hex(wire)},
             "phases": [{"name": phase["name"], "bytes": phase["bytes"],
                         "entries": len(phase["entry_indices"])} for phase in phases],
             "entry_count": manifest["entry_count"],
@@ -347,7 +347,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, output_root,
     root.mkdir(parents=True, exist_ok=False)
     for path, data, _manifest, _stat in described:
         path.write_bytes(data)
-    (root / PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True) + "\n")
+    (root / PACKAGE_NAME).write_text(DIRECT_ASCII_INDENT2_LAX.text(package) + "\n")
     return package
 
 
