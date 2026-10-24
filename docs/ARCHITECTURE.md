@@ -10020,6 +10020,107 @@ prices a rung twice.
 - a unit or group left without a complete rung exits 2;
 - unset, the menu and the record are unchanged.
 
+### Option B: enumerate MTP choices with independently solved bodies (#2532, #2858)
+
+The opt-in `--mtp-option-b-dir DIR` extends the GLM MTP allocator above; it
+is not a replacement selector. Without it, independent MTP selection remains
+the default. Option B requires `--target-disk-gb`, `--mtp-joint-cost`,
+`--mtp-byte-budget` and `--mtp-serve-constants`. The cost input has schema
+`prismaquant.glm_mtp_cost.v1`; its declared groups, parameters, source dtypes,
+self-KL rows and exact wire prices define the MTP menu. Optional
+`--mtp-formats` and `--mtp-fixed-formats` restrict that menu through the same
+admission machinery as `select_mtp_rungs`. Producer eligibility, scope,
+allowability and bound-cost checks still apply. BF16 passthrough is offered
+only where the source permits it. `enumerate_mtp_rungs` emits each admitted
+one-rung-per-group choice once when its summed resident bytes are **less than
+or equal to** the MTP sub-budget. It does not choose the lowest self-KL choice.
+
+For each MTP choice, the allocator runs a separate body byte-budget ratchet
+using the existing body predicted-loss objective and exact footprint owner.
+It starts with the source partition without an independent MTP rebase, then
+replaces the MTP source tail with this choice's bytes. Body source spans are
+replaced by the body's encoded payload exactly once. Immutable tensors,
+fixed regions, sidecars and metadata reserve remain charged exactly once.
+The manifest's `body_byte_allowance` is the whole-artifact cap minus the
+metadata reserve minus this candidate's `floor_bytes` (the fixed/rebased tail,
+including selected MTP bytes). `immutable_and_fixed_bytes` excludes the MTP
+bytes from that tail. Equality with the whole-artifact cap is feasible; any
+amount over it is not. Differing remainders can yield differing body formats.
+Body predicted loss and MTP self-KL remain separate fields: no scalar exchange
+weight combines them and no cross-candidate release winner is selected.
+
+`DIR/manifest.json` uses schema `prismaquant.mtp_option_b_candidates.v1` and
+records the cap, reserve, captured MTP cost path and SHA-256, sub-budget,
+constants source, `winner_selected: false`, `candidates` and `rejected`.
+Each candidate names its relative `layer_config` (`candidate_NNN.json`),
+MTP rung/assignment/selection, expanded `body_assignment`, body achieved bits
+and predicted loss, allowance, fixed floor, tensor payload, whole-artifact
+upper bound, budget stamp, grid/`chosen_target_bits` and ratchet trace.
+Rejections record the MTP choice and below-floor or serving-constraint reason;
+ids may have gaps when choices are rejected. Enumeration retains the captured
+`MtpCostInput` payload/path/digest throughout; stamping does not rehash a
+potentially changed input path.
+
+The body solver's raw assignment stays the writer input. `AssignmentSpace`
+expands it for accounting and emission; the manifest records that complete
+expanded assignment, not an unexpanded expert-stack shorthand. Its union with
+the MTP assignment is bound by `combined_assignment_sha256`, identical to the
+config's whole-artifact `selection_assignment_sha256`. Exact unit prices,
+selected wire receipts and joint-operator identities survive emission in
+`mtp_selection`. Bound M4 roster member order is evidence: validation compares
+original rosters and rejects tampering. Only a separate computation view is
+canonicalized for deterministic iteration; source payloads and receipts are
+not sorted into apparent agreement.
+
+Each candidate writer call passes
+`solved_target_bits=float(_info["chosen_target_bits"])` through the #2633
+writer API. Config `target_bits` therefore names the candidate's actual solve
+target, **not** achieved bits or the CLI request. `target_bits_provenance`
+retains `cli_target_bits`, `args_target_bits`, `solved_target_bits`,
+`stamped_target_bits` and `stamped_from`. Shared CLI state is not mutated.
+The CPU oracle intentionally requests CLI target 31.125 and checks every
+candidate config against its manifest's solve target, achieved bits, complete
+assignment digest, MTP selection and budget stamp.
+
+Option B dispatches before independent-choice feasibility refusal and returns
+when enumeration succeeds: it neither invokes an independent MTP winner nor
+writes the ordinary main layer-config, selection-request or attribution
+outputs. Empty admitted menus, no choices under the MTP budget, and no bodies
+under the artifact cap refuse; the last case leaves a rejection manifest.
+PACT shape-time search is unsupported. Body/MTP source overlap, duplicate
+source aliases, excluded MTP source prefixes, missing or inconsistent bound
+wires/receipts and ineligible menu rows retain the existing fail-closed gates.
+Enumeration and CPU accounting tests are **not** release selection, quality
+validation, or serving qualification. A retained serving constraint is a gate,
+not evidence that a candidate has been served.
+
+Reproduce the bounded CPU fixtures from the repository root (no model download
+or GPU); the first command builds tiny temporary source/probe/cost fixtures
+and emits candidates through the real allocator CLI parser and writer:
+
+```bash
+python -m pytest tests/test_mtp_option_b_2532.py::test_option_b_matches_exhaustive_body_oracle -q --basetemp="$TMPDIR/pytest"
+python -m pytest tests/test_mtp_option_b_2532.py tests/test_architecture_doc.py -q --basetemp="$TMPDIR/pytest"
+```
+
+For already prepared, admitted inputs, the corresponding root-level candidate
+command is below. Paths are operator-provided inputs, not installed defaults;
+the fixture command above constructs CPU-only equivalents. The example cap
+and sub-budget must be replaced with the intended artifact/menu limits.
+
+```bash
+python -m prismaquant.allocator --probe probe.pkl --costs cost.pkl \
+  --formats NVFP4,FP8_E4M3,BF16 --target-profile research \
+  --target-bits 31.125 --target-disk-gb 1 \
+  --artifact-overhead-reserve-bytes 512 \
+  --mtp-joint-cost mtp.pkl --mtp-serve-constants constants.json \
+  --mtp-byte-budget 1000000 --mtp-formats BF16,FP8_E4M3 \
+  --mtp-option-b-dir candidates
+```
+
+The separately owned #2771 protocol document retains its own evidence-lineage
+scope; this section documents the integrated implementation only.
+
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
 window's loads move to `io_engine`, the capture guard gains

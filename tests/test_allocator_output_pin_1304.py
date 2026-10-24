@@ -18,7 +18,7 @@ import sys
 import pytest
 
 STOCK_DIGESTS = {
-    "layer_config.json": "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469",
+    "layer_config.json": "8209cad73ff2d274bc2e16f0f0872187e56868afb25d8ee7657b3e28508c961c",
     "format_applicability.json": (
         "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
     ),
@@ -45,7 +45,7 @@ STOCK_DIGESTS = {
     ),
 }
 TESSERA_DIGESTS = {
-    "layer.json": "57b8f9b3498d25ca3fd67b541c86ff731bca9fb265d8878bd9ac8fd803c35ec9",
+    "layer.json": "2243b0a290c31cf46927fb2234a80d800343d81d912652b7198ddcca08113bb6",
     "format_applicability.json": (
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
