@@ -91,7 +91,6 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import fcntl
 from functools import partial
-import hashlib
 import io
 import math
 import mmap
@@ -258,17 +257,18 @@ class SealedBuffer:
 
     def seal(self) -> str:
         """Hash the bytes read, drop the writable mapping and seal; the SHA-256 hex."""
-        digest = hashlib.sha256()
         if self._map is not None:
             view = memoryview(self._map)
             try:
-                digest.update(view)
+                digest = bytes_sha256hex(view)
             finally:
                 view.release()
             self._map.close()
             self._map = None
+        else:
+            digest = bytes_sha256hex(b"")
         fcntl.fcntl(self._fd, _F_ADD_SEALS, _SEALS)
-        return digest.hexdigest()
+        return digest
 
     def require_sealed(self) -> None:
         """Require actual kernel write/grow/shrink/seal protection, not a flag."""

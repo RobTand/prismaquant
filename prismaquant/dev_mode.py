@@ -127,6 +127,8 @@ def _shown(value: Any) -> str:
     if len(text) <= _SHOWN_CHARS:
         return text
     try:
+        # No settled profile has this spaced/lax default=repr recipe.
+        # default=str would change diagnostic identity bytes.
         encoded = json.dumps(value, sort_keys=True, default=repr).encode()
     except (TypeError, ValueError):
         encoded = text.encode()

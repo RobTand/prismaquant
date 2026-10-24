@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from prismaquant.source_read_plan import read_safetensors_header
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 
 
 APPROVED_RESOURCE_OWNERS: dict[str, frozenset[str]] = {
@@ -1997,7 +1998,7 @@ def main(argv: list[str] | None = None) -> int:
         write_pipeline_spec(spec, args.write_default_production)
         print(f"[pipeline-spec] wrote {args.write_default_production}")
     elif not args.input:
-        print(json.dumps(spec.to_dict(), indent=2, sort_keys=True))
+        print(DIRECT_ASCII_INDENT2_LAX.text(spec.to_dict()))
     elif validation.ok:
         print(f"[pipeline-spec] valid: {args.input}")
     return 0

@@ -1,0 +1,1 @@
+DIRECT_ASCII_LAX.sha256(header)

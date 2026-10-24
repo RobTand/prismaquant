@@ -1,0 +1,1 @@
+_initialization_digest(mapping)
