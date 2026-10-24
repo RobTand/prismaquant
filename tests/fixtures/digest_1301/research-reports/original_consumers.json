@@ -1,0 +1,47 @@
+{
+  "purpose": "Verbatim original consumer function fragments, captured before any replacements; no digest owner used to compute expected outcomes.",
+  "consumers": [
+    {
+      "file": "tools/pq_admitted_profile.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f6b4d55c17b89ba77108e9c23ddbe708f6d3e924",
+      "functions": {
+        "run_observed": "def run_observed(command, observer_command, observations: Path, *, target_out,\n                 ready_timeout=60, observer_exit_timeout=540):\n    observations = Path(observations)\n    if observations.exists():\n        raise FileExistsError('refusing stale observer output directory')\n    observer = subprocess.Popen(observer_command)\n    workload = None\n    try:\n        deadline = time.monotonic() + ready_timeout\n        ready = observations / 'ready.json'\n        while True:\n            if observer.poll() is not None:\n                raise RuntimeError('observer failed before workload readiness')\n            if ready.is_file():\n                record = json.loads(ready.read_text())\n                if record.get('target_out') != target_out:\n                    raise RuntimeError('observer readiness names a different target')\n                break\n            if time.monotonic() >= deadline:\n                raise RuntimeError('observer readiness timeout; workload not started')\n            time.sleep(0.1)\n        workload = subprocess.Popen(command)\n        row_rc = workload.wait()\n        (observations / 'workload_done').write_text(str(row_rc))\n        observer_error = None\n        try:\n            observer_rc = observer.wait(timeout=observer_exit_timeout)\n        except (subprocess.TimeoutExpired, OSError) as error:\n            observer_rc = None\n            observer_error = str(error)\n        qualified = row_rc == 0 and observer_rc == 0 and observer_error is None\n        with (observations / 'observer_result.json').open('x') as handle:\n            json.dump({'schema': 'prismaquant.profile_observer_result.v1',\n                       'workload_returncode': row_rc, 'returncode': observer_rc,\n                       'error': observer_error, 'qualified': qualified}, handle)\n        # Qualification failure cannot turn the original failed row into some\n        # unrelated exception exit. Cleanup still joins/stops our observer only.\n        if row_rc:\n            return row_rc\n        if not qualified:\n            raise RuntimeError(f'observer failed with status {observer_rc}; '\n                               f'profile not qualified: {observer_error}')\n        return row_rc\n    finally:\n        # Own observer only. The workload is never signalled or retried here.\n        if observer.poll() is None:\n            observer.terminate()\n            observer.wait(timeout=30)"
+      }
+    },
+    {
+      "file": "tools/pq_profile_child.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "06d2d73fc1f22821ec4ad0121beda1e3c874d085",
+      "functions": {
+        "run_profile_workload": "def run_profile_workload(command, status):\n    status = Path(status)\n    if status.exists():\n        raise FileExistsError('refusing stale workload status')\n    workload = subprocess.Popen(command)\n    rc = workload.wait()\n    with status.open('x') as handle:\n        json.dump({'schema': 'prismaquant.profile_workload_status.v1',\n                   'returncode': rc, 'workload_pid': workload.pid}, handle)\n    return rc"
+      }
+    },
+    {
+      "file": "tools/pq_profile_artifact.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "fceeb6f5e127218598519947649ee8f2b71fc5d9",
+      "functions": {
+        "workload_status_path": "def workload_status_path(profile):\n    profile = Path(profile)\n    return profile.with_name(profile.name + '.workload-status.json')",
+        "read_workload_status": "def read_workload_status(profile):\n    \"\"\"PID is written by the child in the profiler's own PID namespace.\"\"\"\n    record = json.loads(workload_status_path(profile).read_text())\n    if (not isinstance(record, dict) or record.get('schema') != _STATUS_SCHEMA\n            or type(record.get('returncode')) is not int\n            or type(record.get('workload_pid')) is not int\n            or record['workload_pid'] <= 0):\n        raise RuntimeError('child profiler has no valid workload completion record')\n    return record",
+        "finish_profile_status": "def finish_profile_status(profile, profiler_returncode):\n    \"\"\"Keep the worker's original result separate from profiler shutdown.\"\"\"\n    if type(profiler_returncode) is not int:\n        raise RuntimeError('profiler completion has no valid return code')\n    record = read_workload_status(profile)\n    record['profiler_returncode'] = profiler_returncode\n    status = workload_status_path(profile)\n    partial = status.with_name(status.name + '.finalizing')\n    with partial.open('x') as handle:\n        json.dump(record, handle)\n    partial.replace(status)\n    return record"
+      }
+    },
+    {
+      "file": "tools/pq_block_trial_math.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e5d9602def6ca94db657e29cfbea26148b70674",
+      "functions": {
+        "write_trial_json": "def write_trial_json(path: Path, document: dict) -> None:\n    \"\"\"Write strict ASCII JSON in insertion order with one final newline.\"\"\"\n    path.write_text(json.dumps(document, indent=2, allow_nan=False) + \"\\n\")"
+      }
+    },
+    {
+      "file": "tools/pq_row_profile_observer.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "649996745142c25e544c53c56436d93bf0ae2154",
+      "functions": {
+        "event": "def event(name, **data):\n    with lock, (out / 'events.jsonl').open('a') as f:\n        f.write(json.dumps({'epoch': time.time(), 'event': name, **data}) + '\\n')"
+      }
+    }
+  ]
+}
