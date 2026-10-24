@@ -431,7 +431,7 @@ class RungAllowability:
     source_path: str
     _table: dict = field(repr=False)
     _producer: object = field(repr=False)
-    _rule: Mapping = field(repr=False)
+    _rule: Mapping | range = field(repr=False)
     _rungs: frozenset[int] = field(repr=False)
     _refusals: dict = field(default_factory=dict, repr=False, compare=False)
     _cells: dict = field(default_factory=dict, repr=False, compare=False)
@@ -515,7 +515,9 @@ class RungAllowability:
             if rung not in self._rungs:
                 reason = "unlisted rung; " + reason
         else:
-            reason = "" if rung in self._rule else "excluded by the published allowable_rungs rule"
+            reason = "" if rung in self._rule else (
+                "outside the published reader rate grid" if isinstance(self._rule, range)
+                else "excluded by the published allowable_rungs rule")
         return reason
 
     def _resolve_cells(self, scope_key: tuple) -> tuple:
@@ -710,9 +712,32 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
         if missing:
             raise RungAllowabilityError(f"canonical v3 capabilities required: {', '.join(missing)}")
     rule = _allowable_rung_tables(format_entry, f"formats[{family}]")
-    if not rule:
+    if rule:
+        reader_rungs = MappingProxyType(rule)
+        step = format_entry["allowable_rungs"]["step_q256"]
+    elif (format_entry.get("allowable_rungs") is None
+          and table["schema"] == V3_SCHEMA
+          and format_entry.get("kind") == "tessera_wire"
+          and table.get("geometry_classes")
+          and all(row["identity"].get("decoder_kind") == "native_tcq"
+                  for row in table["geometry_classes"])):
+        # Native TCQ has no WINDOW run-table rule. This is only reader
+        # representability, never a performant menu or a class construction.
+        # The producer has already validated this current native publication;
+        # its per-cell admission still decides every rung below.
+        bounds = format_entry.get("reader_rate_range_q256")
+        step = format_entry.get("reader_rate_step_q256")
+        if (not isinstance(bounds, (list, tuple)) or len(bounds) != 2
+                or any(type(q) is not int for q in bounds)
+                or not 0 < bounds[0] <= bounds[1]
+                or type(step) is not int or step < 1):
+            raise RungAllowabilityError(f"{family}: valid published reader rate grid required")
+        reader_rungs = range(bounds[0], bounds[1] + 1, step)
+    else:
         raise RungAllowabilityError(f"{family}: existing v11 allowable_rungs rule required")
-    if table["scope"]["grid_step_q256"] != format_entry["allowable_rungs"]["step_q256"]:
+    # A native publication may sample only part of the reader grid. Its menu
+    # step is producer-owned; each requested rung still intersects reader_rungs.
+    if rule and table["scope"]["grid_step_q256"] != step:
         raise RungAllowabilityError("table step differs from the published true q256 grid step")
     current_index = read_allowability_json(index_path)
     producer.validate_index(current_index)
@@ -727,6 +752,6 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
         seal_check("D41 publication identity", index, current_index,
                    where=str(index_path), refusal=RungAllowabilityError)
     return RungAllowability(family, MappingProxyType(dict(expected_kernel_build)), version,
-                           str(path), table, producer, MappingProxyType(rule),
+                           str(path), table, producer, reader_rungs,
                            frozenset(row["rung"] for row in table["rungs"]),
                            index_source_path=str(index_path))

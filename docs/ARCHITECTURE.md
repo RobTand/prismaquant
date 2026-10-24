@@ -1883,7 +1883,35 @@ An unresolved explicit scope waits. It never becomes an unscoped allowance.
 
 The producer owns geometry classification and the performance menu.
 Its missing half-bit coverage remains missing. T4 remains unadmitted under
-its current policy. T8 R1280 remains a quality anchor, not a menu option.
+the installed aaa41700 producer's current policy. T8 R1280 remains a quality
+anchor, not a menu option.
+
+The public loader can also consume a producer-validated v3 native-TCQ
+publication whose canonical family registry supplies reader rate bounds and
+step instead of a legacy WINDOW `allowable_rungs` rule. That reader grid is
+only a representability constraint, not a performant rate roster. A native
+publication may sample a coarser grid; the producer still owns class identity,
+menu membership, timing and per-cell admission. Legacy WINDOW families retain
+their existing rule and table-step intersection. Current-version/build
+selection and geometry, native, calibration and fused-family gates are
+unchanged. Paired-value semantics, serialized bytes, operator prices and PACT
+remain with their existing owners; no scientific quality is synthesized.
+
+This is consumer compatibility with valid canonical input, not live T4
+adoption. The offline T4 table is synthetic mechanics input, not measured
+quality/cost, numerical or native evidence, or serving qualification. No
+runtime pin or active index changes, first production composition, or serving
+qualification are implied. The retained #2364/PR2647 adoption candidate
+`f2d79d7b908f00d4e17f26d81d5c28d1941f2c19` remains separate; this loader repair
+is not a competing adoption or publication. Campaign remains parent reviewer
+and must review the exact follow-up head before integration.
+
+CPU verification of this compatibility repair: 308 passed (14 dependency
+deprecation warnings) with
+`python -m pytest tests/test_t4_menu_followup.py tests/test_rung_allowability.py tests/test_shape_runtime_prices.py tests/test_pact_hull.py tests/test_canonical_consumer_join.py tests/test_tessera_menu.py tests/test_tessera_menu_context.py tests/test_tessera_menu_metadata.py -q --basetemp="$TMPDIR/pytest"`.
+No GPU or serving qualification run was performed.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"58bf7d0726824045f65671d021f5c952d0d25d6380bc59bf624e599a4819d3e4","size":1154}},"operation":"624d919e19434ae7ab0ca80cd152c5b24f3f5609ffe3d5b6887b23bdda2ca7cb","receipt":"2523baec2e6f899af4fd9af9ff01f69afb9d30e95d9fa4413b0ea7719e408bf7"}]
 
 Qualified neighbouring whole anchors supply the producer's linear chord.
 Both scientific currencies retain their actual quantity through the price owner.
