@@ -1,0 +1,81 @@
+[
+  {
+    "original_id": "sorted-json:tools/check_stageb_a4_group_quantizer.py::<module>@56:6",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "62e0231c7e199833dcf6272cab3b40f182ee6ec7",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/group.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_group_report"
+    ],
+    "status": "migrated"
+  },
+  {
+    "original_id": "sorted-json:tools/check_stageb_a4_quantizer.py::<module>@30:6",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "e81384e384a859f8c76953eebf299af97542a515",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/quantizer.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_quantizer_report"
+    ],
+    "status": "migrated"
+  },
+  {
+    "original_id": "supplemental-json:tools/pq282_equality/recheck_refusal_order.py::<module>@50:39",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/recheck_report.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_recheck_report"
+    ],
+    "status": "GAP",
+    "reason": "Unsorted indent=2 plus newline has no exact existing profile; not migrated."
+  },
+  {
+    "original_id": "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>@32:24",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/refusals.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_refusal_multiset"
+    ],
+    "status": "migrated"
+  },
+  {
+    "original_id": "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/recheck_report.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_recheck_report"
+    ],
+    "status": "migrated"
+  },
+  {
+    "original_id": "sorted-json:tools/wait_dsv4_aura_campaign.py::main@305:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "03396f19089552a381d309169fe0ceaa97455394",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/reports/waiter.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_reports.py::test_waiter_report"
+    ],
+    "status": "migrated"
+  }
+]

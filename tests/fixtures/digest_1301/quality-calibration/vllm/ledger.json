@@ -1,0 +1,51 @@
+[
+  {
+    "original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@74:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/vllm/main.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_main_equivalence",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_refusals",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_publication_refusal"
+    ],
+    "status": "migrated",
+    "fixture_sha256": "3dae483055d58323ddcc3057a3a5e88574d5dd2dd6f127c273db3a7757bcd600"
+  },
+  {
+    "original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@78:24",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/vllm/main.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_main_equivalence",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_refusals",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_publication_refusal"
+    ],
+    "status": "migrated",
+    "fixture_sha256": "3dae483055d58323ddcc3057a3a5e88574d5dd2dd6f127c273db3a7757bcd600"
+  },
+  {
+    "original_id": "supplemental-json:tools/vllm_prompt_smoke.py::main@50:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/vllm/main.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_main_equivalence",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_refusals",
+      "tests/test_digest_1301/quality-calibration/test_vllm.py::test_publication_refusal"
+    ],
+    "status": "GAP",
+    "fixture_sha256": "3dae483055d58323ddcc3057a3a5e88574d5dd2dd6f127c273db3a7757bcd600",
+    "reason": "Unsorted indent=2 CPU preflight has no exact existing profile; unchanged."
+  }
+]

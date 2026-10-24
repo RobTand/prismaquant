@@ -302,7 +302,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, WaiterError, RuntimeError) as exc:
         print(f"dsv4-campaign-completion: ERROR: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(result, sort_keys=True, allow_nan=False))
+    from prismaquant.digests import DIRECT_ASCII_SPACED_STRICT
+
+    print(DIRECT_ASCII_SPACED_STRICT.text(result))
     return 0
 
 

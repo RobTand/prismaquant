@@ -1,0 +1,54 @@
+[
+  {
+    "original_id": "sorted-json:tools/build_sensitivity_ablation_assignments.py::_write_overlay@167:20",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/assignments/overlay.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_publication",
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_refusals"
+    ]
+  },
+  {
+    "original_id": "sorted-json:tools/build_sensitivity_ablation_assignments.py::main@291:29",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/assignments/manifest.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_publication",
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_refusals"
+    ]
+  },
+  {
+    "original_id": "sorted-json:tools/make_uniform_assignment.py::main@451:19",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ad30b4285418759011db2f03675d5354249fed1b",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/assignments/uniform.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_publication",
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_refusals"
+    ]
+  },
+  {
+    "original_id": "sorted-json:tools/make_uniform_assignment.py::main@487:22",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ad30b4285418759011db2f03675d5354249fed1b",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/assignments/uniform.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_publication",
+      "tests/test_digest_1301/quality-calibration/test_assignments.py::test_report_refusals"
+    ]
+  }
+]

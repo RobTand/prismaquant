@@ -8,7 +8,6 @@ activation perturbations use the production cache path.
 from __future__ import annotations
 
 import argparse
-import json
 import pickle
 import re
 from collections import defaultdict
@@ -16,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.priced_cell import cost_entry_predicted_dloss
 from prismaquant.kl_measurement import assignment_bit_total
 from prismaquant.layer_config import load_assignment
@@ -164,7 +164,7 @@ def _summarize_names(
 
 def _write_overlay(path: Path, names: Sequence[str]) -> None:
     payload = {name: "BF16" for name in sorted(names)}
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    path.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -288,7 +288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "variants": variants,
     }
     manifest_path = output_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(manifest) + "\n")
     print(f"wrote {manifest_path}")
     for variant in variants:
         print(

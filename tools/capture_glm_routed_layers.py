@@ -10,7 +10,6 @@ the complete 512x512 calibration; neither grants full-draw quality or prices.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import io
 import json
 import os
@@ -46,6 +45,7 @@ def main(argv=None):
 
     import torch
 
+    from prismaquant.digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.cost_stage_checkpoint import publish_new_bytes
     from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
@@ -125,7 +125,7 @@ def main(argv=None):
         if not publish_new_bytes(target, raw):
             raise ValueError(f"routed capture output already exists: {target}")
         entries.append({"layer": layer, "unit": result["metadata"]["unit"],
-                        "path": str(target), "sha256": hashlib.sha256(raw).hexdigest(),
+                        "path": str(target), "sha256": bytes_sha256hex(raw),
                         "bytes": len(raw)})
         report("capture", len(entries), unit=result["metadata"]["unit"])
         print(json.dumps({"captured": layer, "count": len(entries),
@@ -160,7 +160,7 @@ def main(argv=None):
         if runner is not None:
             runner.shutdown()
         owner.close()
-    raw = (json.dumps(receipt, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = (DIRECT_ASCII_SPACED_STRICT.text(receipt) + "\n").encode()
     if not publish_new_bytes(root / "receipt.json", raw):
         raise ValueError("routed capture receipt already exists")
     print(json.dumps({"status": "complete", "captures": len(entries),

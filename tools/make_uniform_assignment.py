@@ -49,12 +49,12 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
     _scan_source_dtype_manifest,
@@ -448,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    out.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
 
     counts: dict[str, int] = {}
     for value in result.assignment.values():
@@ -484,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         rp = Path(args.report)
         rp.parent.mkdir(parents=True, exist_ok=True)
-        rp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        rp.write_text(DIRECT_ASCII_INDENT2_LAX.text(report) + "\n")
         print(f"[uniform] report -> {rp}")
     return 0
 

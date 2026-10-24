@@ -1,5 +1,4 @@
 """Real registered-op comparison of whole-stage and routed-slice A4 QDQ."""
-import json
 import argparse
 from pathlib import Path
 import sys
@@ -7,6 +6,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant import format_registry
 from prismaquant.joint_aura import activation_identity
 
@@ -53,6 +53,6 @@ for key, group in policy['executed_grouping']['groups'].items():
 assert len(observations) == 2 and all(v['different_from_historical_per_unit'] > 0 for v in observations)
 assert cache.activation_max_abs == before
 torch.cuda.synchronize()
-print(json.dumps({'status': 'passed', 'policy': binding, 'served_quantizer': identity,
+print(DIRECT_ASCII_SPACED_LAX.text({'status': 'passed', 'policy': binding, 'served_quantizer': identity,
                   'old_maxima_unchanged': True, 'a8_qdq_and_identity_unchanged': True,
-                  'groups': observations}, sort_keys=True))
+                  'groups': observations}))

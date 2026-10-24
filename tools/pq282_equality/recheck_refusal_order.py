@@ -7,7 +7,6 @@ remaining price, population, capture and journal identity fields.
 """
 import argparse
 from collections import Counter
-import hashlib
 import json
 from pathlib import Path
 import pickle
@@ -16,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from dispatch_tessera_campaign import cmd_merge
 from prismaquant.tessera_campaign_table import (canonical_refusals)
 
@@ -29,7 +29,7 @@ paths = {"monolith": args.recorded / "monolith/cost.pkl",
          "historical_merge": args.recorded / "merged/cost.pkl"}
 raw = {name: path.read_bytes() for name, path in paths.items()}
 payloads = {name: pickle.loads(data) for name, data in raw.items()}
-counts = {name: Counter(json.dumps(item, sort_keys=True) for item in payload["non_interpolable"])
+counts = {name: Counter(DIRECT_ASCII_SPACED_LAX.text(item) for item in payload["non_interpolable"])
           for name, payload in payloads.items()}
 if counts["monolith"] != counts["historical_merge"]:
     raise RuntimeError("historical refusal records differ in content or multiplicity")
@@ -48,7 +48,7 @@ result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subpr
 print(result.stdout, flush=True)
 (args.out / "comparison.log").write_text(result.stdout)
 (args.out / "recheck.json").write_text(json.dumps({
-    "inputs": {name: {"path": str(paths[name]), "sha256": hashlib.sha256(data).hexdigest()}
+    "inputs": {name: {"path": str(paths[name]), "sha256": bytes_sha256hex(data)}
                for name, data in raw.items()},
     "normalization": "canonical_refusals only, on a separate monolith comparison copy",
     "historical_refusals_multiset_equal": True,

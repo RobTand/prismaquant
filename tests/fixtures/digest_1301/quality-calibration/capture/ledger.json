@@ -1,0 +1,194 @@
+[
+  {
+    "original_id": "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/routed_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_publish"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "hashlib:tools/capture_glm_routed_layers.py::main.publish"
+  },
+  {
+    "original_id": "sorted-json:tools/capture_glm_routed_layers.py::main@163:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/routed_receipt.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_receipt"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "sorted-json:tools/capture_glm_routed_layers.py::main"
+  },
+  {
+    "original_id": "hashlib:tools/capture_glm_routing_replay.py::main@99:85",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "hashlib:tools/capture_glm_routing_replay.py::main"
+  },
+  {
+    "original_id": "sorted-json:tools/capture_glm_routing_replay.py::main@103:57",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "sorted-json:tools/capture_glm_routing_replay.py::main"
+  },
+  {
+    "original_id": "sorted-json:tools/capture_glm_routing_replay.py::main@105:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "sorted-json:tools/capture_glm_routing_replay.py::main"
+  },
+  {
+    "original_id": "hashlib:tools/exl3_grouped_down_replay.py::_hash@100:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "e80fa32dada1c952507f28ea58c61b12e8896a68",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/tensor_bytes.py",
+      "tests/fixtures/digest_1301/quality-calibration/capture/tensor_hash.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_tensor_hash"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "hashlib:tools/exl3_grouped_down_replay.py::_hash",
+    "loader": "tools/pq_profile_source.py::profile_source_owner(\"digests\")",
+    "loader_note": "Repository-relative stdlib source owner, as corpus/vllm; file-spec startup imports neither prismaquant nor torch. Owner route and tensor byte boundary unchanged.",
+    "startup_tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_stdlib_file_spec_import[exl3_grouped_down_replay]"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/glm_mtp_capture.py::projection_phase@231:62",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1434bd867c2787db03f31fde658b95bf145e0be0",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/projection_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_projection_publish"
+    ],
+    "status": "migrated",
+    "scanner_scope_id": "hashlib:tools/glm_mtp_capture.py::projection_phase",
+    "loader": "tools/pq_profile_source.py::profile_source_owner(\"digests\")",
+    "loader_note": "Repository-relative stdlib source owner, as corpus/vllm; file-spec startup and --help import neither prismaquant nor torch. Owner route and projection publication bytes unchanged.",
+    "startup_tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_stdlib_file_spec_import[glm_mtp_capture]",
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_mtp_stdlib_help"
+    ]
+  },
+  {
+    "original_id": "sorted-json:tools/exl3_grouped_down_replay.py::result_json@432:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "e80fa32dada1c952507f28ea58c61b12e8896a68",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/result_json.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_result_json_gap"
+    ],
+    "status": "gap",
+    "gap": "No existing sorted indent2 strict ASCII profile. DIRECT_UTF8_INDENT2_STRICT differs on non-ASCII; retain local serializer, no new profile.",
+    "witness": "h\u00e9llo escapes as h\\u00e9llo; NaN raises ValueError for strict recipes, but is emitted for lax recipes. See executable differential consumer test.",
+    "scanner_scope_id": "sorted-json:tools/exl3_grouped_down_replay.py::result_json"
+  },
+  {
+    "original_id": "sorted-json:tools/glm_mtp_capture.py::projection_phase@223:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1434bd867c2787db03f31fde658b95bf145e0be0",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/projection_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_projection_publish"
+    ],
+    "status": "gap",
+    "gap": "No existing sorted indent2 strict ASCII profile. DIRECT_UTF8_INDENT2_STRICT differs on non-ASCII; retain local serializer, no new profile.",
+    "witness": "h\u00e9llo escapes as h\\u00e9llo; NaN raises ValueError for strict recipes, but is emitted for lax recipes. See executable differential consumer test.",
+    "scanner_scope_id": "sorted-json:tools/glm_mtp_capture.py::projection_phase"
+  },
+  {
+    "original_id": "sorted-json:tools/glm_mtp_capture.py::main@346:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "1434bd867c2787db03f31fde658b95bf145e0be0",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/mtp_main.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_mtp_main_gap"
+    ],
+    "status": "gap",
+    "gap": "No existing sorted indent2 strict ASCII profile. DIRECT_UTF8_INDENT2_STRICT differs on non-ASCII; retain local serializer, no new profile.",
+    "witness": "h\u00e9llo escapes as h\\u00e9llo; NaN raises ValueError for strict recipes, but is emitted for lax recipes. See executable differential consumer test.",
+    "scanner_scope_id": "sorted-json:tools/glm_mtp_capture.py::main"
+  },
+  {
+    "original_id": "unsorted-json:tools/capture_glm_routed_layers.py::main.publish@131:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/routed_publish.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_publish"
+    ],
+    "status": "gap",
+    "gap": "Unsorted ASCII spaced lax serializer has no exact named profile; retain local serializer. Insertion order differs from sorted profiles (z before a). Outside scanner sorted-json family.",
+    "witness": "Insertion order z then a remains z then a; non-ASCII escapes; NaN allowed. See executable consumer test.",
+    "scanner_id": null,
+    "inventory_family": "outside scanner: unsorted json.dumps"
+  },
+  {
+    "original_id": "unsorted-json:tools/capture_glm_routed_layers.py::main@166:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+    "owner_route": null,
+    "fixtures": [
+      "tests/fixtures/digest_1301/quality-calibration/capture/routed_receipt.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_receipt"
+    ],
+    "status": "gap",
+    "gap": "Unsorted ASCII spaced lax serializer has no exact named profile; retain local serializer. Insertion order differs from sorted profiles (z before a). Outside scanner sorted-json family.",
+    "witness": "Insertion order z then a remains z then a; non-ASCII escapes; NaN allowed. See executable consumer test.",
+    "scanner_id": null,
+    "inventory_family": "outside scanner: unsorted json.dumps"
+  }
+]

@@ -1,14 +1,15 @@
 """PB-admitted replay from a completed capture and an independently owned boundary."""
 import argparse
 import copy
-import hashlib
 import io
 import json
+
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.streamed_model_identity import build_streamed_model_identity
@@ -96,13 +97,13 @@ def main():
         if not publish_new_bytes(target, raw):
             raise ValueError("routing capture output already exists")
         receipt = {"schema": "prismaquant.glm_routing_replay_receipt.v1", "status": "complete",
-                   "spec": spec_binding, "boundary": {"path": str(target), "sha256": hashlib.sha256(raw).hexdigest()},
+                   "spec": spec_binding, "boundary": {"path": str(target), "sha256": bytes_sha256hex(raw)},
                    "metadata": result["metadata"],
                    # Absent at PyTorch's default (PQ #1028).
                    **bf16_reduction_stamp()}
-        if not publish_new_bytes(root / "receipt.json", (json.dumps(receipt, sort_keys=True) + "\n").encode()):
+        if not publish_new_bytes(root / "receipt.json", (DIRECT_ASCII_SPACED_LAX.text(receipt) + "\n").encode()):
             raise ValueError("routing capture receipt already exists")
-        print(json.dumps({"status": "complete", "boundary": receipt["boundary"]}, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text({"status": "complete", "boundary": receipt["boundary"]}))
     finally:
         if runner is not None:
             runner.shutdown()

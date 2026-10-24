@@ -1,0 +1,156 @@
+{
+  "scope": "corpus assigned slice only",
+  "deployment": "Repository-relative standalone files, not demonstrated single-file deployment. Existing source loader reused without new roster/framework.",
+  "provenance_note": "The immutable research registry tests/fixtures/digest_parent_completion_1301.json correctly records builder blob 55be80fdb931621b0dcecb5bfd144d23691ff55a at base 6d8288adc94b3c4b624c143ed372fb6513f32784, including JSONL sites 357/359. Only the historical census uses builder blob 0ee2e204d5a7443ea6616f460d06893265b987dc (verified separately at f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e). This is a historical census discrepancy, not an immutable registry defect. original_id and source_commit/source_blob match the immutable registry; historical census metadata remains separate.",
+  "entries": [
+    {
+      "original_id": "hashlib:tools/build_diverse_calibration.py::_json_digest@137:11",
+      "original_census_blob": "0ee2e204d5a7443ea6616f460d06893265b987dc",
+      "disposition": "migrated-sha-only",
+      "loader": "tools/pq_profile_source.py::profile_source_owner(\"digests\")",
+      "reason": "Exact bytes/text route; no ordinary package import.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "prismaquant/digests.py::bytes_sha256hex(payload)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ],
+      "provenance_discrepancy": "Historical census blob differs from the base and immutable registry blob; the diff adds positive target-token validation outside retained function blocks. _sha256_text, _json_digest, write_jsonl and MANIFEST are identical in both blobs. The immutable registry is correct.",
+      "historical_census_source_commit": "f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e"
+    },
+    {
+      "original_id": "hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11",
+      "original_census_blob": "0ee2e204d5a7443ea6616f460d06893265b987dc",
+      "disposition": "migrated-sha-only",
+      "loader": "tools/pq_profile_source.py::profile_source_owner(\"digests\")",
+      "reason": "Exact bytes/text route; no ordinary package import.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "prismaquant/digests.py::text_sha256hex(text)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ],
+      "provenance_discrepancy": "Historical census blob differs from the base and immutable registry blob; the diff adds positive target-token validation outside retained function blocks. _sha256_text, _json_digest, write_jsonl and MANIFEST are identical in both blobs. The immutable registry is correct.",
+      "historical_census_source_commit": "f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e"
+    },
+    {
+      "original_id": "hashlib:tools/materialize_wikitext_corpus.py::main@82:22",
+      "original_census_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+      "disposition": "migrated-sha-only",
+      "loader": "tools/pq_profile_source.py::profile_source_owner(\"digests\")",
+      "reason": "Exact bytes/text route; no ordinary package import.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+      "owner_route": "prismaquant/digests.py::bytes_sha256hex(raw)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/materialize_wikitext_corpus.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_wikitext_publication_before_hash",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_diverse_calibration.py::_json_digest@136:14",
+      "original_census_blob": "0ee2e204d5a7443ea6616f460d06893265b987dc",
+      "disposition": "retained-recipe-gap",
+      "loader": null,
+      "reason": "No matching owner recipe: preserve sorted spaced UTF8/allow_nan or unsorted publication encoder unchanged. No recipe added.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "json.dumps(value, sort_keys=True, ensure_ascii=False)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ],
+      "provenance_discrepancy": "Historical census blob differs from the base and immutable registry blob; the diff adds positive target-token validation outside retained function blocks. _sha256_text, _json_digest, write_jsonl and MANIFEST are identical in both blobs. The immutable registry is correct.",
+      "historical_census_source_commit": "f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e"
+    },
+    {
+      "original_id": "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@357:17",
+      "original_census_blob": "0ee2e204d5a7443ea6616f460d06893265b987dc",
+      "disposition": "retained-recipe-gap",
+      "loader": null,
+      "reason": "No matching owner recipe: preserve sorted spaced UTF8/allow_nan or unsorted publication encoder unchanged. No recipe added.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "json.dumps({\"__manifest__\": manifest}, ensure_ascii=False)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ],
+      "provenance_discrepancy": "Historical census blob differs from the base and immutable registry blob; the diff adds positive target-token validation outside retained function blocks. _sha256_text, _json_digest, write_jsonl and MANIFEST are identical in both blobs. The immutable registry is correct.",
+      "historical_census_source_commit": "f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e"
+    },
+    {
+      "original_id": "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@359:21",
+      "original_census_blob": "0ee2e204d5a7443ea6616f460d06893265b987dc",
+      "disposition": "retained-recipe-gap",
+      "loader": null,
+      "reason": "No matching owner recipe: preserve sorted spaced UTF8/allow_nan or unsorted publication encoder unchanged. No recipe added.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "json.dumps({\"text\": record[\"text\"]}, ensure_ascii=False)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ],
+      "provenance_discrepancy": "Historical census blob differs from the base and immutable registry blob; the diff adds positive target-token validation outside retained function blocks. _sha256_text, _json_digest, write_jsonl and MANIFEST are identical in both blobs. The immutable registry is correct.",
+      "historical_census_source_commit": "f4436b7ca7e34bd7cb1cafa1f49e95d1365afb0e"
+    },
+    {
+      "original_id": "supplemental-json:tools/materialize_wikitext_corpus.py::main@97:47",
+      "original_census_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+      "disposition": "retained-recipe-gap",
+      "loader": null,
+      "reason": "No matching owner recipe: preserve sorted spaced UTF8/allow_nan or unsorted publication encoder unchanged. No recipe added.",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+      "owner_route": "json.dumps(index, indent=1)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/materialize_wikitext_corpus.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_wikitext_publication_before_hash",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ]
+    }
+  ],
+  "fixture_policy": "Only verbatim original function blocks; tests inject stdlib context and unchanged constants, including MANIFEST. Fixtures are not full Git blobs."
+}

@@ -32,9 +32,19 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
+import importlib.util
 import json
 from pathlib import Path
+
+
+# Keep host-only corpus materialization independent of package startup/torch.
+_SOURCE_PATH = Path(__file__).resolve().with_name("pq_profile_source.py")
+_SOURCE_SPEC = importlib.util.spec_from_file_location("_corpus_source", _SOURCE_PATH)
+if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load source owner loader: {_SOURCE_PATH}")
+_source = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(_source)
+_digests = _source.profile_source_owner("digests")
 
 WIKITEXT_DATASET = "wikitext"
 WIKITEXT_CONFIG = "wikitext-2-raw-v1"
@@ -79,7 +89,7 @@ def main() -> int:
         entry = {
             "path": str(path),
             "bytes": len(raw),
-            "sha256": hashlib.sha256(raw).hexdigest(),
+            "sha256": _digests.bytes_sha256hex(raw),
             "dataset": WIKITEXT_DATASET,
             "config": WIKITEXT_CONFIG,
             "revision": args.revision,

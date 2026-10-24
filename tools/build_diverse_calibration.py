@@ -7,13 +7,24 @@ records so the existing probe loader can consume the file unchanged.
 from __future__ import annotations
 
 import argparse
-import hashlib
+import importlib.util
 import json
 import os
 import random
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
+
+
+# Load the stdlib owner directly, as other host-side tools do: package startup
+# imports torch, which is not a dependency of corpus construction.
+_SOURCE_PATH = Path(__file__).resolve().with_name("pq_profile_source.py")
+_SOURCE_SPEC = importlib.util.spec_from_file_location("_corpus_source", _SOURCE_PATH)
+if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load source owner loader: {_SOURCE_PATH}")
+_source = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(_source)
+_digests = _source.profile_source_owner("digests")
 
 
 # Repo-relative, and overridable by the same knob run-pipeline.sh reads, so the
@@ -129,12 +140,12 @@ def quota_counts(total_rows: int) -> dict[str, int]:
 
 
 def _sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return _digests.text_sha256hex(text)
 
 
 def _json_digest(value: Any) -> str:
     payload = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
+    return _digests.bytes_sha256hex(payload)
 
 
 def _load_dataset_stream(source: dict[str, Any]):

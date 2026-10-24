@@ -1,0 +1,1339 @@
+{
+  "schema": "remaining-json-native-audit/v1",
+  "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "checkout_head": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "coordinate_convention": "AST lines 1-based; columns 0-based UTF-8 bytes; end exclusive; blobs are Git SHA-1 of whole original source.",
+  "boundary": "Every native json.dump/json.dumps plus explicitly separate pickle.dumps in exactly seven assigned files, original source AST; imports/delegated serializers and decoders excluded. No source or owner edits; no scientific retention authorization.",
+  "summary": {
+    "files": 7,
+    "native_json_calls": 15,
+    "json_dumps": 13,
+    "json_dump": 2,
+    "missing_unsorted_recipe": 13,
+    "existing_sorted_recipe": 2,
+    "separate_pickle_calls": 1
+  },
+  "owner_evidence": {
+    "path": "prismaquant/digests.py",
+    "blob": "65c98d3bdeb16035ef4b104dc159e986e2279897",
+    "lines": [
+      264,
+      341
+    ],
+    "fact": "JsonProfile._encoder unconditionally sort_keys=True. A missing unsorted recipe is migration work, not scientific retention. dump additionally needs a stream writer, not merely text()."
+  },
+  "files": [
+    {
+      "path": "tools/pq282_equality/equality_diff.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "head_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "working_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "sha256": "d4606ca2e4d044d1490e9fef3b272ee70ba69acee0b171dcb58d176d8c665efd",
+      "original_equals_head_equals_worktree": true,
+      "significance": "Human diff diagnostics: JSON text is sliced to 400 characters; sorting changes visible prefix/content, even when parsed objects compare equal."
+    },
+    {
+      "path": "tools/quality_cpu_parity.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+      "head_blob": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+      "working_blob": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+      "sha256": "bbf96b06b3ec50a641971248f214d86e5d7bcfcaef6a67fd514c07321e19d282",
+      "original_equals_head_equals_worktree": true,
+      "significance": "Stdout parity report only; persisted report separately uses write_result. CPU parity is not GPU qualification."
+    },
+    {
+      "path": "tools/quality_cpu_smoke.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "head_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "working_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "sha256": "768011606e10121f16ce28404cb66e177a2b2462b85f6950d72ffe3b1750a014",
+      "original_equals_head_equals_worktree": true,
+      "significance": "JSONL task input rows are persisted and consumed by task_suite (ordering changes bytes, not necessarily parsed task semantics); final stdout is a single-key path diagnostic. Production cache pickle is a separate binary serializer."
+    },
+    {
+      "path": "tools/validate_card_zero_churn.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "head_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "working_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "sha256": "aae7095fc26096c0b7962a5e602d0f3805b21136bc62dc32afa678ff3ecff413",
+      "original_equals_head_equals_worktree": true,
+      "significance": "Validation summary stdout and optional report file; field order, whitespace and no added terminal newline are observable. Optional dump retains incremental writes/failures."
+    },
+    {
+      "path": "tools/validate_probe_marginals.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "head_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "working_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "sha256": "4fa45f932e770be7a45fbcdd4bba0568277e327721c818759f61ed65e72f6aa0",
+      "original_equals_head_equals_worktree": true,
+      "significance": "Probe marginal diagnostic stdout and optional summary/units file; preserve outer summary-before-units order and nested row order, lax NaN, and incremental dump behavior."
+    },
+    {
+      "path": "tools/verify_tessera_calibration_forward.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0",
+      "head_blob": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0",
+      "working_blob": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0",
+      "sha256": "794d8f5e5e843ab7dc6049614f931dcec06a811e89e704790b0eafb66f75eaec",
+      "original_equals_head_equals_worktree": true,
+      "significance": "Forward verification stdout diagnostic; comparison.json uses a different existing indent2 byte owner. This stdout is not a source-seal or numerical parity proof."
+    },
+    {
+      "path": "tools/vllm_prompt_smoke.py",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "original_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "head_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "sha256": "3074eb28d08142c5442d1674fd226eac62453f2237ac816dd6a7fdebafcb86eb",
+      "significance": "Original preflight remains an unsorted recipe gap; the two sorted result calls are migrated. See migration_ledger for independent consumer witnesses and current dispositions.",
+      "original_fixture": "tests/fixtures/digest_1301/quality-calibration/vllm/main.py",
+      "original_fixture_line_offset": 8,
+      "migration_ledger": "tests/fixtures/digest_1301/quality-calibration/vllm/ledger.json"
+    }
+  ],
+  "calls": [
+    {
+      "id": "tools/pq282_equality/equality_diff.py::report@43:57",
+      "path": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "line": 43,
+      "column": 57,
+      "end_line": 43,
+      "end_column": 91,
+      "operation": "json.dumps",
+      "source": "json.dumps(left[key], default=str)",
+      "explicit_options": {
+        "default": "str"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": "str",
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Human diff diagnostics: JSON text is sliced to 400 characters; sorting changes visible prefix/content, even when parsed objects compare equal.",
+      "stream_requirement": null,
+      "caller_framing": "slice [:400] inside formatted print; print adds LF"
+    },
+    {
+      "id": "tools/pq282_equality/equality_diff.py::report@44:43",
+      "path": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "line": 44,
+      "column": 43,
+      "end_line": 44,
+      "end_column": 78,
+      "operation": "json.dumps",
+      "source": "json.dumps(right[key], default=str)",
+      "explicit_options": {
+        "default": "str"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": "str",
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Human diff diagnostics: JSON text is sliced to 400 characters; sorting changes visible prefix/content, even when parsed objects compare equal.",
+      "stream_requirement": null,
+      "caller_framing": "slice [:400] inside formatted print; print adds LF"
+    },
+    {
+      "id": "tools/pq282_equality/equality_diff.py::report@46:31",
+      "path": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "line": 46,
+      "column": 31,
+      "end_line": 46,
+      "end_column": 60,
+      "operation": "json.dumps",
+      "source": "json.dumps(left, default=str)",
+      "explicit_options": {
+        "default": "str"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": "str",
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Human diff diagnostics: JSON text is sliced to 400 characters; sorting changes visible prefix/content, even when parsed objects compare equal.",
+      "stream_requirement": null,
+      "caller_framing": "slice [:400] inside formatted print; print adds LF"
+    },
+    {
+      "id": "tools/pq282_equality/equality_diff.py::report@47:31",
+      "path": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "line": 47,
+      "column": 31,
+      "end_line": 47,
+      "end_column": 61,
+      "operation": "json.dumps",
+      "source": "json.dumps(right, default=str)",
+      "explicit_options": {
+        "default": "str"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": "str",
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX_DEFAULT_STR",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Human diff diagnostics: JSON text is sliced to 400 characters; sorting changes visible prefix/content, even when parsed objects compare equal.",
+      "stream_requirement": null,
+      "caller_framing": "slice [:400] inside formatted print; print adds LF"
+    },
+    {
+      "id": "tools/quality_cpu_parity.py::main@86:10",
+      "path": "tools/quality_cpu_parity.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+      "line": 86,
+      "column": 10,
+      "end_line": 86,
+      "end_column": 28,
+      "operation": "json.dumps",
+      "source": "json.dumps(report)",
+      "explicit_options": {},
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Stdout parity report only; persisted report separately uses write_result. CPU parity is not GPU qualification.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF"
+    },
+    {
+      "id": "tools/quality_cpu_smoke.py::main@66:27",
+      "path": "tools/quality_cpu_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "line": 66,
+      "column": 27,
+      "end_line": 66,
+      "end_column": 46,
+      "operation": "pickle.dumps",
+      "source": "pickle.dumps(cache)",
+      "explicit_options": {},
+      "effective_options": {
+        "protocol": "omitted => pickle.DEFAULT_PROTOCOL",
+        "fix_imports": true,
+        "buffer_callback": null
+      },
+      "disposition": "outside-json-audit-binary-pickle",
+      "scientific_retention": false,
+      "owner_candidate": null,
+      "gap": "Not a JsonProfile operation; no pickle migration or scientific-retention claim made.",
+      "independent_reference": null,
+      "significance": "JSONL task input rows are persisted and consumed by task_suite (ordering changes bytes, not necessarily parsed task semantics); final stdout is a single-key path diagnostic. Production cache pickle is a separate binary serializer.",
+      "stream_requirement": null,
+      "caller_framing": "binary pickle bytes written to production-cache.pkl"
+    },
+    {
+      "id": "tools/quality_cpu_smoke.py::main@88:35",
+      "path": "tools/quality_cpu_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "line": 88,
+      "column": 35,
+      "end_line": 88,
+      "end_column": 50,
+      "operation": "json.dumps",
+      "source": "json.dumps(row)",
+      "explicit_options": {},
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "JSONL task input rows are persisted and consumed by task_suite (ordering changes bytes, not necessarily parsed task semantics); final stdout is a single-key path diagnostic. Production cache pickle is a separate binary serializer.",
+      "stream_requirement": null,
+      "caller_framing": "join serialized rows with LF and append LF, then Path.write_text with default encoding/newline"
+    },
+    {
+      "id": "tools/quality_cpu_smoke.py::main@112:10",
+      "path": "tools/quality_cpu_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "line": 112,
+      "column": 10,
+      "end_line": 112,
+      "end_column": 55,
+      "operation": "json.dumps",
+      "source": "json.dumps({\"smoke\": str(root/\"smoke.json\")})",
+      "explicit_options": {},
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Stdout single-key smoke path: sorting does not change this current object shape. Native recipe still lacks an unsorted owner; independent generic witness establishes capability gap, not actual output drift here.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF"
+    },
+    {
+      "id": "tools/validate_card_zero_churn.py::main@110:10",
+      "path": "tools/validate_card_zero_churn.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "line": 110,
+      "column": 10,
+      "end_line": 110,
+      "end_column": 38,
+      "operation": "json.dumps",
+      "source": "json.dumps(report, indent=2)",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"z\": 1,\n  \"a\": 2\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Validation summary stdout and optional report file; field order, whitespace and no added terminal newline are observable. Optional dump retains incremental writes/failures.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF"
+    },
+    {
+      "id": "tools/validate_card_zero_churn.py::main@113:12",
+      "path": "tools/validate_card_zero_churn.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "line": 113,
+      "column": 12,
+      "end_line": 113,
+      "end_column": 43,
+      "operation": "json.dump",
+      "source": "json.dump(report, fh, indent=2)",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"z\": 1,\n  \"a\": 2\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Validation summary stdout and optional report file; field order, whitespace and no added terminal newline are observable. Optional dump retains incremental writes/failures.",
+      "stream_requirement": "dump iterates encoder chunks into fh.write; preserve already-written prefix on encoder or sink failure and exception ordering; text(value) followed by write is not equivalent.",
+      "caller_framing": "json.dump writes incrementally to opened text handle, no terminal newline; outer open truncates before serialization"
+    },
+    {
+      "id": "tools/validate_probe_marginals.py::main@188:10",
+      "path": "tools/validate_probe_marginals.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "line": 188,
+      "column": 10,
+      "end_line": 188,
+      "end_column": 39,
+      "operation": "json.dumps",
+      "source": "json.dumps(summary, indent=2)",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"z\": 1,\n  \"a\": 2\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Probe marginal diagnostic stdout and optional summary/units file; preserve outer summary-before-units order and nested row order, lax NaN, and incremental dump behavior.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF"
+    },
+    {
+      "id": "tools/validate_probe_marginals.py::main@192:12",
+      "path": "tools/validate_probe_marginals.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "line": 192,
+      "column": 12,
+      "end_line": 192,
+      "end_column": 72,
+      "operation": "json.dump",
+      "source": "json.dump({\"summary\": summary, \"units\": rows}, fh, indent=2)",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"z\": 1,\n  \"a\": 2\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Probe marginal diagnostic stdout and optional summary/units file; preserve outer summary-before-units order and nested row order, lax NaN, and incremental dump behavior.",
+      "stream_requirement": "dump iterates encoder chunks into fh.write; preserve already-written prefix on encoder or sink failure and exception ordering; text(value) followed by write is not equivalent.",
+      "caller_framing": "json.dump writes incrementally to opened text handle, no terminal newline; outer open truncates before serialization"
+    },
+    {
+      "id": "tools/verify_tessera_calibration_forward.py::main@157:10",
+      "path": "tools/verify_tessera_calibration_forward.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0",
+      "line": 157,
+      "column": 10,
+      "end_line": 158,
+      "end_column": 78,
+      "operation": "json.dumps",
+      "source": "json.dumps(dict(numerical_parity=True, output=str(args.output),\n                          targets=len(targets), netdata_samples=len(samples)))",
+      "explicit_options": {},
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_SPACED_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\"z\": 1, \"a\": 2}",
+        "sorted_literal": "{\"a\": 2, \"z\": 1}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "Forward verification stdout diagnostic; comparison.json uses a different existing indent2 byte owner. This stdout is not a source-seal or numerical parity proof.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF; forward verifier additionally flush=True"
+    },
+    {
+      "id": "tools/vllm_prompt_smoke.py::main@50:14",
+      "path": "tools/vllm_prompt_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "line": 50,
+      "column": 14,
+      "end_line": 50,
+      "end_column": 90,
+      "operation": "json.dumps",
+      "source": "json.dumps({\"status\": \"cpu_preflight_only\", \"llm_kwargs\": kwargs}, indent=2)",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": false
+      },
+      "disposition": "eligible-owner-gap",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "JsonProfile always sorts; missing insertion-order recipe. Mixed-type accepted JSON keys can also become a sorting TypeError.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"z\": 1,\n  \"a\": 2\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": true,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "CPU preflight stdout is unsorted; successful inference stdout and output JSON explicitly sort and already match DIRECT_ASCII_INDENT2_LAX. The output file appends one newline; no owner recipe gap for these two sorted sites.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF"
+    },
+    {
+      "id": "tools/vllm_prompt_smoke.py::main@74:10",
+      "path": "tools/vllm_prompt_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "line": 74,
+      "column": 10,
+      "end_line": 74,
+      "end_column": 54,
+      "operation": "json.dumps",
+      "source": "json.dumps(result, indent=2, sort_keys=True)",
+      "explicit_options": {
+        "indent": "2",
+        "sort_keys": "True"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": true
+      },
+      "disposition": "migrated",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "No encoding gap; preserve caller framing and I/O.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": false,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "CPU preflight stdout is unsorted; successful inference stdout and output JSON explicitly sort and already match DIRECT_ASCII_INDENT2_LAX. The output file appends one newline; no owner recipe gap for these two sorted sites.",
+      "stream_requirement": null,
+      "caller_framing": "print serialized text, adding LF",
+      "migration_ledger": "tests/fixtures/digest_1301/quality-calibration/vllm/ledger.json",
+      "migration_original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@74:10"
+    },
+    {
+      "id": "tools/vllm_prompt_smoke.py::main@78:24",
+      "path": "tools/vllm_prompt_smoke.py",
+      "scope": "main",
+      "original_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "line": 78,
+      "column": 24,
+      "end_line": 78,
+      "end_column": 68,
+      "operation": "json.dumps",
+      "source": "json.dumps(result, indent=2, sort_keys=True)",
+      "explicit_options": {
+        "indent": "2",
+        "sort_keys": "True"
+      },
+      "effective_options": {
+        "skipkeys": false,
+        "ensure_ascii": true,
+        "check_circular": true,
+        "allow_nan": true,
+        "cls": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "default": null,
+        "sort_keys": true
+      },
+      "disposition": "migrated",
+      "scientific_retention": false,
+      "owner_candidate": "DIRECT_ASCII_INDENT2_LAX",
+      "gap": "No encoding gap; preserve caller framing and I/O.",
+      "independent_reference": {
+        "input_pairs": [
+          [
+            "z",
+            1
+          ],
+          [
+            "a",
+            2
+          ]
+        ],
+        "native_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "sorted_literal": "{\n  \"a\": 2,\n  \"z\": 1\n}",
+        "different": false,
+        "test": "tests/test_digest_1301/quality-calibration/test_remaining.py::test_native_call_witness"
+      },
+      "significance": "CPU preflight stdout is unsorted; successful inference stdout and output JSON explicitly sort and already match DIRECT_ASCII_INDENT2_LAX. The output file appends one newline; no owner recipe gap for these two sorted sites.",
+      "stream_requirement": null,
+      "caller_framing": "Path.write_text(text + LF), default encoding/newline",
+      "migration_ledger": "tests/fixtures/digest_1301/quality-calibration/vllm/ledger.json",
+      "migration_original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@78:24"
+    }
+  ],
+  "changed_file_source_bound_audit": {
+    "population": 12,
+    "method": "Selected source-bound historical contracts plus current local migration ledger entries and their named consumer witnesses. Original call records retained above; diagnostic path/basename search output omitted. This is not a renewed seal or native qualification.",
+    "findings": [
+      "Potential protected-expression conflict: v3 proof rows explicitly reverted unproved residuals to exact original expressions in capture_glm_routing_replay (2), check_stageb_a4_group_quantizer (1), check_stageb_a4_quantizer (1), recheck_refusal_order (1). Those five original expressions are absent from the changed worktree. New local CPU serialization witnesses do not alone discharge prior producer/native qualification blockers. Source/owners and qualification evidence left untouched.",
+      "tests/test_digest_parent_completion_1301.py:109-205 requires current inventory identity, original per-call blobs and independent consumer fixtures; no parent-closure claim here.",
+      "docs/audits/pq2317-consumer-boundary-evidence-20261005-v3.json contains retained_source_scopes and retained_source_files for replay, quantizer and refusal paths: prior scope dispositions must not be treated as proof of this worktree.",
+      "tests/fixtures/spaced_lax_tools_launch_contracts_2320.json:149-213,318 describes replay/refusal package help and quantizer real GPU qualification; CPU witness tests cannot renew native qualification.",
+      "tests/fixtures/duplication_baseline.json and digest_parent_completion_1301.json are source/site rosters: migrations can make the current-inventory check stale even when output bytes are unchanged."
+    ],
+    "files": [
+      {
+        "path": "tools/build_diverse_calibration.py",
+        "head_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+        "head_sha256": "19b3ab190f59bc3a36308db4a7aa5a94a29315e2e31eeb8d5742bf7e7a98d243",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 833,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/corpus/ledger.json",
+            "original_ids": [
+              "hashlib:tools/build_diverse_calibration.py::_json_digest@137:11",
+              "hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11",
+              "sorted-json:tools/build_diverse_calibration.py::_json_digest@136:14",
+              "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@351:17",
+              "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@353:21"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/build_sensitivity_ablation_assignments.py",
+        "head_blob": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+        "head_sha256": "e51b8acf43b687d8e71332edb63573b20486c62948fce6b889e1dfb8d9acdf1a",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 2449,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/assignments/ledger.json",
+            "original_ids": [
+              "sorted-json:tools/build_sensitivity_ablation_assignments.py::_write_overlay@167:20",
+              "sorted-json:tools/build_sensitivity_ablation_assignments.py::main@291:29"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_publication",
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_refusals",
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_publication",
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_refusals"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/capture_glm_routed_layers.py",
+        "head_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+        "head_sha256": "a97fdd795914deb4080cba97d1f21a76be69383ebf6618bf5263e21d570b6f46",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1025,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/capture/ledger.json",
+            "original_ids": [
+              "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55",
+              "sorted-json:tools/capture_glm_routed_layers.py::main@163:11",
+              "unsorted-json:tools/capture_glm_routed_layers.py::main.publish@131:14",
+              "unsorted-json:tools/capture_glm_routed_layers.py::main@166:10"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_publish",
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_receipt"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/capture_glm_routing_replay.py",
+        "head_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+        "head_sha256": "64a811d69a00b28154c46561ed79aec5a392ddc72c72d057b9669bf7f4276cf6",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [
+          {
+            "site": "tools/capture_glm_routing_replay.py::main@102",
+            "status": "explicitly reverted unproved residual",
+            "final_route": "reverted exact original expression; residual issue 1301",
+            "restored_expression": "json.dumps(receipt, sort_keys=True)",
+            "final_source_contract": "exact original serialization expression restored; explicit issue 1301 residual",
+            "restored_expression_present_in_worktree": false
+          },
+          {
+            "site": "tools/capture_glm_routing_replay.py::main@104",
+            "status": "explicitly reverted unproved residual",
+            "final_route": "reverted exact original expression; residual issue 1301",
+            "restored_expression": "json.dumps({\"status\": \"complete\", \"boundary\": receipt[\"boundary\"]}, sort_keys=True)",
+            "final_source_contract": "exact original serialization expression restored; explicit issue 1301 residual",
+            "restored_expression_present_in_worktree": false
+          }
+        ],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1033,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/capture/ledger.json",
+            "original_ids": [
+              "hashlib:tools/capture_glm_routing_replay.py::main@99:85",
+              "sorted-json:tools/capture_glm_routing_replay.py::main@103:57",
+              "sorted-json:tools/capture_glm_routing_replay.py::main@105:14"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/check_stageb_a4_group_quantizer.py",
+        "head_blob": "62e0231c7e199833dcf6272cab3b40f182ee6ec7",
+        "head_sha256": "23cfbbf27c8764ce1ef36d5702f3d1965ec0569b27808bfe776e0fa6bed7c51e",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [
+          {
+            "site": "tools/check_stageb_a4_group_quantizer.py::<module>@55",
+            "status": "explicitly reverted unproved residual",
+            "final_route": "reverted exact original expression; residual issue 1301",
+            "restored_expression": "json.dumps({'status': 'passed', 'policy': binding, 'served_quantizer': identity,\n                  'old_maxima_unchanged': True, 'a8_qdq_and_identity_unchanged': True,\n                  'groups': observations}, sort_keys=True)",
+            "final_source_contract": "exact original serialization expression restored; explicit issue 1301 residual",
+            "blocker": "Bare CUDA interpreter lacks registered scaled_fp4_quant; held container could not import the mounted Tessera package. Metadata diagnosis observed PermissionError reading /tessera-pin/src/tessera/__init__.py. Correct container user/access context still needs a new observed native run.",
+            "restored_expression_present_in_worktree": false
+          }
+        ],
+        "historical_identity_references": [
+          {
+            "path": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+            "line": 43861,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          },
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 2649,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/reports/ledger.json",
+            "original_ids": [
+              "sorted-json:tools/check_stageb_a4_group_quantizer.py::<module>@56:6"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_reports.py::test_group_report"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/check_stageb_a4_quantizer.py",
+        "head_blob": "e81384e384a859f8c76953eebf299af97542a515",
+        "head_sha256": "100934a5741f9ae269381e163b9342ff5c50de52240e6ce433b6b05d0ab1372b",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [
+          {
+            "site": "tools/check_stageb_a4_quantizer.py::<module>@29",
+            "status": "explicitly reverted unproved residual",
+            "final_route": "reverted exact original expression; residual issue 1301",
+            "restored_expression": "json.dumps({\"status\": \"passed\", \"served_quantizer\": identity,\n                  \"shape\": list(x.shape), \"changed_elements\": int((x != y).sum().item()),\n                  \"cuda\": torch.version.cuda, \"device\": torch.cuda.get_device_name()}, sort_keys=True)",
+            "final_source_contract": "exact original serialization expression restored; explicit issue 1301 residual",
+            "blocker": "Bare CUDA interpreter lacks registered scaled_fp4_quant; held container could not import the mounted Tessera package. Metadata diagnosis observed PermissionError reading /tessera-pin/src/tessera/__init__.py. Correct container user/access context still needs a new observed native run.",
+            "restored_expression_present_in_worktree": false
+          }
+        ],
+        "historical_identity_references": [
+          {
+            "path": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+            "line": 43937,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          },
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 2657,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/reports/ledger.json",
+            "original_ids": [
+              "sorted-json:tools/check_stageb_a4_quantizer.py::<module>@30:6"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_reports.py::test_quantizer_report"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/exl3_grouped_down_replay.py",
+        "head_blob": "e80fa32dada1c952507f28ea58c61b12e8896a68",
+        "head_sha256": "f4f9d9cbf457da3599b16844edd417d551e8007407288161a92c3e52a118f12f",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+            "line": 22427,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          },
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1113,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/capture/ledger.json",
+            "original_ids": [
+              "hashlib:tools/exl3_grouped_down_replay.py::_hash@100:11",
+              "sorted-json:tools/exl3_grouped_down_replay.py::result_json@432:11"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_result_json_gap",
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_tensor_hash"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/glm_mtp_capture.py",
+        "head_blob": "1434bd867c2787db03f31fde658b95bf145e0be0",
+        "head_sha256": "fb37d500b3736ab0a6155c3fc865d730ad25b3794a5e23aa049984525cdb3601",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1153,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/capture/ledger.json",
+            "original_ids": [
+              "hashlib:tools/glm_mtp_capture.py::projection_phase@231:62",
+              "sorted-json:tools/glm_mtp_capture.py::projection_phase@223:11",
+              "sorted-json:tools/glm_mtp_capture.py::main@346:10"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_mtp_main_gap",
+              "tests/test_digest_1301/quality-calibration/test_capture.py::test_projection_publish"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/make_uniform_assignment.py",
+        "head_blob": "ad30b4285418759011db2f03675d5354249fed1b",
+        "head_sha256": "61775a0089ae1c4af57dc3b729c0c8435412e5b900221aeb6d2626cc9d53ae75",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 2905,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/assignments/ledger.json",
+            "original_ids": [
+              "sorted-json:tools/make_uniform_assignment.py::main@445:19",
+              "sorted-json:tools/make_uniform_assignment.py::main@481:22"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_report_refusals",
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_publication",
+              "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_refusals"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/materialize_wikitext_corpus.py",
+        "head_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+        "head_sha256": "9bc15e27c89368efc0062fa37bf8a89cbbcbdc09dffc344ef070ff5ce7e10c13",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+            "line": 23356,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          },
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1177,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/corpus/ledger.json",
+            "original_ids": [
+              "hashlib:tools/materialize_wikitext_corpus.py::main@82:22",
+              "supplemental-json:tools/materialize_wikitext_corpus.py::main@97:47"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+              "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_wikitext_publication_before_hash"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/pq282_equality/recheck_refusal_order.py",
+        "head_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+        "head_sha256": "42fd0281173a4de2301b7b800d0f8d5f1a54b4ba96cd889144a3b8d7c1b796ff",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [
+          {
+            "site": "tools/pq282_equality/recheck_refusal_order.py::<module>@31",
+            "status": "explicitly reverted unproved residual",
+            "final_route": "reverted exact original expression; residual issue 1301",
+            "restored_expression": "json.dumps(item, sort_keys=True)",
+            "final_source_contract": "exact original serialization expression restored; explicit issue 1301 residual",
+            "restored_expression_present_in_worktree": false
+          }
+        ],
+        "historical_identity_references": [
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 1265,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/reports/ledger.json",
+            "original_ids": [
+              "supplemental-json:tools/pq282_equality/recheck_refusal_order.py::<module>@50:39",
+              "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>@32:24",
+              "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_reports.py::test_recheck_report",
+              "tests/test_digest_1301/quality-calibration/test_reports.py::test_refusal_multiset"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "tools/wait_dsv4_aura_campaign.py",
+        "head_blob": "03396f19089552a381d309169fe0ceaa97455394",
+        "head_sha256": "ef08de9ab2f7ef9cecccf87da695b2f2db4a2923b9970d968250026c768513ce",
+        "risk": "All changed bytes invalidate any exact-file seal covering this path. Census/parent-completion calls bind original blobs and line/column; duplication baseline ratchets bind sites. Frozen pre-cutover audit scopes and launch qualification are not automatically renewed by byte-equivalent serialization. No seals or rosters updated.",
+        "prior_explicit_residual_contracts": [],
+        "historical_identity_references": [
+          {
+            "path": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+            "line": 51524,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          },
+          {
+            "path": "tests/fixtures/digest_parent_completion_1301.json",
+            "line": 3305,
+            "meaning": "Historical original source identity; not a current-worktree qualification."
+          }
+        ],
+        "current_witnesses": [
+          {
+            "ledger": "tests/fixtures/digest_1301/quality-calibration/reports/ledger.json",
+            "original_ids": [
+              "sorted-json:tools/wait_dsv4_aura_campaign.py::main@305:10"
+            ],
+            "tests": [
+              "tests/test_digest_1301/quality-calibration/test_reports.py::test_waiter_report"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "test_evidence_document": "tests/fixtures/digest_1301/quality-calibration/remaining/EVIDENCE.md",
+  "witness_limits": "Literal witnesses isolate serialization/stream behavior, not producer execution or native qualification. Generic input substitutions demonstrate recipe capability; a currently single-key object has no order difference."
+}
