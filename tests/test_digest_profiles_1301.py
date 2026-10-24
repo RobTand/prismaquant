@@ -149,6 +149,222 @@ SITES = (
 )
 
 
+# PQ #2660: historical census IDs remain the fixture namespace even where the
+# implementation has moved. These shaped cases are deliberately not in SITES:
+# not every consumer has both a returned and a raised outcome.
+_CENSUS_2660 = (
+    "hashlib:prismaquant/kl_fisher.py::fisher_probe_scalar@166:42",
+    "hashlib:prismaquant/sample_parallel_probe_contract.py::activation_priority_key@90:13",
+    "sorted-json:prismaquant/dev_mode.py::_shown@130:18",
+    "hashlib:tools/band_serial_handoff_live_pair.py::prepare@152:15",
+    "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences@502:21",
+    "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences@508:25",
+    "hashlib:prismaquant/tessera_campaign.py::_keystream@4267:17",
+)
+
+
+def _census_fisher_outcomes(monkeypatch):
+    import torch
+    from prismaquant import kl_fisher
+
+    # Equal logits and a Rademacher probe avoid architecture-dependent Gaussian
+    # draws/libm rounding while still exercising global-row SHA-derived seeds.
+    traces = []
+    real_sha256 = hashlib.sha256
+
+    def traced_sha256(payload=b"", *args, **kwargs):
+        hashed = real_sha256(payload, *args, **kwargs)
+        if payload.startswith(b"prismaquant.kl_fisher.global_row.v1:"):
+            prefix = hashed.digest()[:8]
+            traces.append((payload, prefix, int.from_bytes(prefix, "little")))
+        return hashed
+
+    rows = []
+    with monkeypatch.context() as patch:
+        patch.setattr(hashlib, "sha256", traced_sha256)
+        for offset in (7, 8):
+            logits = torch.zeros((1, 1, 4), requires_grad=True)
+            scalar = kl_fisher.fisher_probe_scalar(
+                logits, seed=19, distribution="rademacher",
+                global_row_offset=offset, token_count_override=1)
+            scalar.backward()
+            rows.append(outcome(lambda: {
+                "row_offset": offset, "scalar": scalar.item(),
+                "gradient": logits.grad.tolist(), "seed_trace": traces[-1],
+            }))
+    assert len(traces) == 2 and all(len(trace[1]) == 8 for trace in traces)
+    return rows
+
+
+def _census_activation_outcomes(monkeypatch):
+    from prismaquant import sample_parallel_artifacts as artifacts
+
+    key = artifacts.activation_priority_key
+    rows = [outcome(lambda group=group: key("ab" * 16, group, is_group=True))
+            for group in ("audit-group", "组/café😀", "")]
+    rows.append(outcome(lambda: key("ab" * 16, "model.layers.0.self_attn.q_proj")))
+    malformed = [outcome(lambda value=value: key(value, "group", is_group=True))
+                 for value in ("", "AB" * 16, "g" * 32, "a" * 31)]
+    assert all(row["raised"] == "builtins.ValueError" for row in malformed)
+    rows.extend(malformed)
+    # Reach the actual byte-length guard without allocating a 4-GiB string.
+    with monkeypatch.context() as patch:
+        patch.setattr(artifacts, "_U32_MASK", 3)
+        too_long = outcome(lambda: key("ab" * 16, "éé", is_group=True))
+    assert too_long["raised"] == "builtins.ValueError"
+    assert too_long["text"] == "activation priority group name is too long"
+    rows.append(too_long)
+    return rows
+
+
+def _census_shown_outcomes():
+    from prismaquant import dev_mode
+
+    cycle = {"padding": "x" * 180}
+    cycle["self"] = cycle
+    mixed = {1: "x" * 180, "é": 2}
+    # Verify these are genuinely the two fallback branches, not short values
+    # that bypass the JSON attempt altogether.
+    for value, kind in ((mixed, "builtins.TypeError"), (cycle, "builtins.ValueError")):
+        assert len(repr(value)) > dev_mode._SHOWN_CHARS
+        assert outcome(lambda: json.dumps(value, sort_keys=True, default=repr))["raised"] == kind
+    cases = (
+        ("boundary", "x" * dev_mode._SHOWN_CHARS),
+        ("unicode-truncated", "café😀" * 50),
+        ("nonfinite-truncated", {"padding": "n" * 180, "nan": float("nan"),
+                                  "positive": float("inf"), "negative": -float("inf")}),
+        ("typeerror-fallback", mixed),
+        ("valueerror-fallback", cycle),
+    )
+    rows = []
+    for label, value in cases:
+        shown = dev_mode._shown(value)
+        text = value if isinstance(value, str) else repr(value)
+        if len(text) > dev_mode._SHOWN_CHARS:
+            try:
+                encoded = json.dumps(value, sort_keys=True, default=repr).encode()
+            except (TypeError, ValueError):
+                encoded = text.encode()
+            suffix = hashlib.sha256(encoded).hexdigest()[:16]
+            assert shown == (f"{text[:dev_mode._SHOWN_CHARS]}... "
+                             f"({len(text)} chars, sha256 {suffix}...)")
+            assert len(suffix) == 16
+        else:
+            assert shown == text
+        rows.append(outcome(lambda: (label, shown)))
+    return rows
+
+
+def _census_prepare_outcomes(tmp_path, monkeypatch):
+    from tools import band_serial_handoff_live_pair as live_pair
+    import dispatch_joint_quanta as dispatch
+
+    # Template construction is a PrismaBuild SDK boundary, unrelated to the
+    # head-byte recipe. Keep this unit case offline and deployment-independent;
+    # the real tiny records, receipt, wire sealing and prepare body still run.
+    def local_template(*args, **kwargs):
+        template = tmp_path / "template.json"
+        template.write_text('{"fixture": "digest-freeze-2660"}\n', encoding="utf-8")
+        return template
+
+    monkeypatch.setattr(dispatch, "handoff_template_path", local_template)
+    root = tmp_path / "pair"
+    pair = live_pair.prepare(root, "nvme")
+    raw = Path(pair["head"]["path"]).read_bytes()
+    # A lossless, compact representation of all head bytes, not a second hash
+    # of an unobserved file. Avoid root-dependent manifest identities.
+    assert len(raw) == live_pair.HEAD_BYTES and len(raw) % 32 == 0
+    assert raw == raw[:32] * (len(raw) // 32)
+    rows = [outcome(lambda: (len(raw), raw[:32], pair["head"]["sha256"]))]
+    refusal = outcome(lambda: live_pair.prepare(root, "nvme"), tmp=tmp_path)
+    assert refusal["raised"] == "builtins.SystemExit"
+    rows.append(refusal)
+    return rows
+
+
+def _census_bootstrap_outcomes(monkeypatch, *, reject):
+    from types import SimpleNamespace
+
+    # This lane was retired after the census. Exercise its actual archived
+    # implementation with the live shared canonical helper, without restoring
+    # a production import or depending on historical git objects.
+    path = (Path(__file__).resolve().parents[1] / "archive" /
+            "proposal_validation_2026-10-14" / "prismaquant" / "proposal_validation.py")
+    name = "prismaquant._digest_freeze_bootstrap_2660"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    clusters = tuple((
+        (module.SequenceLoss(str(index), 1, "complete", float(loss)),
+         module.SequenceLoss(str(index), 1, "complete", 1.0)),
+    ) for index, loss in enumerate((2, 4, 8)))
+    config = module.PairedBootstrapConfig(0, 4, 0.95, 0.0)
+    if not reject:
+        return [outcome(lambda: module._bootstrap_differences(clusters, config))]
+
+    real_sha256 = hashlib.sha256
+    crafted = b"\xff" * 32
+    injected = 0
+    rejections = 0
+
+    def keyed_sha256(payload=b"", *args, **kwargs):
+        nonlocal injected, rejections
+        if payload == b"0:0:0":
+            injected += 1
+            return SimpleNamespace(digest=lambda: crafted, hexdigest=lambda: crafted.hex())
+        if payload == crafted:
+            rejections += 1
+        return real_sha256(payload, *args, **kwargs)
+
+    # Patch the stdlib entry, not a consumer-local alias, so the same keyed
+    # stand-in still reaches the operation after a future shared-owner route.
+    with monkeypatch.context() as patch:
+        patch.setattr(hashlib, "sha256", keyed_sha256)
+        draws = module._bootstrap_differences(clusters, config)
+    assert injected == 1 and rejections == 1
+    return [outcome(lambda: {"draws": draws, "rejections": rejections})]
+
+
+def _census_keystream_outcomes():
+    from itertools import islice
+    from prismaquant.tessera_campaign_table import _keystream
+
+    rows = [outcome(lambda seed=seed, label=label: list(islice(_keystream(seed, label), 9)))
+            for seed, label in ((0, "audit:stack"), (-17, "café😀"))]
+    refusal = outcome(lambda: list(islice(_keystream(0, "\ud800"), 1)))
+    assert refusal["raised"] == "builtins.UnicodeEncodeError"
+    rows.append(refusal)
+    return rows
+
+
+@pytest.mark.parametrize("census_id", _CENSUS_2660, ids=_CENSUS_2660)
+def test_census_site_freeze(census_id, tmp_path, monkeypatch):
+    """Freeze current consumer outcomes under the seven stable census IDs.
+
+    Compute all cases before checking rows, so even an absent first fixture
+    row cannot hide a setup error or an unexecuted refusal/rejection branch.
+    Recording belongs to #2660's implementation, with source unchanged.
+    """
+    if census_id == _CENSUS_2660[0]:
+        rows = _census_fisher_outcomes(monkeypatch)
+    elif census_id == _CENSUS_2660[1]:
+        rows = _census_activation_outcomes(monkeypatch)
+    elif census_id == _CENSUS_2660[2]:
+        rows = _census_shown_outcomes()
+    elif census_id == _CENSUS_2660[3]:
+        rows = _census_prepare_outcomes(tmp_path, monkeypatch)
+    elif census_id == _CENSUS_2660[4]:
+        rows = _census_bootstrap_outcomes(monkeypatch, reject=False)
+    elif census_id == _CENSUS_2660[5]:
+        rows = _census_bootstrap_outcomes(monkeypatch, reject=True)
+    else:
+        assert census_id == _CENSUS_2660[6]
+        rows = _census_keystream_outcomes()
+    for row in rows:
+        GOLDEN.check(row)
+
+
 def _inputs(module_name: str, name: str) -> tuple:
     return GENERIC_INPUTS + SITE_INPUTS.get((module_name, name), ())
 
