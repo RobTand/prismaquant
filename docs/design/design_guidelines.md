@@ -143,6 +143,50 @@ improves calibration KL but regresses held-out PPL/mean NLL or downstream
 log-likelihood checks should remain research-only unless there is a documented
 reason to prefer the KL tradeoff and the user explicitly accepts it.
 
+## Deterministic Tests
+
+Tests must establish their preconditions explicitly and assert observable behavior
+against independently known expectations, not repeat the implementation or merely
+check a mock's configured return value.
+
+- Synchronize concurrent work with events, conditions, or bounded condition polls;
+  inject or fake clocks for time-dependent behavior. Never sleep to wait or assert
+  wall-clock or elapsed-time thresholds. Timeouts are generous failure bounds only.
+- Control stat preconditions explicitly. A real write or hardlink need not advance
+  an observed timestamp; do not depend on timestamp resolution, inode or mtime
+  reuse, host load, CPU count, scheduling order, or test order.
+- Own mutable state locally. Use function-scoped fixtures such as `monkeypatch`
+  to replace global reports with fresh objects and restore the incoming objects
+  and contents on teardown, including after exceptions. Clearing a shared dict
+  in place is not isolation; a suite-wide reset can hide the leaking owner.
+- Seed all randomness, use `tmp_path` instead of fixed paths, and make no real
+  network calls. Keep fixtures and workloads within declared CPU and memory
+  limits, including the aggregate cost of xdist workers; choose a bounded worker
+  count rather than deriving it from the host's CPU count.
+- Never add retries, quarantine, skips, or weakened assertions to obtain a pass.
+  Diagnose the failing precondition or behavior and fix its cause while retaining
+  test discovery and meaningful coverage.
+
+The assembler fence gates in `tests/test_assemble_t4_overlay_fence.py` illustrate
+this pattern. Create real files under `tmp_path`, make the real hardlink (or
+write different bytes of the same size), then set the recorded wire ctime to
+one nanosecond below the currently observed ctime. This deliberately forces
+recorded-stat drift even on a frozen clock; it does not claim the filesystem
+advanced its clock. Leave real stat checks, digest computation, and metadata
+stability during hashing intact. Require exactly one admitted wire rehash for
+the hardlink, and the specific content-rehash refusal with no admission for
+corruption. Replace `jce.FENCE_REHASHED` with a fresh dict via the gate's explicit
+`monkeypatch` fixture so teardown restores another caller's report unchanged.
+The existing frozen-timestamp regressions exercise the real digest owner, and
+the isolation regressions verify restoration of both report identity and contents.
+
+Repeated verification is a predeclared sequence of independently executed runs
+plus a resource-bounded parallel run, stopping at the first failure and retaining
+all results and receipts. It is not retrying away a failure to obtain a clean
+streak; after a failure, investigate before starting a new post-fix verification.
+A passing sequence alone does not establish the cause of a historical flake
+without a reproduced failure or traceback.
+
 ## Promotion Gates
 
 Use these states for new functionality:
