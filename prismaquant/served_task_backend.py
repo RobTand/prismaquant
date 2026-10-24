@@ -6,33 +6,24 @@ No serving runtime imports, inference, endpoint requests or local-only passes.
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .schemas import strict_json_loads
+
 SERVED_BACKEND = "served"
 HF_BACKEND = "hf"
-
-def _reject_constant(value: str) -> Any:
-    """Refuse NaN and Infinity tokens: the witness must be strict JSON."""
-    raise ValueError(f"non-strict JSON constant {value}")
-
-
-def _duplicate_key(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError(f"duplicate key {key!r}")
-        result[key] = value
-    return result
 
 
 def read_witness(path: str | Path, *, where: str = "witness") -> dict[str, Any]:
     """Parse ``path`` as strict JSON with duplicate-key refusal."""
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"),
-                           object_pairs_hook=_duplicate_key,
-                           parse_constant=_reject_constant)
+        value = strict_json_loads(
+            Path(path).read_bytes(),
+            duplicate=lambda key: ValueError(f"duplicate key {key!r}"),
+            constant=lambda value: ValueError(f"non-strict JSON constant {value}"))
     except ValueError as exc:
         raise ValueError(f"{where} is not strict JSON: {exc}") from exc
     if not isinstance(value, dict):
@@ -96,18 +87,24 @@ def bind_served_task(config: Mapping[str, Any]) -> dict[str, Any]:
     if problems:
         raise ValueError("; ".join(problems))
     runtime = config["backend"]["serving_runtime"]
-    try:
-        witness = read_witness(runtime["witness"], where="served witness")
-        expected = read_expected(runtime["expected"])
-    except OSError as exc:
-        raise ValueError(f"served witness/expected input unavailable: {exc}") from exc
-    for key in ("endpoint", "served_alias", "attempt_id", "ranks"):
-        # JSON equality, including numeric types, must not make bool a rank.
-        if json.dumps(expected.get(key), sort_keys=True) != json.dumps(runtime[key], sort_keys=True):
-            raise ValueError(f"served binding {key} differs from its expectation file")
-    public = run_public_verifier(
-        cli=runtime["verifier"], witness=runtime["witness"], expected=expected,
-        served_dir=runtime["served_dir"], tokenizer_dir=runtime.get("tokenizer_dir"))
+    with tempfile.TemporaryDirectory(prefix="pq-served-binding-") as tmp:
+        # Read the mutable source once. Strict parsing, public verification and
+        # the recorded fingerprint all refer to this private, byte-exact copy.
+        owned_witness = Path(tmp) / "witness.json"
+        try:
+            owned_witness.write_bytes(Path(runtime["witness"]).read_bytes())
+            witness = read_witness(owned_witness, where="served witness")
+            expected = read_expected(runtime["expected"])
+        except OSError as exc:
+            raise ValueError(f"served witness/expected input unavailable: {exc}") from exc
+        for key in ("endpoint", "served_alias", "attempt_id", "ranks"):
+            # These fields are strings/rank lists, not objects needing key order.
+            # JSON equality must not make bool or float an integer rank.
+            if json.dumps(expected.get(key)) != json.dumps(runtime[key]):
+                raise ValueError(f"served binding {key} differs from its expectation file")
+        public = run_public_verifier(
+            cli=runtime["verifier"], witness=owned_witness, expected=expected,
+            served_dir=runtime["served_dir"], tokenizer_dir=runtime.get("tokenizer_dir"))
     return {"witness_fingerprint": witness["fingerprint"],
             **{key: expected[key] for key in ("endpoint", "served_alias", "attempt_id", "ranks")},
             "verified_facts": {key: expected[key] for key in ("artifacts", "tokenizer")},

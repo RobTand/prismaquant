@@ -22,6 +22,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .schemas import strict_json_loads
+
 #: Inspected producer source, provenance only; never an application default.
 TESSERA_VERIFIER_COMMIT = "17b3fdb396410698c9a142615345f046d2f94a5d"
 
@@ -72,7 +74,6 @@ def run_public_verifier(*, cli: str | Path, witness: str | Path,
     never contacts the endpoint in offline mode.
     """
     import math
-    from .served_task_backend import _duplicate_key, _reject_constant
 
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("public verifier timeout must be positive and finite")
@@ -110,9 +111,9 @@ def run_public_verifier(*, cli: str | Path, witness: str | Path,
     with tempfile.TemporaryDirectory(prefix="pq-public-verifier-") as tmp:
         artifacts_path = Path(tmp) / "expect_artifacts.json"
         tokenizer_path = Path(tmp) / "expect_tokenizer.json"
-        artifacts_path.write_text(json.dumps(artifacts, sort_keys=True),
+        artifacts_path.write_text(json.dumps(artifacts),
                                   encoding="utf-8")
-        tokenizer_path.write_text(json.dumps(tokenizer, sort_keys=True),
+        tokenizer_path.write_text(json.dumps(tokenizer),
                                   encoding="utf-8")
         argv += ["--expect-artifacts", str(artifacts_path),
                  "--expect-tokenizer", str(tokenizer_path)]
@@ -126,8 +127,10 @@ def run_public_verifier(*, cli: str | Path, witness: str | Path,
         raise ValueError(f"public verifier refused with exit status {completed.returncode}: "
                          + completed.stderr.strip())
     try:
-        verdict = json.loads(completed.stdout, object_pairs_hook=_duplicate_key,
-                             parse_constant=_reject_constant)
+        verdict = strict_json_loads(
+            completed.stdout,
+            duplicate=lambda key: ValueError(f"duplicate key {key!r}"),
+            constant=lambda value: ValueError(f"non-strict JSON constant {value}"))
     except (ValueError, IndexError) as exc:
         raise ValueError("public verifier printed no verdict: "
                          + (completed.stderr.strip() or str(exc))) from exc
