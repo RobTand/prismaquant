@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import time
 from pathlib import Path
+
+# Source-load the existing stdlib owner for standalone tools/ launches, without
+# requiring package startup (or torch) or changing the caller's sys.path.
+_SOURCE_PATH = Path(__file__).resolve().with_name("pq_profile_source.py")
+_SOURCE_SPEC = importlib.util.spec_from_file_location("_vllm_source", _SOURCE_PATH)
+if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load source owner loader: {_SOURCE_PATH}")
+_source = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(_source)
+_digests = _source.profile_source_owner("digests")
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -71,11 +82,11 @@ def main() -> int:
         "dtype": args.dtype,
         "distributed_executor_backend": args.distributed_executor_backend,
     }
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(_digests.DIRECT_ASCII_INDENT2_LAX.text(result))
     if args.output_json:
         path = Path(args.output_json)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        path.write_text(_digests.DIRECT_ASCII_INDENT2_LAX.text(result) + "\n")
     return 0
 
 

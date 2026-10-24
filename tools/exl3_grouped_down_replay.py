@@ -48,8 +48,18 @@ may exceed the used row count, so the tables can carry unused capacity; byte
 equality of the whole passed tensor is still what is asked for.
 """
 
-import hashlib
+import importlib.util
 import json
+from pathlib import Path
+
+# Preserve stdlib-only file-spec imports without starting the package or torch.
+_SOURCE_PATH = Path(__file__).resolve().with_name("pq_profile_source.py")
+_SOURCE_SPEC = importlib.util.spec_from_file_location("_exl3_source", _SOURCE_PATH)
+if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load source owner loader: {_SOURCE_PATH}")
+_source = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(_source)
+bytes_sha256hex = _source.profile_source_owner("digests").bytes_sha256hex
 
 
 REPLAY_SCHEMA = "prismaquant.exl3_grouped_down_replay/2"
@@ -97,7 +107,7 @@ def _tensor_bytes(tensor):
 
 
 def _hash(tensor):
-    return hashlib.sha256(_tensor_bytes(tensor)).hexdigest()
+    return bytes_sha256hex(_tensor_bytes(tensor))
 
 
 def describe(tensor, *, name):

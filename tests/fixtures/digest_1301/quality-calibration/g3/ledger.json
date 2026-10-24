@@ -1,0 +1,2669 @@
+{
+  "schema": "local-json-audit-fragment/v1",
+  "research_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "checkout_head": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "coordinate_convention": "AST lines 1-based; col/end_col 0-based UTF-8 byte offsets; ends exclusive. source_blob is Git blob SHA-1; source is exact call slice.",
+  "audit_boundary": {
+    "exhaustive_population": "Native json.* AST call sites in exactly eight assigned files; separately existing JsonProfile construction/text and direct delegated G3 record-write calls. Static sites, not runtime executions.",
+    "generated_code_population": "Not included in native count. Literal inspection found no embedded json.* code in these eight files. v1_preflight AST exec reconstructs runner.main parser; imported/generated serializers remain outside this fragment. Not an exhaustive generated-code census.",
+    "shell_population": "Not included. Native argv serialization and subprocess consumers are recorded, but shell/deployment wrappers, runpy-loaded pinned adapter, PB helper and imported internals are outside this eight-file boundary. No exhaustive shell JSON assertion.",
+    "permissions": "Read-only source/owner audit. No new owner, recipe or scientific-retention decision."
+  },
+  "owner_evidence": {
+    "path": "prismaquant/digests.py",
+    "lines": [
+      264,
+      341
+    ],
+    "fact": "JsonProfile._encoder always sort_keys=True; no unsorted recipe. Existing G3_JSON is g3-result indent=1/default=str.",
+    "import_bridge": "tools/g3job/g3_pq_policy/__init__.py:1-4 sets __path__ to checkout prismaquant without overlaying pinned numerical package."
+  },
+  "summary": {
+    "files": 8,
+    "stdlib_calls": 40,
+    "by_operation": {
+      "json.dumps": 20,
+      "json.dump": 3,
+      "json.loads": 16,
+      "json.load": 1
+    },
+    "encoders": 23,
+    "decoders": 17,
+    "unresolved_recipe_gaps": 23,
+    "existing_profile_sites": 2,
+    "delegated_record_write_sites": 9,
+    "stdlib_calls_by_file": {
+      "tools/g3job/g3_launch.py": 6,
+      "tools/g3job/g3_offline_decoded_kl.py": 3,
+      "tools/g3job/g3_one_arm_smoke.py": 1,
+      "tools/g3job/g3_progress_launch.py": 3,
+      "tools/g3job/g3_readset.py": 7,
+      "tools/g3job/g3_real_arm_smoke.py": 10,
+      "tools/g3job/g3_residency_smoke.py": 7,
+      "tools/g3job/g3_v1_preflight.py": 3
+    },
+    "encoder_option_groups": {
+      "{\"allow_nan\": true, \"check_circular\": true, \"cls\": null, \"default\": null, \"ensure_ascii\": true, \"indent\": null, \"separators\": [\", \", \": \"], \"skipkeys\": false, \"sort_keys\": false}": 17,
+      "{\"allow_nan\": true, \"check_circular\": true, \"cls\": null, \"default\": null, \"ensure_ascii\": true, \"indent\": null, \"separators\": [\",\", \":\"], \"skipkeys\": false, \"sort_keys\": false}": 3,
+      "{\"allow_nan\": true, \"check_circular\": true, \"cls\": null, \"default\": null, \"ensure_ascii\": true, \"indent\": 1, \"separators\": [\",\", \": \"], \"skipkeys\": false, \"sort_keys\": false}": 1,
+      "{\"allow_nan\": true, \"check_circular\": true, \"cls\": null, \"default\": null, \"ensure_ascii\": true, \"indent\": 2, \"separators\": [\",\", \": \"], \"skipkeys\": false, \"sort_keys\": false}": 2
+    }
+  },
+  "files": [
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "research_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "head_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "working_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "sha256": "a0135b2629986c745bc60e1a6df032f59d9b3ae2aaa7fa5affd459e6be28b366",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Host executable with module-scope argparse, output/mount creation; runpy loads pinned teacher-04 adapter after sys.path.insert(PQ). Checkout policy is g3_pq_policy, not a numerical overlay. Importing executable is not metadata-only.",
+      "import_execution_evidence": [
+        {
+          "line": 12,
+          "col": 0,
+          "source": "from __future__ import annotations"
+        },
+        {
+          "line": 14,
+          "col": 0,
+          "source": "import argparse"
+        },
+        {
+          "line": 15,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 16,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 17,
+          "col": 0,
+          "source": "import runpy"
+        },
+        {
+          "line": 18,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 19,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 106,
+          "col": 0,
+          "source": "from g3_residency import container_contract"
+        },
+        {
+          "line": 161,
+          "col": 0,
+          "source": "from g3_pq_policy.dev_mode import dev_mode_enabled, seal_check"
+        },
+        {
+          "line": 63,
+          "col": 4,
+          "source": "from g3_prepared_source import read_prepared_source_json"
+        },
+        {
+          "line": 112,
+          "col": 4,
+          "source": "from g3_residency import launch_read_plan"
+        },
+        {
+          "line": 155,
+          "col": 0,
+          "source": "sys.path.insert(0, PQ)"
+        },
+        {
+          "line": 159,
+          "col": 10,
+          "source": "runpy.run_path(str(Path(PQ) / \"tools\" / \"tessera_campaign_container.py\"))"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "research_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "head_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "working_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "sha256": "312daa3806643d696c19b1ae1465d621f50bc1f9f1471301e0c8df82c304ace0",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Container runner inserts HERE and TESSERA_SRC, uses configurable G3_PQ_ROOT; eager numpy/torch and sibling imports include readset cycle. Checkout policy comes through g3_pq_policy, numerical imports in run_multi from pinned PQ. A new bare prismaquant import may select pinned numerical package instead of checkout policy.",
+      "import_execution_evidence": [
+        {
+          "line": 40,
+          "col": 0,
+          "source": "from __future__ import annotations"
+        },
+        {
+          "line": 42,
+          "col": 0,
+          "source": "import argparse"
+        },
+        {
+          "line": 43,
+          "col": 0,
+          "source": "import ast"
+        },
+        {
+          "line": 44,
+          "col": 0,
+          "source": "from contextlib import ExitStack"
+        },
+        {
+          "line": 45,
+          "col": 0,
+          "source": "import io"
+        },
+        {
+          "line": 46,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 47,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 48,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 49,
+          "col": 0,
+          "source": "import threading"
+        },
+        {
+          "line": 50,
+          "col": 0,
+          "source": "import time"
+        },
+        {
+          "line": 51,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 59,
+          "col": 0,
+          "source": "import numpy as np"
+        },
+        {
+          "line": 60,
+          "col": 0,
+          "source": "import torch"
+        },
+        {
+          "line": 62,
+          "col": 0,
+          "source": "from g3_pq_policy import g3_exl3"
+        },
+        {
+          "line": 63,
+          "col": 0,
+          "source": "import g3_lib as L"
+        },
+        {
+          "line": 64,
+          "col": 0,
+          "source": "from g3_residency import read_g3_input, receipt as residency_receipt, finish_phase, close_reader"
+        },
+        {
+          "line": 65,
+          "col": 0,
+          "source": "from g3_readset import SourceReads, source_indices"
+        },
+        {
+          "line": 68,
+          "col": 0,
+          "source": "from g3_pq_policy.digests import file_sha256hex as sha256_file"
+        },
+        {
+          "line": 69,
+          "col": 0,
+          "source": "from g3_pq_policy.dev_mode import dev_mode_enabled, seal_check, NOT_COMPUTED, dev_stamp"
+        },
+        {
+          "line": 70,
+          "col": 0,
+          "source": "from g3_pq_policy.digests import bytes_sha256hex, JsonProfile"
+        },
+        {
+          "line": 71,
+          "col": 0,
+          "source": "from g3_pq_policy.io_engine import ENGINE"
+        },
+        {
+          "line": 54,
+          "col": 0,
+          "source": "sys.path.insert(0, str(HERE))"
+        },
+        {
+          "line": 57,
+          "col": 0,
+          "source": "sys.path.insert(0, TESSERA_SRC)"
+        },
+        {
+          "line": 180,
+          "col": 4,
+          "source": "from g3_prepared_source import read_prepared_source_json"
+        },
+        {
+          "line": 597,
+          "col": 4,
+          "source": "from tessera.fused import parse_fused"
+        },
+        {
+          "line": 598,
+          "col": 4,
+          "source": "import tessera"
+        },
+        {
+          "line": 695,
+          "col": 4,
+          "source": "import importlib"
+        },
+        {
+          "line": 697,
+          "col": 4,
+          "source": "from experiments.glm_tr3_full_vocab import CONTEXT_LENGTH, VOCAB_SIZE, load_panel, token_kl"
+        },
+        {
+          "line": 698,
+          "col": 4,
+          "source": "from g3_prepared_source import cached_checkpoint_identity"
+        },
+        {
+          "line": 699,
+          "col": 4,
+          "source": "from tools.build_streamed_full_kl_teacher import (_require_source_execution_policy,\n                                                      _source_derivative_policy)"
+        },
+        {
+          "line": 701,
+          "col": 4,
+          "source": "from tools.full_kl_teacher_payload import canonical_sha256"
+        },
+        {
+          "line": 702,
+          "col": 4,
+          "source": "from prismaquant.cost_streaming import build_streamed_causal_lm"
+        },
+        {
+          "line": 703,
+          "col": 4,
+          "source": "from prismaquant.gpu_guard import require_cuda_hot_path"
+        },
+        {
+          "line": 704,
+          "col": 4,
+          "source": "from prismaquant.joint_aura import source_execution_identity"
+        },
+        {
+          "line": 705,
+          "col": 4,
+          "source": "from prismaquant.model_profiles import detect_profile"
+        },
+        {
+          "line": 706,
+          "col": 4,
+          "source": "import transformers"
+        },
+        {
+          "line": 1172,
+          "col": 4,
+          "source": "import importlib"
+        },
+        {
+          "line": 1174,
+          "col": 4,
+          "source": "from experiments.glm_tr3_full_vocab import CONTEXT_LENGTH, VOCAB_SIZE, load_panel, token_kl"
+        },
+        {
+          "line": 1175,
+          "col": 4,
+          "source": "from g3_prepared_source import cached_checkpoint_identity"
+        },
+        {
+          "line": 1176,
+          "col": 4,
+          "source": "from tools.build_streamed_full_kl_teacher import (_require_source_execution_policy,\n                                                      _source_derivative_policy)"
+        },
+        {
+          "line": 1178,
+          "col": 4,
+          "source": "from tools.full_kl_teacher_payload import canonical_sha256"
+        },
+        {
+          "line": 1179,
+          "col": 4,
+          "source": "from prismaquant.cost_streaming import build_streamed_causal_lm"
+        },
+        {
+          "line": 1180,
+          "col": 4,
+          "source": "from prismaquant.gpu_guard import require_cuda_hot_path"
+        },
+        {
+          "line": 1181,
+          "col": 4,
+          "source": "from prismaquant.joint_aura import source_execution_identity"
+        },
+        {
+          "line": 1182,
+          "col": 4,
+          "source": "from prismaquant.model_profiles import detect_profile"
+        },
+        {
+          "line": 1183,
+          "col": 4,
+          "source": "import transformers"
+        },
+        {
+          "line": 1404,
+          "col": 4,
+          "source": "import tessera"
+        },
+        {
+          "line": 1405,
+          "col": 4,
+          "source": "from tessera.unit_artifact import read_unit_artifact"
+        },
+        {
+          "line": 1436,
+          "col": 4,
+          "source": "from experiments.glm_full_capture_profile import CaptureObserver"
+        },
+        {
+          "line": 1437,
+          "col": 4,
+          "source": "import experiments.workspace_netdata as wn"
+        },
+        {
+          "line": 1438,
+          "col": 4,
+          "source": "from experiments.workspace_netdata import sample_netdata"
+        },
+        {
+          "line": 194,
+          "col": 8,
+          "source": "from experiments.build_glm_tr3_teacher import require_reference_binding"
+        },
+        {
+          "line": 592,
+          "col": 4,
+          "source": "exec(compile(ast.Module(body=body, type_ignores=[]), \"pinned\", \"exec\"), ns)"
+        },
+        {
+          "line": 692,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ))"
+        },
+        {
+          "line": 693,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ / \"tools\"))"
+        },
+        {
+          "line": 694,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ / \"experiments\"))"
+        },
+        {
+          "line": 1169,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ))"
+        },
+        {
+          "line": 1170,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ / \"tools\"))"
+        },
+        {
+          "line": 1171,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ / \"experiments\"))"
+        },
+        {
+          "line": 1434,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ))"
+        },
+        {
+          "line": 1435,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ / \"tools\"))"
+        },
+        {
+          "line": 1257,
+          "col": 12,
+          "source": "import psutil"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_one_arm_smoke.py",
+      "research_blob": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+      "head_blob": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+      "working_blob": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+      "sha256": "836a073f917f239571948838c86c780839c74010fd6bcdb3b54b4fcb4ea8cb72",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Synthetic model diagnostic imported by residency smoke uses real SourceReads and multi-visit glue with optional CUDA profiling; sibling initialization and runner import cycle matter.",
+      "import_execution_evidence": [
+        {
+          "line": 6,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 7,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 8,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 10,
+          "col": 0,
+          "source": "import torch"
+        },
+        {
+          "line": 11,
+          "col": 0,
+          "source": "from safetensors.torch import save_file"
+        },
+        {
+          "line": 13,
+          "col": 0,
+          "source": "import g3_lib as L"
+        },
+        {
+          "line": 14,
+          "col": 0,
+          "source": "from g3_offline_decoded_kl import HashPool, PQ"
+        },
+        {
+          "line": 15,
+          "col": 0,
+          "source": "from g3_readset import SourceReads"
+        },
+        {
+          "line": 33,
+          "col": 4,
+          "source": "from experiments.glm_tr3_full_vocab import token_kl"
+        },
+        {
+          "line": 32,
+          "col": 4,
+          "source": "sys.path.insert(0, str(PQ))"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_progress_launch.py",
+      "research_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "head_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "working_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "sha256": "59b7f81d447f8547478b3d89f33c71f9ab4b00a35fcea3afd593d33934685a54",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Host subprocess wrapper; loads commit via PRISMABUILD_ACTION_PROGRESS_HELPER runpy and launches sibling g3_launch. Numerical dependencies are unnecessary. Absolute-script execution does not automatically put repository root on sys.path.",
+      "import_execution_evidence": [
+        {
+          "line": 7,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 8,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 9,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 10,
+          "col": 0,
+          "source": "import re"
+        },
+        {
+          "line": 11,
+          "col": 0,
+          "source": "import runpy"
+        },
+        {
+          "line": 12,
+          "col": 0,
+          "source": "import subprocess"
+        },
+        {
+          "line": 13,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 116,
+          "col": 13,
+          "source": "runpy.run_path(os.environ['PRISMABUILD_ACTION_PROGRESS_HELPER'])"
+        },
+        {
+          "line": 123,
+          "col": 16,
+          "source": "subprocess.Popen([sys.executable, str(Path(__file__).with_name('g3_launch.py')), *args],\n                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "research_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "head_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "working_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "sha256": "33831002768465fd693e57a6312e49d5eccb441d1f51995c51f87bb7448a4b94",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "CPU pbrun manifest builder uses G3_PQ_ROOT host checkout, also imported in container. Eager torch/safetensors, lazy runner imports avoid initialization cycle. SourceReads.install replaces only pinned layer_streaming source hooks.",
+      "import_execution_evidence": [
+        {
+          "line": 11,
+          "col": 0,
+          "source": "from collections import defaultdict"
+        },
+        {
+          "line": 12,
+          "col": 0,
+          "source": "import gzip"
+        },
+        {
+          "line": 13,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 14,
+          "col": 0,
+          "source": "import math"
+        },
+        {
+          "line": 15,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 16,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 17,
+          "col": 0,
+          "source": "import struct"
+        },
+        {
+          "line": 18,
+          "col": 0,
+          "source": "import threading"
+        },
+        {
+          "line": 20,
+          "col": 0,
+          "source": "import torch"
+        },
+        {
+          "line": 21,
+          "col": 0,
+          "source": "from safetensors import safe_open"
+        },
+        {
+          "line": 22,
+          "col": 0,
+          "source": "from safetensors.torch import _TYPES"
+        },
+        {
+          "line": 26,
+          "col": 4,
+          "source": "from g3_lib import read_range"
+        },
+        {
+          "line": 47,
+          "col": 4,
+          "source": "from g3_offline_decoded_kl import arm_wants"
+        },
+        {
+          "line": 136,
+          "col": 4,
+          "source": "from g3_offline_decoded_kl import plan_arms, ARMS"
+        },
+        {
+          "line": 137,
+          "col": 4,
+          "source": "from g3_lib import member_location"
+        },
+        {
+          "line": 170,
+          "col": 4,
+          "source": "from prismaquant.model_profiles import detect_profile"
+        },
+        {
+          "line": 223,
+          "col": 4,
+          "source": "import argparse"
+        },
+        {
+          "line": 224,
+          "col": 4,
+          "source": "import sys"
+        },
+        {
+          "line": 225,
+          "col": 4,
+          "source": "import g3_offline_decoded_kl as g"
+        },
+        {
+          "line": 54,
+          "col": 8,
+          "source": "from g3_offline_decoded_kl import plan_arms, ARMS"
+        },
+        {
+          "line": 57,
+          "col": 8,
+          "source": "from g3_residency import read_g3_input"
+        },
+        {
+          "line": 87,
+          "col": 8,
+          "source": "from prismaquant import layer_streaming"
+        },
+        {
+          "line": 94,
+          "col": 8,
+          "source": "from g3_residency import read_g3_input"
+        },
+        {
+          "line": 125,
+          "col": 8,
+          "source": "from g3_residency import staged_range"
+        },
+        {
+          "line": 238,
+          "col": 4,
+          "source": "sys.path.insert(0, str(g.PQ))"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "research_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "head_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "working_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "sha256": "f452df3b5b7dc4d7d41b4e04eb8b7c32014717c88f5973c31134a105d3ae2e86",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Eager runner import; real pinned loader/decoder/head/KL in isolated child passes. run_pass inserts G.PQ for numerical imports; diagnostic truncated logits are not full-model quality evidence.",
+      "import_execution_evidence": [
+        {
+          "line": 7,
+          "col": 0,
+          "source": "import argparse"
+        },
+        {
+          "line": 8,
+          "col": 0,
+          "source": "import gzip"
+        },
+        {
+          "line": 9,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 10,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 11,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 12,
+          "col": 0,
+          "source": "import subprocess"
+        },
+        {
+          "line": 13,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 15,
+          "col": 0,
+          "source": "import g3_offline_decoded_kl as G"
+        },
+        {
+          "line": 28,
+          "col": 4,
+          "source": "from g3_readset import SourceReads, build_manifest"
+        },
+        {
+          "line": 62,
+          "col": 4,
+          "source": "import importlib"
+        },
+        {
+          "line": 63,
+          "col": 4,
+          "source": "import numpy as np"
+        },
+        {
+          "line": 64,
+          "col": 4,
+          "source": "import torch"
+        },
+        {
+          "line": 68,
+          "col": 4,
+          "source": "from prismaquant.cost_streaming import build_streamed_causal_lm"
+        },
+        {
+          "line": 69,
+          "col": 4,
+          "source": "from prismaquant.gpu_guard import require_cuda_hot_path"
+        },
+        {
+          "line": 70,
+          "col": 4,
+          "source": "from prismaquant.joint_aura import source_execution_identity"
+        },
+        {
+          "line": 71,
+          "col": 4,
+          "source": "from prismaquant.model_profiles import detect_profile"
+        },
+        {
+          "line": 72,
+          "col": 4,
+          "source": "from tools.build_streamed_full_kl_teacher import _require_source_execution_policy, _source_derivative_policy"
+        },
+        {
+          "line": 73,
+          "col": 4,
+          "source": "from experiments.glm_tr3_full_vocab import load_panel, token_kl, CONTEXT_LENGTH, VOCAB_SIZE"
+        },
+        {
+          "line": 75,
+          "col": 4,
+          "source": "from g3_prepared_source import cached_checkpoint_identity"
+        },
+        {
+          "line": 76,
+          "col": 4,
+          "source": "from g3_readset import SourceReads"
+        },
+        {
+          "line": 77,
+          "col": 4,
+          "source": "from g3_residency import finish_phase, receipt"
+        },
+        {
+          "line": 164,
+          "col": 4,
+          "source": "import numpy as np"
+        },
+        {
+          "line": 165,
+          "col": 4,
+          "source": "import time"
+        },
+        {
+          "line": 27,
+          "col": 4,
+          "source": "sys.path.insert(0, str(G.PQ))"
+        },
+        {
+          "line": 65,
+          "col": 4,
+          "source": "sys.path.insert(0, str(G.PQ))"
+        },
+        {
+          "line": 66,
+          "col": 4,
+          "source": "sys.path.insert(0, str(G.PQ / \"tools\"))"
+        },
+        {
+          "line": 67,
+          "col": 4,
+          "source": "sys.path.insert(0, str(G.PQ / \"experiments\"))"
+        },
+        {
+          "line": 170,
+          "col": 8,
+          "source": "subprocess.run([sys.executable, __file__, \"--pass-mode\", mode, \"--spec\", json.dumps(spec),\n                        \"--out\", str(out / mode)], check=True)"
+        },
+        {
+          "line": 203,
+          "col": 8,
+          "source": "from tessera.unit_artifact import read_unit_artifact"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "research_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "head_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "working_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "sha256": "a3ca89e5afb9db790193382158a651b6e1a5aee6673e1d72f564fe0fc512a66d",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "CPU prepare and container CUDA mode share eager torch/HashPool imports. Uses admitted PB staging and checkout policy. Adding imports affects CPU preparation and CUDA consumers, not just one mode.",
+      "import_execution_evidence": [
+        {
+          "line": 10,
+          "col": 0,
+          "source": "import argparse"
+        },
+        {
+          "line": 11,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 12,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 13,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 15,
+          "col": 0,
+          "source": "import torch"
+        },
+        {
+          "line": 16,
+          "col": 0,
+          "source": "from g3_offline_decoded_kl import HashPool"
+        },
+        {
+          "line": 17,
+          "col": 0,
+          "source": "from g3_pq_policy.digests import bytes_sha256hex"
+        },
+        {
+          "line": 18,
+          "col": 0,
+          "source": "from g3_residency import staged_range, resolve_g3_origin, receipt"
+        },
+        {
+          "line": 22,
+          "col": 4,
+          "source": "import gzip"
+        },
+        {
+          "line": 23,
+          "col": 4,
+          "source": "from g3_lib import read_range"
+        },
+        {
+          "line": 77,
+          "col": 4,
+          "source": "from g3_one_arm_smoke import compare_one_arm"
+        }
+      ]
+    },
+    {
+      "path": "tools/g3job/g3_v1_preflight.py",
+      "research_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "head_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "working_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "sha256": "e5c8936ea2ae622daba2cbb2e9a4e7918792c6b5cc3f3dc10c7fafcdfc2391e1",
+      "research_equals_head_equals_worktree": true,
+      "native_context": "Module-scope argv decode, AST parser execution, CUDA decode and exclusive /out write. Eager runner/tessera import; inserts g3.PQ for numerical teacher helpers and optionally runs scorer. Not safely importable as a serializer library.",
+      "import_execution_evidence": [
+        {
+          "line": 2,
+          "col": 0,
+          "source": "import ast"
+        },
+        {
+          "line": 3,
+          "col": 0,
+          "source": "import json"
+        },
+        {
+          "line": 4,
+          "col": 0,
+          "source": "import os"
+        },
+        {
+          "line": 5,
+          "col": 0,
+          "source": "from pathlib import Path"
+        },
+        {
+          "line": 6,
+          "col": 0,
+          "source": "import sys"
+        },
+        {
+          "line": 8,
+          "col": 0,
+          "source": "import g3_offline_decoded_kl as g3"
+        },
+        {
+          "line": 9,
+          "col": 0,
+          "source": "from tessera.unit_artifact import read_unit_artifact"
+        },
+        {
+          "line": 33,
+          "col": 0,
+          "source": "from experiments.glm_tr3_full_vocab import load_panel"
+        },
+        {
+          "line": 34,
+          "col": 0,
+          "source": "from g3_prepared_source import validate_prepared_source"
+        },
+        {
+          "line": 35,
+          "col": 0,
+          "source": "from tools.full_kl_teacher_payload import canonical_sha256"
+        },
+        {
+          "line": 36,
+          "col": 0,
+          "source": "from tools.build_streamed_full_kl_teacher import _source_derivative_policy"
+        },
+        {
+          "line": 23,
+          "col": 0,
+          "source": "exec(compile(ast.Module(body=body, type_ignores=[]), g3.__file__, 'exec'), ns)"
+        },
+        {
+          "line": 32,
+          "col": 0,
+          "source": "sys.path.insert(0, str(g3.PQ))"
+        }
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 110,
+      "col": 32,
+      "end_line": 110,
+      "end_col": 89,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dumps({target: source for source, target in mounts})",
+      "id": "launch:110:32",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "G3_HOST_MOUNTS environment: container-to-host origin translation by g3_residency.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:110:32",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 115,
+      "col": 8,
+      "end_line": 115,
+      "end_col": 68,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dump(launch_read_plan(), stream, separators=(\",\", \":\"))",
+      "id": "launch:115:8",
+      "population": "native-stdlib",
+      "operation": "json.dump",
+      "explicit_options": {
+        "separators": "(\",\", \":\")"
+      },
+      "consumer": "Exclusive compact read-plan file named by G3_READ_PLAN for admitted PB reader phases.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ",",
+          ":"
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:115:8",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 151,
+      "col": 23,
+      "end_line": 151,
+      "end_col": 51,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dumps(launch, indent=1)",
+      "id": "launch:151:23",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {
+        "indent": "1"
+      },
+      "consumer": "Launch provenance .launch.json/.preflight.launch.json file; human-readable indent=1.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": 1,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:151:23",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=1, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 152,
+      "col": 6,
+      "end_line": 152,
+      "end_col": 24,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dumps(launch)",
+      "id": "launch:152:6",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout launch provenance, forwarded by progress wrapper.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:152:6",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 154,
+      "col": 67,
+      "end_line": 154,
+      "end_col": 82,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dumps(cmd)",
+      "id": "launch:154:67",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "One argv JSON argument decoded by g3_v1_preflight line 11.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:154:67",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 174,
+      "col": 36,
+      "end_line": 174,
+      "end_col": 52,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "source": "json.dumps(spec)",
+      "id": "launch:174:36",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Pinned tessera_campaign_container adapter --spec; mounts, environment and image seal.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-launch:174:36",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "read_g3_manifest",
+      "line": 208,
+      "col": 8,
+      "end_line": 208,
+      "end_col": 23,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "json.loads(raw)",
+      "id": "offline_decoded_kl:208:8",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Digest-verified unit manifest; schema, rows and arm planning.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "Teachers.__init__",
+      "line": 528,
+      "col": 16,
+      "end_line": 528,
+      "end_col": 31,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "json.loads(raw)",
+      "id": "offline_decoded_kl:528:16",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "EXL3 safetensors header; WireReader uses dtype, shape and offsets.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_multi",
+      "line": 1193,
+      "col": 29,
+      "end_line": 1193,
+      "end_col": 47,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "json.dumps(totals)",
+      "id": "offline_decoded_kl:1193:29",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Human plan totals after [g3 ...] plan prefix; ReadProgress has no plan JSON parsing branch.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-offline_decoded_kl:1193:29",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_one_arm_smoke.py",
+      "scope": "compare_one_arm",
+      "line": 24,
+      "col": 55,
+      "end_line": 25,
+      "end_col": 64,
+      "source_blob": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+      "source": "json.dumps(\n        {\"weight_map\": {name + \".weight\": \"model.safetensors\"}})",
+      "id": "one_arm_smoke:24:55",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Synthetic model.safetensors.index.json fixture consumed by real SourceReads; weight_map points to tiny shard.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-one_arm_smoke:24:55",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_progress_launch.py",
+      "scope": "ReadProgress.observe",
+      "line": 26,
+      "col": 22,
+      "end_line": 26,
+      "end_col": 38,
+      "source_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "source": "json.loads(line)",
+      "id": "progress_launch:26:22",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Smoke stdout JSON; schema/digest/GPU verification fields gate one progress unit.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_progress_launch.py",
+      "scope": "ComparisonProgress.observe",
+      "line": 87,
+      "col": 16,
+      "end_line": 87,
+      "end_col": 69,
+      "source_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "source": "json.loads(line.removeprefix(\"G3_COMPARE_PROGRESS \"))",
+      "id": "progress_launch:87:16",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "G3_COMPARE_PROGRESS prefixed event; ordered comparison phase and scored-window gates.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_progress_launch.py",
+      "scope": "main",
+      "line": 131,
+      "col": 29,
+      "end_line": 131,
+      "end_col": 46,
+      "source_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "source": "json.dumps(event)",
+      "id": "progress_launch:131:29",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "semantic-progress.jsonl: newline after event, flushed and fsynced before PB commit; evidence retains original line.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-progress_launch:131:29",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "shard_header",
+      "line": 34,
+      "col": 21,
+      "end_line": 34,
+      "end_col": 36,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.loads(raw)",
+      "id": "readset:34:21",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Safetensors header; validates tensor data_offsets/dtype/shape before extent construction.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "SourceReads.__init__",
+      "line": 58,
+      "col": 26,
+      "end_line": 58,
+      "end_col": 96,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.loads(read_g3_input(self.model / \"model.safetensors.index.json\"))",
+      "id": "readset:58:26",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Source model index weight_map; builds shard headers and omission candidates.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "SourceReads.read_json",
+      "line": 95,
+      "col": 15,
+      "end_line": 95,
+      "end_col": 46,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.loads(read_g3_input(path))",
+      "id": "readset:95:15",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "SourceReads.read_json fallback via admitted read_g3_input, installed as pinned layer_streaming._source_json hook; authenticated branch delegates.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 243,
+      "col": 20,
+      "end_line": 243,
+      "end_col": 74,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.loads((Path(root) / 'teacher.json').read_bytes())",
+      "id": "readset:243:20",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Each teacher.json supplies window payload metadata for read-plan construction.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 244,
+      "col": 12,
+      "end_line": 244,
+      "end_col": 53,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.loads(Path(args.panel).read_bytes())",
+      "id": "readset:244:12",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Panel windows, mask and token arrays populate setup/read plan.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 254,
+      "col": 25,
+      "end_line": 254,
+      "end_col": 66,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.dumps(result, separators=(',', ':'))",
+      "id": "readset:254:25",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {
+        "separators": "(',', ':')"
+      },
+      "consumer": "Gzip compact data manifest encoded to bytes; PB entries and phase read order.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ",",
+          ":"
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-readset:254:25",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 255,
+      "col": 10,
+      "end_line": 255,
+      "end_col": 151,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "source": "json.dumps({'out': args.out, 'entries': result['entry_count'], 'bytes': result['total_bytes'], 'omitted_source_tensors': len(reads.omitted)})",
+      "id": "readset:255:10",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout output path, entries/bytes and omitted-source tensor count.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-readset:255:10",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "progress",
+      "line": 22,
+      "col": 35,
+      "end_line": 22,
+      "end_col": 93,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.dumps({\"phase\": f\"{mode}-{phase}\", \"scored\": scored})",
+      "id": "real_arm_smoke:22:35",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "G3_COMPARE_PROGRESS stdout event; ComparisonProgress parses phase/scored sequencing.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-real_arm_smoke:22:35",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 32,
+      "col": 28,
+      "end_line": 32,
+      "end_col": 82,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.loads((Path(root) / \"teacher.json\").read_bytes())",
+      "id": "real_arm_smoke:32:28",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Teacher metadata for union source-read/omission diagnostic plan.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 34,
+      "col": 12,
+      "end_line": 34,
+      "end_col": 56,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.loads(Path(spec[\"panel\"]).read_bytes())",
+      "id": "real_arm_smoke:34:12",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Panel metadata for setup arrays and selected diagnostic window.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 57,
+      "col": 21,
+      "end_line": 57,
+      "end_col": 60,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.dumps(plan, separators=(\",\", \":\"))",
+      "id": "real_arm_smoke:57:21",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {
+        "separators": "(\",\", \":\")"
+      },
+      "consumer": "Gzip compact union manifest; selected layers and both modes teacher phases.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ",",
+          ":"
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-real_arm_smoke:57:21",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 58,
+      "col": 10,
+      "end_line": 58,
+      "end_col": 94,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.dumps({\"manifest\": out, \"phases\": len(phases), \"entries\": plan[\"entry_count\"]})",
+      "id": "real_arm_smoke:58:10",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout manifest path, phase and entry counts.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-real_arm_smoke:58:10",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 170,
+      "col": 81,
+      "end_line": 170,
+      "end_col": 97,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.dumps(spec)",
+      "id": "real_arm_smoke:170:81",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Subprocess --spec JSON shared by isolated source-read/omission child passes; decoded at line 197.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-real_arm_smoke:170:81",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 178,
+      "col": 20,
+      "end_line": 178,
+      "end_col": 73,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.loads((out / mode / \"result.json\").read_bytes())",
+      "id": "real_arm_smoke:178:20",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Per-mode result.json readback (written via G.write_g3_record) for KL/omission comparison.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 187,
+      "col": 10,
+      "end_line": 187,
+      "end_col": 28,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.dumps(result)",
+      "id": "real_arm_smoke:187:10",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout comparison result, also stored through G.write_g3_record as comparison.json.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-real_arm_smoke:187:10",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "main",
+      "line": 197,
+      "col": 11,
+      "end_line": 197,
+      "end_col": 55,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.loads(Path(args.spec[1:]).read_bytes())",
+      "id": "real_arm_smoke:197:11",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "CLI --spec accepts @file bytes or inline JSON; each branch separately inventoried.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "main",
+      "line": 197,
+      "col": 90,
+      "end_line": 197,
+      "end_col": 111,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "json.loads(args.spec)",
+      "id": "real_arm_smoke:197:90",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "CLI --spec accepts @file bytes or inline JSON; each branch separately inventoried.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 27,
+      "col": 19,
+      "end_line": 27,
+      "end_col": 31,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.load(f)",
+      "id": "residency_smoke:27:19",
+      "population": "native-stdlib",
+      "operation": "json.load",
+      "explicit_options": {},
+      "consumer": "Plain/gzip PB manifest stream; selects ONE declared source range.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 45,
+      "col": 44,
+      "end_line": 45,
+      "end_col": 67,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.dumps(declaration)",
+      "id": "residency_smoke:45:44",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "data-manifest.json with one range and smoke phase for PB staging.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-residency_smoke:45:44",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 46,
+      "col": 36,
+      "end_line": 46,
+      "end_col": 52,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.dumps(spec)",
+      "id": "residency_smoke:46:36",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "range.json --spec input: path, offset, bytes, expected hash.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-residency_smoke:46:36",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 47,
+      "col": 10,
+      "end_line": 47,
+      "end_col": 60,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.dumps({\"directory\": str(out), \"range\": spec})",
+      "id": "residency_smoke:47:10",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout preparation directory and selected range spec.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-residency_smoke:47:10",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "main",
+      "line": 62,
+      "col": 11,
+      "end_line": 62,
+      "end_col": 32,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.loads(args.spec)",
+      "id": "residency_smoke:62:11",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Inline --spec from launcher; controls admitted staged range and expected byte hash.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "main",
+      "line": 87,
+      "col": 8,
+      "end_line": 87,
+      "end_col": 38,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.dump(result, f, indent=2)",
+      "id": "residency_smoke:87:8",
+      "population": "native-stdlib",
+      "operation": "json.dump",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "consumer": "Exclusive indent=2 smoke result file; GPU roundtrip and tiny comparison, not full-model quality.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-residency_smoke:87:8",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=2, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_residency_smoke.py",
+      "scope": "main",
+      "line": 88,
+      "col": 10,
+      "end_line": 88,
+      "end_col": 28,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "source": "json.dumps(result)",
+      "id": "residency_smoke:88:10",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Unprefixed smoke result stdout; ReadProgress checks digest flag and GPU count.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-residency_smoke:88:10",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_v1_preflight.py",
+      "scope": "<module>",
+      "line": 11,
+      "col": 6,
+      "end_line": 11,
+      "end_col": 29,
+      "source_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "source": "json.loads(sys.argv[1])",
+      "id": "v1_preflight:11:6",
+      "population": "native-stdlib",
+      "operation": "json.loads",
+      "explicit_options": {},
+      "consumer": "Scorer argv JSON from g3_launch line 154; parser reconstructed from actual scorer AST.",
+      "effective_options": {
+        "cls": null,
+        "object_hook": null,
+        "object_pairs_hook": null,
+        "parse_float": "float",
+        "parse_int": "int",
+        "parse_constant": "stdlib accepts NaN/Infinity/-Infinity",
+        "strict": true
+      },
+      "disposition": "decoder-not-encoding-recipe",
+      "consumer_significance": "Preserve stdlib parser including duplicate-key last-wins and non-finite tokens; no stricter parser or encoding recipe authorized."
+    },
+    {
+      "path": "tools/g3job/g3_v1_preflight.py",
+      "scope": "<module>",
+      "line": 74,
+      "col": 4,
+      "end_line": 74,
+      "end_col": 34,
+      "source_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "source": "json.dump(result, f, indent=2)",
+      "id": "v1_preflight:74:4",
+      "population": "native-stdlib",
+      "operation": "json.dump",
+      "explicit_options": {
+        "indent": "2"
+      },
+      "consumer": "Exclusive invocation-preflight.json indent=2; next line hashes actual file bytes.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": 2,
+        "separators": [
+          ",",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-v1_preflight:74:4",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=2, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    },
+    {
+      "path": "tools/g3job/g3_v1_preflight.py",
+      "scope": "<module>",
+      "line": 75,
+      "col": 6,
+      "end_line": 75,
+      "end_col": 101,
+      "source_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "source": "json.dumps({'output': str(path), 'sha256': g3.sha256_file(path), 'decode_checks': len(checks)})",
+      "id": "v1_preflight:75:6",
+      "population": "native-stdlib",
+      "operation": "json.dumps",
+      "explicit_options": {},
+      "consumer": "Flushed stdout preflight path, file SHA-256 and decode count; preceding encoded file is digest-significant.",
+      "effective_options": {
+        "sort_keys": false,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": null,
+        "indent": null,
+        "separators": [
+          ", ",
+          ": "
+        ],
+        "skipkeys": false,
+        "check_circular": true,
+        "cls": null
+      },
+      "disposition": "unresolved-recipe-gap",
+      "gap_id": "gap-v1_preflight:75:6",
+      "owner_candidate": null,
+      "retention_authority": null,
+      "gap_reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned."
+    }
+  ],
+  "existing_profile_sites": [
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "<module>",
+      "line": 73,
+      "col": 10,
+      "end_line": 74,
+      "end_col": 68,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "JsonProfile(\"g3-result\", ensure_ascii=True, allow_nan=True,\n                      default=str, separators=(\",\", \": \"), indent=1)",
+      "operation": "JsonProfile",
+      "population": "native-existing-owner",
+      "disposition": "existing-owner-no-change",
+      "effective_options": {
+        "sort_keys": true,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": "str",
+        "indent": 1,
+        "separators": [
+          ",",
+          ": "
+        ]
+      },
+      "consumer": "Existing g3-result profile; write_g3_record uses temp file plus os.replace for pilot/plan/layers/telemetry/arm and comparison records."
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "write_g3_record",
+      "line": 173,
+      "col": 19,
+      "end_line": 173,
+      "end_col": 36,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "G3_JSON.text(obj)",
+      "operation": "G3_JSON.text",
+      "population": "native-existing-owner",
+      "disposition": "existing-owner-no-change",
+      "effective_options": {
+        "sort_keys": true,
+        "ensure_ascii": true,
+        "allow_nan": true,
+        "default": "str",
+        "indent": 1,
+        "separators": [
+          ",",
+          ": "
+        ]
+      },
+      "consumer": "Existing g3-result profile; write_g3_record uses temp file plus os.replace for pilot/plan/layers/telemetry/arm and comparison records."
+    }
+  ],
+  "delegated_record_write_sites": [
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_pilot",
+      "line": 680,
+      "col": 4,
+      "end_line": 680,
+      "end_col": 44,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record(res, out / \"pilot.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_pilot",
+      "line": 686,
+      "col": 4,
+      "end_line": 686,
+      "end_col": 44,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record(res, out / \"pilot.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_multi",
+      "line": 1192,
+      "col": 4,
+      "end_line": 1192,
+      "end_col": 72,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record({\"arms\": arms, \"totals\": totals}, out / \"plan.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_multi",
+      "line": 1324,
+      "col": 4,
+      "end_line": 1325,
+      "end_col": 61,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record({\"layers\": layer_records, \"elapsed_seconds\": elapsed, \"wire_bytes_read\": inst.wire_bytes,\n                 \"profile_error\": None}, out / \"layers.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "main",
+      "line": 1448,
+      "col": 8,
+      "end_line": 1448,
+      "end_col": 104,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record([sample_netdata(h) for h in (\"sparky\", \"sparklina\")], telemetry / \"before.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "main",
+      "line": 1454,
+      "col": 8,
+      "end_line": 1454,
+      "end_col": 103,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record([sample_netdata(h) for h in (\"sparky\", \"sparklina\")], telemetry / \"after.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "main",
+      "line": 1463,
+      "col": 8,
+      "end_line": 1463,
+      "end_col": 58,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "source": "write_g3_record(result, dirs[arm] / \"result.json\")",
+      "operation": "write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "run_pass",
+      "line": 160,
+      "col": 4,
+      "end_line": 160,
+      "end_col": 51,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "G.write_g3_record(results, out / \"result.json\")",
+      "operation": "G.write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    },
+    {
+      "path": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 186,
+      "col": 4,
+      "end_line": 186,
+      "end_col": 54,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "source": "G.write_g3_record(result, out / \"comparison.json\")",
+      "operation": "G.write_g3_record",
+      "population": "native-delegated-record-write",
+      "encoding_owner": "g3_offline_decoded_kl.write_g3_record -> G3_JSON.text",
+      "disposition": "existing-owner-no-change"
+    }
+  ],
+  "unresolved_gaps": [
+    {
+      "id": "gap-launch:110:32",
+      "call_id": "launch:110:32",
+      "consumer": "G3_HOST_MOUNTS environment: container-to-host origin translation by g3_residency.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-launch:115:8",
+      "call_id": "launch:115:8",
+      "consumer": "Exclusive compact read-plan file named by G3_READ_PLAN for admitted PB reader phases.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-launch:151:23",
+      "call_id": "launch:151:23",
+      "consumer": "Launch provenance .launch.json/.preflight.launch.json file; human-readable indent=1.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=1, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-launch:152:6",
+      "call_id": "launch:152:6",
+      "consumer": "Flushed stdout launch provenance, forwarded by progress wrapper.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-launch:154:67",
+      "call_id": "launch:154:67",
+      "consumer": "One argv JSON argument decoded by g3_v1_preflight line 11.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-launch:174:36",
+      "call_id": "launch:174:36",
+      "consumer": "Pinned tessera_campaign_container adapter --spec; mounts, environment and image seal.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-offline_decoded_kl:1193:29",
+      "call_id": "offline_decoded_kl:1193:29",
+      "consumer": "Human plan totals after [g3 ...] plan prefix; ReadProgress has no plan JSON parsing branch.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-one_arm_smoke:24:55",
+      "call_id": "one_arm_smoke:24:55",
+      "consumer": "Synthetic model.safetensors.index.json fixture consumed by real SourceReads; weight_map points to tiny shard.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-progress_launch:131:29",
+      "call_id": "progress_launch:131:29",
+      "consumer": "semantic-progress.jsonl: newline after event, flushed and fsynced before PB commit; evidence retains original line.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-readset:254:25",
+      "call_id": "readset:254:25",
+      "consumer": "Gzip compact data manifest encoded to bytes; PB entries and phase read order.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-readset:255:10",
+      "call_id": "readset:255:10",
+      "consumer": "Flushed stdout output path, entries/bytes and omitted-source tensor count.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-real_arm_smoke:22:35",
+      "call_id": "real_arm_smoke:22:35",
+      "consumer": "G3_COMPARE_PROGRESS stdout event; ComparisonProgress parses phase/scored sequencing.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-real_arm_smoke:57:21",
+      "call_id": "real_arm_smoke:57:21",
+      "consumer": "Gzip compact union manifest; selected layers and both modes teacher phases.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=(',', ':'), ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-real_arm_smoke:58:10",
+      "call_id": "real_arm_smoke:58:10",
+      "consumer": "Flushed stdout manifest path, phase and entry counts.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-real_arm_smoke:170:81",
+      "call_id": "real_arm_smoke:170:81",
+      "consumer": "Subprocess --spec JSON shared by isolated source-read/omission child passes; decoded at line 197.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-real_arm_smoke:187:10",
+      "call_id": "real_arm_smoke:187:10",
+      "consumer": "Flushed stdout comparison result, also stored through G.write_g3_record as comparison.json.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-residency_smoke:45:44",
+      "call_id": "residency_smoke:45:44",
+      "consumer": "data-manifest.json with one range and smoke phase for PB staging.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-residency_smoke:46:36",
+      "call_id": "residency_smoke:46:36",
+      "consumer": "range.json --spec input: path, offset, bytes, expected hash.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-residency_smoke:47:10",
+      "call_id": "residency_smoke:47:10",
+      "consumer": "Flushed stdout preparation directory and selected range spec.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-residency_smoke:87:8",
+      "call_id": "residency_smoke:87:8",
+      "consumer": "Exclusive indent=2 smoke result file; GPU roundtrip and tiny comparison, not full-model quality.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=2, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-residency_smoke:88:10",
+      "call_id": "residency_smoke:88:10",
+      "consumer": "Unprefixed smoke result stdout; ReadProgress checks digest flag and GPU count.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-v1_preflight:74:4",
+      "call_id": "v1_preflight:74:4",
+      "consumer": "Exclusive invocation-preflight.json indent=2; next line hashes actual file bytes.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=2, separators=[',', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    },
+    {
+      "id": "gap-v1_preflight:75:6",
+      "call_id": "v1_preflight:75:6",
+      "consumer": "Flushed stdout preflight path, file SHA-256 and decode count; preceding encoded file is digest-significant.",
+      "reason": "No existing JsonProfile preserves sort_keys=False at this site. Required indent=None, separators=[', ', ': '], ensure_ascii=True, allow_nan=True, default=None. Sorting can change consumer-visible bytes/order; consumer-specific equality/import qualification remains open. No owner/retention assigned.",
+      "status": "unresolved",
+      "owner": null,
+      "retention": null
+    }
+  ],
+  "context_evidence": [
+    {
+      "path": "prismaquant/digests.py",
+      "research_blob": "65c98d3bdeb16035ef4b104dc159e986e2279897",
+      "head_blob": "65c98d3bdeb16035ef4b104dc159e986e2279897"
+    },
+    {
+      "path": "tools/g3job/g3_pq_policy/__init__.py",
+      "research_blob": "5a26447f930c0017d0d76d1a82da601cfd030fa7",
+      "head_blob": "5a26447f930c0017d0d76d1a82da601cfd030fa7"
+    },
+    {
+      "path": "tools/g3job/g3_submit.py",
+      "research_blob": "f360554141cf29f25f6ecc3b7cc8b86692f81832",
+      "head_blob": "f360554141cf29f25f6ecc3b7cc8b86692f81832"
+    },
+    {
+      "path": "tests/g3job/test_g3_launch_image_seal.py",
+      "research_blob": "3c86864c78b7ef9188e8f0ae3fd5a1c36c804d54",
+      "head_blob": "3c86864c78b7ef9188e8f0ae3fd5a1c36c804d54"
+    }
+  ],
+  "deployment_evidence": [
+    {
+      "path": "tools/g3job/g3_submit.py",
+      "lines": [
+        25,
+        37
+      ],
+      "observation": "Native PB submission declares staged residency, CPU/RAM/GPU resources and semantic phases, then executes progress wrapper from repo root; wrapper launches container launcher. Resource/deployment availability is not proved by this static audit."
+    },
+    {
+      "path": "tests/g3job/test_g3_launch_image_seal.py",
+      "lines": [
+        1,
+        15
+      ],
+      "observation": "Existing fleet_data test documents launcher runs on import and needs actual pinned adapter; generated fake Docker script at lines 54+ is test population outside assigned source census. No such deployment test was run here."
+    }
+  ]
+}

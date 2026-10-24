@@ -42,12 +42,21 @@ Run inside the campaign container (the plan's source derivative needs it)::
 from __future__ import annotations
 
 import argparse
-import hashlib
+import importlib.util
 import json
 import sys
 import time
 from contextlib import closing
 from pathlib import Path
+
+# Keep file-spec imports and --help independent of package startup and torch.
+_SOURCE_PATH = Path(__file__).resolve().with_name("pq_profile_source.py")
+_SOURCE_SPEC = importlib.util.spec_from_file_location("_mtp_source", _SOURCE_PATH)
+if _SOURCE_SPEC is None or _SOURCE_SPEC.loader is None:  # pragma: no cover
+    raise RuntimeError(f"cannot load source owner loader: {_SOURCE_PATH}")
+_source = importlib.util.module_from_spec(_SOURCE_SPEC)
+_SOURCE_SPEC.loader.exec_module(_source)
+bytes_sha256hex = _source.profile_source_owner("digests").bytes_sha256hex
 
 
 def _capture_arguments(argv):
@@ -228,7 +237,7 @@ def projection_phase(args):
         raise RuntimeError(f"{path} exists; the projection publishes once")
     return {
         "phase": "projection",
-        "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
+        "projection": {"path": str(path.resolve()), "sha256": bytes_sha256hex(raw)},
         "plan": {"path": str(Path(args.plan).resolve()), "sha256": plan_sha256},
         "stacks": sorted(carried["stacks"]),
         "units": sum(len(units) for units in carried["stacks"].values()),

@@ -1,0 +1,1011 @@
+{
+  "schema": "quality-calibration-local-ledger/v1",
+  "research_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "assigned_files": [
+    "tools/build_diverse_calibration.py",
+    "tools/build_sensitivity_ablation_assignments.py",
+    "tools/capture_glm_routed_layers.py",
+    "tools/capture_glm_routing_replay.py",
+    "tools/check_stageb_a4_group_quantizer.py",
+    "tools/check_stageb_a4_quantizer.py",
+    "tools/exl3_grouped_down_replay.py",
+    "tools/glm_mtp_capture.py",
+    "tools/make_uniform_assignment.py",
+    "tools/materialize_wikitext_corpus.py",
+    "tools/pq282_equality/equality_diff.py",
+    "tools/pq282_equality/recheck_refusal_order.py",
+    "tools/quality_cpu_parity.py",
+    "tools/quality_cpu_smoke.py",
+    "tools/validate_card_zero_churn.py",
+    "tools/validate_probe_marginals.py",
+    "tools/verify_tessera_calibration_forward.py",
+    "tools/vllm_prompt_smoke.py",
+    "tools/wait_dsv4_aura_campaign.py",
+    "tools/g3job/g3_launch.py",
+    "tools/g3job/g3_offline_decoded_kl.py",
+    "tools/g3job/g3_one_arm_smoke.py",
+    "tools/g3job/g3_progress_launch.py",
+    "tools/g3job/g3_readset.py",
+    "tools/g3job/g3_real_arm_smoke.py",
+    "tools/g3job/g3_residency_smoke.py",
+    "tools/g3job/g3_v1_preflight.py"
+  ],
+  "completed_calls": [
+    {
+      "original_id": "hashlib:tools/build_diverse_calibration.py::_json_digest@137:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "prismaquant/digests.py::bytes_sha256hex(payload)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_diverse_calibration.py::_sha256_text@132:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+      "owner_route": "prismaquant/digests.py::text_sha256hex(text)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/build_diverse_calibration.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_digest_recipes",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_diverse_jsonl_publication",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/capture_glm_routed_layers.py::main.publish@128:55",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/routed_publish.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_publish"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/capture_glm_routing_replay.py::main@99:85",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/exl3_grouped_down_replay.py::_hash@100:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e80fa32dada1c952507f28ea58c61b12e8896a68",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/tensor_bytes.py",
+        "tests/fixtures/digest_1301/quality-calibration/capture/tensor_hash.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_tensor_hash"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/glm_mtp_capture.py::projection_phase@231:62",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1434bd867c2787db03f31fde658b95bf145e0be0",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/projection_publish.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_projection_publish"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/materialize_wikitext_corpus.py::main@82:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8ee8c0fe7bf515f552681c63d7f16e48f88d78ab",
+      "owner_route": "prismaquant/digests.py::bytes_sha256hex(raw)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/corpus/materialize_wikitext_corpus.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_wikitext_publication_before_hash",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_original_blocks",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_standalone_no_package",
+        "tests/test_digest_1301/quality-calibration/test_corpus.py::CorpusTests::test_ledger_provenance"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>@51:58",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/recheck_report.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_recheck_report"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_sensitivity_ablation_assignments.py::_write_overlay@167:20",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/assignments/overlay.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_publication",
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_overlay_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_sensitivity_ablation_assignments.py::main@291:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e5d1326c6942e865c36a0a23fcd4195b936eb3f6",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/assignments/manifest.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_publication",
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_manifest_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/capture_glm_routed_layers.py::main@163:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ae01c9944359cdb9086ec437e437b756e4f2840a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/routed_receipt.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_routed_receipt"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/capture_glm_routing_replay.py::main@103:57",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/capture_glm_routing_replay.py::main@105:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "48578128fa4a23eda7ce8f8cbe9764b42e293056",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/capture/replay_publish.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_capture.py::test_replay_publish"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/check_stageb_a4_group_quantizer.py::<module>@56:6",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "62e0231c7e199833dcf6272cab3b40f182ee6ec7",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/group.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_group_report"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/check_stageb_a4_quantizer.py::<module>@30:6",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e81384e384a859f8c76953eebf299af97542a515",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/quantizer.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_quantizer_report"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/make_uniform_assignment.py::main@451:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ad30b4285418759011db2f03675d5354249fed1b",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/assignments/uniform.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_publication",
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/make_uniform_assignment.py::main@487:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ad30b4285418759011db2f03675d5354249fed1b",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/assignments/uniform.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_uniform_publication",
+        "tests/test_digest_1301/quality-calibration/test_assignments.py::test_report_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>@32:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/refusals.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_refusal_multiset"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@74:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/vllm/main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_main_equivalence",
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_refusals",
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_publication_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/vllm_prompt_smoke.py::main@78:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1b980de56c0fe7022b3bbe104783b26f74445ea7",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/vllm/main.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_main_equivalence",
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_refusals",
+        "tests/test_digest_1301/quality-calibration/test_vllm.py::test_publication_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/wait_dsv4_aura_campaign.py::main@305:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "03396f19089552a381d309169fe0ceaa97455394",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/waiter.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_waiter_report"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/pq282_equality/recheck_refusal_order.py::<module>@50:39",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c65d80e3985d55ae1f94432d9e9edf69a468a34",
+      "fixtures": [
+        "tests/fixtures/digest_1301/quality-calibration/reports/recheck_report.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/quality-calibration/test_reports.py::test_recheck_report"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex (nested argument hash only; enclosing unsorted indent2 JSON remains an unresolved recipe gap)"
+    }
+  ],
+  "unresolved_calls": [
+    {
+      "id": "sorted-json:tools/build_diverse_calibration.py::_json_digest@147:14",
+      "file": "tools/build_diverse_calibration.py",
+      "scope": "_json_digest",
+      "line": 147,
+      "column": 14,
+      "source_blob": "5e7e437e5c544614cc21cad09fc8e1f49d80d8c0",
+      "callee": "json.dumps",
+      "expression": "json.dumps(value, sort_keys=True, ensure_ascii=False)",
+      "encoding_options": {
+        "sort_keys": "True",
+        "ensure_ascii": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "sorted-json:tools/exl3_grouped_down_replay.py::result_json@442:11",
+      "file": "tools/exl3_grouped_down_replay.py",
+      "scope": "result_json",
+      "line": 442,
+      "column": 11,
+      "source_blob": "39b8fa47c918911935c2dbcd3ee722a197c4d58f",
+      "callee": "json.dumps",
+      "expression": "json.dumps(record, sort_keys=True, indent=2, allow_nan=False)",
+      "encoding_options": {
+        "sort_keys": "True",
+        "indent": "2",
+        "allow_nan": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "sorted-json:tools/glm_mtp_capture.py::main@355:10",
+      "file": "tools/glm_mtp_capture.py",
+      "scope": "main",
+      "line": 355,
+      "column": 10,
+      "source_blob": "fa36d86206b4df1ff85e96115978fea8b6fd164d",
+      "callee": "json.dumps",
+      "expression": "json.dumps(summary, indent=2, sort_keys=True, allow_nan=False)",
+      "encoding_options": {
+        "indent": "2",
+        "sort_keys": "True",
+        "allow_nan": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "sorted-json:tools/glm_mtp_capture.py::projection_phase@232:11",
+      "file": "tools/glm_mtp_capture.py",
+      "scope": "projection_phase",
+      "line": 232,
+      "column": 11,
+      "source_blob": "fa36d86206b4df1ff85e96115978fea8b6fd164d",
+      "callee": "json.dumps",
+      "expression": "json.dumps(carried, indent=2, sort_keys=True, allow_nan=False)",
+      "encoding_options": {
+        "indent": "2",
+        "sort_keys": "True",
+        "allow_nan": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@368:17",
+      "file": "tools/build_diverse_calibration.py",
+      "scope": "write_jsonl",
+      "line": 368,
+      "column": 17,
+      "source_blob": "5e7e437e5c544614cc21cad09fc8e1f49d80d8c0",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"__manifest__\": manifest}, ensure_ascii=False)",
+      "encoding_options": {
+        "ensure_ascii": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/build_diverse_calibration.py::write_jsonl@370:21",
+      "file": "tools/build_diverse_calibration.py",
+      "scope": "write_jsonl",
+      "line": 370,
+      "column": 21,
+      "source_blob": "5e7e437e5c544614cc21cad09fc8e1f49d80d8c0",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"text\": record[\"text\"]}, ensure_ascii=False)",
+      "encoding_options": {
+        "ensure_ascii": "False"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/capture_glm_routed_layers.py::main.publish@131:14",
+      "file": "tools/capture_glm_routed_layers.py",
+      "scope": "main.publish",
+      "line": 131,
+      "column": 14,
+      "source_blob": "9737d9a42232d1047b0224c57b41fc745c51dd3b",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"captured\": layer, \"count\": len(entries),\n                          \"elapsed_s\": time.monotonic() - started})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/capture_glm_routed_layers.py::main@166:10",
+      "file": "tools/capture_glm_routed_layers.py",
+      "scope": "main",
+      "line": 166,
+      "column": 10,
+      "source_blob": "9737d9a42232d1047b0224c57b41fc745c51dd3b",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"status\": \"complete\", \"captures\": len(entries),\n                      \"receipt\": str(root / \"receipt.json\")})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@110:32",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 110,
+      "column": 32,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dumps",
+      "expression": "json.dumps({target: source for source, target in mounts})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@115:8",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 115,
+      "column": 8,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dump",
+      "expression": "json.dump(launch_read_plan(), stream, separators=(\",\", \":\"))",
+      "encoding_options": {
+        "separators": "(',', ':')"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@151:23",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 151,
+      "column": 23,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(launch, indent=1)",
+      "encoding_options": {
+        "indent": "1"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@152:6",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 152,
+      "column": 6,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(launch)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@154:67",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 154,
+      "column": 67,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(cmd)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@174:36",
+      "file": "tools/g3job/g3_launch.py",
+      "scope": "<module>",
+      "line": 174,
+      "column": 36,
+      "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(spec)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_offline_decoded_kl.py::run_multi@1193:29",
+      "file": "tools/g3job/g3_offline_decoded_kl.py",
+      "scope": "run_multi",
+      "line": 1193,
+      "column": 29,
+      "source_blob": "3fcc1a9c63296522f3cdbca08578ec79ca983cc1",
+      "callee": "json.dumps",
+      "expression": "json.dumps(totals)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_one_arm_smoke.py::compare_one_arm@24:55",
+      "file": "tools/g3job/g3_one_arm_smoke.py",
+      "scope": "compare_one_arm",
+      "line": 24,
+      "column": 55,
+      "source_blob": "e9e8f9b8f1fd6d0019ab0c2488f98c0aa8476784",
+      "callee": "json.dumps",
+      "expression": "json.dumps(\n        {\"weight_map\": {name + \".weight\": \"model.safetensors\"}})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_progress_launch.py::main@131:29",
+      "file": "tools/g3job/g3_progress_launch.py",
+      "scope": "main",
+      "line": 131,
+      "column": 29,
+      "source_blob": "a278ca3afa54894fbc0ee534e18e9ab41acbb815",
+      "callee": "json.dumps",
+      "expression": "json.dumps(event)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_readset.py::main@254:25",
+      "file": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 254,
+      "column": 25,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "callee": "json.dumps",
+      "expression": "json.dumps(result, separators=(',', ':'))",
+      "encoding_options": {
+        "separators": "(',', ':')"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_readset.py::main@255:10",
+      "file": "tools/g3job/g3_readset.py",
+      "scope": "main",
+      "line": 255,
+      "column": 10,
+      "source_blob": "d5ebf83aee6c0c4d773743c4d8580ff0f2e274c7",
+      "callee": "json.dumps",
+      "expression": "json.dumps({'out': args.out, 'entries': result['entry_count'], 'bytes': result['total_bytes'], 'omitted_source_tensors': len(reads.omitted)})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::compare_real_arm_passes@170:81",
+      "file": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 170,
+      "column": 81,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "callee": "json.dumps",
+      "expression": "json.dumps(spec)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::compare_real_arm_passes@187:10",
+      "file": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "compare_real_arm_passes",
+      "line": 187,
+      "column": 10,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "callee": "json.dumps",
+      "expression": "json.dumps(result)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::prepare_real_arm_plan@57:21",
+      "file": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 57,
+      "column": 21,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "callee": "json.dumps",
+      "expression": "json.dumps(plan, separators=(\",\", \":\"))",
+      "encoding_options": {
+        "separators": "(',', ':')"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::prepare_real_arm_plan@58:10",
+      "file": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "prepare_real_arm_plan",
+      "line": 58,
+      "column": 10,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"manifest\": out, \"phases\": len(phases), \"entries\": plan[\"entry_count\"]})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::progress@22:35",
+      "file": "tools/g3job/g3_real_arm_smoke.py",
+      "scope": "progress",
+      "line": 22,
+      "column": 35,
+      "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"phase\": f\"{mode}-{phase}\", \"scored\": scored})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_residency_smoke.py::main@87:8",
+      "file": "tools/g3job/g3_residency_smoke.py",
+      "scope": "main",
+      "line": 87,
+      "column": 8,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "callee": "json.dump",
+      "expression": "json.dump(result, f, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_residency_smoke.py::main@88:10",
+      "file": "tools/g3job/g3_residency_smoke.py",
+      "scope": "main",
+      "line": 88,
+      "column": 10,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "callee": "json.dumps",
+      "expression": "json.dumps(result)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@45:44",
+      "file": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 45,
+      "column": 44,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "callee": "json.dumps",
+      "expression": "json.dumps(declaration)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@46:36",
+      "file": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 46,
+      "column": 36,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "callee": "json.dumps",
+      "expression": "json.dumps(spec)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_residency_smoke.py::prepare_g3_range@47:10",
+      "file": "tools/g3job/g3_residency_smoke.py",
+      "scope": "prepare_g3_range",
+      "line": 47,
+      "column": 10,
+      "source_blob": "dbd6ed7ea024779dc03b06ed035c687649555c73",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"directory\": str(out), \"range\": spec})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_v1_preflight.py::<module>@74:4",
+      "file": "tools/g3job/g3_v1_preflight.py",
+      "scope": "<module>",
+      "line": 74,
+      "column": 4,
+      "source_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "callee": "json.dump",
+      "expression": "json.dump(result, f, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/g3job/g3_v1_preflight.py::<module>@75:6",
+      "file": "tools/g3job/g3_v1_preflight.py",
+      "scope": "<module>",
+      "line": 75,
+      "column": 6,
+      "source_blob": "6b025e5dbf147cbee397bf0ddd832c25fbdc40f5",
+      "callee": "json.dumps",
+      "expression": "json.dumps({'output': str(path), 'sha256': g3.sha256_file(path), 'decode_checks': len(checks)})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/materialize_wikitext_corpus.py::main@107:47",
+      "file": "tools/materialize_wikitext_corpus.py",
+      "scope": "main",
+      "line": 107,
+      "column": 47,
+      "source_blob": "7fb720c58bd50989fdafab79d9e2501f9ca02396",
+      "callee": "json.dumps",
+      "expression": "json.dumps(index, indent=1)",
+      "encoding_options": {
+        "indent": "1"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/pq282_equality/equality_diff.py::report@43:57",
+      "file": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "line": 43,
+      "column": 57,
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(left[key], default=str)",
+      "encoding_options": {
+        "default": "str"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/pq282_equality/equality_diff.py::report@44:43",
+      "file": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "line": 44,
+      "column": 43,
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(right[key], default=str)",
+      "encoding_options": {
+        "default": "str"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/pq282_equality/equality_diff.py::report@46:31",
+      "file": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "line": 46,
+      "column": 31,
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(left, default=str)",
+      "encoding_options": {
+        "default": "str"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/pq282_equality/equality_diff.py::report@47:31",
+      "file": "tools/pq282_equality/equality_diff.py",
+      "scope": "report",
+      "line": 47,
+      "column": 31,
+      "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+      "callee": "json.dumps",
+      "expression": "json.dumps(right, default=str)",
+      "encoding_options": {
+        "default": "str"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/pq282_equality/recheck_refusal_order.py::<module>@50:39",
+      "file": "tools/pq282_equality/recheck_refusal_order.py",
+      "scope": "<module>",
+      "line": 50,
+      "column": 39,
+      "source_blob": "2fe2e2c55931ddc51828388238f3a2a1260f5c3e",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\n    \"inputs\": {name: {\"path\": str(paths[name]), \"sha256\": bytes_sha256hex(data)}\n               for name, data in raw.items()},\n    \"normalization\": \"canonical_refusals only, on a separate monolith comparison copy\",\n    \"historical_refusals_multiset_equal\": True,\n    \"no_new_encodes\": True,\n    \"comparison_returncode\": result.returncode,\n    \"comparison_command\": command,\n}, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/quality_cpu_parity.py::main@86:10",
+      "file": "tools/quality_cpu_parity.py",
+      "scope": "main",
+      "line": 86,
+      "column": 10,
+      "source_blob": "1dacbd1232722ee6e42f8d419f29817a97477cd2",
+      "callee": "json.dumps",
+      "expression": "json.dumps(report)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/quality_cpu_smoke.py::main@112:10",
+      "file": "tools/quality_cpu_smoke.py",
+      "scope": "main",
+      "line": 112,
+      "column": 10,
+      "source_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"smoke\": str(root/\"smoke.json\")})",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/quality_cpu_smoke.py::main@88:35",
+      "file": "tools/quality_cpu_smoke.py",
+      "scope": "main",
+      "line": 88,
+      "column": 35,
+      "source_blob": "a4d1c92ee5d32a2b3156fd6dd1e2869b63bc1596",
+      "callee": "json.dumps",
+      "expression": "json.dumps(row)",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/validate_card_zero_churn.py::main@110:10",
+      "file": "tools/validate_card_zero_churn.py",
+      "scope": "main",
+      "line": 110,
+      "column": 10,
+      "source_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "callee": "json.dumps",
+      "expression": "json.dumps(report, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/validate_card_zero_churn.py::main@113:12",
+      "file": "tools/validate_card_zero_churn.py",
+      "scope": "main",
+      "line": 113,
+      "column": 12,
+      "source_blob": "bc77833b207f3aaf7339518bc5076eec386f2eab",
+      "callee": "json.dump",
+      "expression": "json.dump(report, fh, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/validate_probe_marginals.py::main@188:10",
+      "file": "tools/validate_probe_marginals.py",
+      "scope": "main",
+      "line": 188,
+      "column": 10,
+      "source_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "callee": "json.dumps",
+      "expression": "json.dumps(summary, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/validate_probe_marginals.py::main@192:12",
+      "file": "tools/validate_probe_marginals.py",
+      "scope": "main",
+      "line": 192,
+      "column": 12,
+      "source_blob": "31b708df3cffeee0edffab78e67c807af7eeea05",
+      "callee": "json.dump",
+      "expression": "json.dump({\"summary\": summary, \"units\": rows}, fh, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/verify_tessera_calibration_forward.py::main@157:10",
+      "file": "tools/verify_tessera_calibration_forward.py",
+      "scope": "main",
+      "line": 157,
+      "column": 10,
+      "source_blob": "5cbe360f31bf2c62dce875d30ff6e28a7c4620b0",
+      "callee": "json.dumps",
+      "expression": "json.dumps(dict(numerical_parity=True, output=str(args.output),\n                          targets=len(targets), netdata_samples=len(samples)))",
+      "encoding_options": {},
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    },
+    {
+      "id": "supplemental-json:tools/vllm_prompt_smoke.py::main@61:14",
+      "file": "tools/vllm_prompt_smoke.py",
+      "scope": "main",
+      "line": 61,
+      "column": 14,
+      "source_blob": "c90bd829180a2b0883ed5229ddca38ce3e1fa541",
+      "callee": "json.dumps",
+      "expression": "json.dumps({\"status\": \"cpu_preflight_only\", \"llm_kwargs\": kwargs}, indent=2)",
+      "encoding_options": {
+        "indent": "2"
+      },
+      "status": "unresolved-owner-recipe-gap",
+      "reason": "Existing JsonProfile fixes sort_keys=True and/or lacks the exact whitespace/ASCII/NaN/default combination; json.dump also requires an exact incremental writer. Not retention."
+    }
+  ],
+  "retentions": [],
+  "integration": {
+    "shared_files_untouched": true,
+    "removed_scopes": [
+      "hashlib:tools/build_diverse_calibration.py::_json_digest",
+      "hashlib:tools/build_diverse_calibration.py::_sha256_text",
+      "hashlib:tools/capture_glm_routed_layers.py::main.publish",
+      "hashlib:tools/capture_glm_routing_replay.py::main",
+      "hashlib:tools/exl3_grouped_down_replay.py::_hash",
+      "hashlib:tools/glm_mtp_capture.py::projection_phase",
+      "hashlib:tools/materialize_wikitext_corpus.py::main",
+      "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>",
+      "sorted-json:tools/build_sensitivity_ablation_assignments.py::_write_overlay",
+      "sorted-json:tools/build_sensitivity_ablation_assignments.py::main",
+      "sorted-json:tools/capture_glm_routed_layers.py::main",
+      "sorted-json:tools/capture_glm_routing_replay.py::main",
+      "sorted-json:tools/check_stageb_a4_group_quantizer.py::<module>",
+      "sorted-json:tools/check_stageb_a4_quantizer.py::<module>",
+      "sorted-json:tools/make_uniform_assignment.py::main",
+      "sorted-json:tools/pq282_equality/recheck_refusal_order.py::<module>",
+      "sorted-json:tools/vllm_prompt_smoke.py::main",
+      "sorted-json:tools/wait_dsv4_aura_campaign.py::main"
+    ]
+  },
+  "audit_boundaries": {
+    "primary": "Unchanged duplication_inventory lexical traversal in exactly the 27 assigned files.",
+    "supplemental": "Native JSONEncoder/dumps/dump calls including unsorted encoders; does not expand ratchet.",
+    "limits": "Not an exhaustive dynamic/alias/generated/deployment census. G3 ledger separately records native/generated/shell/delegated-record boundaries. Owner implementations, imported helpers and unrelated consumers are outside this local slice.",
+    "qualification": "CPU consumer-block equivalence only, not requalification of producer/native arithmetic or historical artifacts. Historical reverted residuals recorded in remaining/ledger.json; old qualification records remain unmodified."
+  },
+  "fragments": [
+    "assignments/ledger.json",
+    "capture/ledger.json",
+    "corpus/ledger.json",
+    "g3/ledger.json",
+    "remaining/ledger.json",
+    "reports/ledger.json",
+    "vllm/ledger.json"
+  ]
+}
