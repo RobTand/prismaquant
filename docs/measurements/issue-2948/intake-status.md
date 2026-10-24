@@ -69,10 +69,26 @@ Command:
 python -m pytest tests/test_issue_2948_selected_image_capture.py -q --basetemp="$TMPDIR/pytest"
 ```
 
-Observed: **2 failed in 0.66s**, exit 1. Both tests collected and failed at the
-explicit missing-handoff assertion in `_records`, before any artifact joins.
+Repair recheck: **2 failed in 0.61s**, exit 1. Both tests collected and failed
+at the explicit missing-handoff assertion in `_records`, before any artifact
+joins. The reported O1/O2 failures are reproduced, not repaired. O3/O4 also
+remain unmet: no original owner artifact set, canonical delivery receipt or
+independent exact-head verdict has been delivered to this intake. A status-note
+update does not resolve the missing historical provenance input.
+
 This is an unmet evidence requirement, not a demonstrated acceptance-fixture or
 application defect. Retained stdout was read back using `read_test_artifact`.
 The acceptance tests and application code were not modified.
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"5eeba67f1f32f4669807eff8be49be0ee82432fcc46ba9c191e05477154f95e8","size":3123}},"operation":"10543fb4154495512b035504ce2e60cfa9316eac08369481de65aafdc53f8815","receipt":"ff7e014be8b33da77dc1a5f02c73066e7a15a6a70010ffd49f1c375489b727f1"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"67a82d2df1cff99a4fafc73719ff8750f4047dac841ba9522b35fe0b4a214f63","size":3123}},"operation":"0a27f31a447dfbfd09a0df9d0e1533f7ddf326de91378a0f4112c4cf4f561b76","receipt":"d270a6f519510c6607ea885adbe2b3485be6cf9a780a2273fd067fd891a2f173"}]
+
+Documentation/duplication preservation checks:
+
+```sh
+python -m pytest tests/test_docs_staleness.py tests/test_docs_entrypoints.py tests/test_architecture_doc.py tests/test_doc_claims_driver_truth.py tests/test_duplication_baseline.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed: **31 passed, 14 deprecation warnings in 18.20s**, exit 0; retained
+stdout verified. These guards do not establish any of O1–O4.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"d86a904871f32465e70b54100d8d7c1ffe247a58d49d0e5aa2fec4467a4e919a","size":750}},"operation":"c1e7d662f1dd06f0a41e29a29176c17b4fcf145d0e1015098c81f67ebd139b83","receipt":"355aa0061aabb4ecc9e72b0e06389fe25f02b5dff6d34646c0fbb01750347443"}]
