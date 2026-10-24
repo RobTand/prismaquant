@@ -10,13 +10,13 @@ digest every checkpoint journal envelope must carry.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.tessera_census_cache import seal_roster
 
@@ -28,25 +28,23 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True, help="new roster JSON path")
     args = parser.parse_args(argv)
     manifest_path = Path(args.manifest).resolve()
-    digest = hashlib.sha256()
     with manifest_path.open("rb") as handle:
         raw = handle.read()
-    digest.update(raw)
+    digest = bytes_sha256hex(raw)
     manifest = json.loads(raw)
     del raw
     roster = seal_roster(manifest)
-    roster["checkpoint_manifest"] = {"path": str(manifest_path), "sha256": digest.hexdigest(),
+    roster["checkpoint_manifest"] = {"path": str(manifest_path), "sha256": digest,
                                      "bytes": manifest_path.stat().st_size}
     encoded = (json.dumps(roster, sort_keys=True, indent=1, allow_nan=False) + "\n").encode()
     out = Path(args.out)
     _atomic_write_new_bytes(out, encoded)
-    sha = hashlib.sha256(encoded).hexdigest()
+    sha = bytes_sha256hex(encoded)
     _atomic_write_new_bytes(out.with_name(out.name + ".sha256"), f"{sha}  {out.name}\n".encode())
-    print(json.dumps({"roster": str(out.resolve()), "roster_sha256": sha,
+    print(DIRECT_ASCII_SPACED_LAX.text({"roster": str(out.resolve()), "roster_sha256": sha,
                       "identity_sha256": roster["identity_sha256"],
                       "units": len(roster["units"]),
-                      "checkpoint_manifest_sha256": roster["checkpoint_manifest"]["sha256"]},
-                     sort_keys=True))
+                      "checkpoint_manifest_sha256": roster["checkpoint_manifest"]["sha256"]}))
     return 0
 
 

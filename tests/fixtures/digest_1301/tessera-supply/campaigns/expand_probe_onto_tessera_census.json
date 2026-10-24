@@ -1,0 +1,18 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "b76526ad40622ff922651c7057c431b3231d61ef",
+  "fragments": [
+    {
+      "original_id": "hashlib:tools/expand_probe_onto_tessera_census.py::_bound@29:13",
+      "source": "hashlib.sha256(raw)"
+    },
+    {
+      "original_id": "hashlib:tools/expand_probe_onto_tessera_census.py::main@59:13",
+      "source": "hashlib.sha256(raw)"
+    },
+    {
+      "original_id": "sorted-json:tools/expand_probe_onto_tessera_census.py::main@69:10",
+      "source": "json.dumps(summary, sort_keys=True)"
+    }
+  ]
+}

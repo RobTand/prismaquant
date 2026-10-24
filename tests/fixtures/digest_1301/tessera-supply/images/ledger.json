@@ -1,0 +1,400 @@
+{
+  "schema": "digest-routing-fragments.v1",
+  "calls": [
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@100:24",
+      "census_id": "hashlib:tools/build_glm_derivative_image.py::main@100:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::config_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@123:15",
+      "census_id": "hashlib:tools/build_glm_derivative_image.py::main@123:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::verified_config_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@125:15",
+      "census_id": "hashlib:tools/build_glm_derivative_image.py::main@125:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::verified_layer_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@145:27",
+      "census_id": "hashlib:tools/build_glm_derivative_image.py::main@145:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::hub_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@85:19",
+      "census_id": "hashlib:tools/build_glm_derivative_image.py::main@85:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::layer_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_rootfs_layers_sha256@260:11",
+      "census_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_rootfs_layers_sha256@260:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py::_rootfs_layers_sha256"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_sha256_file@152:13",
+      "census_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_sha256_file@152:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "file_sha256hex(block_size=16777216)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py::_sha256_file"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@71:57",
+      "census_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@71:57",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py::publish_collection"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@75:33",
+      "census_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@75:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py::publish_collection"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@86:7",
+      "census_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@86:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@96:41",
+      "census_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@96:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/compose_tessera_cached_units.py::main@77:41",
+      "census_id": "hashlib:tools/compose_tessera_cached_units.py::main@77:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "de30add5ce229574617fe2d6b69c4bda9535e555",
+      "owner_route": "bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_composed_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_glm_derivative_image.py::main@99:18",
+      "census_id": "sorted-json:tools/build_glm_derivative_image.py::main@99:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "DIRECT_ASCII_LAX.encoded",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::config_bytes"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_canonical_bytes@125:15",
+      "census_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_canonical_bytes@125:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "DIRECT_UTF8_STRICT.encoded",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py::_canonical_bytes"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_pretty_bytes@138:8",
+      "census_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_pretty_bytes@138:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "DIRECT_UTF8_INDENT2_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py::_pretty_bytes"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::main@1282:10",
+      "census_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::main@1282:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "DIRECT_ASCII_SPACED_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py::stdout_json"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_hessian_collection.py::publish_collection@58:11",
+      "census_id": "sorted-json:tools/build_tessera_hessian_collection.py::publish_collection@58:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py::publish_collection"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@90:15",
+      "census_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@90:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@94:10",
+      "census_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@94:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compose_tessera_cached_units.py::main@70:11",
+      "census_id": "sorted-json:tools/compose_tessera_cached_units.py::main@70:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "de30add5ce229574617fe2d6b69c4bda9535e555",
+      "owner_route": "DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_composed_publication"
+      ],
+      "status": "routed",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py::main"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_glm_derivative_image.py::main@151:40",
+      "census_id": "supplemental-json:tools/build_glm_derivative_image.py::main@151:40",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "gap",
+      "reason": "Unsorted insertion-order JSON with lax nonfinite handling; existing JsonProfile owners all sort keys. Retained locally, not falsely routed to a sorted profile.",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::result_file"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_glm_derivative_image.py::main@154:10",
+      "census_id": "supplemental-json:tools/build_glm_derivative_image.py::main@154:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ],
+      "status": "gap",
+      "reason": "Unsorted insertion-order JSON with lax nonfinite handling; existing JsonProfile owners all sort keys. Retained locally, not falsely routed to a sorted profile.",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::result_stdout"
+      ]
+    }
+  ],
+  "auxiliary_witnesses": [
+    {
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_embedded_query_witness"
+      ],
+      "status": "gap",
+      "reason": "Runs inside the base image; no settled digest owner is available there. Embedded insertion-order JSON call intentionally retained.",
+      "fixture_references": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py::embedded_query"
+      ],
+      "witness_id": "embedded-query:tools/build_glm_derivative_image.py::main.query"
+    }
+  ]
+}

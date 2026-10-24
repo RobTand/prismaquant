@@ -1,0 +1,51 @@
+[
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py",
+    "function": "_bound",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+    "sha256": "4d3613a0b327af1ecd19ac06a6b8b931963129389fdf1f4b4e5fe1aa46d279d3"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py",
+    "function": "_write",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+    "sha256": "be5e518cd278bf3a52dda2e9dd67ea597cdd3f5654adf44288593f00b9ae1017"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py",
+    "function": "main",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+    "sha256": "69b4c12d6d05d6d144c532e57c9906d2ad9b875a2154b32bba5b10689ac5a3f8"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.py",
+    "function": "main",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+    "sha256": "570e769470106b2a2f9f18b734b5847956becbef330b31f8b84b93079f69a5bc"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py",
+    "function": "cmd_census",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+    "sha256": "e335d7ee41beb585d88cab003bb0905887f6456829d6a69a44d187e0fd59bca3"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py",
+    "function": "cmd_capture",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+    "sha256": "d87abc506241c9aa67a1aa9b6d0f366559d893a80c934c954c7cb822d7121ccf"
+  },
+  {
+    "fixture": "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py",
+    "function": "cmd_plan",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+    "sha256": "df769d065a31a32818113843b01824a7ecf38ede728fdf5ee612de40dfaf2aae"
+  }
+]

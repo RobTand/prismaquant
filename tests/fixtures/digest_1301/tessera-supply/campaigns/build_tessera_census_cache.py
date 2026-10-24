@@ -1,0 +1,127 @@
+# Verbatim function fragments from 6d8288adc94b3c4b624c143ed372fb6513f32784.
+from __future__ import annotations
+
+def _bound(path: str, digest: str, label: str) -> bytes:
+    raw = Path(path).read_bytes()
+    actual = bytes_sha256hex(raw)
+    if actual != digest:
+        raise SystemExit(f"{label} {path}: SHA-256 {actual}, expected {digest}")
+    return raw
+
+
+def _write(path: Path, raw: bytes) -> str:
+    _atomic_write_new_bytes(path, raw)
+    return bytes_sha256hex(raw)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--costs", required=True)
+    parser.add_argument("--costs-sha256", required=True)
+    parser.add_argument("--census", required=True, help="census.json (unit_shapes)")
+    parser.add_argument("--census-sha256", required=True)
+    parser.add_argument("--roster", required=True, help="seal_tessera_census_identity.py output")
+    parser.add_argument("--roster-sha256", required=True)
+    parser.add_argument("--checkpoint-parts", required=True,
+                        help="the census cost.anchors.json.parts journal directory")
+    choice = parser.add_mutually_exclusive_group(required=True)
+    choice.add_argument("--layer-config")
+    choice.add_argument("--uniform-format")
+    parser.add_argument("--layer-config-sha256")
+    parser.add_argument("--target-profile", help="stamped into a uniform layer config")
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--plan-layer-config-out",
+                        help="write the layer config restricted to census units and __* keys, "
+                             "for the Tessera planner; written only after the outside-roster "
+                             "BF16 refusal has run, and refused if the path exists")
+    parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--hash-blobs", action="store_true",
+                        help="also hash every selected blob here (a full read of the wire set); "
+                             "the exporter hashes each blob it reads either way")
+    args = parser.parse_args(argv)
+    started = time.monotonic()
+    out = Path(args.out_dir)
+
+    cost = pickle.loads(_bound(args.costs, args.costs_sha256, "cost table"))
+    census = json.loads(_bound(args.census, args.census_sha256, "census"))
+    roster = json.loads(_bound(args.roster, args.roster_sha256, "seal roster"))
+    shas = {"costs": args.costs_sha256, "census": args.census_sha256, "roster": args.roster_sha256}
+
+    if args.uniform_format:
+        if not args.target_profile:
+            raise SystemExit("--uniform-format needs --target-profile")
+        from prismaquant import format_registry as fr
+        written = uniform_assignment(cost, args.uniform_format)
+        config = census_layer_config(
+            cost, written, target_profile=args.target_profile,
+            entry_for=lambda fmt: fr.get_format(fmt).autoround_config())
+        layer_config = out / "layer_config.json"
+        shas["layer_config"] = _write(
+            layer_config, (json.dumps(config, indent=2, allow_nan=False) + "\n").encode())
+        if load_assignment(layer_config) != written:
+            raise SystemExit("written layer config does not parse back to the uniform assignment")
+    else:
+        if not args.layer_config_sha256:
+            raise SystemExit("--layer-config needs --layer-config-sha256")
+        layer_config = Path(args.layer_config)
+        config = json.loads(_bound(
+            args.layer_config, args.layer_config_sha256, "layer config"))
+        shas["layer_config"] = args.layer_config_sha256
+    validate_layer_config_payload(config, str(layer_config))
+    assignment = canonicalize_assignment(config)
+    metadata = layer_config_metadata(config)
+
+    # Raises on any unit outside the census roster that is not BF16 passthrough;
+    # the planner projection below is written only once that check has passed.
+    selected, *_ = selected_census_assignment(assignment, metadata, cost)
+    outside = sorted(set(assignment) - set(cost["costs"]))
+    plan_dropped = None
+    if args.plan_layer_config_out:
+        config_raw = Path(layer_config).read_bytes()
+        if bytes_sha256hex(config_raw) != shas["layer_config"]:
+            raise SystemExit(f"layer config {layer_config} changed after it was bound")
+        projected, plan_dropped = plan_layer_config_projection(config, cost)
+        if plan_dropped != outside:
+            raise SystemExit(
+                f"plan layer config would drop {len(plan_dropped)} name(s), but "
+                f"{len(outside)} assigned unit(s) are outside the census; refusing a "
+                "projection that drops a name the BF16 passthrough check did not see")
+        shas["plan_layer_config"] = _write(
+            Path(args.plan_layer_config_out),
+            (json.dumps(projected, indent=2, allow_nan=False) + "\n").encode())
+    records = load_selected_wire_records(Path(args.checkpoint_parts), selected,
+                                         identity_sha256=roster["identity_sha256"],
+                                         workers=args.workers)
+    loaded = time.monotonic()
+    manifest = census_selected_cached_units_manifest(
+        assignment, metadata, cost, roster, census["unit_shapes"], records,
+        input_schema=INPUT_SCHEMA, encoding_input_schema=ENCODING_INPUT_SCHEMA,
+        cache_schema=CACHE_SCHEMA, blob_workers=args.workers, hash_blobs=args.hash_blobs)
+    wire_dir = Path(cost["provenance"]["wire_dir"]).resolve()
+    CachedUnitBundle(manifest, wire_dir, set(manifest["units"]), manifest["source"])
+    raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    shas["manifest"] = _write(out / "manifest.json", raw)
+    summary = {
+        "schema": "prismaquant.tessera_census_cache_build.v1",
+        "status": "research_wires_only", "export_qualified": False, "serving_qualified": False,
+        "sha256": shas, "units": len(manifest["units"]), "hash_blobs": args.hash_blobs,
+        "unselected_bf16": sorted(n for n, f in selected.items() if f == "BF16"),
+        "outside_census_bf16_passthrough": outside,
+        "plan_layer_config_sha256": shas.get("plan_layer_config"),
+        "plan_layer_config_dropped": plan_dropped,
+        "formats": dict(sorted(Counter(selected.values()).items())),
+        "blob_bytes": sum(int(r["blob_bytes"]) for r in manifest["units"].values()),
+        "wire_dir": str(wire_dir), "seal_identity_sha256": roster["identity_sha256"],
+        "stack_formats": metadata.get("tessera_expert_stack_formats"),
+        "exporter_reads_blobs_from": "the manifest file's parent directory; copy manifest.json "
+                                     "into wire_dir unchanged before export",
+        "seconds": {"journals": round(loaded - started, 1),
+                    "total": round(time.monotonic() - started, 1)},
+        "layer_config_meta_keys": sorted(metadata),
+    }
+    shas["summary"] = _write(out / "summary.json",
+                             (json.dumps(summary, indent=2, sort_keys=True) + "\n").encode())
+    print(DIRECT_ASCII_SPACED_LAX.text({key: summary[key] for key in ("units", "formats", "blob_bytes", "sha256",
+                                                     "seconds")}))
+    print(json.dumps({"summary_sha256": shas["summary"]}))
+    return 0

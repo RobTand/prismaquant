@@ -9,7 +9,6 @@ stages for host preflight and content-verified transfers.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -36,6 +35,10 @@ _cluster_campaign = importlib.util.module_from_spec(_CLUSTER_SPEC)
 sys.path.insert(0, str(_CLUSTER_CAMPAIGN_PATH.parent))
 try:
     _CLUSTER_SPEC.loader.exec_module(_cluster_campaign)
+    from digests import (
+        DIRECT_ASCII_SPACED_STRICT, DIRECT_UTF8_INDENT2_STRICT,
+        DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex,
+    )
 finally:
     sys.path.pop(0)
 CAMPAIGN_MANIFEST_SCHEMA_V2 = _cluster_campaign.CAMPAIGN_MANIFEST_SCHEMA_V2
@@ -122,41 +125,19 @@ class CampaignBuildError(RuntimeError):
 
 def _canonical_bytes(value: object) -> bytes:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return DIRECT_UTF8_STRICT.encoded(value)
     except (TypeError, ValueError) as exc:
         raise CampaignBuildError("value is not finite canonical JSON") from exc
 
 
 def _pretty_bytes(value: object) -> bytes:
-    return (
-        json.dumps(
-            value,
-            sort_keys=True,
-            indent=2,
-            ensure_ascii=False,
-            allow_nan=False,
-        )
-        + "\n"
-    ).encode("utf-8")
+    return DIRECT_UTF8_INDENT2_STRICT.encoded(value) + b"\n"
 
 
 def _sha256_file(path: Path) -> str:
     if path.is_symlink() or not path.is_file():
         raise CampaignBuildError(f"expected one regular file: {path}")
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(16 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
+    return file_sha256hex(path, block_size=16 * 1024 * 1024)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -257,7 +238,7 @@ def _code_manifest(code_root: Path) -> dict[str, object]:
 
 def _rootfs_layers_sha256(layers: Sequence[str]) -> str:
     encoded = _canonical_bytes(list(layers)) + b"\n"
-    return hashlib.sha256(encoded).hexdigest()
+    return bytes_sha256hex(encoded)
 
 
 def _docker_inspect(image_id: str) -> dict[str, Any]:
@@ -1279,7 +1260,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (CampaignBuildError, OSError, subprocess.SubprocessError) as exc:
         print(f"prismasnap-27b-campaign: ERROR: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(payload, sort_keys=True, allow_nan=False))
+    print(DIRECT_ASCII_SPACED_STRICT.text(payload))
     return 0
 
 

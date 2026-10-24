@@ -7,11 +7,11 @@ config and then uses the existing M3 receipt backfill for exact cached wires.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 from prismaquant import format_registry as fr
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.allocator_candidates import selection_serving_lane_provenance
 from prismaquant.allocator import _mtp_rung_attestation, _mtp_scope_inputs
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
@@ -62,7 +62,7 @@ def main() -> int:
     body_path = Path(args.body_layer_config)
     cost_path = Path(args.mtp_joint_cost)
     body_raw = body_path.read_bytes()
-    if hashlib.sha256(body_raw).hexdigest() != args.expect_body_sha256:
+    if bytes_sha256hex(body_raw) != args.expect_body_sha256:
         parser.error("body layer config differs from expected bytes")
     try:
         cost = load_mtp_cost(cost_path, expected_sha256=args.expect_cost_sha256)
@@ -187,7 +187,7 @@ def main() -> int:
     raw = (json.dumps(result, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if not publish_new_bytes(output, raw):
         parser.error("output already exists; refusing overwrite")
-    print(json.dumps({"output": str(output), "sha256": hashlib.sha256(raw).hexdigest(),
+    print(DIRECT_ASCII_SPACED_LAX.text({"output": str(output), "sha256": bytes_sha256hex(raw),
                       "body_sha256": args.expect_body_sha256,
                       "mtp_cost_sha256": cost.sha256,
                       "selected_mtp_wires": len(result["__prismaquant__"]["mtp_selection"][
@@ -196,8 +196,7 @@ def main() -> int:
                       "E": record["E"],
                       "whole_artifact_payload_bytes": payload_bytes,
                       "whole_artifact_reserve_bytes": reserve_bytes,
-                      "whole_artifact_budget_bytes": args.whole_artifact_budget_bytes},
-                     sort_keys=True))
+                      "whole_artifact_budget_bytes": args.whole_artifact_budget_bytes}))
     return 0
 
 

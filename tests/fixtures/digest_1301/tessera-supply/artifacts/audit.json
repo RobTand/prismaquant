@@ -1,0 +1,116 @@
+[
+  {
+    "original_id": "hashlib:tools/provision_tessera_pin.py::tree_digest@131:8",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "The outer path/NUL/ASCII-hex-content-digest/LF tree recipe needs an exact shared owner. Unusual framing is not retention justification. Agreement S prevents owner edits in this slice.",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_retained_algorithm_source_witnesses",
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_tree_identity_and_manifest"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::_replay_frozen_digests@923:17",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "status": "retained",
+    "reason": "Replay rereads each non-inline frozen entry through its held descriptor with offset-based os.pread until EOF, accumulating byte count and SHA-256, then refuses size or digest divergence after upload. Retain this descriptor-integrated verification loop; reopening a path or substituting a whole-file owner would lose the held-inode replay boundary.",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_retained_algorithm_source_witnesses",
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::_scan_file@629:12",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "status": "retained",
+    "reason": "Scan computes the whole-file SHA-256 during the same offset-based _pread_exact pass over a held descriptor that creates block digests, the first-block sample, bounded inline content, and read-call accounting. Retain this integrated snapshot scan and its short-read refusals, not a second path-based file read. Nested plain-bytes block hashes already route to the shared owner.",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_retained_algorithm_source_witnesses",
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+    ]
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::_write_manifest@247:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@520:18",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@545:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@549:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@578:18",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@594:14",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@597:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "original_id": "supplemental-json:tools/tessera_campaign_container.py::main@1021:10",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "90870799094cacd764127a1619dbe616aa5f477a",
+    "status": "gap",
+    "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+  },
+  {
+    "site": "provision_tessera_pin.installed_identity embedded -I probe",
+    "status": "retained",
+    "reason": "Target interpreter is isolated and may not have prismaquant. No new package requirement; original probe byte-for-byte preserved.",
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_installed_probe_isolated_and_unchanged"
+    ]
+  },
+  {
+    "site": "provision_tessera_pin host checkout bootstrap",
+    "status": "verified",
+    "reason": "Supported invocation witnesses are ROOT/tools/provision_tessera_pin.py in tools/accept_tessera_pin_provisioner.py, checkout-relative tools/provision_tessera_pin.py in docs/experiments/tessera_best_form_pin_20260909/provision_cpu.py, and ROOT/TOOL in tests/test_tessera_pin_provisioner.py. An isolated python -I -S test stages the actual host tool, prismaquant/digests.py and default pin source at checkout-relative paths without package init; it exercises the runpy-loaded bytes owner, default pin parsing, and CLI help from outside that checkout. No standalone copied-tool support, target installation, or absent-digests.py compatibility is claimed.",
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_host_checkout_bootstrap_isolated"
+    ]
+  }
+]

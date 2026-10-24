@@ -9,10 +9,15 @@ from a PR body.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
+import runpy
+
+# This host-side report tool remains standard-library-only.
+_digests = runpy.run_path(str(Path(__file__).resolve().parents[1] / "prismaquant/digests.py"))
+DIRECT_ASCII_INDENT2_LAX = _digests["DIRECT_ASCII_INDENT2_LAX"]
+bytes_sha256hex = _digests["bytes_sha256hex"]
 
 
 DEFAULT_ROOT = Path(
@@ -26,7 +31,7 @@ ROW = re.compile(r"workspace/rows/(row-\d+)")
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return bytes_sha256hex(path.read_bytes())
 
 
 def fit(rows: list[dict[str, object]]) -> dict[str, float]:
@@ -95,7 +100,7 @@ def main() -> int:
     parser.add_argument("--root-action-records", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--terminals", type=Path, default=DEFAULT_TERMINALS)
     args = parser.parse_args()
-    print(json.dumps(derive(args.root_action_records, args.terminals), indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(derive(args.root_action_records, args.terminals)))
     return 0
 
 

@@ -1,0 +1,22 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+  "fragments": [
+    {
+      "original_id": "hashlib:tools/reselect_mtp_fixed.py::main@190:55",
+      "source": "hashlib.sha256(raw)"
+    },
+    {
+      "original_id": "hashlib:tools/reselect_mtp_fixed.py::main@65:7",
+      "source": "hashlib.sha256(body_raw)"
+    },
+    {
+      "original_id": "sorted-json:tools/reselect_mtp_fixed.py::main@190:10",
+      "source": "json.dumps({\"output\": str(output), \"sha256\": hashlib.sha256(raw).hexdigest(),\n                      \"body_sha256\": args.expect_body_sha256,\n                      \"mtp_cost_sha256\": cost.sha256,\n                      \"selected_mtp_wires\": len(result[\"__prismaquant__\"][\"mtp_selection\"][\n                          \"mtp_expert_wires\"]),\n                      \"rung\": record[\"rung\"], \"resident_bytes\": record[\"resident_bytes\"],\n                      \"E\": record[\"E\"],\n                      \"whole_artifact_payload_bytes\": payload_bytes,\n                      \"whole_artifact_reserve_bytes\": reserve_bytes,\n                      \"whole_artifact_budget_bytes\": args.whole_artifact_budget_bytes},\n                     sort_keys=True)"
+    },
+    {
+      "original_id": "supplemental-json:tools/reselect_mtp_fixed.py::main@187:11",
+      "source": "json.dumps(result, separators=(\",\", \":\"), allow_nan=False)"
+    }
+  ]
+}

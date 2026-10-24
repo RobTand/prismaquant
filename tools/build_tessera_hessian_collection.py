@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
-import hashlib
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -19,7 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.tessera_reuse_authority import CANONICAL_CAPTURE
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import (
+    DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, bytes_sha256hex,
+)
 
 
 def collection_document(paths) -> dict:
@@ -55,8 +55,7 @@ def publish_collection(paths, output: str | Path) -> dict:
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"Hessian collection output exists: {output}")
     document = collection_document(paths)
-    raw = (json.dumps(document, sort_keys=True, separators=(",", ":"),
-                      allow_nan=False) + "\n").encode()
+    raw = DIRECT_ASCII_STRICT.encoded(document) + b"\n"
     output.parent.mkdir(parents=True, exist_ok=True)
     # Validate the exact bytes under the producer's reader before publication.
     with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".collection.references.json") as temp:
@@ -68,11 +67,11 @@ def publish_collection(paths, output: str | Path) -> dict:
     if not publish_new_bytes(output, raw):
         raise FileExistsError(f"Hessian collection output exists: {output}")
     with ReferenceHessianCollection(output, canonical_capture=CANONICAL_CAPTURE) as checked:
-        return {"path": str(output.resolve()), "sha256": hashlib.sha256(raw).hexdigest(),
+        return {"path": str(output.resolve()), "sha256": bytes_sha256hex(raw),
                 "capture_sha256": document["capture_sha256"],
                 "reference_binding": checked.binding(),
                 "units": len(checked), "reader_file": str(Path(reader.__file__).resolve()),
-                "reader_sha256": hashlib.sha256(Path(reader.__file__).read_bytes()).hexdigest()}
+                "reader_sha256": bytes_sha256hex(Path(reader.__file__).read_bytes())}
 
 
 def main(argv=None):

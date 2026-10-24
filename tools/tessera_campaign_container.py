@@ -6,7 +6,6 @@ maps the worker's sealed checkout and explicit data mounts into the container.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -14,6 +13,9 @@ import re
 import subprocess
 
 import runpy
+
+file_digest_sha256hex = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/digests.py"))["file_digest_sha256hex"]
 
 # Authenticate before importing PQ: its initializer needs the producer stack,
 # which the small host interpreter deliberately does not install (#601).
@@ -945,7 +947,7 @@ def inspect_or_load(container):
         if bound is None:
             raise RuntimeError('declared container image is unavailable: ' + found.stderr)
         with Path(bound['path']).open('rb') as stream:
-            actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+            actual = file_digest_sha256hex(stream)
         if actual != bound['sha256']:
             raise RuntimeError('declared image archive bytes changed')
         subprocess.run(['docker', 'load', '--input', bound['path']], check=True)

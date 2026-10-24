@@ -1,0 +1,14 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "8d5b2b81e755747f2348c93865f551a964d06aa8",
+  "fragments": [
+    {
+      "original_id": "hashlib:tools/derive_tessera_progress_grace.py::sha256@29:11",
+      "source": "hashlib.sha256(path.read_bytes())"
+    },
+    {
+      "original_id": "sorted-json:tools/derive_tessera_progress_grace.py::main@98:10",
+      "source": "json.dumps(derive(args.root_action_records, args.terminals), indent=2, sort_keys=True)"
+    }
+  ]
+}

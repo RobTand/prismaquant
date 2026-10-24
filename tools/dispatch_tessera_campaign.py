@@ -105,6 +105,7 @@ from tools.tessera_campaign_namespace import (
 )
 from prismaquant import campaign_data_manifests
 from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.campaign_container_spec import (
     BOUNDED_CAPTURE_ENV,
     CONTAINER_IMAGE_FLAG,
@@ -502,8 +503,7 @@ def cmd_census(args) -> int:
     )
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
-        (workspace/'census-resources.json').write_text(json.dumps(
-            campaign_rows.streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)+'\n')
+        (workspace/'census-resources.json').write_text(DIRECT_ASCII_INDENT2_LAX.text(campaign_rows.streamed_resource_plan(spec, {}, []))+'\n')
     print(f"[dispatch] census manifest {manifest}")
     if args.submit:
         return _pbcampaign(manifest, wait_s=args.wait_s,
@@ -533,9 +533,7 @@ def cmd_capture(args) -> int:
         progress_phases=())
     manifest.write_text(json.dumps([row], indent=2) + "\n")
     if explicit_campaign_options(spec['campaign_argv']).get("streaming", False):
-        (workspace/'capture-resources.json').write_text(json.dumps(
-            campaign_rows.streamed_resource_plan(spec, census, sorted(census['counts'])),
-            indent=2, sort_keys=True)+'\n')
+        (workspace/'capture-resources.json').write_text(DIRECT_ASCII_INDENT2_LAX.text(campaign_rows.streamed_resource_plan(spec, census, sorted(census['counts'])))+'\n')
     if args.submit:
         return _pbcampaign(manifest, wait_s=args.wait_s,
                            receipts=workspace / "capture-receipts.json")
@@ -1143,7 +1141,7 @@ def cmd_plan(args) -> int:
             "groups": entries,
         }
         units_path = units_dir / f"{row_id}.json"
-        selection_writes.append((units_path, json.dumps(selection, indent=2, sort_keys=True) + "\n"))
+        selection_writes.append((units_path, DIRECT_ASCII_INDENT2_LAX.text(selection) + "\n"))
         row_dir = workspace / "rows" / row_id
         from prismaquant.tessera_campaign_table import expert_partition_members
         from prismaquant.tessera_campaign_selection import selection_priced_units

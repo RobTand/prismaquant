@@ -25,6 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX, indent2_json_file_bytes
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.layer_config import (
@@ -139,7 +140,7 @@ def main(argv=None) -> int:
         cache_schema=CACHE_SCHEMA, blob_workers=args.workers, hash_blobs=args.hash_blobs)
     wire_dir = Path(cost["provenance"]["wire_dir"]).resolve()
     CachedUnitBundle(manifest, wire_dir, set(manifest["units"]), manifest["source"])
-    raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(manifest)
     shas["manifest"] = _write(out / "manifest.json", raw)
     summary = {
         "schema": "prismaquant.tessera_census_cache_build.v1",
@@ -160,7 +161,7 @@ def main(argv=None) -> int:
         "layer_config_meta_keys": sorted(metadata),
     }
     shas["summary"] = _write(out / "summary.json",
-                             (json.dumps(summary, indent=2, sort_keys=True) + "\n").encode())
+                             (DIRECT_ASCII_INDENT2_LAX.text(summary) + "\n").encode())
     print(DIRECT_ASCII_SPACED_LAX.text({key: summary[key] for key in ("units", "formats", "blob_bytes", "sha256",
                                                      "seconds")}))
     print(json.dumps({"summary_sha256": shas["summary"]}))

@@ -8,15 +8,15 @@ coverage and complete disjoint plan roster before this parent is published.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
+from prismaquant.digests import (
+    DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, bytes_sha256hex, file_sha256hex,
+)
 from prismaquant.tessera_export_lane import read_cached_unit_bundle
 from tessera.cached_unit import (CACHE_SCHEMA, COMPOSED_CACHE_SCHEMA,
                                  CachedUnitBundle, read_manifest)
@@ -67,14 +67,13 @@ def main(argv=None):
                      'producer_package': None} for path, sha in args.child_v2)
     output = Path(args.out)
     manifest, bundle = compose(children, output=output)
-    raw = (json.dumps(manifest, sort_keys=True, separators=(',', ':'),
-                      allow_nan=False) + '\n').encode()
+    raw = DIRECT_ASCII_STRICT.encoded(manifest) + b"\n"
     output.parent.mkdir(parents=True, exist_ok=True)
     if not publish_new_bytes(output, raw):
         raise FileExistsError(f'cached composition output exists: {output}')
     print(DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.cached_unit_composition_handoff.v1',
                       'manifest': str(output.resolve()),
-                      'manifest_sha256': hashlib.sha256(raw).hexdigest(),
+                      'manifest_sha256': bytes_sha256hex(raw),
                       'children': bundle.child_manifests,
                       'units': len(bundle.units),
                       'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
