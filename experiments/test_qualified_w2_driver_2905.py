@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,9 +11,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 from experiments.qualified_w2_replay_2905 import (
-    HandoffError, _read, _sha, _qualification, _measured_only,
-    _measured_overhead, _layer_configs, main, run,
+    HandoffError, _read, _qualification, _measured_only,
+    _measured_overhead, _layer_configs, _scientific_rows, _row_provenance, main, run,
 )
 
 
@@ -27,11 +29,17 @@ class ExplicitInputTests(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 run(Path(tmp) / "not-published.json")
 
+    def test_digest_owner_preserves_legacy_canonical_wire_bytes(self):
+        value = {"label": "µ", "flag": True, "cells": [1, -0.0]}
+        wire = b'{"cells":[1,-0.0],"flag":true,"label":"\\u00b5"}'
+        self.assertEqual(DIRECT_ASCII_STRICT.encoded(value), wire)
+        self.assertEqual(DIRECT_ASCII_STRICT.sha256(value), bytes_sha256hex(wire))
+
     def test_reject_duplicate_and_nonfinite_json(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "input.json"
             for text in ('{"schema": 1, "schema": 2}', '{"value": NaN}',
-                         '{"value": Infinity}'):
+                         '{"value": Infinity}', '{"value": 1e999}'):
                 path.write_text(text)
                 with self.assertRaises(HandoffError):
                     _read(path)
@@ -68,18 +76,18 @@ class QualificationTests(unittest.TestCase):
         self.config = {"targets": [2.9], "qualification": {"sha256": "5" * 64}}
         self.roster = {
             "schema": "prismaquant.w2_qualification_roster.v1",
-            "replay_config_sha256": _sha({"targets": [2.9]}),
+            "replay_config_sha256": DIRECT_ASCII_STRICT.sha256({"targets": [2.9]}),
             "artifact_sha256": {k: v for k, v in self.hashes.items()
                                 if k not in ("inputs", "qualification")},
             "identities": {k: self.hashes[k + "_identity"] for k in
                            ("source", "probe", "calibration", "teacher")},
             "cells": [
                 {"unit": "unit", "format": "measured", "status": "qualified",
-                 "row_sha256": _sha(self.costs["unit"]["measured"])},
+                 "row_sha256": DIRECT_ASCII_STRICT.sha256(self.costs["unit"]["measured"])},
                 {"unit": "unit", "format": "refused", "status": "refused",
                  "reason": "synthetic refusal"}],
         }
-        self.roster["identities"]["scope"] = _sha(["unit"])
+        self.roster["identities"]["scope"] = DIRECT_ASCII_STRICT.sha256(["unit"])
 
     def check(self, roster=None):
         return _qualification(self.roster if roster is None else roster, self.hashes,
@@ -199,6 +207,311 @@ class AccountingAndExportTests(unittest.TestCase):
                 self.assertEqual(path.read_text(), stdout.getvalue())
                 with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                     main(["--inputs", "not-a-campaign", "--output", str(path)])
+
+
+class EffectiveScientificRowsTests(unittest.TestCase):
+    """Canonical fixture + real production build; no serving/W2 claim is made."""
+
+    def setUp(self):
+        # Reuse the repository's canonical fixtures and its explicit test-only
+        # producer. Keep their sibling imports local to this test setup.
+        tests = Path(__file__).resolve().parents[1] / "tests"
+        with patch.object(sys, "path", [str(tests), *sys.path]):
+            import canonical_quality_fixtures as fixtures
+            import test_canonical_quality_quantity as canonical
+        import pytest
+        self.fixtures = fixtures
+        self.canonical = canonical
+        monkeypatch = pytest.MonkeyPatch()
+        self.addCleanup(monkeypatch.undo)
+        with patch.object(sys, "path", [str(tests), *sys.path]):
+            self.owner = canonical.owner_for_rows(monkeypatch)
+        from prismaquant import format_registry as fr
+        self.F = [f"{fixtures.FAMILY}_R{rate}" for rate in (768, 896, 1024)]
+        self.formats = [fr.get_format(fmt) for fmt in self.F]
+        from prismaquant.tessera_formats import parse_tessera_format_name
+        self.parsed = {spec.name: parse_tessera_format_name(spec.name) for spec in self.formats}
+        self.stats = {"u": {"n_params": 8192, "in_features": 128,
+                            "out_features": 64, "h_trace": 1.0, "unit_structure": "dense"}}
+        rows = canonical.anchor_rows(currency="served_kl")
+        for row in rows.values():
+            row["cost_currency"] = "served_kl"
+        rows[self.F[1]] = self.owner.chord_cost(self.F[1], unit="u", costs=rows)
+        self.costs = {"u": rows}
+        scope = rows[self.F[0]]["quality_scope"]
+        probe = deepcopy(scope["probe_identity"])
+        self.currency = rows[self.F[0]]["cost_currency"]
+        from prismaquant.rung_allowability import qualified_cost_scope
+        scientific = qualified_cost_scope(rows[self.F[0]], family=fixtures.FAMILY,
+                                           unit="u", format_name=self.F[0])
+        self.identities = {
+            "probe": {key: deepcopy(scientific[key]) for key in (
+                "probe_identity", "probe_identity_sha256", "probe_ids")},
+            "teacher": deepcopy(probe["source_model"]),
+            "calibration": {"calibration_sha256": probe["calibration_sha256"],
+                            **deepcopy(scientific["window"])},
+            "source": {"source_weights": {"u": deepcopy(scope["source_weight"])}},
+        }
+
+    def scientific(self, identities=None, costs=None, stats=None):
+        _scientific_rows(self.stats if stats is None else stats,
+                         self.costs if costs is None else costs, self.parsed,
+                         self.currency, self.identities if identities is None else identities)
+
+    def test_actual_scientific_documents_required(self):
+        self.scientific()
+        for label in self.identities:
+            identities = deepcopy(self.identities)
+            identities[label] = {"label": "a separately hash-bound but unrelated document"}
+            with self.subTest(label=label), self.assertRaises((ValueError, KeyError, TypeError)):
+                self.scientific(identities)
+
+    def test_rehashed_handoff_coordinates_cannot_disagree_with_rows(self):
+        # These are valid self-consistent documents. File/roster rehashing cannot
+        # make their different scientific coordinates match the effective rows.
+        from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+        from prismaquant.joint_aura_rows import joint_identity_sha256
+
+        def other_teacher(doc):
+            doc["config"]["fixture"] = "other teacher"
+            doc["content_sha256"] = canonical_json_sha256(
+                {key: doc[key] for key in ("config", "weight_map", "shards")},
+                where="boundary fixture teacher content")
+
+        def other_probe(doc):
+            doc["probe_identity"]["seed_base"] = 8000
+            doc["probe_identity_sha256"] = joint_identity_sha256(doc["probe_identity"])
+
+        changes = {
+            "calibration": lambda doc: doc.update(calibration_sha256="b" * 64),
+            "teacher": other_teacher,
+            "probe": other_probe,
+            "source": lambda doc: doc["source_weights"]["u"].update(content_sha256="e" * 64),
+        }
+        for label, change in changes.items():
+            identities = deepcopy(self.identities)
+            change(identities[label])
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                self.scientific(identities)
+
+    def test_units_share_one_production_scientific_scope(self):
+        stats = {**self.stats, "other": deepcopy(self.stats["u"])}
+        # Other unit may have its own source weight, but not another probe wall,
+        # calibration/teacher/reference/window. Each row is individually valid.
+        other = deepcopy(self.costs["u"][self.F[0]])
+        other["quality_scope"]["unit"] = "other"
+        other["quality_scope"]["source_weight"]["content_sha256"] = "a" * 64
+        identities = deepcopy(self.identities)
+        identities["source"]["source_weights"]["other"] = other["quality_scope"]["source_weight"]
+        costs = {**self.costs, "other": {self.F[0]: other}}
+        self.scientific(identities, costs, stats)
+        from prismaquant.joint_aura_rows import joint_identity_sha256
+        for field, value in (("calibration_sha256", "b" * 64),
+                             ("token_scope", "another-window"),
+                             ("temperature", 2.0), ("baseline", "another-reference")):
+            changed = deepcopy(costs)
+            row = changed["other"][self.F[0]]
+            row["quality_scope"]["probe_identity"][field] = value
+            row["quality_scope"]["probe_identity_sha256"] = joint_identity_sha256(
+                row["quality_scope"]["probe_identity"])
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.scientific(identities, changed, stats)
+        for field in ("objective", "probe_ids"):
+            changed = deepcopy(costs)
+            scope = changed["other"][self.F[0]]["quality_scope"]
+            if field == "objective":
+                scope["objective"]["objective"] = "another-reference"
+                scope["probe_identity"]["objective"] = "another-reference"
+                scope["probe_identity_sha256"] = joint_identity_sha256(scope["probe_identity"])
+            else:
+                scope["probe_ids"] = [99]
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.scientific(identities, changed, stats)
+
+    def test_price_source_shape_must_match_actual_mutable_stats(self):
+        stats = deepcopy(self.stats)
+        stats["u"]["out_features"] *= 2
+        with self.assertRaisesRegex(HandoffError, "source shape differs"):
+            self.scientific(stats=stats)
+
+    def test_effective_row_provenance_cannot_relabel_a_measured_replacement(self):
+        effective = deepcopy(self.costs)
+        effective["u"][self.F[0]]["production_annotation"] = "different row"
+        self.scientific(costs=effective)
+        with self.assertRaisesRegex(HandoffError, "replaced a non-chord"):
+            _row_provenance(self.costs, effective)
+
+    def test_effective_chord_anchors_are_bound_to_supplied_roster_rows(self):
+        effective = deepcopy(self.costs)
+        anchor = effective["u"][self.F[1]]["canonical_anchors"][0]
+        anchor["row"] = deepcopy(anchor["row"])
+        anchor["row"]["annotation"] = "not supplied"
+        self.scientific(costs=effective)
+        with self.assertRaisesRegex(HandoffError, "anchor differs from supplied roster"):
+            _row_provenance(self.costs, effective)
+
+    def write_handoff(self, root):
+        """Build a fully hash-bound, synthetic boundary handoff, not W2 evidence."""
+        stats = deepcopy(self.stats)
+        values = {"stats": stats, "costs": self.costs, "model_config": {},
+                  "source_manifest": {"bytes": {"u": 16384},
+                                      "spans": {"u": ["u"]}, "total_bytes": 16384},
+                  "kernel_builds": {self.fixtures.FAMILY: "boundary-fixture"},
+                  **{k + "_identity": v for k, v in self.identities.items()},
+                  "measured_overhead": {"schema": "prismaquant.measured_overhead.v1",
+                               "components": {"fixture": 0},
+                               "measurement_reference": "synthetic boundary fixture"}}
+        config = {
+            "schema": "prismaquant.o5_explicit_w2_inputs.v2",
+            "formats": self.F, "currency": self.currency, "profile": "fixture",
+            "allowability_root": ".",
+            "serving_context": {"platform": "sm_120",
+                                "runtime_image": "example/vllm@sha256:" + "a" * 64,
+                                "execution_mode": "eager", "residency": "resident"},
+            "target_profile": None, "tensor_parallel": 1,
+            "targets": [3.5, 4.5, 6.0], "bit_precision": .00001,
+            "overhead_reserve_bytes": 0, "measured_only_units": [],
+        }
+        for label, value in values.items():
+            raw = json.dumps(value).encode()
+            path = root / (label + ".json")
+            path.write_bytes(raw)
+            config[label] = {"path": path.name, "sha256": bytes_sha256hex(raw)}
+        hashes = {k: config[k]["sha256"] for k in values}
+        roster = {
+            "schema": "prismaquant.w2_qualification_roster.v1",
+            "artifact_sha256": hashes,
+            "replay_config_sha256": DIRECT_ASCII_STRICT.sha256(config),
+            "identities": {k: hashes[k + "_identity"] for k in self.identities},
+            "cells": [{"unit": "u", "format": spec.name, "status": "qualified",
+                       "row_sha256": DIRECT_ASCII_STRICT.sha256(self.costs["u"][spec.name])}
+                      for spec in self.formats],
+        }
+        roster["identities"]["scope"] = DIRECT_ASCII_STRICT.sha256(["u"])
+        raw = json.dumps(roster).encode()
+        (root / "qualification.json").write_bytes(raw)
+        config["qualification"] = {"path": "qualification.json", "sha256": bytes_sha256hex(raw)}
+        path = root / "inputs.json"
+        path.write_text(json.dumps(config))
+        return path
+
+    def driver_environment(self):
+        from prismaquant import allocator_candidates as ac, format_registry as fr
+        from prismaquant import interpolation_regret as replay, rung_allowability as ra
+        from prismaquant import model_profiles as mp, tessera_menu as tm, tessera_serving_scope as scope
+        from prismaquant.lane_eligibility import ServingContext
+        context = ServingContext(platform="sm_120", structure="dense", residency="resident",
+                                 runtime_image="example/vllm@sha256:" + "a" * 64,
+                                 execution_mode="eager")
+        # The serving contract is a boundary stub. The production row builder
+        # runs under the same emulation seam as the canonical fixture's tests;
+        # never pass this stub off as an admission/reader contract to production.
+        contract = SimpleNamespace(allowable_rungs={self.fixtures.FAMILY: None},
+                                   identity=lambda: {"fixture": True})
+        self.enterContext(patch.object(tm, "tessera_runtime_contract", return_value=contract))
+        # Use the already-synthesized canonical fixture specs at the driver seam.
+        real_get_format = fr.get_format
+        formats = {spec.name: spec for spec in self.formats}
+        self.enterContext(patch.object(fr, "get_format", side_effect=lambda name: (
+            formats[name] if name in formats else real_get_format(name))))
+        real_build = ac.build_candidates
+
+        def canonical_build(*args, **kwargs):
+            with patch.object(tm, "tessera_runtime_contract", return_value=None):
+                return real_build(*args, **kwargs)
+
+        self.enterContext(patch.object(ac, "build_candidates", side_effect=canonical_build))
+        # Native serving admission is not under test and the fixture has no
+        # release contract. Preserve the canonical fixture's explicit admit stub.
+        self.enterContext(patch.object(ac, "candidate_rung_admission", return_value=SimpleNamespace(
+            requires_serving_context=False, admits=lambda _mode: True)))
+        self.enterContext(patch.object(ra, "load_rung_allowability", return_value=self.owner))
+        self.enterContext(patch.object(mp, "profile_from_config", return_value=SimpleNamespace(name="fixture")))
+        self.enterContext(patch.object(scope, "context_by_unit_from_stats", return_value={"u": context}))
+        return self.enterContext(patch.object(replay, "replay_three_arms", return_value={"targets": []}))
+
+    def test_driver_replays_immutable_effective_production_rows_and_records_both_stages(self):
+        # Production ignores these supplied annotations when rebuilding R3.5.
+        # A supplied-table replay used to hide that the row and hash had changed.
+        self.costs["u"][self.F[1]]["supplied_annotation"] = "not effective"
+        original = deepcopy(self.costs)
+        replay = self.driver_environment()
+        from prismaquant import allocator_candidates as ac
+        real_build = ac.build_candidates
+        built_tables = []
+
+        def build(*args, **kwargs):
+            built = real_build(*args, **kwargs)
+            built_tables.append(built.cost_rows)
+            return built
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ac, "build_candidates", side_effect=build):
+            result = run(self.write_handoff(Path(tmp)))
+        effective = replay.call_args.kwargs["costs"]
+        self.assertNotIn("supplied_annotation", effective["u"][self.F[1]])
+        self.assertEqual(effective, built_tables[0])
+        self.assertIsNot(effective, built_tables[0])
+        self.assertEqual(self.costs, original)
+        provenance = result["effective_row_provenance"]
+        self.assertEqual(provenance["effective_costs_sha256"], DIRECT_ASCII_STRICT.sha256(effective))
+        self.assertEqual(provenance["supplied_costs_sha256"], DIRECT_ASCII_STRICT.sha256(original))
+        cells = {cell["format"]: cell for cell in provenance["cells"]}
+        chord = cells[self.F[1]]
+        self.assertTrue(chord["replaced"])
+        self.assertNotEqual(chord["supplied_row_sha256"], chord["effective_row_sha256"])
+        self.assertEqual(chord["effective_origin"], "production_canonical_chord")
+        self.assertEqual({a["format"] for a in chord["anchors"]}, {self.F[0], self.F[2]})
+        for anchor in chord["anchors"]:
+            self.assertEqual(anchor["supplied_row_sha256"], cells[anchor["format"]]["supplied_row_sha256"])
+        # Evidence is from immutable snapshots, not the replay's mutable copy.
+        replay.call_args.kwargs["costs"]["u"][self.F[1]]["predicted_dloss"] = 999
+        self.assertEqual(chord["effective_row_sha256"],
+                         DIRECT_ASCII_STRICT.sha256(built_tables[0]["u"][self.F[1]]))
+
+    def test_hash_bound_unrelated_identity_documents_still_refuse(self):
+        replay = self.driver_environment()
+        original = deepcopy(self.identities)
+        for label in original:
+            self.identities = deepcopy(original)
+            self.identities[label] = {"opaque": "not a scientific coordinate"}
+            # write_handoff rehashes the files, replay config and qualification
+            # roster after the document change. Byte binding alone must not pass.
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaises(HandoffError):
+                    run(self.write_handoff(Path(tmp)))
+        replay.assert_not_called()
+
+    def test_production_admission_cannot_drop_a_supplied_cell(self):
+        replay = self.driver_environment()
+        from prismaquant import allocator_candidates as ac
+        real_build = ac.build_candidates
+
+        def build(*args, **kwargs):
+            built = real_build(*args, **kwargs)
+            built.candidates["u"].pop()
+            return built
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ac, "build_candidates", side_effect=build) as producer:
+            with self.assertRaisesRegex(HandoffError, "admission changed the supplied grid"):
+                run(self.write_handoff(Path(tmp)))
+        producer.assert_called_once()
+        replay.assert_not_called()
+
+    def test_effective_production_scope_drift_refuses_before_replay(self):
+        replay = self.driver_environment()
+        from prismaquant import allocator_candidates as ac
+        real_build = ac.build_candidates
+
+        def build(*args, **kwargs):
+            built = real_build(*args, **kwargs)
+            built.cost_rows["u"][self.F[0]]["quality_scope"]["teacher"] = "e" * 64
+            return built
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ac, "build_candidates", side_effect=build) as producer:
+            with self.assertRaisesRegex(ValueError, "teacher|probe|identity"):
+                run(self.write_handoff(Path(tmp)))
+        producer.assert_called_once()
+        replay.assert_not_called()
 
 
 if __name__ == "__main__":

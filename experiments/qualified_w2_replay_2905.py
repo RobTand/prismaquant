@@ -7,11 +7,12 @@ No artifact discovery, synthetic costs, research fallback, or serving launch.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib
 import json
 import math
 from pathlib import Path
+
+from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex, is_sha256hex
 
 
 class HandoffError(ValueError):
@@ -32,24 +33,19 @@ def _read(path):
     value = json.loads(raw, object_pairs_hook=_object,
                        parse_constant=lambda x: (_ for _ in ()).throw(
                            HandoffError(f"non-finite JSON constant: {x}")))
-    return value, hashlib.sha256(raw).hexdigest()
-
-
-def _sha(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
-
-
-def _digest(value):
-    return (isinstance(value, str) and len(value) == 64
-            and all(c in "0123456789abcdef" for c in value))
+    # Also reject finite-looking JSON numbers that overflow Python's float.
+    try:
+        DIRECT_ASCII_STRICT.encoded(value)
+    except ValueError as exc:
+        raise HandoffError(f"nonfinite JSON number: {path}") from exc
+    return value, bytes_sha256hex(raw)
 
 
 def _qualification(roster, hashes, stats, costs, names, config):
     """Freeze a complete producer decision grid; never infer absent refusals."""
     if roster.get("schema") != "prismaquant.w2_qualification_roster.v1":
         raise HandoffError("qualification roster schema required")
-    if roster.get("replay_config_sha256") != _sha(
+    if roster.get("replay_config_sha256") != DIRECT_ASCII_STRICT.sha256(
             {k: v for k, v in config.items() if k != "qualification"}):
         raise HandoffError("qualification replay configuration differs")
     expected = {k: v for k, v in hashes.items() if k not in ("inputs", "qualification")}
@@ -57,12 +53,12 @@ def _qualification(roster, hashes, stats, costs, names, config):
         raise HandoffError("qualification artifact bindings differ")
     identities = roster.get("identities", {})
     if set(identities) != {"source", "probe", "calibration", "teacher", "scope"} or not all(
-            _digest(v) for v in identities.values()):
+            is_sha256hex(v) for v in identities.values()):
         raise HandoffError("source/probe/calibration/teacher/scope SHA-256 identities required")
     if any(identities[k] != hashes[k + "_identity"]
            for k in ("source", "probe", "calibration", "teacher")):
         raise HandoffError("lineage identity differs from hashed artifact")
-    if identities["scope"] != _sha(sorted(stats)):
+    if identities["scope"] != DIRECT_ASCII_STRICT.sha256(sorted(stats)):
         raise HandoffError("mutable scope identity differs")
     cells, refused, qualified = {}, set(), set()
     for cell in roster["cells"]:
@@ -72,7 +68,7 @@ def _qualification(roster, hashes, stats, costs, names, config):
         cells[key] = cell
         row = costs.get(key[0], {}).get(key[1])
         if cell["status"] == "qualified":
-            if row is None or cell.get("row_sha256") != _sha(row):
+            if row is None or cell.get("row_sha256") != DIRECT_ASCII_STRICT.sha256(row):
                 raise HandoffError("qualified row missing or changed")
             qualified.add(key)
         elif cell["status"] == "refused":
@@ -86,6 +82,106 @@ def _qualification(roster, hashes, stats, costs, names, config):
     if qualified != {(u, f) for u, rows in costs.items() for f in rows}:
         raise HandoffError("cost coverage differs from qualification roster")
     return frozenset(refused)
+
+
+def _scientific_rows(stats, costs, parsed, currency, identities):
+    """Bind actual price coordinates, not merely the identity documents' bytes."""
+    try:
+        _require_scientific_rows(stats, costs, parsed, currency, identities)
+    except (KeyError, TypeError, AttributeError, RuntimeError) as exc:
+        raise HandoffError(f"malformed scientific row or identity document: {exc}") from exc
+
+
+def _require_scientific_rows(stats, costs, parsed, currency, identities):
+    from prismaquant.allocator_solver import _shape_from_stats
+    from prismaquant.joint_aura_rows import joint_identity_sha256, require_probe_alignment
+    from prismaquant.rung_allowability import (
+        complete_scientific_price, qualified_cost_scope, require_quality_scope_alignment)
+    from prismaquant.streamed_model_identity import validate_streamed_model_identity
+
+    probe_scope = identities["probe"]
+    probe = probe_scope["probe_identity"]
+    if probe_scope["probe_identity_sha256"] != joint_identity_sha256(probe):
+        raise HandoffError("handoff probe identity digest differs")
+    teacher = identities["teacher"]
+    validate_streamed_model_identity(teacher, where="handoff teacher_identity")
+    validate_streamed_model_identity(probe["source_model"], where="handoff probe teacher")
+    weights = identities["source"]["source_weights"]
+    if set(weights) != set(stats):
+        raise HandoffError("source_identity source_weights must cover the mutable scope")
+    first = None
+    for unit, rows in costs.items():
+        for name, row in rows.items():
+            where = f"{unit}/{name}"
+            if complete_scientific_price(row, format_name=name) is None:
+                raise HandoffError(f"{where}: producer-qualified quality required")
+            scope = qualified_cost_scope(row, family=parsed[name][0].name,
+                                         unit=unit, format_name=name)
+            if scope is None or scope["currency"] != currency:
+                raise HandoffError(f"{where}: common-reference scope required")
+            if tuple(scope["shape"]) != tuple(_shape_from_stats(stats[unit])):
+                raise HandoffError(f"{where}: scientific source shape differs from stats")
+            if not math.isfinite(float(row["predicted_dloss"])):
+                raise HandoffError(f"{where}: finite canonical quality required")
+            # Production owns mathematical alignment and D32 provenance policy.
+            if first is None:
+                first = scope
+            else:
+                require_quality_scope_alignment(
+                    first, scope, where=where, same_unit=first["unit"] == unit)
+            require_probe_alignment(probe_scope, scope, where=where,
+                                    message="handoff probe coordinates differ")
+            window = identities["calibration"]
+            if (window.get("calibration_sha256") != scope["calibration"]
+                    or window.get("calibration_sha256") != probe["calibration_sha256"]
+                    or any(window.get(key) != value for key, value in scope["window"].items())):
+                raise HandoffError(f"{where}: handoff calibration coordinates differ")
+            if (scope["teacher"] != teacher["content_sha256"]
+                    or scope["probe_identity"]["source_model"]["content_sha256"]
+                    != teacher["content_sha256"]):
+                raise HandoffError(f"{where}: handoff teacher coordinate differs")
+            if weights[unit] != scope["source_weight"]:
+                raise HandoffError(f"{where}: handoff source weight coordinate differs")
+
+
+def _row_provenance(supplied, effective):
+    """Two stages: roster-qualified inputs, then production-owned chord rebuilds.
+
+    Never transfer the supplied row's qualification digest onto a different row.
+    A rebuild must be a validated canonical chord of the *supplied* anchors.
+    Scientific validation is performed separately on both complete tables.
+    """
+    from prismaquant.rung_allowability import CANONICAL_CHORD_SOURCE
+
+    cells = []
+    if set(effective) != set(supplied):
+        raise HandoffError("production effective row coverage differs")
+    for unit, rows in sorted(supplied.items()):
+        if set(effective[unit]) != set(rows):
+            raise HandoffError(f"{unit}: production effective grid differs")
+        for name, row in sorted(rows.items()):
+            result = effective[unit][name]
+            before, after = (DIRECT_ASCII_STRICT.sha256(value) for value in (row, result))
+            chord = result.get("cost_source") == CANONICAL_CHORD_SOURCE
+            anchors = []
+            if chord:
+                for anchor in result["canonical_anchors"]:
+                    fmt = anchor["format"]
+                    if (fmt not in rows or DIRECT_ASCII_STRICT.sha256(anchor["row"])
+                            != DIRECT_ASCII_STRICT.sha256(rows[fmt])):
+                        raise HandoffError(f"{unit}/{name}: effective anchor differs from supplied roster")
+                    anchors.append({"format": fmt,
+                                    "supplied_row_sha256": DIRECT_ASCII_STRICT.sha256(rows[fmt])})
+            elif before != after:
+                raise HandoffError(f"{unit}/{name}: production replaced a non-chord row")
+            cells.append({"unit": unit, "format": name,
+                          "supplied_row_sha256": before, "effective_row_sha256": after,
+                          "effective_origin": "production_canonical_chord" if chord else "supplied",
+                          "replaced": before != after, "anchors": anchors})
+    return {"schema": "prismaquant.o5_effective_rows.v1",
+            "supplied_costs_sha256": DIRECT_ASCII_STRICT.sha256(supplied),
+            "effective_costs_sha256": DIRECT_ASCII_STRICT.sha256(effective),
+            "cells": cells}
 
 
 def _measured_only(contexts, extra):
@@ -150,17 +246,15 @@ def run(input_path):
     model_config = artifact("model_config")
     source = artifact("source_manifest")
     builds = artifact("kernel_builds")
-    for identity in ("source", "probe", "calibration", "teacher"):
-        artifact(identity + "_identity")
+    identities = {identity: artifact(identity + "_identity")
+                  for identity in ("source", "probe", "calibration", "teacher")}
     overhead = artifact("measured_overhead")
     roster = artifact("qualification")
     from prismaquant import footprint as fp, format_registry as fr
     from prismaquant.allocator_candidates import build_candidates
     from prismaquant.model_profiles import profile_from_config
     from prismaquant.priced_cell import CostPricingPolicy
-    from prismaquant.rung_allowability import (complete_scientific_price,
-                                               qualified_cost_scope,
-                                               load_rung_allowability)
+    from prismaquant.rung_allowability import load_rung_allowability
     from prismaquant.tessera_formats import parse_tessera_format_name
     from prismaquant.tessera_menu import tessera_runtime_contract
     from prismaquant.tessera_serving_scope import (ServingTarget,
@@ -185,15 +279,11 @@ def run(input_path):
     for unit, rows in costs.items():
         if not rows or set(rows) - set(names):
             raise HandoffError(f"{unit}: empty costs or undeclared format")
-        for name, row in rows.items():
-            if complete_scientific_price(row, format_name=name) is None:
-                raise HandoffError(f"{unit}/{name}: producer-qualified quality required")
-            scope = qualified_cost_scope(row, family=parsed[name][0].name,
-                                         unit=unit, format_name=name)
-            if scope is None or scope["currency"] != currency:
-                raise HandoffError(f"{unit}/{name}: common-reference scope required")
-            if not math.isfinite(float(row["predicted_dloss"])):
-                raise HandoffError(f"{unit}/{name}: finite canonical quality required")
+    _scientific_rows(stats, costs, parsed, currency, identities)
+    # Immutable snapshots are the two provenance boundaries. Production receives
+    # a fresh table; neither aliasing nor later replay mutation can rewrite the
+    # roster-qualified inputs or the effective-row hash evidence.
+    supplied_cost_bytes = DIRECT_ASCII_STRICT.encoded(costs)
 
     tp = cfg["tensor_parallel"]
     if type(tp) is not int or tp < 1:
@@ -219,7 +309,7 @@ def run(input_path):
         if not allowability[family].scoped:
             raise HandoffError(f"{family}: canonical scoped publication required")
     built = build_candidates(
-        stats, costs, formats, target_profile=cfg["target_profile"],
+        stats, json.loads(supplied_cost_bytes), formats, target_profile=cfg["target_profile"],
         bit_precision=cfg["bit_precision"], preserve_runtime_frontier=True,
         defer_menu_reduction=set(stats), context_by_unit=contexts,
         rung_allowability=allowability, allowability_tensor_parallel=tp,
@@ -230,6 +320,10 @@ def run(input_path):
             raise HandoffError(f"{unit}: production admission changed the supplied grid")
     if set(candidates) != set(stats):
         raise HandoffError("production candidate coverage differs from mutable stats")
+    effective_cost_bytes = DIRECT_ASCII_STRICT.encoded(built.cost_rows)
+    effective_costs = json.loads(effective_cost_bytes)
+    _scientific_rows(stats, effective_costs, parsed, currency, identities)
+    provenance = _row_provenance(json.loads(supplied_cost_bytes), effective_costs)
     manifest = fp.SourceByteManifest(
         source["bytes"], spans={name: frozenset(spans)
                                 for name, spans in source["spans"].items()})
@@ -249,7 +343,7 @@ def run(input_path):
     # pre-fold here: that would leak full-arm options into measured-only arms.
     replay = importlib.import_module("prismaquant.interpolation_regret")
     report = replay.replay_three_arms(
-        stats=stats, costs=costs, formats=formats, candidates=candidates,
+        stats=stats, costs=json.loads(effective_cost_bytes), formats=formats, candidates=candidates,
         profile=profile, currency=currency, targets=("3.5", "4.5", "6.0"),
         bit_precision=cfg["bit_precision"],
         source_total_bytes=source["total_bytes"], source_manifest=manifest,
@@ -260,13 +354,14 @@ def run(input_path):
             "qualification_claim": False,
             "input_sha256": hashes,
             "code_sha256": {
-                module.__name__: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
+                module.__name__: bytes_sha256hex(Path(module.__file__).read_bytes())
                 for module in (importlib.import_module(__name__), replay,
                                importlib.import_module("prismaquant.allocator_candidates"),
                                importlib.import_module("prismaquant.allocator_solver"), fp)},
             "runtime": contract.identity(),
             "allowability": {k: v.provenance() for k, v in allowability.items()},
             "qualification_roster": roster,
+            "effective_row_provenance": provenance,
             "measured_only_units": sorted(measured_only),
             "measured_only_policy": "all production-profile-checked routed units plus explicit additions",
             "measured_overhead": overhead,

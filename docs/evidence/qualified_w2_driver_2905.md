@@ -1,252 +1,231 @@
-# #2905 O5/O6 explicit-input driver — strengthened handoff, not a campaign
+# #2905: production-menu replay and qualified-input boundary
 
-## Status
+## Status and reviewer repairs
 
-`experiments/qualified_w2_replay_2905.py` remains a fail-closed adapter to the
-`prismaquant.interpolation_regret.replay_three_arms`, added in this work.
-Existing allocator and acceptance-test files are unchanged. The portable seam now exists
-and its eight CPU acceptance tests pass in the combined run below. Earlier notes
-that the module was absent describe a superseded check, not the current state.
+`prismaquant.interpolation_regret.replay_three_arms` is a portable, surrogate-only
+adapter, not W2 qualification or an export/serving validator. The explicit-input
+driver is `experiments/qualified_w2_replay_2905.py`. Existing allocator, digest-owner,
+duplication-guard and acceptance-test files are unchanged.
 
-**No W2 qualification, completed O5/O6 campaign, served-quality result, or successful
-real-input driver run is claimed.** Successful output retains
-`qualification_claim: false`. Test prices and manifests are explicitly synthetic.
-Hashes make decisions reproducible/tamper-evident relative to the input digest;
-they neither authenticate a producer nor prove that its measurements are true.
+This repair addresses the production defects found in review:
 
-## Production API evidence
+* Canonical chords are interpolation. Filtering recognizes the production
+  `CANONICAL_CHORD_SOURCE` through both Candidate activation pricing and effective
+  row `cost_source`, in addition to legacy band/output-MSE interpolation. Thus
+  chords count toward nondegeneracy and cannot enter meas or measured-only units.
+* Replay consumes **effective `built.cost_rows`**, not the original supplied
+  fractional values. Immutable byte snapshots separate supplied, build and replay
+  copies. Explicit two-stage provenance binds replacements to roster-qualified
+  anchors; a changed non-chord row refuses.
+* Identity documents are no longer merely hashed/discarded. Actual supplied and
+  effective scientific coordinates must match their contents, and must align
+  across units under production scope/probe owners.
+* The local `_sha` recipe is removed. Core candidate/assignment identities and
+  driver canonical digests use the existing `DIRECT_ASCII_STRICT` owner profile;
+  raw artifact/code digests use `bytes_sha256hex`. This preserves the former
+  compact sorted JSON, ASCII escaping, strict finite numbers, UTF-8 and SHA-256
+  byte recipe. No digest owner or guard baseline was extended.
 
-Inspected project instructions and production implementations:
+**No real-input driver success, qualified W2, completed campaign, validated export
+or serving-quality result is claimed.** Output retains `qualification_claim:
+false`. Hashes bind inputs; they neither authenticate a producer nor prove the
+truth of measurements. The numeric campaign denominator is still unavailable.
 
-* `allocator_candidates.build_candidates` returns `CandidateBuild`. The driver
-  uses production runtime/shape/TP/D41 gates, explicit serving contexts, no Fisher
-  pricing, a retained runtime frontier, and requires every supplied row to survive
-  admission. A rejected qualified row refuses the entire handoff; it is not silently
-  downgraded or reclassified.
-* `complete_scientific_price` / `qualified_cost_scope` check producer-qualified
-  scientific prices/anchors and bind unit, format and currency. Legacy interpolation
-  with a locally asserted `predicted_dloss` is insufficient. Each supplied row is
-  additionally pinned by the qualification roster's canonical row digest.
-* `rung_allowability.load_rung_allowability` uses scoped publications, pinned
-  contract family rules and explicit kernel builds; unscoped boolean publications
-  are not accepted. Permission to run is distinct from quality qualification.
-* `tessera_campaign._measured_projected_units` derives wire-backed measured-only
-  units from `_tessera_expert_projection.population.stacks` / `present_expert_ids`.
-  `tessera_expert_projection.carried_expert_projection` validates carried
-  projections. That campaign helper is private and depends on a bound campaign;
-  this adapter does not instantiate a fake campaign or invent its projection.
-* Instead, `context_by_unit_from_stats` supplies production profile-checked
-  topology. The adapter conservatively marks **every routed-MoE unit** measured-only,
-  unioned with explicit operator additions. Thus an empty supplied list cannot
-  re-enable interpolation on wire-backed routed experts. This is intentionally
-  stricter than the exact campaign projection and can exclude otherwise legal
-  non-wire routed interpolation or refuse a degenerate replay. It is not a claim
-  of exact wire-population reconstruction. Exact projection integration remains
-  future work if that less-conservative behavior is needed.
-* The portable seam filters arms before packed/fused production aggregation,
-  expands assignments, accounts source-bound integer bytes and supplies common
-  reference regret. Tests cover this seam; the adapter does not duplicate its DP.
-* Existing `allocator.AllocationResult.to_layer_config` maps assignments using
-  `format_registry.get_format(fmt).autoround_config()`. The adapter uses that same
-  registry configuration generation, without constructing a fake AllocationResult.
+## Production mechanisms and restrictions
 
-## Explicit v2 input contract
+The driver uses `build_candidates`, producer-qualified scientific pricing,
+`qualified_cost_scope`, scoped `load_rung_allowability`, matching kernel builds and
+the configured runtime contract. It requires every supplied qualified cell to
+survive production admission; no scope refusal is silently downgraded or retried.
+Candidate and effective-row grids must equal the supplied qualified grid.
+
+The portable seam filters before production packed-then-fused grouping, whose
+fused folding invokes contract-licensed `tessera_group_composites`. It expands all
+synthetic group names before accounting/scoring. Only surviving legal atomic
+options count toward eligible interpolation. There is no parallel knapsack or
+new cross-product admission mechanism: selection uses `solve_allocation`.
+
+`context_by_unit_from_stats` supplies profile-checked topology. The driver
+conservatively marks **all routed-MoE units** measured-only, unioned with explicit
+operator additions. An empty operator list cannot enable interpolation on
+wire-backed routed experts. This is stricter than the exact campaign projection,
+not a claim to reconstruct that projection; it can exclude legal non-wire routed
+interpolation or refuse a degenerate replay. Exact measured-wire/export preflight
+is still a downstream requirement. No interpolation proposal is called a validated
+wire or checkpoint.
+
+Successful layer configurations use the existing format registry's
+`autoround_config()`, as `AllocationResult.to_layer_config` does. They are assignment
+configurations only: conversion, required calibration/assets, group metadata,
+export validation and serving launch remain separate obligations.
+
+## Explicit v2 handoff
 
 ```sh
 python -m experiments.qualified_w2_replay_2905 --inputs /operator/inputs.json \
   --output /operator/new-report.json
 ```
 
-Paths are operator configuration, not deployment defaults. Relative artifact and
-allowability paths resolve against the input file. `--output` is optional and
-**exclusive-create**: an existing file is refused. The complete JSON report also
-goes to stdout. No report is produced when validation or replay fails.
+Paths are configuration, not deployment defaults. Relative artifact and
+allowability paths resolve against the input file. Optional `--output` is
+exclusive-create; an existing file refuses. A complete JSON report also goes to
+stdout. Validation/replay refusal produces no report.
 
-Input schema is `prismaquant.o5_explicit_w2_inputs.v2` (v1 is refused because it
-lacks mandatory qualification/lineage/accounting bindings). Every artifact entry
-is `{ "path": "...", "sha256": "<raw-file-sha256>" }`. Mandatory entries:
+Input schema: `prismaquant.o5_explicit_w2_inputs.v2`. Artifact entries are
+`{ "path": "...", "sha256": "<raw-file-sha256>" }`. Required artifacts:
 
-* Existing `stats`, `costs`, `model_config`, `source_manifest`, `kernel_builds`.
-* `source_identity`, `probe_identity`, `calibration_identity`, `teacher_identity`:
-  actual producer identity JSON documents, hashed as bytes, not bare unverifiable
-  names. Their content is retained by reference/digest, not independently audited
-  or schema-interpreted here. They must describe the actual producer lineage;
-  row scope/anchor qualification still comes from the production validators.
-* `measured_overhead`: schema `prismaquant.measured_overhead.v1`, `components`
-  mapping named components to nonnegative integer byte counts, and nonblank
-  `measurement_reference`. Empty components explicitly mean zero. Count only
-  measured non-tensor overhead **not already represented** by source spans or
-  format shape accounting. The adapter cannot independently detect double counts
-  or verify the referenced measurement. The measured total and reserve are passed
-  separately to the portable API and reported separately; both count in all-in
-  bytes in every arm.
-* `qualification`: immutable producer decision roster, detailed below.
+* `stats`, `costs`, `model_config`, `source_manifest`, `kernel_builds`.
+* `source_identity`: `source_weights` maps exactly the mutable units to actual
+  `quality_scope.source_weight` objects. Each weight identity must match its row,
+  and its shape must match production stats geometry. Unit weights may differ.
+* `teacher_identity`: full `prismaquant.streamed_model.identity.v1`, checked by
+  `validate_streamed_model_identity`. Its content digest must match both the row
+  teacher coordinate and the owner-validated actual probe source-model identity.
+* `probe_identity`: production projection
+  `{probe_identity, probe_identity_sha256, probe_ids}`. The nested object is the
+  actual scientific identity, not this document's path/hash. Its digest uses
+  `joint_identity_sha256`; sample/probe alignment uses `require_probe_alignment`,
+  including the owner's D32 scientific/provenance policy.
+* `calibration_identity`: `calibration_sha256`, `calibration_shape`, `token_scope`,
+  `temperature`. These must match actual row calibration/window and actual probe
+  calibration. A content digest is not the raw-file digest of this document.
+* `measured_overhead`: schema `prismaquant.measured_overhead.v1`, named nonnegative
+  integer-byte `components`, and nonblank `measurement_reference`. Empty components
+  explicitly mean zero. Do not count tensor spans/serialization twice. The driver
+  cannot independently verify the referenced measurement or detect double counts.
+* `qualification`: the complete producer decision roster described below.
 
-Other mandatory fields retain their existing meaning: `profile` (must equal
-production profile detection), explicit `target_profile` (or null), `currency`,
-unique Tessera `formats`, positive integer `tensor_parallel`, production
-`serving_context`, `allowability_root`, `bit_precision`, nonnegative integer
-`overhead_reserve_bytes`, and `measured_only_units` (unique known units; additions
-only). Kernel builds must match each family publication. Source manifest contains
-`bytes`, `spans`, `total_bytes`; byte and span coverage must agree. Stats and cost
-unit sets must match, with at least one qualified row per unit.
+Mandatory configuration includes detected `profile`, explicit `target_profile`
+(or null), one `currency`, unique Tessera `formats`, positive `tensor_parallel`,
+production `serving_context`, `allowability_root`, positive `bit_precision`,
+nonnegative integer `overhead_reserve_bytes`, and `measured_only_units` (unique known
+units; additions only). Source manifest has `bytes`, `spans`, `total_bytes`; byte
+and span coverage must agree. Stats and cost units must match.
 
-Fixed targets remain 3.5/4.5/6.0; no alternate solver or substitute W2 is created.
+Supplied **and effective** rows must match the documents' actual coordinates.
+Across units, `require_quality_scope_alignment(..., same_unit=False)` and production
+probe alignment require common scientific context (including family, currency,
+calibration, teacher, window, objective and samples). Per-unit weight/shape or
+activation coordinates are not spuriously required to be identical. The adapter
+neither remeasures nor authenticates these artifacts. Duplicate JSON keys,
+nonfinite constants and overflowing JSON floats refuse.
 
-### Qualification roster
+### Qualification and effective-row provenance
 
-Schema: `prismaquant.w2_qualification_roster.v1`.
+Roster schema: `prismaquant.w2_qualification_roster.v1`.
 
-* `artifact_sha256`: exact mapping of all loaded artifact names to raw SHA-256,
-  excluding `qualification` itself and `inputs` (avoids digest cycles).
-* `replay_config_sha256`: canonical JSON digest of the entire input object except
-  its `qualification` entry. It binds formats, currency, precision, TP, context,
-  reserve, paths and all artifact references. Produce this **before** adding the
-  qualification reference, then hash the roster file, then finalize inputs.
-* `identities`: exactly `source`, `probe`, `calibration`, `teacher`, `scope`.
-  The first four equal the corresponding identity document's raw SHA-256. `scope`
-  is the canonical JSON SHA-256 of the sorted mutable unit names. Full stats,
-  model config, row scopes and source spans are separately artifact-bound.
-* `cells`: exactly one entry for every mutable unit x declared format. Entry keys
-  include `unit`, `format`, `status`. A `qualified` cell requires `row_sha256` equal
-  to the canonical JSON digest of the supplied production cost row. A `refused`
-  cell requires a nonblank `reason` and **no supplied cost row**. Missing cells,
-  duplicates, changed rows, extra cost coverage, or unknown statuses refuse the
-  handoff. Qualified coverage must exactly equal supplied cost coverage.
+* `artifact_sha256` exactly maps artifact names to raw digests, excluding the
+  qualification file and input file to avoid cycles.
+* `replay_config_sha256` is the canonical digest of inputs excluding the
+  qualification entry. It binds formats, currency, precision, TP/context, reserve,
+  paths and artifact references. Compute this before finalizing the roster.
+* `identities` has exactly `source`, `probe`, `calibration`, `teacher`, `scope`.
+  The first four are identity-document file digests; scope is the canonical digest
+  of sorted mutable unit names. These bindings supplement, not replace, the
+  scientific-coordinate checks above.
+* `cells` covers every mutable unit × declared format exactly once. Qualified
+  cells have a matching canonical `row_sha256`; refused cells have a nonblank
+  reason and no supplied row. Missing/duplicate cells, changed rows, extra cost
+  coverage and unknown statuses refuse. Refusals become an immutable `frozenset`.
 
-Canonical digests use Python JSON `sort_keys=True, separators=(",", ":"),
-allow_nan=False`, UTF-8, SHA-256 (the driver's `_sha`). Raw artifact hashes are not
-canonical JSON hashes. Duplicate JSON keys and nonfinite constants are rejected.
-Refusal pairs become a `frozenset` passed to replay; the hashed full roster,
-including reasons, is also included in the report. A producer must actually
-publish the decisions: the driver never synthesizes missing refusal records.
+The roster certifies supplied rows, not replacements hidden under the same keys.
+Production may rebuild a fractional canonical chord. `effective_row_provenance`
+(schema `prismaquant.o5_effective_rows.v1`) records supplied/effective complete-table
+hashes and, per cell, supplied/effective row hashes, `replaced`, `effective_origin`
+(`supplied` or `production_canonical_chord`), and anchor format/supplied-row hashes.
+Every embedded effective anchor must be the exact supplied roster-qualified row.
+Replacements must pass production scientific/chord validators; non-chord changes
+refuse. The supplied hash is never relabeled as an effective-row hash. This is an
+explicit production derivation, not a claim the producer signed the replacement.
 
-## Output and precise limitations
+Result schema remains `prismaquant.o5_explicit_w2_result.v2`, with bound roster,
+input/code/contract identities, effective-row provenance, measured-only policy,
+overhead provenance, replay report and per-successful-arm configurations.
 
-Result schema is `prismaquant.o5_explicit_w2_result.v2`. Alongside replay results
-and artifact/input hashes it contains the full bound roster, derived measured-only
-roster/policy, measured overhead provenance and per-successful-arm layer configs.
-Configs are keyed by target/arm, exclude infeasible arms, and come from the existing
-format registry. This is **assignment configuration output only**, not an exported
-checkpoint: conversion, export preflight, wire source manifests, group metadata,
-calibration assets and serving launch remain separate production obligations.
-No export or serving workload was run here.
+## Budget, accounting and interpretation
 
-Real-input end-to-end driver execution still requires the actual qualified W2
-bundle, matching contract/D41 publications, builds, profile/TP/context, lineage
-identity documents, source-byte manifest and measured-overhead evidence. None was
-fabricated. We have not shown that a supplied real W2 grid passes admission or that
-canonical chord labels from that grid yield a nondegenerate replay. The actual
-qualified rows must be checked by a retained real-input run before claiming O5/O6
-completion. Conservative routed filtering may require revisiting exact projection
-integration for such a run. The full repository/GPU suites were not run.
+Frozen N is the sum of mutable leaf `n_params`, recorded as
+`frozen_mutable_n_params`. The immutable targets are 3.5, 4.5 and 6.0, each with
+`target_bytes=floor(Decimal(target_bpp)*N/8)`. No floor/reachable bpp replaces a
+requested target. Infeasibility returns exact all-in menu floor/gap without a
+fabricated assignment or fullm comparator.
 
-## Portable replay and accounting convention
+`assignment_artifact_bytes` includes selected tensor payload serialization and
+retained source spans. Measured non-tensor overhead and conservative reserve are
+reported separately and both count in the ceiling. A reserve is not measured
+physical-file equality. DP bins conservatively round up exact group byte deltas
+from each arm's floor using quantum `max(1, ceil(bit_precision*N/8))`; available
+bins round down and the production solver's extra bin is removed. This is not a
+claim of exact knapsack optimality at coarse precision. Expanded picks are
+independently accounted and checked against both additivity and the exact ceiling.
 
-The frozen denominator is the sum of `n_params` over the explicitly supplied
-mutable leaf scope, recorded as `frozen_mutable_n_params`. Requested budgets are
-exactly `floor(Decimal(target_bpp) * N / 8)` for 3.5, 4.5 and 6.0. The real
-campaign's numeric denominator **cannot yet be declared** without its frozen W2
-scope. No synthetic denominator is substituted for it.
-
-Each arm independently uses production packed-then-fused grouping. Fused folding
-calls the existing contract-licensed `tessera_group_composites` internally; this
-adapter does not create cross-products bypassing that gate. Only surviving legal
-atomic options count as eligible interpolation. Choices expand back to leaves
-before scoring, byte accounting and configuration generation.
-
-`assignment_artifact_bytes` includes selected payload serialization and retained
-source spans. Measured non-tensor overhead and reserve are separate quantities,
-both included in the all-in ceiling. The reserve is conservative accounting, not
-proof of priced-versus-written physical-file equality. Exact measured-wire/export
-preflight is still required downstream; interpolation remains a proposal.
-
-The existing production `solve_allocation` receives conservative integer-byte
-delta bins relative to each arm's exact group floor. Quantum is
-`max(1, ceil(bit_precision*N/8))` bytes. Options round **up**, the available budget
-rounds **down**, and the solver's extra bin is explicitly removed. This preserves
-the ceiling, not a claim of globally exact knapsack optimality at coarse precision.
-The complete expanded assignment is independently re-accounted and checked against
-the exact ceiling and additive option prices. `fullm` receives `meas`'s achieved
-integer bytes directly, never achieved bpp. Infeasible targets retain their requested
-budget, menu floor and gap, with no fabricated assignment or fullm comparator.
-
+`fullm` receives meas's achieved **integer all-in bytes**, never reconstructed bpp.
 Reach is `meas loss / full loss` at the common nominal target. Common-budget
-comparison is `meas loss / fullm loss` at meas's achieved all-in ceiling. Every
-ratio states arm names, numeric numerator/denominator and declared currency;
-a zero denominator produces JSON null (`undefined_null`), never a fabricated 1.
-Both comparisons report signed achieved-byte gaps and equal-size status. A nonzero
-gap is not a ranking-only/equal-size claim. All scores use immutable leaf Candidate
-reference prices; hashes include eligible reference rows and prices, independent
-of input ordering.
+comparison is `meas loss / fullm loss` at meas's achieved ceiling. Reports state
+arm names, numeric numerator/denominator, currency, signed achieved-byte gaps and
+equal-size status. Zero denominator yields JSON null (`undefined_null`), not 1.
+Nonzero gaps are not ranking-only/equal-size claims. All scores use one immutable
+leaf Candidate reference currency; eligible reference prices affect candidate
+hashes, independent of input ordering. All conclusions remain surrogate-only
+pending W4.
 
-## Missing-input disposition (O6 and real-input O5 validation)
+## Missing input: existing #3044 / #2902 / #2903
 
-No immutable qualified W2 handoff was supplied to this run. The inspected
-`/mnt/shared/tessera-measurements/pq275-2026-09-06/campaign-01/` listing still has
-`cost_measured_from_journal.pkl`, not the required qualified full payload. Its
-README lines 229–249 explicitly describe withdrawal and no interpolated table,
-and lines 299–301 describe scope refusal/fallback. It is not a substitute result.
-The research-identified v7 table covers three dense units only; it is not accepted
-as the required qualified dense-plus-packed campaign. We did not claim an
-exhaustive discovery of all fleet artifacts.
+No immutable qualified W2 handoff was supplied for this repair. The earlier
+campaign-01 inspection found the measured-only reconstruction and README's
+explicit withdrawal/no-interpolation/scope-refusal notes. Research's v7 table
+covered three dense units only. Neither is a substitute for the qualified
+full dense-plus-packed payload. No exhaustive claim about all fleet artifacts
+is made, and no real W2-loader round trip has been demonstrated.
 
-Existing owners #2902/#2903 must deliver the immutable qualified full payload,
-complete qualification/refusal roster, matching frozen scope/probe/calibration/
-source-byte identities, runtime contract/D41 publications and builds, and relevant
-overhead accounting. Until then there is **no real three-budget campaign table,
-real denominator, real regret result or validated real export configuration**.
-O6 remains blocked on that handoff; this change prepares the portable capability,
-input contract, machine-readable output and registry configurations without
-inventing scientific qualification. No GPU acquisition, W4, joint-currency audit
-or served run was performed.
+The existing owners must supply the immutable payload, qualification/refusal
+roster, matching frozen scope/probe/calibration/source-byte identities,
+contract/D41 publications/builds and overhead accounting. Until then **there is no
+real campaign denominator, three-budget campaign table, real regret result or
+validated real export configuration**. O6 and real-input O5 validation remain
+blocked through existing #3044, not a new duplicate issue. No GPU acquisition,
+W4, joint-currency audit, export or served run was performed.
 
-## Final integrated verification
+## Verification after repair
 
 ```sh
-python -m pytest tests/test_interpolation_regret_replay_2905.py experiments/test_qualified_w2_driver_2905.py tests/test_allocator_byte_budget_selection.py tests/test_allocator_packed_group_menu_reduction.py tests/test_allocator_packed_group_units.py tests/test_fused_fold_enumeration_2287.py tests/test_incomplete_fused_group.py tests/test_incomplete_fused_ignore.py -q --basetemp="$TMPDIR/pytest"
+python -m pytest tests/test_interpolation_regret_canonical_2905.py tests/test_interpolation_regret_replay_2905.py experiments/test_qualified_w2_driver_2905.py tests/test_canonical_quality_quantity.py tests/test_canonical_consumer_join.py tests/test_rung_allowability.py tests/test_duplication_baseline.py tests/test_duplication_alias_scope_audit.py tests/test_allocator_byte_budget_selection.py tests/test_allocator_packed_group_menu_reduction.py tests/test_allocator_packed_group_units.py tests/test_fused_fold_enumeration_2287.py tests/test_incomplete_fused_group.py tests/test_incomplete_fused_ignore.py -q --basetemp="$TMPDIR/pytest"
 ```
 
-Observed **83 passed, 15 subtests passed**, 14 upstream deprecation warnings;
-stdout verified with `read_test_artifact`. This includes all eight immutable
-acceptance cases, the explicit-input boundary tests and existing byte/grouping
-regressions. No acceptance files changed. Full suite, GPU, real W2 replay and
-export/serving validation were not run. Untracked new-file diffs were inspected;
-`git diff --no-index --check` emitted no whitespace diagnostics (exit 1 denotes
-the new-file difference).
+Observed **263 passed, 33 subtests passed**, 14 upstream Torch/Python deprecation
+warnings, exit 0. Retained stdout verified with `read_test_artifact`. This includes
+all eight unchanged acceptance cases, both reported duplication guards, canonical
+owner/consumer APIs and existing byte/grouping regressions. `git diff --check`
+emitted no whitespace errors. The full repository suite was not run.
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"b730e1542aaae31fbd8c574706fed4d7c218684775d1630ef71de3e1e345c018","size":917}},"operation":"9475bde641cc1aee2de696d083ea0ce384f930ededdc5dfc8325fcf42c75a8e2","receipt":"631c51bdd769d74ad69b8e5ffe1c36c21c2eeacffe60925ca015fcc9a3ac8f35"}]
+The new canonical replay regression reuses existing canonical-quality fixtures
+and the real production build/effective-row path. It verifies both provenance
+labels, meas and measured-only exclusions, refusal/nondegeneracy, and input reuse.
+Its measured anchor is above all fixed budgets: it explicitly checks infeasibility
+rather than inventing a successful fullm run. Actual selections remain covered by
+the immutable portable tests. Driver regressions exercise real canonical rebuilding
+with explicit test-only serving/admission/replay seams; they are boundary/API
+evidence, not actual W2 qualification or a real-input driver success. Rehashed
+unrelated documents, cross-unit scientific drift, altered anchors/non-chord rows,
+source geometry mismatch, mutable provenance and admission-grid drift refuse.
 
-## Earlier development checks (all through run_tests)
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"143c162f2b9b44343b9f328031e3f7130d0d4c2e80de6c6a416c16ff8d12ccbc","size":1140}},"operation":"fc1d402fc75a019f283f821263cef21a959fd0a7960911a3a8e0a942615bf915","receipt":"cd7874adeb00c9a2396d5f51f125f089540218b7e7ca4e198945625005a298a4"}]
 
-Initial strengthened boundary run: **1 failed, 12 passed** because the synthetic
-configuration test used unregistered lowercase `fp16`; corrected fixture to the
-registered `BF16`, not application behavior.
+### Rechecks and failed development assertions
 
-After the initial passing combined run, bumping the input schema to v2 exposed
-one stale v1 digest-mismatch fixture: **1 failed, 21 passed**. Updated the fixture
-to v2 so it again reaches the intended digest guard. Final combined rerun:
+Before repair, the two duplication guards reproduced the reported helper/raw
+recipe failures (2 failed, 30 passed). The new canonical API regression reproduced
+misclassification before repair (4 failed). An added fullm-success assertion later
+failed because this production fixture's measured anchor cannot fit any nominal
+budget (3 failed, 260 passed); the fixture now explicitly asserts infeasibility,
+without weakening production budgets or behavior. Driver development also exposed
+fixture protocol/schema/aliasing assumptions and one nonexistent test filename;
+those iterations were not counted as successful checks. Final verification above
+uses the corrected paths and current files. Detailed diagnostics remain in retained
+computation outputs, not duplicated as source fixtures.
 
-```sh
-python -m pytest -q experiments/test_qualified_w2_driver_2905.py \
-  tests/test_interpolation_regret_replay_2905.py --basetemp="$TMPDIR/pytest"
-```
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"84479fec47adfa1e4e7ab0e706e1739c75d4e18b3eeca189c6320707f3f24c5c","size":3424}},"operation":"06222fd875b22252b6cc73cba01f419cb2d86764db049328b5d56b3af4ae7349","receipt":"6f11dbd520558b95d66b09fec30d2a44b0537be81e8dbec76c25a6e5c55e879a"}]
 
-**22 passed, 15 subtests passed**, 14 upstream Torch/Python deprecation warnings.
-Driver tests cover roster completeness/immutability/refusal resurrection, changed
-row/config/artifact/lineage bindings, topology-based restrictions even with an empty
-operator list, integer measured overhead, real portable-seam separate-overhead
-accounting on synthetic prices, registry configs, and exclusive report writing.
-This is feasible CPU/API evidence, not W2 evidence.
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"873778fc1f802f083230eaef5c53215a683b05ef6ee098710215e2bae011e31a","size":26226}},"operation":"e34ff03bec6f40ba68bacf91be67cc5de6754afafa2c3fe7d6f50aa524f455ac","receipt":"0088859aa977a00e3df7296473f824a56434a082d36e7be7b657665fe4051713"}]
 
-Final test evidence:
-
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"e3eccf29bbf2891aeacf1320c41fe4461092afa96f30cf4220046bd69093c7a5","size":826}},"operation":"7f0465d9304818a9da65b052d241acd49925e7922b82811f8610f3bf55c283f3","receipt":"cf631ea1839e306eb03ad60758f44b55eacb0a20f66aef7ca4a91438db5ca375"}]
-
-Schema-fixture failure evidence:
-
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"a25f0e676bd48276443923b1f148920a22923aa7bb624969204fda1f1d2ba191","size":2204}},"operation":"e965ac2725d0755478ab7032ee80ef14446a6a92a1aed54255419b17098ea5bd","receipt":"34717aad761592dc6063c46f185e97290d1fac96e23f813c6fa881eddccac2af"}]
-
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"446de2f3589edefc35bb045131221703c89d04127c1cc6786641837848524c74","size":4659}},"operation":"e4048fa307000647a96677dbedd3ae40ea1dc3e364d14dc31787aa7b7591653f","receipt":"a189fa3667ef69a2d42fcfc3e96e6ea0aee22044286569a49070c04d3a67186f"}]
-
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"921a4c3df55e6d9baa3382d6a70311b398e9737308c293794f441bd0f59b6967","size":826}},"operation":"992911aee5d3973eb026321fc6c3863d9c008b0bf7ecca1d4e1c0911bb34b4c1","receipt":"6829385189adad1db2d6362a3d1ace75dbe7ef65013746738c18fea3853ca71c"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"7ccd4b1d1b7315d513fd7eb0e434377e7cb41a0587cf548fc6396ad71ce30295","size":7403}},"operation":"611a40e2acb181304e9838dcd55b64faf1630934d3d4373dc9250c4120fb8f4d","receipt":"3ca996d84ccaff8f808b060c90323ebd9f25a234edb54ea998f581d7095ae17a"}]

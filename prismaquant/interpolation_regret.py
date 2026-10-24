@@ -8,8 +8,6 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 from decimal import Decimal
-import hashlib
-import json
 import math
 
 from .allocator_candidates import (
@@ -17,15 +15,12 @@ from .allocator_candidates import (
     expand_fused_sibling_assignment, expand_packed_group_assignment,
 )
 from .allocator_solver import solve_allocation
+from .digests import DIRECT_ASCII_STRICT
 from .footprint import assignment_artifact_bytes
 from .priced_cell import CostPricingPolicy, cost_entry_is_band_interpolated
+from .rung_allowability import CANONICAL_CHORD_SOURCE
 
 TARGETS = ("3.5", "4.5", "6.0")
-
-
-def _sha(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
 
 
 def replay_three_arms(*, stats, candidates, costs, formats, profile, currency,
@@ -68,7 +63,11 @@ def replay_three_arms(*, stats, candidates, costs, formats, profile, currency,
                 raise ValueError("mixed reference currencies")
 
     def interpolated(name, c):
-        return (c.activation_pricing == "interpolated_output_mse" or
+        # Production canonical chords are interpolants too, not measured
+        # anchors. Recognize both the Candidate branch and effective row
+        # provenance so neither can leak into meas or a wire-restricted unit.
+        return (c.activation_pricing in ("interpolated_output_mse", CANONICAL_CHORD_SOURCE) or
+                costs[name][c.fmt].get("cost_source") == CANONICAL_CHORD_SOURCE or
                 cost_entry_is_band_interpolated(costs[name][c.fmt]))
 
     menus = {}
@@ -161,7 +160,7 @@ def replay_three_arms(*, stats, candidates, costs, formats, profile, currency,
         out = {"budget_bytes": budget, "floor_bytes": floor_bytes,
                "floor_gap_bytes": max(0, floor_bytes - budget),
                "candidate_formats": {n: [c.fmt for c in cs] for n, cs in menu.items()},
-               "candidate_sha256": _sha({n: [{"fmt": c.fmt,
+               "candidate_sha256": DIRECT_ASCII_STRICT.sha256({n: [{"fmt": c.fmt,
                    "reference_dloss": c.predicted_dloss,
                    "memory_bytes": c.memory_bytes,
                    "serialized_identity": c.serialized_identity,
@@ -194,7 +193,7 @@ def replay_three_arms(*, stats, candidates, costs, formats, profile, currency,
         if achieved != expected or achieved > budget:
             raise ValueError("independent integer-byte feasibility/additivity check failed")
         return dict(out, status="ok", assignment=dict(sorted(assignment.items())),
-                    assignment_sha256=_sha(assignment), achieved_bytes=achieved,
+                    assignment_sha256=DIRECT_ASCII_STRICT.sha256(assignment), achieved_bytes=achieved,
                     residual_bytes=budget-achieved, predicted_dloss=score(assignment),
                     accounting=accounting, dp_byte_quantum=quantum)
 
