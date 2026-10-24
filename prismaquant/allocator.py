@@ -140,7 +140,7 @@ from prismaquant.allocator_candidates import (
     reprice_paired_candidates,
     require_candidate_coverage,
 )
-from prismaquant.priced_cell import CostPricingPolicy
+from prismaquant.priced_cell import CostPricingPolicy, price_cell
 from .digests import (
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
@@ -843,7 +843,8 @@ class _StockAllocationLane:
     @staticmethod
     def allocation_routed_unit_rates(costs, assignment, *, cost_data,
                                      per_linear_legal_formats, budget_bytes,
-                                     reserve_bytes, artifact_size_for, canonical_format):
+                                     reserve_bytes, artifact_size_for, canonical_format,
+                                     pricing_policy=None):
         raise SystemExit("[alloc] ERROR: no declared allocation lane provides "
                          "--routed-unit-rates")
 
@@ -1914,6 +1915,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     lane.allocation_arguments(ap)
     ap.add_argument("--probe", required=True, help="sensitivity_probe pickle")
     ap.add_argument("--costs", required=True, help="measure_quant_cost pickle")
+    ap.add_argument("--depth-price-authorization", help="Independent reviewed interim decision JSON")
+    ap.add_argument("--depth-price-profile", help="Receipt-bound routed depth profile JSON")
+    ap.add_argument("--depth-price-purpose", choices=("production", "research"),
+                    default="production", help="Research profiles never authorize production prices")
     ap.add_argument(
         "--accept-research-cost-table",
         action="store_true",
@@ -2809,6 +2814,29 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     validate_probe_payload(probe, args.probe)
     validate_cost_payload(cost_data, args.costs)
     require_no_research_exact_member_scalar(cost_data)
+    # Admit against the original source identity before preparation or allocation
+    # can mutate working rows or publish assignments (including Pareto seeds).
+    depth_record = None
+    if args.depth_price_profile:
+        with open(args.depth_price_profile, encoding="utf-8") as f:
+            depth_record = json.load(f)
+    depth_authorization = None
+    if args.depth_price_authorization:
+        with open(args.depth_price_authorization, encoding="utf-8") as f:
+            depth_authorization = json.load(f)
+    pricing_policy = CostPricingPolicy.from_depth_profile(
+        cost_data, profile_record=depth_record,
+        authorized_interim_record=depth_authorization,
+        production=args.depth_price_purpose == "production",
+        ucb_z=pricing_policy.ucb_z,
+        fisher_output_mse=pricing_policy.fisher_output_mse,
+    )
+    depth_source_prices = {
+        name: {fmt: price_cell({}, row, format_name=fmt,
+                               policy=pricing_policy).predicted_dloss
+               for fmt, row in cost_data["costs"][name].items()}
+        for name in dict(pricing_policy._depth_multipliers)
+    }
     from prismaquant.joint_aura_rows import prepare_joint_aura_identities
     prepare_joint_aura_identities(cost_data)
     # One DP prices in one currency: a cost table carrying Tessera-currency
@@ -3673,7 +3701,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         try:
             candidates = reprice_paired_candidates(
                 stats, cost_data["costs"], candidates, cost_baseline_assignment,
-                profile=model_profile, ucb_z=pricing_policy.ucb_z, report=paired_candidate_report)
+                profile=model_profile, ucb_z=pricing_policy.ucb_z, report=paired_candidate_report,
+                pricing_policy=pricing_policy)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
     aggregated_candidate_names = tuple(candidates)
@@ -4010,7 +4039,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return price_paired_rate_trade(
                 cost_data["costs"], assignment,
                 {n: cost_baseline_assignment[n] for n in assignment},
-                profile=model_profile, ucb_z=pricing_policy.ucb_z)
+                profile=model_profile, ucb_z=pricing_policy.ucb_z,
+                pricing_policy=pricing_policy)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
 
@@ -4252,6 +4282,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
                 artifact_size_for=_artifact_size_for,
                 canonical_format=_canonical_candidate_format,
+                pricing_policy=pricing_policy,
             )
             achieved = float(assignment_space.payload(
                 body_assignment_for_accounting(assignment_expanded),
@@ -4538,6 +4569,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     isinstance(v, dict) and "solver_seconds" in v
                     for v in _solve_diagnostics.values()) else {}),
             **propagated_cost_provenance(research_cost_provenance),
+            **({"routed_depth_pricing": {
+                **pricing_policy.depth_profile,
+                "selected_prices": {
+                    name: depth_source_prices[name][fmt]
+                    for name, fmt in assignment_expanded.items()
+                    if name in depth_source_prices
+                    and fmt in depth_source_prices[name]
+                },
+            }} if pricing_policy.depth_profile is not None else {}),
             **({"paired_rate_trade": paired_trade,
                 "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment),
                 "paired_cost_scope": "sum_of_decision_unit_paired_ucbs; full-assignment covariance reported separately"}
@@ -5840,6 +5880,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 for c in grid
             ],
             **propagated_cost_provenance(research_cost_provenance),
+            **({"routed_depth_pricing": pricing_policy.depth_profile}
+               if pricing_policy.depth_profile is not None else {}),
         }
         sel_path = Path(args.pareto_csv).with_name("selection.json")
         if not sel["feasible"]:

@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+### Added — receipt-bound routed-depth price admission (#2535 / #2774)
+
+- Document the shared `CostPricingPolicy` intake for explicit
+  `joint_t8_routed` / `all_rates` scope using
+  `prismaquant.routed_depth_profile.v1` and `band_loss_multiplier.v1`.
+  Band multipliers scale already-normalized probe losses and paired deltas;
+  source rows and existing Fisher/activation normalization remain unchanged.
+- No authentic complete numeric interim-flat authorization was found in the
+  bounded local docs/ref inspection; the actual decision remains missing
+  under #2535 / #2972. Missing profiles, unsupported `flat`, and `interim_flat`
+  without a complete matching independent decision halt on the affected
+  scope, including in research. Local absence does not establish absence in
+  uninspected remote records; synthetic fixtures or digests cannot authorize
+  values. Conditional interim admission is documented separately below.
+- Distinguish receipt-bound `research_calibrated` (unvalidated) from
+  `qualified` price admission, which requires matching passing measured-arm
+  agreement and independent held-out-arm receipts. `routed_depth_pricing`
+  metadata records state and receipt provenance. Neither state bypasses
+  independent quality, runtime/resource, fused/expert, export, pinned-cell
+  and serving release gates. No numeric decision, GPU qualification, default
+  menu or serving-pin change is claimed; legacy stock/uniform and unrelated
+  unscoped pricing stays unchanged.
+- Enforce immutable measurement bindings at consumption, transform complete
+  scientific joint prices without changing their hedge semantics, and reject
+  nonfinite effective losses. Receipt hashes check consistency, not
+  authenticity. Document the explicit-provenance scope boundary pending the
+  actual authorization population. Rename the admission mapping helper
+  without weakening duplication guards. See
+  [the design](docs/design/joint_aura_runtime_allocation.md#receipt-bound-routed-depth-prices-2535--2774).
+
+### Added — conditional interim depth-policy admission
+
+- Document `CostPricingPolicy.from_depth_profile`'s separate
+  `authorized_interim_record` input and the independent reviewed decision JSON
+  loaded by CLI `--depth-price-authorization`. A profile cannot self-authorize.
+  The `prismaquant.routed_depth_authorization.v1` decision requires nonblank
+  `decision_ref`, `decided_by` and `decided_at`; exact matching scope, bands,
+  parameters, `calibration_contract`, `source_table_sha256`,
+  `band_roster_sha256` and `parameters_sha256`; and a matching profile
+  `authorization_sha256` digest of the complete decision.
+- Retain owned `deepcopy` profile and decision provenance. Only
+  `band_loss_multiplier.v1` scales already-normalized losses; an authorized
+  `interim_flat` stays `validated=false` even for production purpose.
+  Research cannot bypass qualification, and consistency hashes do not prove
+  authenticity. The explicit source marker is not population enforcement
+  (#3013 / #3019). No numeric defaults, rollout, scientific qualification or
+  release claim follows; independent quality and serving gates are unchanged.
+
 ### Added
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.

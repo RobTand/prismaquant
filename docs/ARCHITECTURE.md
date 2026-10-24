@@ -18935,6 +18935,61 @@ marginal pricing without a paired baseline and default `z=0` prices stay
 unchanged. CPU fixtures in `tests/test_paired_rate_trade.py` qualify this source
 policy, not corrected model prices, held-out KL, GPU execution or #2281.
 
+Routed-depth price-policy boundary (#2535 / #2774): the shared
+`CostPricingPolicy` consumes `prismaquant.routed_depth_profile.v1` records for
+the explicit `joint_t8_routed` / `all_rates` scope. Under
+`band_loss_multiplier.v1`, complete per-band loss multipliers apply to
+already-normalized per-probe losses and paired deltas without changing raw
+source rows or repeating Fisher/activation normalization. Paired covariance
+and expert-dominance statistics use those scaled contributions, not a
+post-hoc multiplier on marginal UCB. Stock, uniform-rate and unrelated
+unscoped inputs retain legacy prices and metadata.
+
+Conditional interim policy admission: `CostPricingPolicy.from_depth_profile`
+accepts `authorized_interim_record` independently of the profile; the CLI
+loads the reviewed decision JSON via `--depth-price-authorization`. An
+embedded profile authorization cannot authorize itself. The decision schema
+is `prismaquant.routed_depth_authorization.v1`, with nonblank `decision_ref`,
+`decided_by` and `decided_at`. Its scope, bands, parameters and
+`calibration_contract` must exactly match the profile, together with
+`source_table_sha256`, `band_roster_sha256` and `parameters_sha256`; the
+profile's `authorization_sha256` must match the complete decision digest.
+Admission keeps owned `deepcopy` profile and decision provenance in
+`routed_depth_pricing`. Only `band_loss_multiplier.v1` is supported.
+An authorized `interim_flat` remains `validated=false`, even for production
+purpose: interim policy authority is not scientific qualification or release.
+
+No authentic complete numeric interim-flat authorization was located in the
+bounded local docs/ref inspection; the actual decision remains missing under
+#2535 / #2972. Missing profiles, unsupported `flat`, and `interim_flat` without
+a complete matching independent decision halt affected allocation, even in
+research. Synthetic fixtures and hashes cannot provide that authority.
+Receipt-bound `research_calibrated` profiles remain unvalidated and cannot
+bypass production qualification. `qualified` price admission
+requires matching passing measured-arm-agreement and independent held-out-arm
+receipts bound to the source table, band roster, parameters and numerical
+contract. `routed_depth_pricing` metadata carries state, validation status and
+receipt links. This checks recorded intake consistency, not receipt
+authenticity, actual arm/sample independence, measurement authority or an
+artifact's release. `validated=true` is the receipt-state result, not an
+end-to-end safety certificate. Consumers enforce immutable per-coordinate
+measurement digests and reject replacement rows, including independently
+valid ones. Complete scientific joint point prices receive the transform
+without changing their existing hedge semantics; unrelated fixed currencies
+do not. Finite effective contributions, prices and paired uncertainty are
+checked at consumption, since finite parameters alone are insufficient.
+Admission is a no-op for absent or
+nonmatching scope; it does not independently verify the selected allocation
+mode or an authorized model population. The roster is source-table
+`.experts.` keys, not a model-manifest completeness check. This explicit
+source marker is not population enforcement (#3013 / #3019). Independent
+additivity/held-out quality, measured
+runtime/resource, fused-sibling, expert-dominance, export, pinned runtime/cell,
+and serving release gates remain in force. No actual numeric authorization,
+GPU qualification, default-menu or serving-pin change is established here.
+See [the depth-policy contract](design/joint_aura_runtime_allocation.md#receipt-bound-routed-depth-prices-2535--2774)
+for the local-inspection limits and admission states.
+
 Re-stamped 2026-10-08 (#2288): menu pruning on expert dominance applies only
 when the priced decision group covers its complete routed layer. A
 subgroup-scoped verdict stays in provenance and reprices the option without

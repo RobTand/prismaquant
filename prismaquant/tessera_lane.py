@@ -646,6 +646,7 @@ def allocation_routed_unit_rates(
     per_linear_legal_formats: Mapping[str, set[str]] | None,
     budget_bytes: int, reserve_bytes: int,
     artifact_size_for, canonical_format,
+    pricing_policy=None,
 ) -> dict:
     """Spend the serialized-byte headroom on exact per-unit routed rows.
 
@@ -721,7 +722,8 @@ def allocation_routed_unit_rates(
     try:
         picks, record = tep.select_priced_unit_upgrades(
             menu, assignment_expanded,
-            byte_budget=headroom_budget, reserve_bytes=int(reserve_bytes))
+            byte_budget=headroom_budget, reserve_bytes=int(reserve_bytes),
+            pricing_policy=pricing_policy)
     except (tep.ExpertProjectionError, ValueError) as exc:
         raise SystemExit(f"[alloc] ERROR: routed unit rates: {exc}") from exc
     for unit, fmt in picks.items():
