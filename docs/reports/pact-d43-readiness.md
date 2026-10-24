@@ -112,7 +112,7 @@ incomplete. #2705 and #2841–#2843 were not reopened or duplicated.
 | O5 / #2886 Qwen real chain | Same prerequisites plus authentic declared Qwen scope missing; no GLM fallback. |
 | O6 / #2886 regression population | 318 existing tests pass; four new acceptance cases fail. Not an integrated acceptance pass. |
 | O7 / #2887 complete caller reconciliation | Incomplete. Literal Python search for `pact_frontier_profile` finds the adapter test importer and acceptance tracing only. This is not exhaustive dynamic-loader inventory or reconciliation with admitted #2484/#2485 inventories. |
-| O8 / #2887 authorized retirement | Sources retained; acceptance incomplete without current Campaign authority. |
+| O8 / #2887 authorized retirement | Conditional preservation requirement satisfied: sources retained. Retirement acceptance itself remains incomplete without current Campaign authority. |
 | O9 / #2887 exact-head parent report | This is a readiness report, not a completed integrated acceptance report. Exact code revision and retained check receipt below; prerequisite receipts/caller dispositions unavailable. |
 
 For #2427's parent criteria: the shared adapter exists, but full harness/frontier/
@@ -186,8 +186,9 @@ Inherited historical excerpts are not selected as retirement authority here.
 
 The readiness gap stays in the existing #2486 → #2885 → #2886 → #2887 lane,
 with Campaign and its existing source-acceptance owner. The supplied open-issue
-list already includes #3007 for Campaign/source-acceptance readiness; this review
-does not create a duplicate issue or imply that its title supplies approval.
+list includes #3007 for Campaign/source-acceptance readiness and #3008 for the
+existing custody/harness/price-owner prerequisites. Those are existing handoffs,
+not additional work items; neither issue title supplies approval or admission.
 Before any later removal, the existing lane needs an attributable Campaign
 record identifying the completed active runs and their evidence, the exact
 sources/revisions authorized for retirement, and the approved removal scope.
@@ -212,3 +213,37 @@ qualification was run; admitted-prerequisite importer/loader checks remain
 unavailable as described above.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"d78a2f4827b464e1e140a1876fa8382d8e7766a914cc8d4844060c8a82639c73","size":8182}},"operation":"8d090b00662b510af9bb6c5ab44475e5eb68be2dd9be9bdb914087d3648a584c","receipt":"e22cfadb912de9a8440617ee98b50ab31cffc50c1a17d8ea8656b5549a5bf44e"}]
+
+### Review repair disposition
+
+Rechecked review base `670e372e7324af49f99d10426eff253a17ec4bdc` with this
+report-only repair. The review's O1–O7 and O9 findings remain valid and unresolved;
+the readiness fallback is not completion of those objectives or a fix to the
+scientific input/consumer boundary. O8's conditional preservation requirement is
+satisfied, as the review records, while permission to retire remains absent.
+No new attributable Campaign designation, closure, or retirement grant is present
+in the supplied repair discussion. No source is made eligible for removal here.
+
+The unmet work must continue through the already-open owners, not be replaced
+inside this assigned retirement-authority slice: #3007 / #2486 / #2885 for the
+Campaign-designated full scientific closure; #3008 / #2482 / #2489 and
+#2973–#2975 / #2960–#2961 for corrected custody, admitted harness/price APIs,
+source-bound cases/wires (including authentic Qwen scope), and caller/test
+inventories. Portable fixtures and frontier integration remain undelivered;
+#2886 and the #2887 integrated-head inventory/report cannot be accepted on the
+strength of this document. These are existing readiness dependencies, not new
+issues, test defects, or objectives declared impossible as written.
+
+Re-ran the exact twelve-file CPU command above: **4 failed, 318 passed,
+14 warnings in 27.68s**, exit 1. All four failures still stop at the missing
+`binding.json` assertion on line 38; none reaches oracle or consumer assertions.
+Also ran `python -m pytest tests/test_architecture_doc.py tests/test_docs_staleness.py -q --basetemp="$TMPDIR/pytest"`:
+**18 passed, 14 warnings in 2.00s**, exit 0. Both retained stdout artifacts were
+read back and verified. These documentation guards are not prerequisite-owner
+importer/loader tests; that additional population remains unidentified pending
+admitted inventories, not passed. No new scientific, GPU, native, or serving
+qualification is claimed. Only this report changes; sources remain untouched.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"802d71a87b4c6dbcdcce6033cf60109163bf3399855d167166eaddb6957d7df2","size":8182}},"operation":"4a6188df735e6fe19c88de2e3debb50990053485fd79a6601c8c76a2b90c2dd0","receipt":"72fb620b0f4cff2a9c7595a45f816e733cdff9de0ab31c94b469ab3037015ddc"}]
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"772930a698e7901db9301d183f69f90ff425d37899bacf24d795bd2eb9f265a8","size":749}},"operation":"37d52cfae989ab11101b015ca5244001191cad9609cae7c27e9a5ac533a52fcf","receipt":"2774fbce96c9a795a46f8bcad720ee69a01b5594595d06ae68349561cd898fae"}]
