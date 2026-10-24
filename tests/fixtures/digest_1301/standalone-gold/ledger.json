@@ -1,0 +1,2057 @@
+{
+  "schema": "prismaquant.digest_slice_ledger.v1",
+  "slice": "standalone-gold",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "inspected_commit": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "scope_files": [
+    "tools/build_streamed_full_kl_teacher.py",
+    "tools/dsv4_wikitext_inputs.py",
+    "tools/full_kl_teacher_payload.py",
+    "tools/gold_engine_options.py",
+    "tools/measure_served_gold.py",
+    "tools/measure_vllm_full_kl.py",
+    "tools/measure_vllm_wikitext_ppl.py",
+    "tools/prepare_dsv4_wikitext_inputs.py",
+    "tools/serve_fingerprint.py",
+    "tools/dspark_memavailable_sampler.py",
+    "tools/prismaquant_runtime_snapshot.py",
+    "tools/duplication_inventory.py",
+    "tools/tessera_fleet/model_worker.py"
+  ],
+  "decision": "No production edits: retain current source-bound producers and isolated stdlib contracts. No completed research-base replacements in this slice; shared census/baseline reconciliation belongs to integrator.",
+  "qualification": "No current GPU/vLLM/deployment qualification claimed. Historical qualified-runtime blobs are a binding-contract witness only, not HEAD qualification. Current rosters, isolation and operation tests ground these decisions.",
+  "calls": [
+    {
+      "original_id": "hashlib:tools/dsv4_wikitext_inputs.py::_strict_json_load@127:15",
+      "id": "hashlib:tools/dsv4_wikitext_inputs.py::_strict_json_load@127:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c4d4a4a4f4ea0f55df6153897763d5ecffd50623",
+      "file": "tools/dsv4_wikitext_inputs.py",
+      "scope": "_strict_json_load",
+      "callee": "hashlib.sha256",
+      "line": 127,
+      "column": 15,
+      "syntax_sha256": "12a456a8f0e7527180fbb5dcc3b4806f8d3efd8bed365b9c2a0b6d8c2c0a98ba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/dsv4_wikitext_inputs.py::_strict_json_load",
+      "recipe": "hashlib.sha256(raw).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; input bytes bound before decode, tensor converted to contiguous int64 and hashed as C-order uint8 bytes; schema/tamper refusals remain local.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_dsv4_tensor_and_payload_tensor_descriptors",
+        "tests/test_model_wikitext_inputs.py::test_v2_reader_requires_independent_file_sha",
+        "tests/test_model_wikitext_inputs.py::test_v2_refuses_changed_values_and_metadata"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/dsv4_wikitext_inputs.py::_tensor_sha256@105:11",
+      "id": "hashlib:tools/dsv4_wikitext_inputs.py::_tensor_sha256@105:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c4d4a4a4f4ea0f55df6153897763d5ecffd50623",
+      "file": "tools/dsv4_wikitext_inputs.py",
+      "scope": "_tensor_sha256",
+      "callee": "hashlib.sha256",
+      "line": 105,
+      "column": 11,
+      "syntax_sha256": "05e59cdf6aa18d9fc7520189c33547352c2d72a770e8c9dd1628d0d25158d0ae",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/dsv4_wikitext_inputs.py::_tensor_sha256",
+      "recipe": "hashlib.sha256(\n        tensor.view(torch.uint8).numpy().tobytes(order=\"C\")\n    ).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; input bytes bound before decode, tensor converted to contiguous int64 and hashed as C-order uint8 bytes; schema/tamper refusals remain local.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_dsv4_tensor_and_payload_tensor_descriptors",
+        "tests/test_model_wikitext_inputs.py::test_v2_reader_requires_independent_file_sha",
+        "tests/test_model_wikitext_inputs.py::test_v2_refuses_changed_values_and_metadata"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/duplication_inventory.py::_shingles@89:23",
+      "id": "hashlib:tools/duplication_inventory.py::_shingles@89:23",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c5d24bb9f304add2d958668487b61b552a00ec11",
+      "file": "tools/duplication_inventory.py",
+      "scope": "_shingles",
+      "callee": "hashlib.blake2b",
+      "line": 89,
+      "column": 23,
+      "syntax_sha256": "c59f38f7a475c1d937a6da2de41931e793b576cf5479ef8c10653a593898a7b4",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "protected-scanner",
+      "owner_route": "retained:tools/duplication_inventory.py::_shingles",
+      "recipe": "hashlib.blake2b(\n            \"\\x1f\".join(tokens[i:i + SHINGLE]).encode(), digest_size=8).digest()",
+      "result_contract": "BLAKE2b digest_size=8 bytes converted big-endian to int",
+      "consumer_evidence": "Explicitly protected scanner including its two calls; independent BLAKE2b-8 shingles interpreted big-endian, and sorted indent-1 baseline JSON publication. No scanner/default/exclusion/population/owner change authorized.",
+      "witnesses": [
+        "Assigned Agreement S: scanner byte-for-byte protection",
+        "tools/duplication_inventory.py::_shingles",
+        "tools/duplication_inventory.py::main"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_duplication_inventory_reference_shingles_and_baseline_write"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/full_kl_teacher_payload.py::tensor_descriptor@664:18",
+      "id": "hashlib:tools/full_kl_teacher_payload.py::tensor_descriptor@664:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a9e758e54cad4e1a27514f83df590f25d9f48954",
+      "file": "tools/full_kl_teacher_payload.py",
+      "scope": "tensor_descriptor",
+      "callee": "hashlib.sha256",
+      "line": 664,
+      "column": 18,
+      "syntax_sha256": "12a456a8f0e7527180fbb5dcc3b4806f8d3efd8bed365b9c2a0b6d8c2c0a98ba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/full_kl_teacher_payload.py::tensor_descriptor",
+      "recipe": "hashlib.sha256(raw).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned producer source; tensor descriptor retains dtype/shape and raw contiguous bytes. Publication is strict Unicode indent-2 JSON plus LF via temporary sibling and replace, NOT canonical identity JSON.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_dsv4_tensor_and_payload_tensor_descriptors",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_payload_atomic_json_publication_and_refusals",
+        "tests/test_streamed_gold_companion.py::test_payload_roundtrip_and_v1_exact_semantic_projection"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_served_gold.py::_calibration_contract@231:28",
+      "id": "hashlib:tools/measure_served_gold.py::_calibration_contract@231:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_calibration_contract",
+      "callee": "hashlib.sha256",
+      "line": 231,
+      "column": 28,
+      "syntax_sha256": "eb631dbb1b0e9339f4f6de172d1dbc39bbe4bfe7673f68b2d692a4b06269050f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_calibration_contract",
+      "recipe": "hashlib.sha256(\n            \",\".join(str(i) for i in token_ids).encode(\"utf-8\")\n        ).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_served_gold.py::_canonical_sha256@116:11",
+      "id": "hashlib:tools/measure_served_gold.py::_canonical_sha256@116:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_canonical_sha256",
+      "callee": "hashlib.sha256",
+      "line": 116,
+      "column": 11,
+      "syntax_sha256": "53497a793c7df4bc7493f8ce232f7254631d93e506e38b955e68bffef379ffba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_canonical_sha256",
+      "recipe": "hashlib.sha256(json.dumps(\n        payload, sort_keys=True, separators=(\",\", \":\"), allow_nan=False,\n    ).encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_served_gold.py::_sha256_file@108:13",
+      "id": "hashlib:tools/measure_served_gold.py::_sha256_file@108:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_sha256_file",
+      "callee": "hashlib.sha256",
+      "line": 108,
+      "column": 13,
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_sha256_file",
+      "recipe": "hashlib.sha256()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_vllm_full_kl.py::_load_wikitext_calibration@149:29",
+      "id": "hashlib:tools/measure_vllm_full_kl.py::_load_wikitext_calibration@149:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+      "file": "tools/measure_vllm_full_kl.py",
+      "scope": "_load_wikitext_calibration",
+      "callee": "hashlib.sha256",
+      "line": 149,
+      "column": 29,
+      "syntax_sha256": "12a456a8f0e7527180fbb5dcc3b4806f8d3efd8bed365b9c2a0b6d8c2c0a98ba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_full_kl.py::_load_wikitext_calibration",
+      "recipe": "hashlib.sha256(raw).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned full-KL producer source; raw file bytes and joined UTF-8 corpus text are separate identities. Strict indent-2 text and strict default-spaced report bytes are publication, not semantic canonicalization.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_streamed_gold_companion.py::test_v2_student_final_uses_companion_and_keeps_evidence",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_measurement_loaders_hash_raw_file_and_joined_dataset"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_vllm_full_kl.py::_load_wikitext_calibration@167:29",
+      "id": "hashlib:tools/measure_vllm_full_kl.py::_load_wikitext_calibration@167:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+      "file": "tools/measure_vllm_full_kl.py",
+      "scope": "_load_wikitext_calibration",
+      "callee": "hashlib.sha256",
+      "line": 167,
+      "column": 29,
+      "syntax_sha256": "f6c27d7cc3da0333aff81427909a3a9b110f00a94555e2f52ab839031b6a0213",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_full_kl.py::_load_wikitext_calibration",
+      "recipe": "hashlib.sha256(text.encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned full-KL producer source; raw file bytes and joined UTF-8 corpus text are separate identities. Strict indent-2 text and strict default-spaced report bytes are publication, not semantic canonicalization.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_streamed_gold_companion.py::test_v2_student_final_uses_companion_and_keeps_evidence",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_measurement_loaders_hash_raw_file_and_joined_dataset"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_vllm_wikitext_ppl.py::_load_ids@155:39",
+      "id": "hashlib:tools/measure_vllm_wikitext_ppl.py::_load_ids@155:39",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3e2c8c2dcbaed200cc0aefacc3c68b11640f6ca5",
+      "file": "tools/measure_vllm_wikitext_ppl.py",
+      "scope": "_load_ids",
+      "callee": "hashlib.sha256",
+      "line": 155,
+      "column": 39,
+      "syntax_sha256": "12a456a8f0e7527180fbb5dcc3b4806f8d3efd8bed365b9c2a0b6d8c2c0a98ba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_wikitext_ppl.py::_load_ids",
+      "recipe": "hashlib.sha256(raw).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned PPL producer source; raw file SHA and joined UTF-8 corpus SHA preserve file:sha256 labels and descriptors. Strict pretty text and default-spaced report bytes remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_model_wikitext_inputs.py::test_v2_ppl_routes_bound_inputs_without_tokenizer",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_measurement_loaders_hash_raw_file_and_joined_dataset"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/measure_vllm_wikitext_ppl.py::_load_ids@187:25",
+      "id": "hashlib:tools/measure_vllm_wikitext_ppl.py::_load_ids@187:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3e2c8c2dcbaed200cc0aefacc3c68b11640f6ca5",
+      "file": "tools/measure_vllm_wikitext_ppl.py",
+      "scope": "_load_ids",
+      "callee": "hashlib.sha256",
+      "line": 187,
+      "column": 25,
+      "syntax_sha256": "f6c27d7cc3da0333aff81427909a3a9b110f00a94555e2f52ab839031b6a0213",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_wikitext_ppl.py::_load_ids",
+      "recipe": "hashlib.sha256(text.encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned PPL producer source; raw file SHA and joined UTF-8 corpus SHA preserve file:sha256 labels and descriptors. Strict pretty text and default-spaced report bytes remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_model_wikitext_inputs.py::test_v2_ppl_routes_bound_inputs_without_tokenizer",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_measurement_loaders_hash_raw_file_and_joined_dataset"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@131:17",
+      "id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@131:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "_build_payload",
+      "callee": "hashlib.sha256",
+      "line": 131,
+      "column": 17,
+      "syntax_sha256": "a5f5e57bd3b0df7bf05acb8f3122572a44798427ede7c86904fb4e4d52b1dc3a",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
+      "recipe": "hashlib.sha256(\n        window_tensor.view(torch.uint8).numpy().tobytes(order=\"C\")\n    ).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@135:14",
+      "id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@135:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "_build_payload",
+      "callee": "hashlib.sha256",
+      "line": 135,
+      "column": 14,
+      "syntax_sha256": "f944f10a8344793ea0d878efee07c153ea0dd5e66168f0b670016802e0e33fd2",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
+      "recipe": "hashlib.sha256(json.dumps(\n        ppl_ids,\n        sort_keys=True,\n        separators=(\",\", \":\"),\n        ensure_ascii=False,\n        allow_nan=False,\n    ).encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@188:37",
+      "id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@188:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "_build_payload",
+      "callee": "hashlib.sha256",
+      "line": 188,
+      "column": 37,
+      "syntax_sha256": "a228ca76e105250d2fed7171e3e0f54f10b6fded4bf69d095254e3ee9a33d2fc",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
+      "recipe": "hashlib.sha256(config_bytes).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_load_corpus@61:25",
+      "id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::_load_corpus@61:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "_load_corpus",
+      "callee": "hashlib.sha256",
+      "line": 61,
+      "column": 25,
+      "syntax_sha256": "f6c27d7cc3da0333aff81427909a3a9b110f00a94555e2f52ab839031b6a0213",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::_load_corpus",
+      "recipe": "hashlib.sha256(text.encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::main@213:18",
+      "id": "hashlib:tools/prepare_dsv4_wikitext_inputs.py::main@213:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "main",
+      "callee": "hashlib.sha256",
+      "line": 213,
+      "column": 18,
+      "syntax_sha256": "3a999780bc2932233f61d4a23acd4115f84cc428a9af27f201abce8310ce05ac",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::main",
+      "recipe": "hashlib.sha256(output.read_bytes()).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_main_publishes_file_digest_descriptor"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prismaquant_runtime_snapshot.py::_closure_sha256@167:11",
+      "id": "hashlib:tools/prismaquant_runtime_snapshot.py::_closure_sha256@167:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+      "file": "tools/prismaquant_runtime_snapshot.py",
+      "scope": "_closure_sha256",
+      "callee": "hashlib.sha256",
+      "line": 167,
+      "column": 11,
+      "syntax_sha256": "7d70badc26bfbc5e2e05c89afee27a747ebe4d65acdc69f7a3405dff03233c92",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/prismaquant_runtime_snapshot.py::_closure_sha256",
+      "recipe": "hashlib.sha256(encoded).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Existing single-public-file supported layout tested without package; Git committed byte closure excludes unrelated worktree content. Strict ASCII compact closure JSON, indent-2 manifest plus LF and spaced stdout are distinct; preserve modes, materialization and mutation refusals.",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_runtime_snapshot_materializes_exact_closure_and_refuses_changes",
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/prismaquant_runtime_snapshot.py::_file_sha256@98:13",
+      "id": "hashlib:tools/prismaquant_runtime_snapshot.py::_file_sha256@98:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+      "file": "tools/prismaquant_runtime_snapshot.py",
+      "scope": "_file_sha256",
+      "callee": "hashlib.sha256",
+      "line": 98,
+      "column": 13,
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/prismaquant_runtime_snapshot.py::_file_sha256",
+      "recipe": "hashlib.sha256()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Existing single-public-file supported layout tested without package; Git committed byte closure excludes unrelated worktree content. Strict ASCII compact closure JSON, indent-2 manifest plus LF and spaced stdout are distinct; preserve modes, materialization and mutation refusals.",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_runtime_snapshot_materializes_exact_closure_and_refuses_changes",
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::_canonical_sha256@767:11",
+      "id": "hashlib:tools/serve_fingerprint.py::_canonical_sha256@767:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_canonical_sha256",
+      "callee": "hashlib.sha256",
+      "line": 767,
+      "column": 11,
+      "syntax_sha256": "f5062c6868946ffd1cd3236013a783de3162442d1433840d6554ad1fe4056c3b",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_canonical_sha256",
+      "recipe": "hashlib.sha256(canonical).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::_decode_record_sha256@1500:19",
+      "id": "hashlib:tools/serve_fingerprint.py::_decode_record_sha256@1500:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_decode_record_sha256",
+      "callee": "hashlib.sha256",
+      "line": 1500,
+      "column": 19,
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_decode_record_sha256",
+      "recipe": "hashlib.sha256()",
+      "result_contract": "digest_size integer validator (not a hash identity)",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::_file_identity@1473:13",
+      "id": "hashlib:tools/serve_fingerprint.py::_file_identity@1473:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_file_identity",
+      "callee": "hashlib.sha256",
+      "line": 1473,
+      "column": 13,
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_file_identity",
+      "recipe": "hashlib.sha256()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::artifact_binding@1720:37",
+      "id": "hashlib:tools/serve_fingerprint.py::artifact_binding@1720:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "artifact_binding",
+      "callee": "hashlib.sha256",
+      "line": 1720,
+      "column": 37,
+      "syntax_sha256": "f5062c6868946ffd1cd3236013a783de3162442d1433840d6554ad1fe4056c3b",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::artifact_binding",
+      "recipe": "hashlib.sha256(canonical).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_artifact_binding_strict_inventory_hash"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::fingerprint@2317:11",
+      "id": "hashlib:tools/serve_fingerprint.py::fingerprint@2317:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "fingerprint",
+      "callee": "hashlib.sha256",
+      "line": 2317,
+      "column": 11,
+      "syntax_sha256": "b276e5d8290367cb3a2de2d068eee63cd768e452cb3fe8065f5a86d661c75575",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::fingerprint",
+      "recipe": "hashlib.sha256(canonical.encode(\"utf-8\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::host_identity@876:12",
+      "id": "hashlib:tools/serve_fingerprint.py::host_identity@876:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "host_identity",
+      "callee": "hashlib.sha256",
+      "line": 876,
+      "column": 12,
+      "syntax_sha256": "5d4695419ce6f4420887a77a53ac6d885347abc19b326a993ab4f2d395d86abd",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::host_identity",
+      "recipe": "hashlib.sha256(machine_id.encode(\"ascii\")).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_host_identity_ascii_machine_hash"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/serve_fingerprint.py::models_endpoint_binding_from_bytes@2003:27",
+      "id": "hashlib:tools/serve_fingerprint.py::models_endpoint_binding_from_bytes@2003:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "models_endpoint_binding_from_bytes",
+      "callee": "hashlib.sha256",
+      "line": 2003,
+      "column": 27,
+      "syntax_sha256": "12a456a8f0e7527180fbb5dcc3b4806f8d3efd8bed365b9c2a0b6d8c2c0a98ba",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::models_endpoint_binding_from_bytes",
+      "recipe": "hashlib.sha256(raw).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/tessera_fleet/model_worker.py::digest_file@42:8",
+      "id": "hashlib:tools/tessera_fleet/model_worker.py::digest_file@42:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+      "file": "tools/tessera_fleet/model_worker.py",
+      "scope": "digest_file",
+      "callee": "hashlib.sha256",
+      "line": 42,
+      "column": 8,
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/tessera_fleet/model_worker.py::digest_file",
+      "recipe": "hashlib.sha256()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "dispatch_model.stage_checkout copies worker alone to workspace/worker.py and invokes python3 worker.py. Keep 8-MiB reads, compact sorted ASCII/lax JSON identity, spaced sorted ASCII/lax atomic publication plus LF and main stdout; no digest owner staged.",
+      "witnesses": [
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_hashing_recipes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_atomic_json_publication_and_failure",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_output_verification"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/tessera_fleet/model_worker.py::digest_json@50:11",
+      "id": "hashlib:tools/tessera_fleet/model_worker.py::digest_json@50:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+      "file": "tools/tessera_fleet/model_worker.py",
+      "scope": "digest_json",
+      "callee": "hashlib.sha256",
+      "line": 50,
+      "column": 11,
+      "syntax_sha256": "fefe695cd028534b12e6e8171af1a5be3bbc744d0420dc5c42295277ee0bd403",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/tessera_fleet/model_worker.py::digest_json",
+      "recipe": "hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()",
+      "result_contract": "SHA-256 full lowercase 64-hex str; no truncation",
+      "consumer_evidence": "dispatch_model.stage_checkout copies worker alone to workspace/worker.py and invokes python3 worker.py. Keep 8-MiB reads, compact sorted ASCII/lax JSON identity, spaced sorted ASCII/lax atomic publication plus LF and main stdout; no digest owner staged.",
+      "witnesses": [
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_hashing_recipes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_atomic_json_publication_and_failure",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_output_verification"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_streamed_full_kl_teacher.py::main@399:10",
+      "id": "sorted-json:tools/build_streamed_full_kl_teacher.py::main@399:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4d96704c35c345465d1fb37374f0860527994408",
+      "file": "tools/build_streamed_full_kl_teacher.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 399,
+      "column": 10,
+      "syntax_sha256": "27d7eeee81e49cdc69e7238f11f90f6425476ee0838815ff4f7d01e99de22204",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/build_streamed_full_kl_teacher.py::main",
+      "recipe": "json.dumps(meta, indent=2, sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned producer source closure includes this builder; CLI metadata print is distinct from semantic payload encoding.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_streamed_gold_companion.py::test_builder_one_forward_binds_final_rows_and_source_policy"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dspark_memavailable_sampler.py::_append_sample@92:12",
+      "id": "sorted-json:tools/dspark_memavailable_sampler.py::_append_sample@92:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56cd115d2c8a3804c9552fc56e67171e87b2b2cf",
+      "file": "tools/dspark_memavailable_sampler.py",
+      "scope": "_append_sample",
+      "callee": "json.dumps",
+      "line": 92,
+      "column": 12,
+      "syntax_sha256": "dc87d313048e4a027aee676044c334fa812a98795a9ff3993b0f947905065bf7",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/dspark_memavailable_sampler.py::_append_sample",
+      "recipe": "json.dumps(\n                row,\n                sort_keys=True,\n                separators=(\",\", \":\"),\n                allow_nan=False,\n            )",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Explicit stdlib-only separate-process observer contract in module docstring and arming-pipe CLI. No package footprint may be introduced; append compact strict ASCII JSONL and exclusive indent-2 strict ASCII error JSON preserve LF, permissions, no-follow and no-overwrite. Historical collector is archived, not evidence of a current qualified deployment.",
+      "witnesses": [
+        "tools/dspark_memavailable_sampler.py module stdlib-only process/arming contract"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_sampler_append_and_error_bytes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_sampler_refuses_unsafe_ledger_and_unarmed_start"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dspark_memavailable_sampler.py::_record_error@130:16",
+      "id": "sorted-json:tools/dspark_memavailable_sampler.py::_record_error@130:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56cd115d2c8a3804c9552fc56e67171e87b2b2cf",
+      "file": "tools/dspark_memavailable_sampler.py",
+      "scope": "_record_error",
+      "callee": "json.dumps",
+      "line": 130,
+      "column": 16,
+      "syntax_sha256": "c8ef88563d557a4cf0838f42c3d30f5b75a71de47a94c935d0cdd4f988872b91",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/dspark_memavailable_sampler.py::_record_error",
+      "recipe": "json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Explicit stdlib-only separate-process observer contract in module docstring and arming-pipe CLI. No package footprint may be introduced; append compact strict ASCII JSONL and exclusive indent-2 strict ASCII error JSON preserve LF, permissions, no-follow and no-overwrite. Historical collector is archived, not evidence of a current qualified deployment.",
+      "witnesses": [
+        "tools/dspark_memavailable_sampler.py module stdlib-only process/arming contract"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_sampler_append_and_error_bytes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_sampler_refuses_unsafe_ledger_and_unarmed_start"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/duplication_inventory.py::main@283:28",
+      "id": "sorted-json:tools/duplication_inventory.py::main@283:28",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c5d24bb9f304add2d958668487b61b552a00ec11",
+      "file": "tools/duplication_inventory.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 283,
+      "column": 28,
+      "syntax_sha256": "353eb5fa0104ba90aaa44ed4908fecd4606f1232d682cabceaa051fa355ab98b",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "protected-scanner",
+      "owner_route": "retained:tools/duplication_inventory.py::main",
+      "recipe": "json.dumps(live, indent=1, sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Explicitly protected scanner including its two calls; independent BLAKE2b-8 shingles interpreted big-endian, and sorted indent-1 baseline JSON publication. No scanner/default/exclusion/population/owner change authorized.",
+      "witnesses": [
+        "Assigned Agreement S: scanner byte-for-byte protection",
+        "tools/duplication_inventory.py::_shingles",
+        "tools/duplication_inventory.py::main"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_duplication_inventory_reference_shingles_and_baseline_write"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/full_kl_teacher_payload.py::atomic_json_write@1097:11",
+      "id": "sorted-json:tools/full_kl_teacher_payload.py::atomic_json_write@1097:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a9e758e54cad4e1a27514f83df590f25d9f48954",
+      "file": "tools/full_kl_teacher_payload.py",
+      "scope": "atomic_json_write",
+      "callee": "json.dumps",
+      "line": 1097,
+      "column": 11,
+      "syntax_sha256": "92c74f200fd72b6c23fff79341555750738ddc27c69f59785c41103f5da79006",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/full_kl_teacher_payload.py::atomic_json_write",
+      "recipe": "json.dumps(\n        payload, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned producer source; tensor descriptor retains dtype/shape and raw contiguous bytes. Publication is strict Unicode indent-2 JSON plus LF via temporary sibling and replace, NOT canonical identity JSON.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_dsv4_tensor_and_payload_tensor_descriptors",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_payload_atomic_json_publication_and_refusals",
+        "tests/test_streamed_gold_companion.py::test_payload_roundtrip_and_v1_exact_semantic_projection"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/gold_engine_options.py::headless_peer_argv@281:25",
+      "id": "sorted-json:tools/gold_engine_options.py::headless_peer_argv@281:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7b70e98f5e55440a46dd1b19588ababff2e8013a",
+      "file": "tools/gold_engine_options.py",
+      "scope": "headless_peer_argv",
+      "callee": "json.dumps",
+      "line": 281,
+      "column": 25,
+      "syntax_sha256": "c1fe6236ca9e81404a4041cec4c7e92b741fa8ddb52fb2ef0032c8f07dff4618",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/gold_engine_options.py::headless_peer_argv",
+      "recipe": "json.dumps(value, separators=(\",\", \":\"), sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned vLLM producer source; compact ASCII/lax sorted JSON is argv syntax for dictionary-valued engine kwargs, not an identity encoder. Preserve parser roundtrip.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_gold_engine_options.py"
+      ],
+      "tests": [
+        "tests/test_gold_engine_options.py::test_peer_argv_is_derived_from_the_coordinators_own_engine_kwargs",
+        "tests/test_gold_engine_options.py::test_peer_argv_round_trips_to_the_coordinators_engine_kwargs"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/measure_served_gold.py::_canonical_sha256@116:26",
+      "id": "sorted-json:tools/measure_served_gold.py::_canonical_sha256@116:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_canonical_sha256",
+      "callee": "json.dumps",
+      "line": 116,
+      "column": 26,
+      "syntax_sha256": "6bbcb33487c002781c0fc32e564904842093751feed04e4f663446a8bcf9eedd",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_canonical_sha256",
+      "recipe": "json.dumps(\n        payload, sort_keys=True, separators=(\",\", \":\"), allow_nan=False,\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@135:29",
+      "id": "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::_build_payload@135:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "_build_payload",
+      "callee": "json.dumps",
+      "line": 135,
+      "column": 29,
+      "syntax_sha256": "aa4cb3cea69c7f2f9af655dcf21b9990e6d4380285d30ff15782d8ef6655c0c8",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::_build_payload",
+      "recipe": "json.dumps(\n        ppl_ids,\n        sort_keys=True,\n        separators=(\",\", \":\"),\n        ensure_ascii=False,\n        allow_nan=False,\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::main@211:10",
+      "id": "sorted-json:tools/prepare_dsv4_wikitext_inputs.py::main@211:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "055fc7dc8137aba889f2193d8c06589486cfc706",
+      "file": "tools/prepare_dsv4_wikitext_inputs.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 211,
+      "column": 10,
+      "syntax_sha256": "f83e192912be9dd62372f9b2fbef74ee502b97ddd934d7c520969ae1869689e8",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/prepare_dsv4_wikitext_inputs.py::main",
+      "recipe": "json.dumps({\n        \"output\": str(output.resolve()),\n        \"sha256\": hashlib.sha256(output.read_bytes()).hexdigest(),\n        \"schema\": payload[\"schema\"],\n        \"semantic_sha256\": payload[\"semantic_sha256\"],\n        \"full_kl_token_ids_tensor_sha256\": (\n            payload[\"full_kl\"][\"token_ids_tensor_sha256\"]\n        ),\n        \"ppl_token_ids_sha256\": payload[\"ppl\"][\"token_ids_sha256\"],\n    }, indent=2, sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned common producer source; exact joined Unicode corpus, int64 contiguous tensor bytes, compact strict Unicode token-list JSON and original config/output bytes remain separately bound. Do not substitute comma-token recipe.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_corpus_descriptor_hashes_exact_joined_utf8",
+        "tests/test_model_wikitext_inputs.py::test_model_v2_explicit_materialization_accepts_model_tokenizer",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_prepare_main_publishes_file_digest_descriptor"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prismaquant_runtime_snapshot.py::_closure_sha256@160:14",
+      "id": "sorted-json:tools/prismaquant_runtime_snapshot.py::_closure_sha256@160:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+      "file": "tools/prismaquant_runtime_snapshot.py",
+      "scope": "_closure_sha256",
+      "callee": "json.dumps",
+      "line": 160,
+      "column": 14,
+      "syntax_sha256": "009b7a7871cbdfa104770e46381a1da46bb14be7b254e4d6525d405adedf3e53",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/prismaquant_runtime_snapshot.py::_closure_sha256",
+      "recipe": "json.dumps(\n        list(entries),\n        sort_keys=True,\n        separators=(\",\", \":\"),\n        ensure_ascii=True,\n        allow_nan=False,\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Existing single-public-file supported layout tested without package; Git committed byte closure excludes unrelated worktree content. Strict ASCII compact closure JSON, indent-2 manifest plus LF and spaced stdout are distinct; preserve modes, materialization and mutation refusals.",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_runtime_snapshot_materializes_exact_closure_and_refuses_changes",
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prismaquant_runtime_snapshot.py::main@476:10",
+      "id": "sorted-json:tools/prismaquant_runtime_snapshot.py::main@476:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+      "file": "tools/prismaquant_runtime_snapshot.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 476,
+      "column": 10,
+      "syntax_sha256": "314633cd9ad687d54320d109608f20e4218dee9c834504089fec1bd21f50ef0b",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/prismaquant_runtime_snapshot.py::main",
+      "recipe": "json.dumps(payload, sort_keys=True, allow_nan=False)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Existing single-public-file supported layout tested without package; Git committed byte closure excludes unrelated worktree content. Strict ASCII compact closure JSON, indent-2 manifest plus LF and spaced stdout are distinct; preserve modes, materialization and mutation refusals.",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_runtime_snapshot_materializes_exact_closure_and_refuses_changes",
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prismaquant_runtime_snapshot.py::materialize_snapshot@327:16",
+      "id": "sorted-json:tools/prismaquant_runtime_snapshot.py::materialize_snapshot@327:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1c4d709cfd018db9939d96e1780d7e8d5cc5a776",
+      "file": "tools/prismaquant_runtime_snapshot.py",
+      "scope": "materialize_snapshot",
+      "callee": "json.dumps",
+      "line": 327,
+      "column": 16,
+      "syntax_sha256": "4b9cdea912735bc45419ea0f1ef4d2c6c4a11cca6a0a98bd2340f480c036776d",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/prismaquant_runtime_snapshot.py::materialize_snapshot",
+      "recipe": "json.dumps(payload, sort_keys=True, indent=2, allow_nan=False)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Existing single-public-file supported layout tested without package; Git committed byte closure excludes unrelated worktree content. Strict ASCII compact closure JSON, indent-2 manifest plus LF and spaced stdout are distinct; preserve modes, materialization and mutation refusals.",
+      "witnesses": [
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_runtime_snapshot_materializes_exact_closure_and_refuses_changes",
+        "tests/test_stdlib_tools_no_package_1605.py::test_snapshot_manifest_loader_runs_without_the_package"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/serve_fingerprint.py::_canonical_sha256@764:16",
+      "id": "sorted-json:tools/serve_fingerprint.py::_canonical_sha256@764:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_canonical_sha256",
+      "callee": "json.dumps",
+      "line": 764,
+      "column": 16,
+      "syntax_sha256": "6bbcb33487c002781c0fc32e564904842093751feed04e4f663446a8bcf9eedd",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_canonical_sha256",
+      "recipe": "json.dumps(\n        payload, sort_keys=True, separators=(\",\", \":\"), allow_nan=False\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/serve_fingerprint.py::artifact_binding@1712:16",
+      "id": "sorted-json:tools/serve_fingerprint.py::artifact_binding@1712:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "artifact_binding",
+      "callee": "json.dumps",
+      "line": 1712,
+      "column": 16,
+      "syntax_sha256": "7961258476b65cc75de326126567ef99803fe87c35546222fec4b032eef56822",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::artifact_binding",
+      "recipe": "json.dumps(\n        inventory, sort_keys=True, separators=(\",\", \":\"), allow_nan=False\n    ).encode(\"utf-8\")",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_artifact_binding_strict_inventory_hash"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/serve_fingerprint.py::fingerprint@2315:16",
+      "id": "sorted-json:tools/serve_fingerprint.py::fingerprint@2315:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "fingerprint",
+      "callee": "json.dumps",
+      "line": 2315,
+      "column": 16,
+      "syntax_sha256": "befa903d5c85d29a86eb0a61bd7ccef04e7a8fae7b7f667c7d5adf7bcab8f197",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::fingerprint",
+      "recipe": "json.dumps(payload, sort_keys=True, separators=(\",\", \":\"),\n                           default=str)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/serve_fingerprint.py::server_environment_snapshot@823:8",
+      "id": "sorted-json:tools/serve_fingerprint.py::server_environment_snapshot@823:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "server_environment_snapshot",
+      "callee": "json.dumps",
+      "line": 823,
+      "column": 8,
+      "syntax_sha256": "209494a0f1b6fc97ecd6244b169c527fe2dfb56af39743f7fc61712507b58b1c",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::server_environment_snapshot",
+      "recipe": "json.dumps(row[\"values\"], sort_keys=True, separators=(\",\", \":\"))",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/tessera_fleet/model_worker.py::atomic_json@62:29",
+      "id": "sorted-json:tools/tessera_fleet/model_worker.py::atomic_json@62:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+      "file": "tools/tessera_fleet/model_worker.py",
+      "scope": "atomic_json",
+      "callee": "json.dumps",
+      "line": 62,
+      "column": 29,
+      "syntax_sha256": "5996ffb729a768f02544355d6eb1110854c6cff31eb48f9d3f48e14f50ecd948",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/tessera_fleet/model_worker.py::atomic_json",
+      "recipe": "json.dumps(value, sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "dispatch_model.stage_checkout copies worker alone to workspace/worker.py and invokes python3 worker.py. Keep 8-MiB reads, compact sorted ASCII/lax JSON identity, spaced sorted ASCII/lax atomic publication plus LF and main stdout; no digest owner staged.",
+      "witnesses": [
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_hashing_recipes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_atomic_json_publication_and_failure",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_output_verification"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/tessera_fleet/model_worker.py::digest_json@50:26",
+      "id": "sorted-json:tools/tessera_fleet/model_worker.py::digest_json@50:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+      "file": "tools/tessera_fleet/model_worker.py",
+      "scope": "digest_json",
+      "callee": "json.dumps",
+      "line": 50,
+      "column": 26,
+      "syntax_sha256": "09abc8aa34faf81fba519d57c705122b211855fb6dea174b8f2fc306e30c1c9d",
+      "population": "primary",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/tessera_fleet/model_worker.py::digest_json",
+      "recipe": "json.dumps(value, sort_keys=True, separators=(',', ':')).encode()",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "dispatch_model.stage_checkout copies worker alone to workspace/worker.py and invokes python3 worker.py. Keep 8-MiB reads, compact sorted ASCII/lax JSON identity, spaced sorted ASCII/lax atomic publication plus LF and main stdout; no digest owner staged.",
+      "witnesses": [
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_hashing_recipes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_atomic_json_publication_and_failure",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_output_verification"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/tessera_fleet/model_worker.py::main@291:26",
+      "id": "sorted-json:tools/tessera_fleet/model_worker.py::main@291:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "76984a737b7424620a3b1cb917a14acaa2f2fffb",
+      "file": "tools/tessera_fleet/model_worker.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 291,
+      "column": 26,
+      "syntax_sha256": "6b2fdb3ef61493e32862bdaa3ac5b352472272919b980daa7674f1ead10e06c3",
+      "population": "primary",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "standalone-deployment",
+      "owner_route": "retained:tools/tessera_fleet/model_worker.py::main",
+      "recipe": "json.dumps(result, sort_keys=True)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "dispatch_model.stage_checkout copies worker alone to workspace/worker.py and invokes python3 worker.py. Keep 8-MiB reads, compact sorted ASCII/lax JSON identity, spaced sorted ASCII/lax atomic publication plus LF and main stdout; no digest owner staged.",
+      "witnesses": [
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_hashing_recipes",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_atomic_json_publication_and_failure",
+        "tests/test_digest_1301/standalone-gold/test_isolated_operations.py::test_staged_worker_output_verification"
+      ]
+    }
+  ],
+  "supplemental_calls": [
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_cmd_dump@414:30",
+      "id": "supplemental-json:tools/measure_served_gold.py::_cmd_dump@414:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_cmd_dump",
+      "callee": "json.dumps",
+      "line": 414,
+      "column": 30,
+      "syntax_sha256": "2bb9784322a16df56fbdb76f2ea2c6d02f23519abe0f97f8b0b2903b614e22f5",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_cmd_dump",
+      "recipe": "json.dumps(payload)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_cmd_kl@566:30",
+      "id": "supplemental-json:tools/measure_served_gold.py::_cmd_kl@566:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_cmd_kl",
+      "callee": "json.dumps",
+      "line": 566,
+      "column": 30,
+      "syntax_sha256": "51010137aefee986df1e8c285638691808c2b1b63433eed6f423a53e47843fcf",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_cmd_kl",
+      "recipe": "json.dumps(record, indent=2)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_cmd_kl@567:10",
+      "id": "supplemental-json:tools/measure_served_gold.py::_cmd_kl@567:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_cmd_kl",
+      "callee": "json.dumps",
+      "line": 567,
+      "column": 10,
+      "syntax_sha256": "6300e710ae5e95dc45e7749b26579c74eebff587520df9aab43063c9a5c164f1",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_cmd_kl",
+      "recipe": "json.dumps({\n        key: record[key] for key in (\n            \"n_positions\", \"n_confident\", \"kl_mean\", \"kl_confident_mean\",\n            \"top1_agreement_confident\", \"topk_coverage_mean\",\n            \"topk_coverage_min\",\n        )\n    }, indent=2)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@640:30",
+      "id": "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@640:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_cmd_ppl",
+      "callee": "json.dumps",
+      "line": 640,
+      "column": 30,
+      "syntax_sha256": "51010137aefee986df1e8c285638691808c2b1b63433eed6f423a53e47843fcf",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_cmd_ppl",
+      "recipe": "json.dumps(record, indent=2)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@641:10",
+      "id": "supplemental-json:tools/measure_served_gold.py::_cmd_ppl@641:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_cmd_ppl",
+      "callee": "json.dumps",
+      "line": 641,
+      "column": 10,
+      "syntax_sha256": "a9bc1f8608ee2a5c6728156ca866e0f4ac4410bc70859ceed02f03cf27b9a6ae",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_cmd_ppl",
+      "recipe": "json.dumps({\n        key: record[key]\n        for key in (\"n_tokens_scored\", \"n_samples\", \"mean_nll\", \"ppl\",\n                    \"max_chunk_mean_nll\")\n    }, indent=2)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_served_gold.py::_post_completion@330:42",
+      "id": "supplemental-json:tools/measure_served_gold.py::_post_completion@330:42",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c686e18331320610a1d7aedb97b6f4082780a11",
+      "file": "tools/measure_served_gold.py",
+      "scope": "_post_completion",
+      "callee": "json.dumps",
+      "line": 330,
+      "column": 42,
+      "syntax_sha256": "ac061a80dc0bfc65d691f9bc9f643c2e7868aeec109f32a4625c1bf31c9a8165",
+      "population": "supplemental-json",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_served_gold.py::_post_completion",
+      "recipe": "json.dumps(response)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned served-gold producer source; canonical identity is compact sorted ASCII/strict; calibration hash feeds comma-joined decimal IDs (no LF); raw teacher dump bytes, HTTP fallback and indent-2 reports remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_measure_served_gold.py",
+        "tests/test_served_gold_position_population_audit.py",
+        "tests/test_served_gold_ppl_positions_audit.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_measure_served_gold.py::test_a_record_carries_every_field_the_ship_slot_binds",
+        "tests/test_served_gold_position_population_audit.py::test_full_window_dumps_reach_actual_zero_kl_on_identical_distributions",
+        "tests/test_served_gold_ppl_positions_audit.py::test_ppl_accepts_first_null_and_scores_every_other_actual_token"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_vllm_full_kl.py::_strict_json_text@79:15",
+      "id": "supplemental-json:tools/measure_vllm_full_kl.py::_strict_json_text@79:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+      "file": "tools/measure_vllm_full_kl.py",
+      "scope": "_strict_json_text",
+      "callee": "json.dumps",
+      "line": 79,
+      "column": 15,
+      "syntax_sha256": "22f6d98107d2ae12cb4bc350844f0efbecd0121b89bc811ebd74706a1b283776",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_full_kl.py::_strict_json_text",
+      "recipe": "json.dumps(value, indent=2, allow_nan=False)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned full-KL producer source; raw file bytes and joined UTF-8 corpus text are separate identities. Strict indent-2 text and strict default-spaced report bytes are publication, not semantic canonicalization.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_streamed_gold_companion.py::test_v2_student_final_uses_companion_and_keeps_evidence"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_vllm_full_kl.py::_student@724:46",
+      "id": "supplemental-json:tools/measure_vllm_full_kl.py::_student@724:46",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+      "file": "tools/measure_vllm_full_kl.py",
+      "scope": "_student",
+      "callee": "json.dumps",
+      "line": 724,
+      "column": 46,
+      "syntax_sha256": "8c4f61d35f82a3f00ae89e4641ceabf52eacc59a58df71b558cfc6d44ae5c482",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_full_kl.py::_student",
+      "recipe": "json.dumps(report, allow_nan=False).encode()",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned full-KL producer source; raw file bytes and joined UTF-8 corpus text are separate identities. Strict indent-2 text and strict default-spaced report bytes are publication, not semantic canonicalization.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_streamed_gold_companion.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_streamed_gold_companion.py::test_v2_student_final_uses_companion_and_keeps_evidence"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_vllm_wikitext_ppl.py::_strict_json@82:11",
+      "id": "supplemental-json:tools/measure_vllm_wikitext_ppl.py::_strict_json@82:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3e2c8c2dcbaed200cc0aefacc3c68b11640f6ca5",
+      "file": "tools/measure_vllm_wikitext_ppl.py",
+      "scope": "_strict_json",
+      "callee": "json.dumps",
+      "line": 82,
+      "column": 11,
+      "syntax_sha256": "22f6d98107d2ae12cb4bc350844f0efbecd0121b89bc811ebd74706a1b283776",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_wikitext_ppl.py::_strict_json",
+      "recipe": "json.dumps(value, indent=2, allow_nan=False)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned PPL producer source; raw file SHA and joined UTF-8 corpus SHA preserve file:sha256 labels and descriptors. Strict pretty text and default-spaced report bytes remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_model_wikitext_inputs.py::test_v2_ppl_routes_bound_inputs_without_tokenizer"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_vllm_wikitext_ppl.py::main@519:35",
+      "id": "supplemental-json:tools/measure_vllm_wikitext_ppl.py::main@519:35",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3e2c8c2dcbaed200cc0aefacc3c68b11640f6ca5",
+      "file": "tools/measure_vllm_wikitext_ppl.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "line": 519,
+      "column": 35,
+      "syntax_sha256": "8c4f61d35f82a3f00ae89e4641ceabf52eacc59a58df71b558cfc6d44ae5c482",
+      "population": "supplemental-json",
+      "classification": "load-bearing",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/measure_vllm_wikitext_ppl.py::main",
+      "recipe": "json.dumps(report, allow_nan=False).encode()",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Versioned PPL producer source; raw file SHA and joined UTF-8 corpus SHA preserve file:sha256 labels and descriptors. Strict pretty text and default-spaced report bytes remain separate.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_model_wikitext_inputs.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_gold_hash_leaves_and_strict_print_recipes",
+        "tests/test_model_wikitext_inputs.py::test_v2_ppl_routes_bound_inputs_without_tokenizer"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/serve_fingerprint.py::_cmd_show@2475:10",
+      "id": "supplemental-json:tools/serve_fingerprint.py::_cmd_show@2475:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_cmd_show",
+      "callee": "json.dumps",
+      "line": 2475,
+      "column": 10,
+      "syntax_sha256": "a00a0ff0669181d3eaf4114b51fc3f9dc89e3b892c7cb5d3c97d2ec93de96293",
+      "population": "supplemental-json",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_cmd_show",
+      "recipe": "json.dumps(manifest, indent=2, default=str)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_publication_default_str"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/serve_fingerprint.py::_cmd_write@2461:19",
+      "id": "supplemental-json:tools/serve_fingerprint.py::_cmd_write@2461:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c75cccc3f9d2f3af17eb2195389a58f4e598d0ad",
+      "file": "tools/serve_fingerprint.py",
+      "scope": "_cmd_write",
+      "callee": "json.dumps",
+      "line": 2461,
+      "column": 19,
+      "syntax_sha256": "a00a0ff0669181d3eaf4114b51fc3f9dc89e3b892c7cb5d3c97d2ec93de96293",
+      "population": "supplemental-json",
+      "classification": "ephemeral",
+      "disposition": "retained",
+      "retention_kind": "source-bound-producer",
+      "owner_route": "retained:tools/serve_fingerprint.py::_cmd_write",
+      "recipe": "json.dumps(manifest, indent=2, default=str)",
+      "result_contract": "native JSON text; caller UTF-8/LF/publication framing unchanged",
+      "consumer_evidence": "Current common producer source plus independently staged single-file/pin deployment; strict ASCII canonical records and lax ASCII default=str stack fingerprint are distinct. File identities count bytes in the same pass. artifact_binding already imports package within its branch, but editing it still changes the whole file in the current producer roster; this is not a claim that its branch lacks a package.",
+      "witnesses": [
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_COMMON_FILES",
+        "tools/serve_fingerprint.py::_GOLD_PRODUCER_TOOL_FILES",
+        "tools/serve_fingerprint.py::gold_producer_identity"
+      ],
+      "fixtures": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py",
+        "tests/test_serve_fingerprint_descendants.py",
+        "tests/test_stdlib_tools_no_package_1605.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_fingerprint_wire_recipe_and_exclusions",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_current_producer_roster_binds_source_and_supplemental_json",
+        "tests/test_stdlib_tools_no_package_1605.py::test_models_endpoint_loader_runs_without_the_package",
+        "tests/test_serve_fingerprint_descendants.py::test_an_unset_fabric_projects_exactly_as_before_the_fabric_names_joined",
+        "tests/test_digest_1301/standalone-gold/test_gold_contracts.py::test_serve_publication_default_str"
+      ]
+    }
+  ],
+  "completed_calls": [],
+  "audit_boundaries": [
+    {
+      "population": "digest validators",
+      "members": [
+        "tools/serve_fingerprint.py::_decode_record_sha256"
+      ],
+      "boundary": "digest_size query remains in primary scanner population; validation is not an additional identity."
+    },
+    {
+      "population": "incremental algorithms",
+      "members": [
+        "tools/serve_fingerprint.py::_file_identity",
+        "tools/prismaquant_runtime_snapshot.py::_file_sha256",
+        "tools/measure_served_gold.py::_sha256_file",
+        "tools/tessera_fleet/model_worker.py::digest_file"
+      ],
+      "boundary": "Constructors included in primary calls; update/hexdigest operations not additional primary calls. Read windows/counting/descriptor ownership remain local."
+    },
+    {
+      "population": "aliases/dynamic options",
+      "members": [],
+      "boundary": "Exact scanner lexical aliases reused. Source inspected for JSON constructors/dump calls; no additional dynamic sort_keys, json.dump or JSONEncoder in these 13 files. No proof of arbitrary runtime alias resolution."
+    },
+    {
+      "population": "remote/generated",
+      "members": [
+        "tools/gold_engine_options.py::headless_peer_argv",
+        "tools/tessera_fleet/dispatch_model.py::stage_checkout",
+        "tools/serve_fingerprint.py process/proc and models endpoint observations"
+      ],
+      "boundary": "Argv/remote worker records are tested using local CPU adapters, not remote engines. Generated worker.py is the exact copied model_worker.py, not another syntactic source member. External HTTP/vLLM/CUDA payloads not exhaustively enumerated."
+    },
+    {
+      "population": "shell/deployment",
+      "members": [
+        "scripts/lib/serve_manifest.sh",
+        "tools/prismaquant_source_bootstrap.py",
+        "tools/prismaquant_runtime_snapshot.py"
+      ],
+      "boundary": "Current fingerprint single-file-plus-pin witness and current producer roster inspected; not a repository-wide shell/generated code census. No roster expansion or pin edits."
+    },
+    {
+      "population": "producer roster limitation",
+      "members": [
+        "prismaquant/digests.py",
+        "prismaquant/tokenizer_identity.py",
+        "prismaquant/shipcard.py"
+      ],
+      "boundary": "Imported package dependencies are not all individual source_files in the gold tool roster. The roster binds the listed tools, not a proof of exhaustive dependency-byte closure. Shared package closure and pins remain outside this slice; no roster expansion authorized."
+    }
+  ],
+  "fixture_independence": "Fixtures fields refer to executable consumer tests containing literal original wire outcomes, independent stdlib hash references or original operation adapters. They do not designate the frozen call registry as an oracle, and no expected result is generated by a replacement owner."
+}
