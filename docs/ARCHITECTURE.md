@@ -10087,7 +10087,11 @@ when enumeration succeeds: it neither invokes an independent MTP winner nor
 writes the ordinary main layer-config, selection-request or attribution
 outputs. Empty admitted menus, no choices under the MTP budget, and no bodies
 under the artifact cap refuse; the last case leaves a rejection manifest.
-PACT shape-time search is unsupported. Body/MTP source overlap, duplicate
+PACT shape-time search (`--pact-shape-table`) and measured-runtime sweeps
+(including `prefill_frontier`) are unsupported with Option B and refuse during
+argument validation, before input loading, source partitioning or either
+runtime-search branch can publish a frontier. Run candidate enumeration and
+runtime-frontier searches separately. Body/MTP source overlap, duplicate
 source aliases, excluded MTP source prefixes, missing or inconsistent bound
 wires/receipts and ineligible menu rows retain the existing fail-closed gates.
 Enumeration and CPU accounting tests are **not** release selection, quality

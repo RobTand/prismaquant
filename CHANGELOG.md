@@ -9,7 +9,9 @@
   whole-artifact accounting without selecting a release winner. Consume the
   #2633 solved-target writer interface so candidate configs retain both their
   actual solve target and original CLI provenance. Document the implementation
-  and reproducible CPU fixture commands in `docs/ARCHITECTURE.md`.
+  and reproducible CPU fixture commands in `docs/ARCHITECTURE.md`. Reject
+  incompatible PACT searches and measured-runtime sweeps during argument
+  validation, before their early-return branches can publish a frontier.
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
   Bounded local reads retain digest-valid symlink behavior, independent of memo state.

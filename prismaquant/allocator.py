@@ -1065,7 +1065,6 @@ class _MtpOptionBContext:
     rung_allowability: object
     target_profile: object
     serving_constraints_active: bool
-    pact_pricing: object
     artifact_for_target: Callable
     menu_floor_target_bits: Callable
     fits_bytes: Callable
@@ -1234,11 +1233,6 @@ def _run_mtp_option_b(ctx: _MtpOptionBContext) -> dict:
     args = ctx.args
     budget_bytes = ctx.budget_bytes
     overhead_reserve_bytes = ctx.overhead_reserve_bytes
-    if ctx.pact_pricing is not None:
-        raise SystemExit(
-            "[alloc] ERROR: --mtp-option-b-dir is not supported with PACT "
-            "shape-time search: the candidate body objective is the "
-            "byte-budget ratchet, not the runtime hull")
     try:
         _mtp = _load_mtp_inputs(
             args, serving_target=ctx.serving_target, profile=ctx.profile,
@@ -2920,6 +2914,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "cap it is measured from"
         )
     if getattr(args, "mtp_option_b_dir", None) is not None:
+        # Runtime-search modes return before the byte-budget candidate runner.
+        # Refuse here, before loading inputs or suppressing independent MTP
+        # rebasing, rather than silently publishing a different computation.
+        if args.pact_shape_table is not None:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir is not supported with PACT "
+                "shape-time search: the candidate body objective is the "
+                "byte-budget ratchet, not the runtime hull")
+        if measured_runtime_sweep is not None:
+            raise SystemExit(
+                "[alloc] ERROR: --mtp-option-b-dir is not supported with a "
+                "measured-runtime sweep: enumerate candidates separately "
+                "from the runtime frontier")
         if args.mtp_joint_cost is None:
             raise SystemExit(
                 "[alloc] ERROR: --mtp-option-b-dir enumerates declared MTP choices "
@@ -6269,7 +6276,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 serving_target=tessera_serving_target, profile=model_profile,
                 rung_allowability=rung_allowability, target_profile=target_profile,
                 serving_constraints_active=serving_constraints_active,
-                pact_pricing=pact_pricing,
                 artifact_for_target=_artifact_for_target,
                 menu_floor_target_bits=_menu_floor_target_bits,
                 fits_bytes=_fits_bytes, fits=_fits, beats=_beats,
