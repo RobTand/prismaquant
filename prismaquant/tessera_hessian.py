@@ -47,7 +47,6 @@ objective prices an artifact the export does not ship (principle 8).
 """
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Mapping, Sequence
 
 from .digests import text_sha256hex
@@ -109,12 +108,9 @@ def token_ids_sha256(batches: Sequence) -> str:
     Both travel, because the reverse is also true -- one tokenizer over two
     corpora can collide on neither.
     """
-    import torch
+    from .tensor_digests import token_ids_int32_sha256
 
-    digest = hashlib.sha256()
-    for batch in batches:
-        digest.update(batch.to(dtype=torch.int32).cpu().numpy().tobytes())
-    return digest.hexdigest()
+    return token_ids_int32_sha256(batches)
 
 
 def calibration_identity(text: str, batches: Sequence, *, fit_tokens: int,
