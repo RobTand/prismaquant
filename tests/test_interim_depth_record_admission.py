@@ -203,6 +203,41 @@ def test_interim_authorization_does_not_authorize_replacement_measurements():
         _price(payload, policy, EARLY[0])
 
 
+@pytest.mark.parametrize("field", ["decision_ref", "decided_by", "decided_at"])
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_interim_requires_complete_attributable_decision_provenance(field, value):
+    payload, profile, decision = _interim_smoke_arguments()
+    if value is None:
+        decision.pop(field)
+    else:
+        decision[field] = value
+    # Rehash deliberately: recorded equality cannot replace attribution.
+    profile["authorization_sha256"] = digest(decision)
+    with pytest.raises(ValueError):
+        _interim_policy(payload, profile, decision)
+
+
+@pytest.mark.parametrize("multipliers", [(True, 1.0), (0.0, 1.0), (-1.0, 1.0), (2.0, 2.0)])
+def test_interim_decision_cannot_license_invalid_or_scalar_only_parameters(multipliers):
+    payload, _, _ = _payload()
+    profile, decision = _interim_intake_fixture(payload, multipliers=multipliers)
+    # Both inputs and all digests agree. Neither an invalid numeric value nor
+    # a global gain becomes this defect's repair by calling it interim-flat.
+    with pytest.raises(ValueError):
+        _interim_policy(payload, profile, decision)
+
+
+def test_interim_authorization_does_not_promote_research_parameters_to_qualified():
+    payload, _, _ = _payload()
+    profile, decision = _interim_intake_fixture(payload)
+    research = _record(payload, multipliers=(0.25, 1.0))
+    research["authorization_sha256"] = profile["authorization_sha256"]
+    # Authorization is a distinct state, not an alternative to qualification
+    # for a research-calibrated profile that requests production admission.
+    with pytest.raises(ValueError):
+        _interim_policy(payload, research, decision, production=True)
+
+
 def test_interim_authorization_contract_is_documented_without_qualification_claim():
     from pathlib import Path
 
