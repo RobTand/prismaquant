@@ -41,6 +41,11 @@ MANIFEST_SOURCE_BLOBS = {
 }
 CURRENT_SOURCE_BLOBS = {
     **MANIFEST_SOURCE_BLOBS,
+    # #2638/#3012: additive token recipe; existing owner profiles unchanged.
+    "prismaquant/tensor_digests.py": (
+        "0777758650869edc365cbf545280250e6fa175f2",
+        "8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a",
+    ),
     "prismaquant/perturbed_x_cache.py": (
         "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
         "4daf929763ce5eefc5c3ed31c0bfaa2489e29b3cf7827b5ecf17fd82b9bfdfbf",

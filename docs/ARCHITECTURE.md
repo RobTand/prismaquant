@@ -9928,6 +9928,17 @@ checked against the pre-change functions on a GB10 through PB action
 remains as historical evidence. No default, stage, format, lane, gate or byte
 changes.
 
+Token-owner integration (#2638/#3012) adds exactly one recipe to that owner:
+`token_ids_int32_sha256`, caller-ordered per-batch int32 bytes without shape/dtype
+headers or delimiters. The owner now also imports hashlib.
+`tessera_hessian.token_ids_sha256` delegates once with the original batches
+object; sampling and existing digest values are unchanged. Stage A's payload
+feed, both production-cache identities and export capture remain local
+retentions, not additional owner recipes. See
+[audit](audits/tensor_digest_token_2638_integration.md) for current-source
+admission, qualification and the one-site primitive-baseline reduction; the
+census remains historical.
+
 Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
 anchors that survive a kill** (PQ #1403, P2).
 

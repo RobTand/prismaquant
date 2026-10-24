@@ -36,7 +36,6 @@
   "hashlib:prismaquant/tessera_calibration_cache.py::sha256",
   "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob",
   "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
-  "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
   "hashlib:prismaquant/tessera_sampled_stack_proposal.py::_read_bound",
   "hashlib:prismaquant/tessera_sampled_stack_proposal.py::propose_from_bound_inputs",
   "hashlib:prismaquant/validation_harness.py::_compute_metrics",
