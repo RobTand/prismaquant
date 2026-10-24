@@ -1,0 +1,349 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "purpose": "Small verbatim original stdlib calls, verified against frozen registry AST hashes and original Git blobs. No owner-derived expected bytes. Native dump calls are retained when present; tests explicitly adapt only the operation/stream for missing companion APIs, never JSON options.",
+  "recipes": [
+    {
+      "profile": "DIRECT_ASCII_INDENT1_LAX",
+      "source": {
+        "id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+        "file": "tools/band_serial_handoff_live_pair.py",
+        "scope": "prepare",
+        "callee": "json.dumps",
+        "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+        "syntax_sha256": "ab0dae157f70c054116cc785fa47cf791fa66976c9b1449b5f253136fae171b7",
+        "expression": "json.dumps(pair, sort_keys=True, indent=1)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_INDENT1_STRICT",
+      "source": {
+        "id": "sorted-json:prismaquant/native_receipt_table.py::emit_native_receipt_table@710:19",
+        "file": "prismaquant/native_receipt_table.py",
+        "scope": "emit_native_receipt_table",
+        "callee": "json.dumps",
+        "source_blob": "cc709b7141f3f3508f0e985858c5c8299dac2cfb",
+        "syntax_sha256": "a0282b5607c7de39e20f9936cacfdefacb50e4793f1c0a54582b2bc5fcb409d6",
+        "expression": "json.dumps(table, indent=1, sort_keys=True, allow_nan=False)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_INDENT2_STRICT",
+      "source": {
+        "id": "sorted-json:prismaquant/streamed_boundary_artifacts.py::StreamedBoundaryArtifacts._publish_status@881:13",
+        "file": "prismaquant/streamed_boundary_artifacts.py",
+        "scope": "StreamedBoundaryArtifacts._publish_status",
+        "callee": "json.dumps",
+        "source_blob": "e31369f4fba6110070b19a994c0d3506980e765c",
+        "syntax_sha256": "d6c282d2a878f31999c61c87fbce40cd0fb5b0ab8aaca4cdc6a8a27fc9384558",
+        "expression": "json.dumps(data, sort_keys=True, indent=2, allow_nan=False)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR",
+      "source": {
+        "id": "sorted-json:tools/check_readset_coverage.py::main@132:11",
+        "file": "tools/check_readset_coverage.py",
+        "scope": "main",
+        "callee": "json.dumps",
+        "source_blob": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+        "syntax_sha256": "caac7feaf92aee031fdaadb13c6e422c9bec2e95e14b46fb6a06ab77586d4b37",
+        "expression": "json.dumps(report, indent=2, sort_keys=True, default=str)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_INDENT2_STRICT_DEFAULT_STR",
+      "source": {
+        "id": "sorted-json:prismaquant/stage_b_workspace_profile.py::write_profile@336:11",
+        "file": "prismaquant/stage_b_workspace_profile.py",
+        "scope": "write_profile",
+        "callee": "json.dumps",
+        "source_blob": "985b9f0f653e1f24060d5167647d6cbcf95ca831",
+        "syntax_sha256": "aca2bbc4bbf79104120667541029a2ae815b799c679ad378330d1dce6b3e0813",
+        "expression": "json.dumps(profile, sort_keys=True, indent=2, allow_nan=False,\n                      default=str)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_SPACED_STRICT_DEFAULT_STR",
+      "source": {
+        "id": "sorted-json:prismaquant/io_spans.py::IoSpanLog.close@252:24",
+        "file": "prismaquant/io_spans.py",
+        "scope": "IoSpanLog.close",
+        "callee": "json.dumps",
+        "source_blob": "b2c028c05902347da251336d11009a846c5b171a",
+        "syntax_sha256": "5662812b62d6742e6186f1d1443aa54aed73d18e605068dd365fa49ec6917768",
+        "expression": "json.dumps(record, sort_keys=True, allow_nan=False,\n                                   default=str)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_SPACED_LAX_DEFAULT_REPR",
+      "source": {
+        "id": "sorted-json:prismaquant/dev_mode.py::_shown@130:18",
+        "file": "prismaquant/dev_mode.py",
+        "scope": "_shown",
+        "callee": "json.dumps",
+        "source_blob": "1de4f205ed5fdd69ceadcc8716cdf801f9046ca2",
+        "syntax_sha256": "2d2ce5ab9ea43aeef591cf5d8870f20e6fc59e82e9af22ea88c6d134e1edfbc6",
+        "expression": "json.dumps(value, sort_keys=True, default=repr)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_SPACED_STRICT_DEFAULT_REPR",
+      "source": {
+        "id": "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+        "file": "prismaquant/joint_cost_stage_a.py",
+        "scope": "_produced_output_block",
+        "callee": "json.dumps",
+        "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+        "syntax_sha256": "2904b8187e6bbb21a47551b8e713e99b202d3c742cfb399693cb7a490a93b3f0",
+        "expression": "json.dumps(\n            report, sort_keys=True, default=repr, allow_nan=False)"
+      }
+    },
+    {
+      "profile": "DIRECT_ASCII_LAX_DEFAULT_REPR",
+      "source": {
+        "id": "sorted-json:prismaquant/tessera_census_union.py::_json_key@60:11",
+        "file": "prismaquant/tessera_census_union.py",
+        "scope": "_json_key",
+        "callee": "json.dumps",
+        "source_blob": "bb7a129e997f0ef5dcb380600838c3e96358a5aa",
+        "syntax_sha256": "a1d3956f094154f9a286b7df3c37dc9bba0823de2399a46cd58a2b8256c2d2a8",
+        "expression": "json.dumps(value, sort_keys=True, separators=(\",\", \":\"), allow_nan=True, default=repr)"
+      }
+    },
+    {
+      "profile": "DIRECT_UTF8_SPACED_LAX",
+      "source": {
+        "id": "sorted-json:tools/build_diverse_calibration.py::_json_digest@136:14",
+        "file": "tools/build_diverse_calibration.py",
+        "scope": "_json_digest",
+        "callee": "json.dumps",
+        "source_blob": "55be80fdb931621b0dcecb5bfd144d23691ff55a",
+        "syntax_sha256": "c7b5cb3260b67adf2fca966c5eff79cda94a1ce77a771b61f95fd02f58b51c89",
+        "expression": "json.dumps(value, sort_keys=True, ensure_ascii=False)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_SPACED_LAX",
+      "source": {
+        "id": "supplemental-json:prismaquant/model_walk.py::main@2016:32",
+        "file": "prismaquant/model_walk.py",
+        "scope": "main",
+        "callee": "json.dumps",
+        "source_blob": "12b652dbbf06b27bcfdc6856ea4d7084d1f8f3c5",
+        "syntax_sha256": "5baf345f4f597e928ea48dc410ce61b255b08af53cd3c52973f606c0e947e947",
+        "expression": "json.dumps(r)"
+      },
+      "dump_source": {
+        "id": "supplemental-json:tools/pq_profile_artifact.py::finish_profile_status@40:8",
+        "file": "tools/pq_profile_artifact.py",
+        "scope": "finish_profile_status",
+        "callee": "json.dump",
+        "source_blob": "fceeb6f5e127218598519947649ee8f2b71fc5d9",
+        "syntax_sha256": "cd68f63734d2205ed03bd157cb967ff7d524fff30f27493608d7f0806d76e05f",
+        "expression": "json.dump(record, handle)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_SPACED_STRICT",
+      "source": {
+        "id": "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22",
+        "file": "prismaquant/glm_source_derivative.py",
+        "scope": "normalize_source_derivative",
+        "callee": "json.dumps",
+        "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+        "syntax_sha256": "ad222f8bb2e446d2d1db8ca8d676db7c5a1787dc291e2b7a87eff0fd6fe2483f",
+        "expression": "json.dumps(value, allow_nan=False)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_SPACED_LAX_DEFAULT_STR",
+      "source": {
+        "id": "supplemental-json:tools/pq282_equality/equality_diff.py::report@46:31",
+        "file": "tools/pq282_equality/equality_diff.py",
+        "scope": "report",
+        "callee": "json.dumps",
+        "source_blob": "01ddc233f72ff36370572df4cdb6e1698687848c",
+        "syntax_sha256": "368cf5e1f7d7d7d3a9cd63778b3b29093d7ebd6cd9d66cf0c5f09f458633e2fa",
+        "expression": "json.dumps(left, default=str)"
+      }
+    },
+    {
+      "profile": "INSERTION_UTF8_SPACED_LAX",
+      "source": {
+        "id": "supplemental-json:prismaquant/tessera_census_union.py::manifest_chunks.walk@245:25",
+        "file": "prismaquant/tessera_census_union.py",
+        "scope": "manifest_chunks.walk",
+        "callee": "json.dumps",
+        "source_blob": "bb7a129e997f0ef5dcb380600838c3e96358a5aa",
+        "syntax_sha256": "7cfc638f6415a37209767ae0ba5c298a76317c85e6e218560d71bd3d004df0a7",
+        "expression": "json.dumps(key, ensure_ascii=False)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_LAX",
+      "source": {
+        "id": "supplemental-json:tools/g3job/g3_real_arm_smoke.py::prepare_real_arm_plan@57:21",
+        "file": "tools/g3job/g3_real_arm_smoke.py",
+        "scope": "prepare_real_arm_plan",
+        "callee": "json.dumps",
+        "source_blob": "83f6eaa5a1b684a2126cf3ca6a9bd0c6611eecfe",
+        "syntax_sha256": "c501a519a06778bd65e802b0c838e03c029acade7df17783b85d2e15965f2011",
+        "expression": "json.dumps(plan, separators=(\",\", \":\"))"
+      },
+      "dump_source": {
+        "id": "supplemental-json:tools/g3job/g3_launch.py::<module>@115:8",
+        "file": "tools/g3job/g3_launch.py",
+        "scope": "<module>",
+        "callee": "json.dump",
+        "source_blob": "e30d3f48aec94ec61d8963320bce9fb5ec46ed8c",
+        "syntax_sha256": "82bef9c4ebc352dc539e9570dcfaab20a2867167d3c3dd6beb241891a90e1e07",
+        "expression": "json.dump(launch_read_plan(), stream, separators=(\",\", \":\"))"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_STRICT",
+      "source": {
+        "id": "supplemental-json:prismaquant/joint_aura_rows.py::_ValidatedProbeIdentity.__init__@64:18",
+        "file": "prismaquant/joint_aura_rows.py",
+        "scope": "_ValidatedProbeIdentity.__init__",
+        "callee": "json.dumps",
+        "source_blob": "ebd08e79487bdc8975dbb90b45505f03a816dd4d",
+        "syntax_sha256": "245bd673b56e1d78b06aa31140d1efbbf96a844aa8a94d0919cfbea654e3cab8",
+        "expression": "json.dumps(value, separators=(\",\", \":\"), allow_nan=False)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_LAX_DEFAULT_STR",
+      "source": {
+        "id": "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1710:16",
+        "file": "prismaquant/shipcard.py",
+        "scope": "_publish_shipcard",
+        "callee": "json.dumps",
+        "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+        "syntax_sha256": "99303e0ab89058239026a95506e036cf2716b91d317af9069bee539de649b735",
+        "expression": "json.dumps(card, separators=(\",\", \":\"), default=str)"
+      }
+    },
+    {
+      "profile": "INSERTION_UTF8_LAX",
+      "source": {
+        "id": "supplemental-json:prismaquant/joint_replay_frontier.py::roster_sha256@141:14",
+        "file": "prismaquant/joint_replay_frontier.py",
+        "scope": "roster_sha256",
+        "callee": "json.dumps",
+        "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+        "syntax_sha256": "130ec7999aca8f73d544eddfc43cc7ca3f6de6e28482ee26c627c0739f01092b",
+        "expression": "json.dumps(name, ensure_ascii=False, separators=(\",\", \":\"))"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_INDENT1_LAX",
+      "source": {
+        "id": "supplemental-json:tools/accept_tessera_pin_provisioner.py::main@120:10",
+        "file": "tools/accept_tessera_pin_provisioner.py",
+        "scope": "main",
+        "callee": "json.dumps",
+        "source_blob": "a50ee2f70524df78d76ad029a3dee324d0811b17",
+        "syntax_sha256": "e0f686f1865c34b17454bc11c16179e9a43b9fdb83d53c028ba586a63b0d1ed9",
+        "expression": "json.dumps(out, indent=1)"
+      },
+      "dump_source": {
+        "id": "supplemental-json:tools/staged_read_stream_ab.py::main@235:12",
+        "file": "tools/staged_read_stream_ab.py",
+        "scope": "main",
+        "callee": "json.dump",
+        "source_blob": "6959fa59c745042d8d5873c2a2c56cb1f0b08c74",
+        "syntax_sha256": "946c4b30abebf07106a78ee26b719ae691de42e975fcf1c2610213199d2cbe76",
+        "expression": "json.dump(out, handle, indent=1)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR",
+      "source": {
+        "id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@609:38",
+        "file": "tools/pwc_window_load_bench.py",
+        "scope": "run_ab",
+        "callee": "json.dumps",
+        "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+        "syntax_sha256": "8291b297706a875cb8f882441c16839d9b9ae4103783183806c641d814c617f6",
+        "expression": "json.dumps(summary, indent=1, default=str)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_INDENT2_LAX",
+      "source": {
+        "id": "supplemental-json:prismaquant/validate_assignments_kl.py::main@1805:26",
+        "file": "prismaquant/validate_assignments_kl.py",
+        "scope": "main",
+        "callee": "json.dumps",
+        "source_blob": "d0325eb9b276e10fb19adb7667f25eaf1f6d1641",
+        "syntax_sha256": "1f8d5221e5b8562e7efc8b416d8f5a98d84a146cf677c63965dc1e9e49bd23b2",
+        "expression": "json.dumps(out, indent=2)"
+      },
+      "dump_source": {
+        "id": "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@171:12",
+        "file": "prismaquant/build_rtn_cache.py",
+        "scope": "stage_multimodal",
+        "callee": "json.dump",
+        "source_blob": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+        "syntax_sha256": "a57bdbb3c559330028e780991c7a0ec439a7ced1ecbe44754e1fbe058b4c69bb",
+        "expression": "json.dump(cfg, f, indent=2)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_INDENT2_STRICT",
+      "source": {
+        "id": "supplemental-json:tools/measure_vllm_full_kl.py::_strict_json_text@79:15",
+        "file": "tools/measure_vllm_full_kl.py",
+        "scope": "_strict_json_text",
+        "callee": "json.dumps",
+        "source_blob": "b9a49d98a17312d124b94f59c3097fc55ce04f07",
+        "syntax_sha256": "22f6d98107d2ae12cb4bc350844f0efbecd0121b89bc811ebd74706a1b283776",
+        "expression": "json.dumps(value, indent=2, allow_nan=False)"
+      }
+    },
+    {
+      "profile": "INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR",
+      "source": {
+        "id": "supplemental-json:prismaquant/shipcard.py::_publish_shipcard@1696:15",
+        "file": "prismaquant/shipcard.py",
+        "scope": "_publish_shipcard",
+        "callee": "json.dumps",
+        "source_blob": "bb7bc02b915b0906470f5cc9fdd881d218f361eb",
+        "syntax_sha256": "358ab85741a823962ffdc0ae79e7916066e7debc866ffe856f8791c243a77c81",
+        "expression": "json.dumps(card, indent=2, default=str)"
+      }
+    },
+    {
+      "profile": "INSERTION_UTF8_INDENT2_STRICT",
+      "source": {
+        "id": "supplemental-json:tools/measure_boundary_control.py::main@86:8",
+        "file": "tools/measure_boundary_control.py",
+        "scope": "main",
+        "callee": "json.dump",
+        "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+        "syntax_sha256": "360315bc37cd177de84cf18f2273c78d8963564ff5a452100f904c3d920bf0f3",
+        "expression": "json.dump(before, stream, indent=2, ensure_ascii=False, allow_nan=False)"
+      },
+      "dump_source": {
+        "id": "supplemental-json:tools/measure_boundary_control.py::main@86:8",
+        "file": "tools/measure_boundary_control.py",
+        "scope": "main",
+        "callee": "json.dump",
+        "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+        "syntax_sha256": "360315bc37cd177de84cf18f2273c78d8963564ff5a452100f904c3d920bf0f3",
+        "expression": "json.dump(before, stream, indent=2, ensure_ascii=False, allow_nan=False)"
+      }
+    }
+  ],
+  "custom_fallback_source": {
+    "id": "supplemental-json:prismaquant/task_suite.py::measure_tasks@218:25",
+    "file": "prismaquant/task_suite.py",
+    "scope": "measure_tasks",
+    "callee": "json.dumps",
+    "source_blob": "d1147322ee6d2ef852a68a927509cb17b546f4d6",
+    "syntax_sha256": "995bdd247d045939bb31181bc75973c0e8cdda27d07dfab6fcd07934d3b99f0f",
+    "expression": "json.dumps(raw, default=handle_non_serializable, allow_nan=False)"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schema": "prismaquant.digest-consumer-ledger.v1",
+  "piece": "owner-recipes",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "agreement": "docs/audits/digest_1301/owner-interfaces.json",
+  "completed_calls": [],
+  "retentions": [],
+  "note": "This prerequisite extends only existing owners. No research-base consumer call is replaced, so no consumer completion row is claimed. Independent original-source owner fixtures prove recipe compatibility, not full-consumer publication, acquisition or policy compatibility. Consumer slices must supply their own per-call ledgers and executable consumer tests before closure.",
+  "fixtures": [
+    "tests/fixtures/digest_1301/owner-recipes/json_recipes.json",
+    "tests/fixtures/digest_1301/owner-recipes/byte_recipes.json",
+    "tests/fixtures/digest_1301/owner-recipes/bounded_tensors.json"
+  ],
+  "tests": [
+    "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_fixture_provenance_and_coverage",
+    "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_text_bytes_and_hash",
+    "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_original_dump_trace_and_native_errors",
+    "tests/test_digest_1301/owner-recipes/test_json_recipes.py::test_caller_supplied_custom_fallback",
+    "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_frozen_original_provenance",
+    "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_activation_priority_full_original",
+    "tests/test_digest_1301/owner-recipes/test_byte_recipes.py::test_nvfp4_original_chunks_exact_transcript",
+    "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_frozen_original_provenance",
+    "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_tiny_cpu_records",
+    "tests/test_digest_1301/owner-recipes/test_bounded_tensors.py::test_original_first_error_operation_trace"
+  ],
+  "boundaries": {
+    "retention_authority": "The six guarded/scientific contracts in tests/test_guarded_read_digest_retention_2637.py are not migrated or weakened. Current owner source-pin revalidation is serial integration work, not an owner ledger retention decision.",
+    "generated": "Generated code was not exhaustively enumerated by this owner slice; no generated source changed.",
+    "deployment": "No shell or deployed roster changed. JSON option matches do not authorize imports into standalone/file-spec consumers. Deployment eligibility requires current witnesses from its consumer owner.",
+    "dynamic": "No exhaustive claim for runtime aliases, dynamic options or external fallback implementations. JsonProfile retains callable defaults; custom dependencies remain caller-owned."
+  }
+}

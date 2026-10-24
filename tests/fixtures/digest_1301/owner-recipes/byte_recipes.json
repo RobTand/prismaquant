@@ -1,0 +1,203 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "purpose": "Frozen original consumer snippets/outcomes independently evaluated without digest owners. Scientific seed remains scientific: no migration claim. Canonical layer JSON, framing, validation and integer endian interpretation remain caller-owned. The target explicit-policy-only pass-through resolver does NOT cover aliases, defaults or environment resolution; real float/struct conversion is retained.",
+  "recipes": {
+    "framed": {
+      "id": "hashlib:prismaquant/joint_replay_frontier.py::_framed@129:13",
+      "file": "prismaquant/joint_replay_frontier.py",
+      "scope": "_framed",
+      "callee": "hashlib.sha256",
+      "source_blob": "17f28517c5d94774bfdc7976ef8b43ff8a7dcd14",
+      "syntax_sha256": "04c0c3904806ee18de50c2a3ff0ec639f8492826e806303f6491f2f794ce90a8",
+      "expression": "hashlib.sha256(b\"prismaquant.joint_prepare.replay_read_order.v1\\n\")",
+      "source": "def _framed(items: Sequence[tuple[str, str, str | None]]) -> bytes:\n    \"\"\"Length-framed items, so adjacent rows cannot be read two ways.\"\"\"\n    digest = hashlib.sha256(b\"prismaquant.joint_prepare.replay_read_order.v1\\n\")\n    for kind, name, fmt in items:\n        row = json.dumps((kind, name, fmt), ensure_ascii=False,\n                         separators=(\",\", \":\")).encode(\"utf-8\")\n        digest.update(len(row).to_bytes(8, \"big\"))\n        digest.update(row)\n    return digest.digest()"
+    },
+    "scientific_seed": {
+      "id": "hashlib:prismaquant/kl_fisher.py::fisher_probe_scalar@166:42",
+      "file": "prismaquant/kl_fisher.py",
+      "scope": "fisher_probe_scalar",
+      "callee": "hashlib.sha256",
+      "source_blob": "397e4a867f2bbcbc9672717c87fc67af6196c8d7",
+      "syntax_sha256": "d836f53053e6a8465f9500900ad2091a60b5a280e21c412b3bf3bef357e1d1d4",
+      "expression": "hashlib.sha256(domain.encode(\"ascii\"))",
+      "source": "                domain = (f\"{ROW_PROBE_LAYOUT}:{int(seed)}:{token_scope}:\"\n                          f\"{global_row_offset + local_row}:\"\n                          f\"{selected.shape[1]}:{selected.shape[2]}\")\n                row_seed = int.from_bytes(hashlib.sha256(domain.encode(\"ascii\")).digest()[:8], \"little\")",
+      "digest_expression": "hashlib.sha256(domain.encode(\"ascii\")).digest()"
+    },
+    "calibration": {
+      "id": "hashlib:prismaquant/validation_harness.py::_compute_metrics@267:15",
+      "file": "prismaquant/validation_harness.py",
+      "scope": "_compute_metrics",
+      "callee": "hashlib.blake2b",
+      "source_blob": "54ae2d8488a2a6d663fb2d282a07a9e7d2da387c",
+      "syntax_sha256": "7ef1121256d678d736a53a7ea6a00e619a24f113dbfe9410bc27cecdcddbf605",
+      "expression": "hashlib.blake2b(\n        canonical_layer_config_json(layer_config).encode(\"utf-8\"),\n        digest_size=16,\n    )",
+      "source": "    cal_hash = hashlib.blake2b(\n        canonical_layer_config_json(layer_config).encode(\"utf-8\"),\n        digest_size=16,\n    ).hexdigest()",
+      "digest_expression": "hashlib.blake2b(\n        canonical_layer_config_json(layer_config).encode(\"utf-8\"),\n        digest_size=16,\n    ).hexdigest()"
+    },
+    "priority": {
+      "id": "hashlib:prismaquant/sample_parallel_artifacts.py::activation_priority_key@109:13",
+      "file": "prismaquant/sample_parallel_artifacts.py",
+      "scope": "activation_priority_key",
+      "callee": "hashlib.blake2b",
+      "source_blob": "0edf909a40bbc2ea3b698822b9846b7563f7ca5a",
+      "syntax_sha256": "eb9466e26163a011f25a4138435f902b51efccad57f1a414bdf534b16d5d6c7e",
+      "expression": "hashlib.blake2b(material, digest_size=8)",
+      "source": "ACTIVATION_PRIORITY_KEY_DOMAIN = (\n    b\"prismaquant.sample-parallel.activation-priority.v2\\0\"\n)\n\n_U32_MASK = (1 << 32) - 1\n\n_CALIBRATION_HASH_RE = re.compile(r\"[0-9a-f]{32}\")\n\ndef activation_priority_group(qname: str) -> str:\n    \"\"\"Resolve the existing joint-consumer row-alignment group.\"\"\"\n    return fused_subsample_group(str(qname))\n\ndef activation_priority_key(\n    global_calibration_hash: str,\n    qname_or_group: str,\n    *,\n    is_group: bool = False,\n) -> tuple[int, int]:\n    \"\"\"Derive the exact little-endian uint32 key pair for one fused group.\"\"\"\n    calibration_hash = str(global_calibration_hash)\n    if _CALIBRATION_HASH_RE.fullmatch(calibration_hash) is None:\n        raise ValueError(\"global calibration hash must be 32 lowercase hex digits\")\n    group = (\n        str(qname_or_group)\n        if is_group\n        else activation_priority_group(str(qname_or_group))\n    )\n    encoded_group = group.encode(\"utf-8\")\n    if len(encoded_group) > _U32_MASK:\n        raise ValueError(\"activation priority group name is too long\")\n    material = (\n        ACTIVATION_PRIORITY_KEY_DOMAIN\n        + bytes.fromhex(calibration_hash)\n        + struct.pack(\"<I\", len(encoded_group))\n        + encoded_group\n    )\n    digest = hashlib.blake2b(material, digest_size=8).digest()\n    return struct.unpack(\"<II\", digest)",
+      "dependency": {
+        "file": "prismaquant/perturbed_x_cache.py",
+        "source_blob": "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
+        "source": "def fused_subsample_group(name: str, profile=None) -> str:\n    \"\"\"Return the deterministic row-subsample group for a recipe name.\"\"\"\n    if profile is not None:\n        try:\n            group = profile.fused_sibling_group(name)\n            if group is not None:\n                return str(group)\n        except Exception:\n            pass\n    bare = name[:-7] if name.endswith(\".weight\") else name\n    parent, _, leaf = bare.rpartition(\".\")\n    if leaf in {\"q_proj\", \"k_proj\", \"v_proj\"}:\n        return f\"{parent.rsplit('.', 1)[0]}.qkv\"\n    if leaf in {\"gate_proj\", \"up_proj\"}:\n        return f\"{parent.rsplit('.', 1)[0]}.gate_up\"\n    if leaf in {\"in_proj_qkv\", \"in_proj_z\"}:\n        return f\"{parent.rsplit('.', 1)[0]}.in_proj_qkvz\"\n    if leaf in {\"in_proj_a\", \"in_proj_b\"}:\n        return f\"{parent.rsplit('.', 1)[0]}.in_proj_ab\"\n    return bare"
+      }
+    },
+    "targets": {
+      "id": "hashlib:prismaquant/nvfp4_activation_contract.py::target_values_sha256@1380:13",
+      "file": "prismaquant/nvfp4_activation_contract.py",
+      "scope": "target_values_sha256",
+      "callee": "hashlib.sha256",
+      "source_blob": "3f2d970e8677e5c52467e0f5e0b990b2de66289e",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "expression": "hashlib.sha256()",
+      "source": "NVFP4_ACTIVATION_CONTRACT_SCHEMA = (\n    \"prismaquant.nvfp4_w4a4_activation.v1\"\n)\n\ndef target_values_sha256(\n    scales: Mapping[str, float],\n    *,\n    policy: str,\n) -> str:\n    \"\"\"Digest exact physical target names and their serialized F32 values.\n\n    The framing constant is deliberately pinned at\n    ``NVFP4_ACTIVATION_CONTRACT_SCHEMA`` (the v1 literal) even when the record\n    declares the v2 stage-attested schema, so the whole-model digest a shipped\n    artifact carries never moves under a record-schema bump.\n    \"\"\"\n\n    canonical_policy = resolve_input_global_scale_policy(policy)\n    digest = hashlib.sha256()\n    for field in (NVFP4_ACTIVATION_CONTRACT_SCHEMA, canonical_policy):\n        encoded = field.encode(\"utf-8\")\n        digest.update(struct.pack(\"<I\", len(encoded)))\n        digest.update(encoded)\n    for target in sorted(scales):\n        encoded = str(target).encode(\"utf-8\")\n        digest.update(struct.pack(\"<I\", len(encoded)))\n        digest.update(encoded)\n        digest.update(struct.pack(\"<f\", float(scales[target])))\n    return digest.hexdigest()"
+    }
+  },
+  "byte_vectors": [
+    {
+      "hex": "",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blake8": "e4a6a0577479b2b4",
+      "blake16": "cae66941d9efbd404e4d88758ea67670"
+    },
+    {
+      "hex": "616263",
+      "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "blake8": "d8bb14d833d59559",
+      "blake16": "cf4ab791c62b8d2b2109c90275287816"
+    },
+    {
+      "hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+      "sha256": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+      "blake8": "2b2cedfed655ad3f",
+      "blake16": "c2472c0ac37a8dbdb25f05ada0d82643"
+    },
+    {
+      "hex": "00ff8062696e6172790a",
+      "sha256": "41b86998c17b31ad0ab0e60825001d97620308b65eec9fe7f226857c8c038da4",
+      "blake8": "e82c16aa39218509",
+      "blake16": "5d174a76bc525a2bfbdcbfc70e615da1"
+    }
+  ],
+  "framed_cases": [
+    {
+      "items": [],
+      "expected": "3ce8648c10c357bcf0c225941556cde475f7204d2fba93d6b6b0ee762c763083"
+    },
+    {
+      "items": [
+        [
+          "tensor",
+          "café",
+          null
+        ],
+        [
+          "weight",
+          "a|b",
+          "f32"
+        ]
+      ],
+      "expected": "b6c5164431eae80e80952551f58db9f992f8f13fb016f92c2ade43f27cd1bcaf"
+    },
+    {
+      "items": [
+        [
+          "x",
+          "ab",
+          "c"
+        ]
+      ],
+      "expected": "9b4247d141f986283b3f6c052a6933363d88da567208ae5d16500a3317721078"
+    },
+    {
+      "items": [
+        [
+          "x",
+          "a",
+          "bc"
+        ]
+      ],
+      "expected": "646fda9000d22bf51a8dda1ee7cff8e472c2da404ffe8e1341e8910c16de932d"
+    }
+  ],
+  "priority_cases": [
+    {
+      "calibration_hash": "0123456789abcdef0123456789abcdef",
+      "name": "model.layers.0.self_attn.q_proj",
+      "is_group": false,
+      "expected": [
+        348924452,
+        2468403142
+      ]
+    },
+    {
+      "calibration_hash": "00000000000000000000000000000000",
+      "name": "雪\u0000group",
+      "is_group": true,
+      "expected": [
+        3887076933,
+        3926029714
+      ]
+    },
+    {
+      "calibration_hash": "ffffffffffffffffffffffffffffffff",
+      "name": "",
+      "is_group": true,
+      "expected": [
+        1416283641,
+        565586025
+      ]
+    }
+  ],
+  "target_cases": [
+    {
+      "scales": {
+        "z.雪": 1.25,
+        "a": -0.0
+      },
+      "policy": "canonical-policy",
+      "expected": "15f8fec300af756b76bf4ebe0f88c06b1682810fda353e41cee5eef9d87ef8c1"
+    },
+    {
+      "scales": {},
+      "policy": "canonical-policy",
+      "expected": "408f049518b550f35b8c61cc117be0a0c56887c31e26f3f035f27861dd24735a"
+    },
+    {
+      "scales": {
+        "a": -0.0,
+        "z.雪": 1.25
+      },
+      "policy": "canonical-policy",
+      "expected": "15f8fec300af756b76bf4ebe0f88c06b1682810fda353e41cee5eef9d87ef8c1"
+    }
+  ],
+  "seed_cases": [
+    {
+      "domain": "prismaquant.kl_fisher.global_row.v1:17:token:0:128:256",
+      "expected": "a1f4ed240c2180f5776bdd2b9204e551905c024b4a1d1db4eb712cde418d632b"
+    },
+    {
+      "domain": "prismaquant.kl_fisher.global_row.v1:0:token:9:32:64",
+      "expected": "8e959f92c1c4065b460c7b7fe2eaee2587f0b3dc9d3eb2bde5707f4366853e8c"
+    }
+  ],
+  "calibration_cases": [
+    {
+      "text": "{}",
+      "expected": "2afb9b83f9314e5d029766197f539792"
+    },
+    {
+      "text": "{\"layer\":\"café 雪\",\"bits\":4}",
+      "expected": "f18469f293d2adc1abbf01c10ecb9986"
+    }
+  ]
+}

@@ -1,0 +1,235 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "purpose": "Verbatim original functions extracted from the read-only research base, not from the new tensor owner. Executed independently with their original dependencies; no historical Git access at test runtime.",
+  "dependencies": {
+    "_TENSOR_DIGEST_CHUNK_BYTES": 8388608
+  },
+  "recipes": [
+    {
+      "api": "tensor_payload_sha256",
+      "original_name": "tensor_payload_sha256",
+      "original_ids": [
+        "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "source_file": "prismaquant/stage_a_chain_seed.py",
+      "source_lineno": 412,
+      "source": "def tensor_payload_sha256(tensor, *, chunk_bytes: int = 1 << 26) -> str:\n    \"\"\"sha256 of a tensor's contiguous payload bytes, dtype and shape aside.\n\n    The bytes are copied to the host ``chunk_bytes`` at a time, so hashing a\n    device tensor holds one chunk beside it, not a second copy of it.\n    \"\"\"\n    import torch\n\n    data = tensor.detach().contiguous().reshape(-1)\n    digest = hashlib.sha256()\n    step = max(1, int(chunk_bytes) // max(data.element_size(), 1))\n    for start in range(0, data.numel(), step):\n        digest.update(data[start:start + step].to(\"cpu\").view(torch.uint8).numpy())\n    return digest.hexdigest()\n",
+      "source_sha256": "d83bdb5caecf69651a18360b7f63ba1198ce68da13e8e0844e74a40baad89aed"
+    },
+    {
+      "api": "source_weight_value_identity",
+      "original_name": "_source_weight_value_identity",
+      "original_ids": [
+        "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@3345:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "source_file": "prismaquant/production_weight_cache.py",
+      "source_lineno": 3340,
+      "source": "def _source_weight_value_identity(\n    weight: torch.Tensor,\n) -> tuple[list[int], str]:\n    tensor = torch.as_tensor(weight).detach()\n    shape = [int(dim) for dim in tensor.shape]\n    digest = hashlib.sha256()\n    max_chunk_elements = 4 * 1024 * 1024  # <=16 MiB after fp32 conversion\n\n    def _chunks_c_order(value: torch.Tensor):\n        if value.numel() <= max_chunk_elements or value.ndim == 0:\n            yield value\n            return\n        trailing = math.prod(int(dim) for dim in value.shape[1:])\n        if trailing <= max_chunk_elements:\n            step = max(1, max_chunk_elements // max(trailing, 1))\n            for start in range(0, int(value.shape[0]), step):\n                yield value[start:start + step]\n            return\n        # A single leading slice is still too large. Recurse dimension by\n        # dimension; concatenating these chunks is exactly C-order traversal.\n        for index in range(int(value.shape[0])):\n            yield from _chunks_c_order(value[index])\n\n    for chunk in _chunks_c_order(tensor):\n        cpu = chunk.to(device=\"cpu\", dtype=torch.float32).contiguous()\n        digest.update(\n            cpu.numpy().astype(\"<f4\", copy=False).tobytes(order=\"C\")\n        )\n        del cpu\n    return shape, digest.hexdigest()\n",
+      "source_sha256": "ff876b85da921fc4e36b2c84b99ec43c61871533fed1dbc19f46bbe5766ae6f5"
+    },
+    {
+      "api": "cb_cache_tensor_identity",
+      "original_name": "_cb_cache_tensor_identity",
+      "original_ids": [
+        "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3602:13"
+      ],
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "source_file": "prismaquant/production_weight_cache.py",
+      "source_lineno": 3594,
+      "source": "def _cb_cache_tensor_identity(tensor: torch.Tensor) -> dict[str, object]:\n    stored = tensor.detach().to(device=\"cpu\").contiguous()\n    # ``cast(\"B\")`` flattens the dimensions without copying, so slices below\n    # are byte windows, never copies. (A multi-dimensional memoryview's bare\n    # ``len`` would be the first axis, not the byte count.) An empty tensor\n    # has zeros in its shape, which ``cast`` refuses, so it takes the empty\n    # feed directly -- the same sha256 of zero bytes ``tobytes()`` produced.\n    nbytes = stored.nbytes\n    digest = hashlib.sha256()\n    if nbytes:\n        view = memoryview(stored.view(torch.uint8).numpy()).cast(\"B\")\n        for offset in range(0, len(view), _TENSOR_DIGEST_CHUNK_BYTES):\n            digest.update(view[offset:offset + _TENSOR_DIGEST_CHUNK_BYTES])\n    return {\n        \"shape\": [int(dim) for dim in stored.shape],\n        \"dtype\": str(stored.dtype),\n        \"logical_bytes\": nbytes,\n        \"content_sha256\": digest.hexdigest(),\n    }\n",
+      "source_sha256": "0a2e6c2b9ed2830033ad3d6692977f296e582f410daffd6caf4a5708be2b3a17"
+    }
+  ],
+  "records": [
+    {
+      "id": "matrix",
+      "dtype": "float32",
+      "shape": [
+        2,
+        3
+      ],
+      "values": [
+        0,
+        -0.0,
+        1.25,
+        -2.5,
+        3,
+        4
+      ]
+    },
+    {
+      "id": "transpose",
+      "dtype": "float64",
+      "shape": [
+        2,
+        3
+      ],
+      "values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "layout": "transpose"
+    },
+    {
+      "id": "strided",
+      "dtype": "int64",
+      "shape": [
+        2,
+        4
+      ],
+      "values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "layout": "strided"
+    },
+    {
+      "id": "expanded",
+      "dtype": "float32",
+      "shape": [
+        1,
+        3
+      ],
+      "values": [
+        1,
+        2,
+        3
+      ],
+      "layout": "expanded"
+    },
+    {
+      "id": "channels_last",
+      "dtype": "float32",
+      "shape": [
+        1,
+        2,
+        2,
+        3
+      ],
+      "values": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "layout": "channels_last"
+    },
+    {
+      "id": "empty",
+      "dtype": "float32",
+      "shape": [
+        2,
+        0,
+        3
+      ],
+      "values": []
+    },
+    {
+      "id": "empty_bf16",
+      "dtype": "bfloat16",
+      "shape": [
+        0
+      ],
+      "values": []
+    },
+    {
+      "id": "scalar",
+      "dtype": "float32",
+      "shape": [],
+      "values": [
+        -0.0
+      ]
+    },
+    {
+      "id": "scalar_byte",
+      "dtype": "uint8",
+      "shape": [],
+      "values": [
+        127
+      ]
+    },
+    {
+      "id": "scalar_bf16",
+      "dtype": "bfloat16",
+      "shape": [],
+      "values": [
+        2.5
+      ]
+    },
+    {
+      "id": "bf16",
+      "dtype": "bfloat16",
+      "shape": [
+        2,
+        2
+      ],
+      "values": [
+        0,
+        -0.0,
+        1.25,
+        -2.5
+      ]
+    },
+    {
+      "id": "bool",
+      "dtype": "bool",
+      "shape": [
+        3
+      ],
+      "values": [
+        true,
+        false,
+        true
+      ]
+    },
+    {
+      "id": "special",
+      "dtype": "float32",
+      "shape": [
+        5
+      ],
+      "values": [
+        "nan",
+        "inf",
+        "-inf",
+        -0.0,
+        0.0
+      ]
+    },
+    {
+      "id": "half",
+      "dtype": "float16",
+      "shape": [
+        3
+      ],
+      "values": [
+        1.5,
+        -0.0,
+        -3
+      ]
+    }
+  ]
+}

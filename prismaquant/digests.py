@@ -43,7 +43,19 @@ unless the profile states otherwise:
   ``allow_nan=True``, so ``NaN`` and ``Infinity`` are written, not refused.
 - ``DIRECT_ASCII_LAX_DEFAULT_STR``: ``DIRECT_ASCII_LAX`` with ``default=str``.
 
-Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
+Additional direct JSON profiles preserve insertion order, indentation and
+str/repr fallback choices. ``JsonProfile.dump`` retains stdlib chunked writes;
+publication ownership and final newlines remain with the caller. See the
+source-pinned recipe agreement in ``docs/audits/digest_1301/owner-interfaces.json``.
+
+Byte profiles (hex unless explicitly named ``digest``):
+
+- ``bytes_sha256digest``: native 32-byte SHA-256 result.
+- ``bytes_blake2b8digest`` / ``bytes_blake2b16hex``: BLAKE2b configured for
+  eight native bytes / sixteen bytes rendered as hex, never truncations of
+  a wider BLAKE2b digest.
+- ``chunks_sha256hex``: one ordered unframed stream, each chunk fed before
+  acquiring the next, without joining or owning IO.
 
 - ``git_blob_sha1hex``: native Git blob SHA1 over its ASCII type/length/NUL
   header and exact owned payload, for independently published auxiliary IDs.
@@ -107,7 +119,7 @@ import math
 import operator
 import os
 import re
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Protocol, TextIO
 
 
 # A regex checks the underlying text, not a str subclass's Python length or
@@ -262,9 +274,11 @@ def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
 
 @dataclass(frozen=True)
 class JsonProfile:
-    """One direct JSON encoding: sorted keys and exactly these options.
+    """One direct JSON encoding with exactly these options.
 
     Separators default to compact; a spaced profile must name its own pair.
+    Sorting defaults to True for compatibility with existing positional users.
+    Insertion-order profiles are distinct identities, not canonical JSON.
     """
 
     name: str
@@ -273,11 +287,12 @@ class JsonProfile:
     default: Callable[[object], object] | None = None
     separators: tuple[str, str] = (",", ":")
     indent: int | None = None
+    sort_keys: bool = True
 
     def _encoder(self) -> json.JSONEncoder:
         """The stdlib encoder with exactly this profile's options."""
         return json.JSONEncoder(
-            sort_keys=True,
+            sort_keys=self.sort_keys,
             separators=self.separators,
             indent=self.indent,
             ensure_ascii=self.ensure_ascii,
@@ -287,6 +302,15 @@ class JsonProfile:
 
     def text(self, value: object) -> str:
         return self._encoder().encode(value)
+
+    def dump(self, value: object, stream: TextIO) -> None:
+        """Write stdlib ``json.dump`` chunks to a caller-owned text stream.
+
+        Do not close, flush or append a newline. Unlike ``text``, this retains
+        partial writes and iterencode's first-error behavior on invalid input.
+        """
+        for chunk in self._encoder().iterencode(value):
+            stream.write(chunk)
 
     def encoded(self, value: object) -> bytes:
         return self.text(value).encode("utf-8")
@@ -328,6 +352,76 @@ DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)
+
+
+# Remaining direct recipes, pinned to original consumer encoders in the
+# owner-interfaces agreement. No profile appends publication whitespace.
+DIRECT_ASCII_INDENT1_LAX = JsonProfile(
+    "direct-ascii-indent1-lax", True, True, separators=(",", ": "), indent=1)
+DIRECT_ASCII_INDENT1_STRICT = JsonProfile(
+    "direct-ascii-indent1-strict", True, False, separators=(",", ": "), indent=1)
+DIRECT_ASCII_INDENT2_STRICT = JsonProfile(
+    "direct-ascii-indent2-strict", True, False, separators=(",", ": "), indent=2)
+DIRECT_ASCII_INDENT2_LAX_DEFAULT_STR = JsonProfile(
+    "direct-ascii-indent2-lax-default-str", True, True, default=str,
+    separators=(",", ": "), indent=2)
+DIRECT_ASCII_INDENT2_STRICT_DEFAULT_STR = JsonProfile(
+    "direct-ascii-indent2-strict-default-str", True, False, default=str,
+    separators=(",", ": "), indent=2)
+DIRECT_ASCII_SPACED_STRICT_DEFAULT_STR = JsonProfile(
+    "direct-ascii-spaced-strict-default-str", True, False, default=str,
+    separators=(", ", ": "))
+DIRECT_ASCII_SPACED_LAX_DEFAULT_REPR = JsonProfile(
+    "direct-ascii-spaced-lax-default-repr", True, True, default=repr,
+    separators=(", ", ": "))
+DIRECT_ASCII_SPACED_STRICT_DEFAULT_REPR = JsonProfile(
+    "direct-ascii-spaced-strict-default-repr", True, False, default=repr,
+    separators=(", ", ": "))
+DIRECT_ASCII_LAX_DEFAULT_REPR = JsonProfile(
+    "direct-ascii-lax-default-repr", True, True, default=repr)
+DIRECT_UTF8_SPACED_LAX = JsonProfile(
+    "direct-utf8-spaced-lax", False, True, separators=(", ", ": "))
+
+# INSERTION profiles never sort or round-trip dictionary keys. This is part
+# of the serialized identity, including duplicate/coerced JSON key spelling.
+INSERTION_ASCII_SPACED_LAX = JsonProfile(
+    "insertion-ascii-spaced-lax", True, True,
+    separators=(", ", ": "), sort_keys=False)
+INSERTION_ASCII_SPACED_STRICT = JsonProfile(
+    "insertion-ascii-spaced-strict", True, False,
+    separators=(", ", ": "), sort_keys=False)
+INSERTION_ASCII_SPACED_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-spaced-lax-default-str", True, True, default=str,
+    separators=(", ", ": "), sort_keys=False)
+INSERTION_UTF8_SPACED_LAX = JsonProfile(
+    "insertion-utf8-spaced-lax", False, True,
+    separators=(", ", ": "), sort_keys=False)
+INSERTION_ASCII_LAX = JsonProfile(
+    "insertion-ascii-lax", True, True, sort_keys=False)
+INSERTION_ASCII_STRICT = JsonProfile(
+    "insertion-ascii-strict", True, False, sort_keys=False)
+INSERTION_ASCII_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-lax-default-str", True, True, default=str, sort_keys=False)
+INSERTION_UTF8_LAX = JsonProfile(
+    "insertion-utf8-lax", False, True, sort_keys=False)
+INSERTION_ASCII_INDENT1_LAX = JsonProfile(
+    "insertion-ascii-indent1-lax", True, True,
+    separators=(",", ": "), indent=1, sort_keys=False)
+INSERTION_ASCII_INDENT1_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-indent1-lax-default-str", True, True, default=str,
+    separators=(",", ": "), indent=1, sort_keys=False)
+INSERTION_ASCII_INDENT2_LAX = JsonProfile(
+    "insertion-ascii-indent2-lax", True, True,
+    separators=(",", ": "), indent=2, sort_keys=False)
+INSERTION_ASCII_INDENT2_STRICT = JsonProfile(
+    "insertion-ascii-indent2-strict", True, False,
+    separators=(",", ": "), indent=2, sort_keys=False)
+INSERTION_ASCII_INDENT2_LAX_DEFAULT_STR = JsonProfile(
+    "insertion-ascii-indent2-lax-default-str", True, True, default=str,
+    separators=(",", ": "), indent=2, sort_keys=False)
+INSERTION_UTF8_INDENT2_STRICT = JsonProfile(
+    "insertion-utf8-indent2-strict", False, False,
+    separators=(",", ": "), indent=2, sort_keys=False)
 
 
 class _CheckpointJsonEncoder:
@@ -522,6 +616,39 @@ def git_blob_sha1hex(data: bytes | bytearray | memoryview) -> str:
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def bytes_sha256digest(data: bytes | bytearray | memoryview) -> bytes:
+    """SHA-256's native 32 bytes, not encoded hexadecimal characters."""
+    return hashlib.sha256(data).digest()
+
+
+def bytes_blake2b8digest(data: bytes | bytearray | memoryview) -> bytes:
+    """BLAKE2b configured for eight bytes; not a truncated wider digest.
+
+    Domain/framing validation and integer endian interpretation remain with
+    the activation-priority consumer.
+    """
+    return hashlib.blake2b(data, digest_size=8).digest()
+
+
+def bytes_blake2b16hex(data: bytes | bytearray | memoryview) -> str:
+    """BLAKE2b configured for 16 bytes, returned as 32 lowercase hex digits."""
+    return hashlib.blake2b(data, digest_size=16).hexdigest()
+
+
+def chunks_sha256hex(chunks: Iterable[bytes | bytearray | memoryview]) -> str:
+    """Hash one ordered unframed byte stream, without joining or rereading.
+
+    Each chunk is fed once before acquiring the next. This owns only the
+    byte-stream recipe, not acquisition, serialization, framing or guards.
+    It does not expose a constructor or mutable accumulator to consumers.
+    In particular, guarded write sinks keep their interleaved IO contract.
+    """
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def text_sha256hex(text: str) -> str:
