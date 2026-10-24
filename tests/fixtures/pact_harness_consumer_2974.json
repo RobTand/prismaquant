@@ -1,0 +1,68 @@
+{
+  "description": "Synthetic CPU consumer metadata, not campaign data or a canonical source oracle. Small dimensions are explicit configuration, not model defaults.",
+  "glm": {
+    "config": {
+      "model_type": "glm5_next",
+      "architectures": ["Glm5NextForConditionalGeneration"],
+      "num_hidden_layers": 45,
+      "hidden_size": 8,
+      "intermediate_size": 4,
+      "moe_intermediate_size": 4,
+      "n_routed_experts": 2,
+      "vocab_size": 154880
+    },
+    "bands": [[0,3],[3,9],[9,15],[15,21],[21,27],[27,33],[33,39],[39,45]],
+    "cohort": {
+      "sample_range": [384,448],
+      "raw_tokens_per_sequence": 512,
+      "prefix_ids": [154822,154824],
+      "input_contract": "prefixed_514",
+      "local_prefix_rows": "excluded",
+      "global_original_tokens": 32768,
+      "scored_positions_per_sequence": 511,
+      "vocab_size": 154880
+    },
+    "profile_name": "glm5_next",
+    "hidden_streams": 4,
+    "kind": "dense",
+    "band": "3:9",
+    "window": [3,24],
+    "plan": [{"window_start":3,"window_stop":24},{"window_start":24,"window_stop":45}]
+  },
+  "qwen": {
+    "config": {
+      "model_type": "qwen3",
+      "architectures": ["Qwen3MoeForCausalLM"],
+      "num_hidden_layers": 12,
+      "hidden_size": 8,
+      "intermediate_size": 4,
+      "moe_intermediate_size": 4,
+      "num_experts": 2,
+      "vocab_size": 32,
+      "prefix_ids": [30,31],
+      "raw_tokens_per_sequence": 4,
+      "scored_positions_per_sequence": 3,
+      "sample_range": [0,2],
+      "local_prefix_rows": "excluded",
+      "input_contract": "raw",
+      "global_original_tokens": 8
+    },
+    "bands": [[0,6],[6,12]],
+    "cohort": {
+      "sample_range": [0,2],
+      "raw_tokens_per_sequence": 4,
+      "prefix_ids": [30,31],
+      "input_contract": "raw",
+      "local_prefix_rows": "excluded",
+      "global_original_tokens": 8,
+      "scored_positions_per_sequence": 3,
+      "vocab_size": 32
+    },
+    "profile_name": "qwen3",
+    "hidden_streams": 1,
+    "kind": "routed",
+    "band": "6:12",
+    "window": [6,12],
+    "plan": [{"window_start":6,"window_stop":12}]
+  }
+}
