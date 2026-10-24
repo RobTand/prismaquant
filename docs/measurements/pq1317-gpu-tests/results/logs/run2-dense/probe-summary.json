@@ -1,0 +1,53 @@
+{
+ "assertions_dropped": 0,
+ "assertions_recorded": 164,
+ "errors": [],
+ "native_libraries_by_worker": {
+  "gw0": {
+   "tessera_routed_fused_value": {
+    "deleted": false,
+    "nfs_renamed": false,
+    "path": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/torch-ext/gw0/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+    "sha256": "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46"
+   },
+   "tessera_window_gemv": {
+    "deleted": false,
+    "nfs_renamed": false,
+    "path": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+    "sha256": "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2"
+   }
+  },
+  "gw1": {
+   "tessera_routed_fused_mma_e4m3": {
+    "deleted": false,
+    "nfs_renamed": false,
+    "path": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/torch-ext/gw1/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+    "sha256": "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf"
+   },
+   "tessera_window_gemv": {
+    "deleted": false,
+    "nfs_renamed": false,
+    "path": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-dense.9f8qda_6/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+    "sha256": "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6"
+   }
+  },
+  "main": {}
+ },
+ "native_library_sha256_seen": {
+  "tessera_routed_fused_mma_e4m3": [
+   "ff76725e9641583ca624d27f665ea797c10656aca3ce228782c46c2d0b1bc0bf"
+  ],
+  "tessera_routed_fused_value": [
+   "3bb266f43d00a4916de16d0932feda28373e567de6bb8f926ffb44bcbe741a46"
+  ],
+  "tessera_window_gemv": [
+   "13177f1c76ebe05bb37727229d041b54a75851407c5e0d535fc39a361225b5a2",
+   "f9f55e5f51a41be1220a6770eac1fd62e3a77d7e2cd63ba5bba4b61ea1f7f3f6"
+  ]
+ },
+ "tests_recorded": 65,
+ "workers": [
+  "gw0",
+  "gw1"
+ ]
+}
