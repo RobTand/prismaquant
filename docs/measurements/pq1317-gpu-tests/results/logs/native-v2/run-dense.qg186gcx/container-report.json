@@ -1,0 +1,824 @@
+{
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "exit_code": 0,
+ "files": [
+  "tests/test_serving_bf16_gemv.py",
+  "tests/test_serving_fp8_gemv.py"
+ ],
+ "finished_unix": 1792798329.3913853,
+ "identity": {
+  "contract_matches_pin": true,
+  "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "suite_source": {
+   "excluded_metadata": [],
+   "files_verified": 2005,
+   "schema": "tessera.suite_source.v1",
+   "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+   "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+   "verification": "verified"
+  },
+  "verified_at_candidate": true
+ },
+ "mode": "run",
+ "probe": {
+  "assertions_dropped": 0,
+  "assertions_recorded": 197,
+  "errors": [],
+  "native_libraries_by_worker": {
+   "gw0": {
+    "tessera_routed_fused_mma_e4m3": {
+     "deleted": false,
+     "identity_verified": true,
+     "mappings": [
+      {
+       "address": "fc1311a20000-fc1311d2b000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc1311a20000-fc1311d2b000'",
+         "path": "/proc/self/map_files/fc1311a20000-fc1311d2b000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798282499683394,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44585904,
+          "mtime_ns": 1792798282498683369,
+          "size": 3498320
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798282499683394,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44585904,
+        "mtime_ns": 1792798282498683369,
+        "size": 3498320
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44585904,
+       "module": "tessera_routed_fused_mma_e4m3",
+       "nfs_renamed": false,
+       "offset": 0,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+       "permissions": "r-xp",
+       "reader": "pathname",
+       "sha256": "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+      },
+      {
+       "address": "fc1311d2b000-fc1311d3f000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc1311d2b000-fc1311d3f000'",
+         "path": "/proc/self/map_files/fc1311d2b000-fc1311d3f000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798282499683394,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44585904,
+          "mtime_ns": 1792798282498683369,
+          "size": 3498320
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798282499683394,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44585904,
+        "mtime_ns": 1792798282498683369,
+        "size": 3498320
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44585904,
+       "module": "tessera_routed_fused_mma_e4m3",
+       "nfs_renamed": false,
+       "offset": 3190784,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+       "permissions": "---p",
+       "reader": "pathname",
+       "sha256": "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+      },
+      {
+       "address": "fc1311d3f000-fc1311d40000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc1311d3f000-fc1311d40000'",
+         "path": "/proc/self/map_files/fc1311d3f000-fc1311d40000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798282499683394,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44585904,
+          "mtime_ns": 1792798282498683369,
+          "size": 3498320
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798282499683394,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44585904,
+        "mtime_ns": 1792798282498683369,
+        "size": 3498320
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44585904,
+       "module": "tessera_routed_fused_mma_e4m3",
+       "nfs_renamed": false,
+       "offset": 3207168,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+       "permissions": "r--p",
+       "reader": "pathname",
+       "sha256": "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+      },
+      {
+       "address": "fc1311d40000-fc1311d41000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc1311d40000-fc1311d41000'",
+         "path": "/proc/self/map_files/fc1311d40000-fc1311d41000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798282499683394,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44585904,
+          "mtime_ns": 1792798282498683369,
+          "size": 3498320
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798282499683394,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44585904,
+        "mtime_ns": 1792798282498683369,
+        "size": 3498320
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44585904,
+       "module": "tessera_routed_fused_mma_e4m3",
+       "nfs_renamed": false,
+       "offset": 3211264,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+       "permissions": "rw-p",
+       "reader": "pathname",
+       "sha256": "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+      }
+     ],
+     "nfs_renamed": false,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_routed_fused_mma_e4m3_sm_121_tessera_guarded_v1/tessera_routed_fused_mma_e4m3.so",
+     "sha256": "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+    },
+    "tessera_window_gemv": {
+     "deleted": false,
+     "identity_verified": true,
+     "mappings": [
+      {
+       "address": "fc12cf340000-fc12cf9b8000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc12cf340000-fc12cf9b8000'",
+         "path": "/proc/self/map_files/fc12cf340000-fc12cf9b8000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798319104572505,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44571090,
+          "mtime_ns": 1792798319103572481,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798319104572505,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44571090,
+        "mtime_ns": 1792798319103572481,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44571090,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 0,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "r-xp",
+       "reader": "pathname",
+       "sha256": "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+      },
+      {
+       "address": "fc12cf9b8000-fc12cf9cf000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc12cf9b8000-fc12cf9cf000'",
+         "path": "/proc/self/map_files/fc12cf9b8000-fc12cf9cf000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798319104572505,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44571090,
+          "mtime_ns": 1792798319103572481,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798319104572505,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44571090,
+        "mtime_ns": 1792798319103572481,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44571090,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6782976,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "---p",
+       "reader": "pathname",
+       "sha256": "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+      },
+      {
+       "address": "fc12cf9cf000-fc12cf9d0000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc12cf9cf000-fc12cf9d0000'",
+         "path": "/proc/self/map_files/fc12cf9cf000-fc12cf9d0000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798319104572505,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44571090,
+          "mtime_ns": 1792798319103572481,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798319104572505,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44571090,
+        "mtime_ns": 1792798319103572481,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44571090,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6811648,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "r--p",
+       "reader": "pathname",
+       "sha256": "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+      },
+      {
+       "address": "fc12cf9d0000-fc12cf9d1000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/fc12cf9d0000-fc12cf9d1000'",
+         "path": "/proc/self/map_files/fc12cf9d0000-fc12cf9d1000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798319104572505,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44571090,
+          "mtime_ns": 1792798319103572481,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798319104572505,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44571090,
+        "mtime_ns": 1792798319103572481,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44571090,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6815744,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "rw-p",
+       "reader": "pathname",
+       "sha256": "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+      }
+     ],
+     "nfs_renamed": false,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw0/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "sha256": "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+    }
+   },
+   "gw1": {
+    "tessera_routed_fused_value": {
+     "deleted": false,
+     "identity_verified": true,
+     "mappings": [
+      {
+       "address": "f7a1e2820000-f7a1e29d4000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1e2820000-f7a1e29d4000'",
+         "path": "/proc/self/map_files/f7a1e2820000-f7a1e29d4000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798264971253509,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44583533,
+          "mtime_ns": 1792798264971253509,
+          "size": 2060976
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798264971253509,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44583533,
+        "mtime_ns": 1792798264971253509,
+        "size": 2060976
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44583533,
+       "module": "tessera_routed_fused_value",
+       "nfs_renamed": false,
+       "offset": 0,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+       "permissions": "r-xp",
+       "reader": "pathname",
+       "sha256": "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+      },
+      {
+       "address": "f7a1e29d4000-f7a1e29ef000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1e29d4000-f7a1e29ef000'",
+         "path": "/proc/self/map_files/f7a1e29d4000-f7a1e29ef000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798264971253509,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44583533,
+          "mtime_ns": 1792798264971253509,
+          "size": 2060976
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798264971253509,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44583533,
+        "mtime_ns": 1792798264971253509,
+        "size": 2060976
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44583533,
+       "module": "tessera_routed_fused_value",
+       "nfs_renamed": false,
+       "offset": 1785856,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+       "permissions": "---p",
+       "reader": "pathname",
+       "sha256": "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+      },
+      {
+       "address": "f7a1e29ef000-f7a1e29f0000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1e29ef000-f7a1e29f0000'",
+         "path": "/proc/self/map_files/f7a1e29ef000-f7a1e29f0000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798264971253509,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44583533,
+          "mtime_ns": 1792798264971253509,
+          "size": 2060976
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798264971253509,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44583533,
+        "mtime_ns": 1792798264971253509,
+        "size": 2060976
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44583533,
+       "module": "tessera_routed_fused_value",
+       "nfs_renamed": false,
+       "offset": 1830912,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+       "permissions": "r--p",
+       "reader": "pathname",
+       "sha256": "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+      },
+      {
+       "address": "f7a1e29f0000-f7a1e29f1000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1e29f0000-f7a1e29f1000'",
+         "path": "/proc/self/map_files/f7a1e29f0000-f7a1e29f1000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798264971253509,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44583533,
+          "mtime_ns": 1792798264971253509,
+          "size": 2060976
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798264971253509,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44583533,
+        "mtime_ns": 1792798264971253509,
+        "size": 2060976
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44583533,
+       "module": "tessera_routed_fused_value",
+       "nfs_renamed": false,
+       "offset": 1835008,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+       "permissions": "rw-p",
+       "reader": "pathname",
+       "sha256": "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+      }
+     ],
+     "nfs_renamed": false,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_routed_fused_value_sm_121_tessera_guarded_v1/tessera_routed_fused_value.so",
+     "sha256": "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+    },
+    "tessera_window_gemv": {
+     "deleted": false,
+     "identity_verified": true,
+     "mappings": [
+      {
+       "address": "f7a1c5b60000-f7a1c61d8000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1c5b60000-f7a1c61d8000'",
+         "path": "/proc/self/map_files/f7a1c5b60000-f7a1c61d8000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798301058135592,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44588825,
+          "mtime_ns": 1792798301058135592,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798301058135592,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44588825,
+        "mtime_ns": 1792798301058135592,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44588825,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 0,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "r-xp",
+       "reader": "pathname",
+       "sha256": "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf"
+      },
+      {
+       "address": "f7a1c61d8000-f7a1c61ef000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1c61d8000-f7a1c61ef000'",
+         "path": "/proc/self/map_files/f7a1c61d8000-f7a1c61ef000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798301058135592,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44588825,
+          "mtime_ns": 1792798301058135592,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798301058135592,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44588825,
+        "mtime_ns": 1792798301058135592,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44588825,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6782976,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "---p",
+       "reader": "pathname",
+       "sha256": "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf"
+      },
+      {
+       "address": "f7a1c61ef000-f7a1c61f0000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1c61ef000-f7a1c61f0000'",
+         "path": "/proc/self/map_files/f7a1c61ef000-f7a1c61f0000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798301058135592,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44588825,
+          "mtime_ns": 1792798301058135592,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798301058135592,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44588825,
+        "mtime_ns": 1792798301058135592,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44588825,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6811648,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "r--p",
+       "reader": "pathname",
+       "sha256": "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf"
+      },
+      {
+       "address": "f7a1c61f0000-f7a1c61f1000",
+       "attempts": [
+        {
+         "error": "[Errno 1] Operation not permitted: '/proc/self/map_files/f7a1c61f0000-f7a1c61f1000'",
+         "path": "/proc/self/map_files/f7a1c61f0000-f7a1c61f1000",
+         "reader": "map_files"
+        },
+        {
+         "opened_file": {
+          "ctime_ns": 1792798301058135592,
+          "device_major": 0,
+          "device_minor": 66,
+          "inode": 44588825,
+          "mtime_ns": 1792798301058135592,
+          "size": 6984624
+         },
+         "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+         "reader": "pathname"
+        }
+       ],
+       "backing_file": {
+        "ctime_ns": 1792798301058135592,
+        "device_major": 0,
+        "device_minor": 66,
+        "inode": 44588825,
+        "mtime_ns": 1792798301058135592,
+        "size": 6984624
+       },
+       "deleted": false,
+       "device_major": 0,
+       "device_minor": 66,
+       "identity_verified": true,
+       "inode": 44588825,
+       "module": "tessera_window_gemv",
+       "nfs_renamed": false,
+       "offset": 6815744,
+       "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+       "permissions": "rw-p",
+       "reader": "pathname",
+       "sha256": "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf"
+      }
+     ],
+     "nfs_renamed": false,
+     "path": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/torch-ext/gw1/tessera_window_gemv_sm_121_tessera_guarded_v1/tessera_window_gemv.so",
+     "sha256": "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf"
+    }
+   },
+   "main": {}
+  },
+  "native_library_sha256_seen": {
+   "tessera_routed_fused_mma_e4m3": [
+    "41e67adab43971115e264492a5961222eac2236112a5019d9f94691635bfb7f9"
+   ],
+   "tessera_routed_fused_value": [
+    "faabb02d719796398d4cdcacba46bd73246501b69c967eea1e4b4096ebc64cb6"
+   ],
+   "tessera_window_gemv": [
+    "2383e2d5ebe1b3d0bb8056ff8bfcb0c4b097379de869c5ed61ef8ecbc9059daf",
+    "5be5eab5faf37a316e4da5ec8f6bec4e58155f067d5534938cb027ca288fc3ed"
+   ]
+  },
+  "qualification_ok": true,
+  "tests_recorded": 65,
+  "workers": [
+   "gw0",
+   "gw1"
+  ]
+ },
+ "probe_loaded_in_collection": true,
+ "probe_selftest": {
+  "float_assertion": {
+   "assertion": "measured < tolerance",
+   "evaluated": "0.125 < 0.25",
+   "line": 14
+  },
+  "ok": true,
+  "returncode": 0,
+  "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n....                                                                     [100%]\n4 passed in 0.37s\n",
+  "workers": [
+   "gw0",
+   "gw1"
+  ]
+ },
+ "roster_check": {
+  "collected": 65,
+  "duplicates": [],
+  "equal": true,
+  "expected": 65,
+  "missing": [],
+  "unexpected": []
+ },
+ "runtime": {
+  "cuda_available": true,
+  "device": {
+   "capability": [
+    12,
+    1
+   ],
+   "multi_processor_count": 48,
+   "name": "NVIDIA GB10",
+   "total_memory": 130594095104,
+   "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+  },
+  "gid": 1000,
+  "machine": "aarch64",
+  "python": "3.12.3",
+  "tessera_environment": {},
+  "tessera_file": "/mnt/shared/tessera-measurements/pq-tl/2547/native-identity-v2/run-dense.qg186gcx/tessera-source/src/tessera/__init__.py",
+  "torch": "2.13.0+cu130",
+  "torch_cuda": "13.0",
+  "triton": "3.7.1",
+  "uid": 1000,
+  "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904"
+ },
+ "schema": "pq1317.container.v1",
+ "started_unix": 1792798197.1309512,
+ "suite": "dense",
+ "test_tools": {
+  "installed": [],
+  "pytest": "8.4.2",
+  "versions": {
+   "Pygments": "2.21.0",
+   "execnet": "2.1.1",
+   "iniconfig": "2.1.0",
+   "packaging": "26.3",
+   "pluggy": "1.6.0",
+   "pytest": "8.4.2",
+   "pytest-xdist": "3.8.0"
+  },
+  "xdist": "3.8.0"
+ }
+}

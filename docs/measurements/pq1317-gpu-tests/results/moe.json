@@ -1,5 +1,7 @@
 {
  "schema": "pq1317.suite-result.v3",
+ "evidence_status": "historical; native backing-file identity not established by this record",
+ "superseded_by": "results/requalification.json",
  "suite": "moe",
  "issue": 610,
  "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",

@@ -3,8 +3,9 @@
 It records, for each test process:
 
 * the Tessera native libraries (``tessera_*.so``) the process has mapped after
-  each test, read from ``/proc/self/maps``, each with the sha256 of the bytes
-  that are mapped (read through ``/proc/self/map_files``); and
+  each test, read from ``/proc/self/maps``, each with a SHA-256 of its backing
+  file. Readers must match the mapping's device/inode and record provenance.
+  This identifies the backing file, not relocated or privately modified RAM; and
 * the evaluated text of each passing assertion that holds a floating-point
   value or names a launch (a symbol, a decoder or a ``tessera::`` op), through
   pytest's ``pytest_assertion_pass`` hook.
@@ -25,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 PROBE_DIR_ENV = "PQ1317_PROBE_DIR"
@@ -39,7 +41,8 @@ NAMES_LAUNCH = re.compile(r"symbol|decoder|launch_pair|tessera::|DENSE_")
 #: The build directory of a JIT extension: <module>_<platform token>_tessera_guarded_v1.
 BUILD_DIR = re.compile(r"^(tessera_[a-z0-9_]+?)_sm_\d+_tessera_guarded_v1$")
 
-_digests: dict[str, str] = {}
+MAPPING_IDENTITY = ("address", "permissions", "offset", "device_major", "device_minor", "inode")
+FILE_IDENTITY = ("device_major", "device_minor", "inode")
 _assertions: dict[str, list[dict]] = {}
 _dropped: dict[str, int] = {}
 _state: dict = {"config": None}
@@ -94,33 +97,111 @@ def parse_maps(lines) -> list[dict]:
             built = BUILD_DIR.match(os.path.basename(os.path.dirname(path)))
             module = built.group(1) if built else None
         if module:
+            major, minor = fields[3].split(":", 1)
             found.append({"module": module, "address": address, "path": path,
+                          "permissions": fields[1], "offset": int(fields[2], 16),
+                          "device_major": int(major, 16), "device_minor": int(minor, 16),
+                          "inode": int(fields[4]),
                           "nfs_renamed": name.startswith(".nfs"), "deleted": deleted})
     return found
 
 
-def _digest(entry: dict) -> str:
-    """sha256 of the mapped bytes: the map file first, the path as a fall back."""
-    key = f"{entry['path']}@{entry['address']}"
-    if key not in _digests:
-        for candidate in (f"/proc/self/map_files/{entry['address']}", entry["path"]):
-            try:
-                _digests[key] = hashlib.sha256(Path(candidate).read_bytes()).hexdigest()
-                break
-            except OSError as error:
-                _digests[key] = f"unreadable: {error}"
-    return _digests[key]
+def _maps() -> list[dict]:
+    with open("/proc/self/maps", encoding="utf-8", errors="replace") as handle:
+        return parse_maps(handle)
+
+
+def _file_identity(info: os.stat_result) -> dict:
+    return {"device_major": os.major(info.st_dev), "device_minor": os.minor(info.st_dev),
+            "inode": info.st_ino, "size": info.st_size,
+            "mtime_ns": info.st_mtime_ns, "ctime_ns": info.st_ctime_ns}
+
+
+def _digest(entry: dict) -> dict:
+    """Read an opened backing file, never an unchecked pathname or cached digest.
+
+    map_files can require privileges unavailable in a container. The fallback is
+    safe only if fstat on the *opened descriptor* matches maps' device/inode.
+    Check file stability and the mapping again after reading to reject races.
+    """
+    record = {**entry, "sha256": None, "identity_verified": False, "reader": None,
+              "attempts": []}
+    for reader, path in (("map_files", f"/proc/self/map_files/{entry['address']}"),
+                         ("pathname", entry["path"])):
+        attempt = {"reader": reader, "path": path}
+        record["attempts"].append(attempt)
+        try:
+            with Path(path).open("rb") as handle:
+                before = os.fstat(handle.fileno())
+                identity = _file_identity(before)
+                attempt["opened_file"] = identity
+                if not stat.S_ISREG(before.st_mode) or entry["inode"] == 0:
+                    raise ValueError("mapping has no regular backing file")
+                if any(identity[key] != entry[key] for key in FILE_IDENTITY):
+                    raise ValueError("opened file device/inode differs from mapping")
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+                if _file_identity(os.fstat(handle.fileno())) != identity:
+                    raise ValueError("backing file changed while hashing")
+                if not any(all(current[key] == entry[key] for key in MAPPING_IDENTITY)
+                           for current in _maps()):
+                    raise ValueError("mapping changed while hashing")
+            record.update(sha256=digest, identity_verified=True, reader=reader,
+                          backing_file=identity)
+            return record
+        except (OSError, ValueError) as error:
+            attempt["error"] = str(error)
+    record["error"] = "no reader established mapped backing-file identity"
+    return record
 
 
 def mapped_native_libraries() -> dict[str, dict]:
-    """``{module: {path, sha256, nfs_renamed, deleted}}`` for the mapped Tessera libraries."""
+    """Preserve every segment; a failed or conflicting identity has no digest."""
     try:
-        with open("/proc/self/maps", encoding="utf-8", errors="replace") as handle:
-            entries = parse_maps(handle)
-    except OSError as error:
-        return {"<unreadable /proc/self/maps>": {"error": str(error)}}
-    return {e["module"]: {"path": e["path"], "sha256": _digest(e), "nfs_renamed": e["nfs_renamed"],
-                          "deleted": e["deleted"]} for e in entries}
+        entries = _maps()
+    except (OSError, ValueError) as error:
+        return {"<unreadable /proc/self/maps>": {"identity_verified": False, "sha256": None,
+                                               "error": str(error)}}
+    libraries: dict[str, dict] = {}
+    for entry in entries:
+        info = libraries.setdefault(entry["module"], {
+            "path": entry["path"], "nfs_renamed": entry["nfs_renamed"],
+            "deleted": entry["deleted"], "mappings": []})
+        info["mappings"].append(_digest(entry))
+    for info in libraries.values():
+        mappings = info["mappings"]
+        identities = {tuple(m[key] for key in FILE_IDENTITY) for m in mappings}
+        digests = {m["sha256"] for m in mappings}
+        verified = (all(m["identity_verified"] for m in mappings)
+                    and len(identities) == len(digests) == 1)
+        info.update(identity_verified=verified, sha256=mappings[0]["sha256"] if verified else None)
+        if not verified:
+            info["error"] = "unverified or conflicting mapped backing files"
+    return libraries
+
+
+def native_identity_errors(libraries: dict) -> list[str]:
+    """Qualification gate, including refusal of legacy records without provenance."""
+    errors = []
+    for module, info in libraries.items():
+        mappings = info.get("mappings", [])
+        digest = info.get("sha256")
+        valid = (info.get("identity_verified") is True and isinstance(digest, str)
+                 and re.fullmatch(r"[0-9a-f]{64}", digest) and bool(mappings))
+        identities = set()
+        for mapping in mappings:
+            backing = mapping.get("backing_file", {})
+            identities.add(tuple(mapping.get(key) for key in FILE_IDENTITY))
+            valid = (valid and mapping.get("identity_verified") is True
+                     and mapping.get("sha256") == digest
+                     and mapping.get("reader") in ("map_files", "pathname")
+                     and mapping.get("inode", 0) > 0
+                     and all(key in backing and backing[key] == mapping.get(key)
+                             for key in FILE_IDENTITY)
+                     and any(a.get("reader") == mapping.get("reader") and "error" not in a
+                             and a.get("opened_file") == backing for a in mapping.get("attempts", [])))
+        if not valid or len(identities) != 1:
+            errors.append(f"{module}: mapped backing-file identity is unverified")
+    return errors
 
 
 def pytest_configure(config):
@@ -134,15 +215,21 @@ def pytest_configure(config):
 
 def pytest_assertion_pass(item, lineno, orig, expl):
     try:
+        from bf16_oracle import observe_bf16_assertion
+
+        numerical = observe_bf16_assertion(item, lineno, str(orig))
         text = expl if isinstance(expl, str) else str(expl)
-        if not (HAS_FLOAT.search(text) or NAMES_LAUNCH.search(text) or NAMES_LAUNCH.search(str(orig))):
+        if numerical is None and not (HAS_FLOAT.search(text) or NAMES_LAUNCH.search(text)
+                                      or NAMES_LAUNCH.search(str(orig))):
             return
         bucket = _assertions.setdefault(item.nodeid, [])
         if len(bucket) >= MAX_ASSERTIONS_PER_TEST:
             _dropped[item.nodeid] = _dropped.get(item.nodeid, 0) + 1
             return
-        bucket.append({"line": lineno, "assertion": str(orig)[:MAX_TEXT],
-                       "evaluated": text[:MAX_TEXT]})
+        record = {"line": lineno, "assertion": str(orig)[:MAX_TEXT], "evaluated": text[:MAX_TEXT]}
+        if numerical is not None:
+            record["numerical"] = numerical
+        bucket.append(record)
     except Exception as error:  # noqa: BLE001 -- an observer must not fail a test
         _append({"kind": "error", "where": "pytest_assertion_pass", "error": repr(error)})
 

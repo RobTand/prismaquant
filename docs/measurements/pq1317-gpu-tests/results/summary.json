@@ -177,7 +177,9 @@
     "fused_moe_kernel": 2
    },
    "note": "The MoE files load no Tessera shared object. They run the compact Triton adapter."
-  }
+  },
+  "historical_hash_equality_only": true,
+  "current_verified_record": "results/requalification.json"
  },
  "runs": {
   "run1-moe": {
@@ -347,5 +349,14 @@
   "harness/native_probe.py": "6b709393dc91c67ac87e656fdbe1f913d9094514e160451a2c7e171990d535bd",
   "harness/probe_selftest.py": "1e4c3b41e10a8170f93d212a7ed56cc42a46f34dd66ef1477f6e11828b011931",
   "harness/run_suite.py": "cac4344bdb87d0c752634a6794655ae96ba86b3fa2dbcaaab91798fd0c635566"
+ },
+ "qualification_record": "results/requalification.json",
+ "historical_records_note": "run1/run2 and suite-result.v3 primary_run fields describe original observations. Their native hashes omit provenance and cannot verify backing-file identity; current qualification uses native-v2 two independent rounds.",
+ "bf16_numerical_evidence": {
+  "record": "results/requalification.json",
+  "cuda_nodes_per_round": 19,
+  "measurements_per_round": 23,
+  "independent_rounds": 2,
+  "bound_violations": 0
  }
 }

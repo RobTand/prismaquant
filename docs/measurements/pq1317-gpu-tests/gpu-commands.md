@@ -1,5 +1,44 @@
 # Commands that ran
 
+## Native-identity v2 requalification
+
+The current runs and full expanded Docker/pytest commands are retained in
+`results/requalification.json` and `results/logs/native-v2/*/run-manifest.json`.
+They ran inside admitted GPU actions using the cached exact image X. The
+containers use `--pull=never --network=none`, and no test dependency is installed.
+The local source origin and read-only test tools are configuration, not code
+paths. To reproduce with pre-provisioned inputs, set `SOURCE_ORIGIN`,
+`TEST_TOOLS_PATH` and `OUT_ROOT` for the deployment, then run:
+
+```sh
+for suite in moe dense; do
+  python3 docs/measurements/pq1317-gpu-tests/harness/run_suite.py \
+    --suite "$suite" --mode collect --source-url "$SOURCE_ORIGIN" \
+    --test-tools-path "$TEST_TOOLS_PATH" --out-root "$OUT_ROOT" || exit "$?"
+done
+# Only after preflight and a targeted native-launch smoke:
+for round in 1 2; do
+  for suite in moe dense; do
+    python3 docs/measurements/pq1317-gpu-tests/harness/run_suite.py \
+      --suite "$suite" --mode run --source-url "$SOURCE_ORIGIN" \
+      --test-tools-path "$TEST_TOOLS_PATH" --out-root "$OUT_ROOT" || exit "$?"
+  done
+done
+```
+
+Fresh output directories keep every launch independent. A pytest pass is not
+sufficient: container exit 6 refuses incomplete observer/oracle evidence, and
+the outer runner checks mapped identities against the built-file inventory.
+The source commit, image reference and roster still come from the package's
+existing candidate/roster configuration. No host or CPU set is pinned; affinity
+is derived from the current admitted action. See `native-identity-repair.md`
+for the pre-run GPU budgets, failed setup attempts and the successful smoke.
+
+## Historical commands (pre-repair harness)
+
+The following describes the original runs, not commands to submit as checks
+inside an already admitted action. Their native observer is superseded.
+
 Candidate: Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb`, contract v60.
 Image X: `localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5`.
 Target: sm_121 on NVIDIA GB10. Priority 0 for every measurement action.

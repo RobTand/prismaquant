@@ -68,13 +68,17 @@ def docker_command(args, out: Path, source: Path, candidate: dict, nodes_path: P
         "NUMEXPR_NUM_THREADS": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "PYTHONPATH": f"{source}/src:{out}/test-deps:{out}/harness",
     }
-    command = ["docker", "run", "--rm"]
+    if args.test_tools_path:
+        environment["PYTHONPATH"] = f"{args.test_tools_path}:" + environment["PYTHONPATH"]
+    command = ["docker", "run", "--rm", "--pull=never", "--network=none"]
     if args.mode == "run":
         command += ["--gpus", "all"]
     else:
         environment["CUDA_VISIBLE_DEVICES"] = ""
     command += ["--cpuset-cpus", cpus, "--user", f"{os.getuid()}:{os.getgid()}", "--shm-size", "1g",
                 "-v", f"{source}:{source}:ro", "-v", f"{out}:{out}:rw", "-w", str(source)]
+    if args.test_tools_path:
+        command += ["-v", f"{args.test_tools_path}:{args.test_tools_path}:ro"]
     for key, value in environment.items():
         command += ["-e", f"{key}={value}"]
     command += [candidate["image_digest"], "python3", "-u", f"{out}/harness/container_entry.py",
@@ -90,6 +94,29 @@ def native_libraries(out: Path) -> list[dict]:
     (out / "native-so.sha256").write_text(
         "".join(f"{item['sha256']}  {item['path']}\n" for item in libraries), encoding="utf-8")
     return libraries
+
+
+def native_inventory_errors(out: Path, built: list[dict]) -> list[str]:
+    """Join attested observations to built files; a pathname inventory is not proof."""
+    from native_probe import native_identity_errors
+
+    try:
+        summary = json.loads((out / "probe-summary.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return [f"missing or unreadable probe summary: {error}"]
+    errors = []
+    if summary.get("qualification_ok") is not True or summary.get("errors") != []:
+        errors.append("probe evidence did not qualify")
+    inventory = {str(out / item["path"]): item["sha256"] for item in built}
+    workers = summary.get("native_libraries_by_worker")
+    if not isinstance(workers, dict) or not workers:
+        return errors + ["missing worker native inventories"]
+    for worker, libraries in workers.items():
+        errors.extend(f"{worker}: {e}" for e in native_identity_errors(libraries))
+        for module, info in libraries.items():
+            if info.get("sha256") is None or inventory.get(info.get("path")) != info["sha256"]:
+                errors.append(f"{worker}: {module}: mapped digest does not match its built file")
+    return errors
 
 
 def triton_kernels(out: Path) -> dict:
@@ -138,7 +165,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mode", choices=("collect", "run"), required=True)
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--source-url", default=DEFAULT_SOURCE_URL)
+    parser.add_argument("--test-tools-path", type=Path,
+                        help="pre-provisioned pinned test tools, mounted read-only; never installed")
     args = parser.parse_args(argv)
+    if args.test_tools_path:
+        args.test_tools_path = args.test_tools_path.resolve(strict=True)
 
     candidate = json.loads((PACKAGE / "candidate.json").read_text(encoding="utf-8"))
     roster = json.loads((PACKAGE / "roster.json").read_text(encoding="utf-8"))
@@ -182,9 +213,14 @@ def main(argv: list[str]) -> int:
 
     manifest.update(docker_returncode=returncode, finished_unix=time.time(),
                     native_libraries_built=native_libraries(out), triton=triton_kernels(out))
+    if args.mode == "run":
+        manifest["native_evidence_errors"] = native_inventory_errors(out, manifest["native_libraries_built"])
+        manifest["native_evidence_qualified"] = not manifest["native_evidence_errors"]
+        returncode = returncode or (6 if manifest["native_evidence_errors"] else 0)
+    manifest["exit_code"] = returncode
     (out / "run-manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     print("PQ1317_RUN " + json.dumps({k: manifest[k] for k in (
-        "mode", "suite", "host", "candidate", "out", "docker_returncode")}, sort_keys=True), flush=True)
+        "mode", "suite", "host", "candidate", "out", "docker_returncode", "exit_code")}, sort_keys=True), flush=True)
     return returncode
 
 

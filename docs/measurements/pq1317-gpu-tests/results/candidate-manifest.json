@@ -9,11 +9,12 @@
   "candidate.json": "0ee08986969b7f897dc647d8e96c456c1bc6c552528232c89f4c403ea8335a67",
   "roster.json": "0f2607af14e20b383666891fcbb0922664a8a40a8219792bc5bbfa14a8628889",
   "corrections.json": "370df2fae9c7e641607eca0dc384386fa08afac31dc6586b2640bfa45c5844ca",
-  "results/summary.json": "1c97040ffc63d8001ffe7ac6157cd6de84b50158bbb9a63e821ca240ccc712d3",
-  "results/moe.json": "5bc0ed8cafcef63b3ae3d4438d59c669118a41c09d887ff00910fd83a1d6eade",
-  "results/dense.json": "f22b0d63041cac1d6320e92c67d35cc7c0db17c1f97083dcccf11302d7d4e0b9",
+  "results/summary.json": "f59ca4302bdb69205de027bcb2cc0f2df32f2890b9aa08abcf518806dae08392",
+  "results/moe.json": "1bcc17f5af85b9ce156380a3467d36e0ea80f21b809ffde6a4e3a2ebf6e44932",
+  "results/dense.json": "3b4dd4b14e2c958ceb53a41d541e72a35405a0e976bccab2c98a88c4b6f8dad1",
   "results/pb-receipts.json": "491b9252acaf32bcbc3b780448e567f9bfa88d73b47a4bb72a904c7952de5a06",
-  "results/log-digests.json": "37cf3aa74f913d654c30df6e5c4ec365168550e1e4aaf8f6a084f6e6e8f14af7"
+  "results/log-digests.json": "5a4c29106c9edf8e1d4690f2352ad278e62b84aa5a0bc0b39e3f40d270a7cb3e",
+  "results/requalification.json": "0f54e54c268c50dd0cbbfbc22f2a057461e365d6d354b3d80d74a520e150bc9c"
  },
  "result_files": [
   "results/moe.json",
@@ -21,5 +22,7 @@
   "results/summary.json",
   "results/pb-receipts.json"
  ],
- "requalify_rule": "After any change to the candidate commit, the image, or the harness, requalify. Any change under src/tessera/, csrc/, the five roster test files or the test modules they import is a change to measured code: rerun both suites. For any other change, write a dependency analysis that names each retained node and why the change cannot reach it."
+ "requalify_rule": "After any change to the candidate commit, the image, or the harness, requalify. Any change under src/tessera/, csrc/, the five roster test files or the test modules they import is a change to measured code: rerun both suites. For any other change, write a dependency analysis that names each retained node and why the change cannot reach it.",
+ "historical_harness_note": "accepted_harness_head is the historical run2 identity. Current requalification uses the exact harness digests and immutable snapshot receipt in results/requalification.json.",
+ "qualification_record": "results/requalification.json"
 }

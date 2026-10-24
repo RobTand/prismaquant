@@ -8,21 +8,79 @@ before they allocate. They passed, but this package does not count them as GPU p
 This package answers prismaquant#2547, a part of prismaquant#1317 (criterion C5).
 It qualifies one candidate. It does not qualify whole-model serving. See "What this does not show".
 
+## Current qualification: repaired native identities
+
+[`results/requalification.json`](results/requalification.json) is the authoritative
+qualification record after the native-observer repair. It binds **two fresh,
+independent repetitions of all 136 nodes** to the exact candidate and image X.
+Both rounds passed 71 MoE + 65 dense nodes, with no failure, skip or omission.
+They used separate source checkouts, containers, worker extension directories
+and Triton caches. The four launches share one admitted operation, not four
+separate action IDs:
+`a577b8d9db2049265c77f9c211f8a7994b45374c25575163ddc6310664be1cb7`.
+
+| Round | MoE launch | Dense launch | Elapsed per suite |
+|---|---|---|---|
+| 1 | `run-moe.4yrogwtx` | `run-dense.8iph6q0c` | 53.60 s / 137.16 s |
+| 2 | `run-moe.lze3_4vo` | `run-dense.qg186gcx` | 47.00 s / 136.83 s |
+
+The probe now records **reader provenance, mapping device/inode, opened-file
+identity and stability checks for every segment**. In these runs `map_files`
+returned EPERM; the `pathname` fallback succeeded only after `fstat` on the
+opened descriptor matched the mapping. Every dense mapped digest equals the
+corresponding worker's built-file digest. An unreadable, replaced, conflicting
+or changing backing file fails qualification, even if pytest passes. These
+hashes identify backing files, not relocated or privately modified RAM pages.
+MoE still maps no Tessera native library and is Triton evidence only.
+
+Each dense round also retains **23 measured CUDA numerical comparisons across
+19 BF16 nodes**, including both repeated outputs where applicable. The observer
+reads the live operands at the passing assertion, recording errors, evaluated
+bound extrema and violation counts without changing candidate tests. All have
+finite values and zero violations. Boolean passes alone no longer satisfy this
+gate. FP8/MoE assertion records remain retained as before.
+
+The new logs are under `results/logs/native-v2/`. Repeated native identities are
+content-addressed; the package test losslessly reconstructs the original probe
+JSON and verifies its original byte count/SHA-256. The index retains commands,
+source/image/device identities, native inventories, preflights and artifact
+digests. Docker's configuration image ID is recorded separately from its
+repository/manifest digest. Test tools are supplied read-only; no package
+install, image pull or network access occurs inside the containers.
+
+The original `run1-*`, `run2-*`, suite JSON files and receipts below are retained
+**historical** records, not repaired attestation. Their hashes can match built
+files but omit reader/device/inode provenance, so they cannot establish native
+identity retrospectively. The current harness hashes are in the new index;
+old manifests intentionally keep the hashes of the old harness that ran.
+See [repair decisions and attempts](native-identity-repair.md) and
+[verified evidence receipts](results/requalification-evidence.md).
+
+CPU verification:
+
+```sh
+python -m pytest tests/test_pq1317_native_identity.py tests/test_pq1317_bf16_identity_requalification.py tests/test_pq1317_native_v2_package.py -q --basetemp="$TMPDIR/pytest"
+```
+
+The legacy package test's assumption that the *historical* run2 harness must
+match the current repaired files is obsolete. Do not rewrite old manifests to
+make that assertion green; the new package gate validates the current runs.
+
 ## Candidate, image and device
 
 | Item | Value |
 |---|---|
 | Tessera commit | `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (merge of tessera#1033), contract v60 |
-| Why this commit | `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json` on `main` pins it |
+| Why this commit | Explicit candidate named by the runtime pin at the original qualification; not a qualification of later main pins |
 | Contract digest | `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`, checked inside every run |
 | Image X | `localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5` |
 | Software in the image | Torch 2.13.0+cu130, vLLM 0.28.1rc1.dev397+gfd4a15126.d20260904, Triton 3.7.1, Python 3.12.3 |
-| Test tools | pytest 8.4.2, pytest-xdist 3.8.0 (installed into the output directory) |
+| Test tools | pytest 8.4.2, pytest-xdist 3.8.0 (pre-provisioned directory mounted read-only in native-v2 runs) |
 | Device | NVIDIA GB10, compute capability 12.1 (sm_121), driver 595.99.02, 48 SMs |
 
 `candidate.json` holds the full identity record.
 
-## Result
+## Historical result (before native attestation repair)
 
 | Suite | Issue | Files | Nodes | Passed | Device-allocating | Accepted run (PrismaBuild action) | Host |
 |---|---|---|---|---|---|---|---|
@@ -130,9 +188,10 @@ FP8 covers M = 8 and M = 9 on the GPU.
 | FP8 prefill M = 9 / 32 / 64, relative error | 0.0 / 5.6e-6 / 5.6e-6 | 0.008 |
 | FP8 GEMV vs materialized, bit-identical share | 1.0 | 0.9 |
 
-The BF16 dense nodes assert an elementwise bound and print only `True`. They show no margin.
-`test_gemv_and_torch_agree_with_measured_differences` prints its own measurement:
-`max_abs=0.000e+00 max_rel=0.000e+00` (`results/logs/run2-dense/pytest.log`).
+The historical BF16 dense records reduced elementwise bounds to `True`; they
+were pass evidence, not retained measurements. The reference GEMV's separately
+printed error did not qualify those launches. The current native-v2 records
+repair that gap with 23 live-operand measurements on 19 nodes per dense round.
 
 **Obsolete launch assertions.** None remain. The old expectations were the symbols
 `tessera_window_gemv::gemv`, `torch._scaled_mm` and `torch.mm`, and the `tessera_gemv` holder.
@@ -140,11 +199,14 @@ Tessera#643 ported all 38 test functions and deleted none. `corrections.json` li
 names in the candidate tests: constant checks, negative assertions, and one reference computation.
 **CPU skips.** None. The harness runs under `--strict-cuda`, which refuses a device-less run.
 
-## Native path evidence
+## Historical native path evidence (not verified attestation)
 
-**Dense suites.** Each worker builds its own extensions in its own directory. The accepted run mapped these libraries:
+**Dense suites.** Each worker built extensions in its own directory. The old
+observer reported these library hashes but could silently read a replacement
+pathname. They are retained for audit, not proof of mapped backing-file identity.
+Use the native-v2 per-segment provenance and inventory join for current proof.
 
-| Worker, file | Library | sha256 of the mapped bytes |
+| Worker, file | Library | historical observer-reported sha256 |
 |---|---|---|
 | gw0, BF16 | `tessera_routed_fused_value.so` | `3bb266f43d00…` |
 | gw0, BF16 | `tessera_window_gemv.so` (reference tests) | `13177f1c76eb…` |
@@ -170,9 +232,13 @@ That is a shape refusal by the lane's own predicate. It is not a failed build. T
 (`tessera_routed_fused_*`) is therefore not exercised by these files. It belongs to the native-cell work in prismaquant#1317.
 The pin's four `serving_native_extensions` are listed in `candidate.json`.
 
-## Identity chain
+## Historical identity chain
 
-1. Candidate commit `fca4c6ce0…` is the merge of tessera#1033 on Tessera `master`. The pin file on `main` names it.
+The current chain is verified independently in `results/requalification.json`.
+The statements below describe the original runs; their manifests are not edited
+into records of the repaired harness.
+
+1. Candidate commit `fca4c6ce0…` is the merge of tessera#1033 on Tessera `master`. The pin at the original measurement named it.
 2. The harness fetches exactly that commit into a fresh git checkout and refuses any other HEAD.
 3. Tessera's own instrument (`tessera.suite_source.v1`) reports `verified`: 2005 files checked against the commit's
    blobs, source digest `980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627`.
@@ -182,7 +248,9 @@ The pin's four `serving_native_extensions` are listed in `candidate.json`.
 5. The contract file in the checkout hashes to the pinned digest.
 6. PrismaBuild ran the harness from PrismaQuant commit `dffc6a6b72949a5d149406c66bcb16ccfd74e4e7` with a clean snapshot
    (`dirty_sha256` is the hash of empty input). `results/log-digests.json` binds the harness files to that run.
-7. Docker on the host reports image ID `sha256:f8dbe1a0…` for the reference. Architecture arm64.
+7. The original record reports `sha256:f8dbe1a0…` as its image ID. The new
+   inspections distinguish the image-X repository digest from Docker's config
+   ID `sha256:9e6882df…`; they need not be equal. Architecture arm64.
 
 ## What this does not show
 
@@ -191,7 +259,8 @@ The pin's four `serving_native_extensions` are listed in `candidate.json`.
   Native routed E4M3 cells, compiled cells, full-model TP2 and smoke receipts are other children of prismaquant#1317.
 * **Real TP2.** The TP2 nodes simulate rank geometry on one GPU. They are not a distributed serve.
 * **A routed fused-lane result.** See "MoE suites" above.
-* **Margins for BF16 dense nodes.** They assert a bound and report `True`.
+* **Numerical reproducibility beyond retained observations.** Native-v2 retains
+  live BF16 error/bound measurements, not operand tensor dumps or whole-model accuracy.
 * **Exhaustive GPU use.** `cuda_allocated` is a floor. Some nodes may use the device without a new allocation.
 * **Performance.** No speed claim is made.
 * **A fixed owner roster.** See "Roster provenance".

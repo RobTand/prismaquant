@@ -3,7 +3,7 @@
 
 ``run_suite.py`` starts it with the Tessera source mounted read-only. Steps:
 
-1. install the pinned pytest tools into the output directory;
+1. validate the pinned pytest tools already supplied by the image or a read-only tool directory;
 2. bind the source: Tessera's own ``measured_source`` must say ``verified`` at the
    candidate commit, and the packaged runtime contract must hash to the pinned digest;
 3. record the runtime: torch, CUDA device, vLLM, Triton, Tessera;
@@ -13,8 +13,9 @@
    ``--dist loadfile`` fixes which worker runs which file, so process-level evidence
    (the mapped native libraries) belongs to one file.
 
-Exit codes: 0 ok, 3 roster mismatch, 4 identity refused, 5 probe self-test failed;
-in ``run`` mode a pytest failure returns pytest's own code.
+Exit codes: 0 ok, 3 roster mismatch, 4 identity refused, 5 probe self-test failed,
+6 unqualified probe evidence. A pytest failure returns pytest's own code; passing
+tests alone cannot override failed attestation.
 """
 from __future__ import annotations
 
@@ -52,15 +53,20 @@ def say(tag: str, payload) -> None:
 
 
 def install_test_tools(out: Path) -> dict:
-    missing = [pin for module, pin in TEST_TOOLS.items() if importlib.util.find_spec(module) is None]
-    if missing:
-        subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "--no-cache-dir",
-                        "--target", str(out / "test-deps"), *missing], check=True)
-        importlib.invalidate_caches()
-    import pytest
-    import xdist  # noqa: F401
-    return {"installed": missing, "pytest": pytest.__version__,
-            "xdist": importlib.metadata.version("pytest-xdist")}
+    # Qualification must not resolve new dependencies from a package index.
+    versions = {}
+    for module, pin in TEST_TOOLS.items():
+        distribution, expected = pin.split("==", 1)
+        if importlib.util.find_spec(module) is None:
+            raise RuntimeError(f"missing pre-provisioned test tool: {pin}")
+        actual = importlib.metadata.version(distribution)
+        # Rendering/version-parsing dependencies come from immutable image X,
+        # as in the historical runs. Pin the supplied pytest/xdist toolchain.
+        if module not in ("pygments", "packaging") and actual != expected:
+            raise RuntimeError(f"test tool {distribution}: expected {expected}, got {actual}")
+        versions[distribution] = actual
+    return {"installed": [], "versions": versions,
+            "pytest": versions["pytest"], "xdist": versions["pytest-xdist"]}
 
 
 def bind_source(source: Path, candidate: str, contract_sha256: str) -> dict:
@@ -197,21 +203,67 @@ def run_suite(files: list[str], out: Path) -> int:
     return returncode
 
 
-def merge_probe(out: Path) -> dict:
+def merge_probe(out: Path, expected: list[str]) -> dict:
+    # Import only when merging so this module can still be inspected by path.
+    from native_probe import FILE_IDENTITY, native_identity_errors
+    from bf16_oracle import bf16_oracle_errors
+
     records = [json.loads(line) for path in sorted((out / "probe").glob("probe.*.jsonl"))
                for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     tests = [r for r in records if r.get("kind") == "test"]
     sessions = [r for r in records if r.get("kind") == "session"]
     errors = [r for r in records if r.get("kind") == "error"]
-    (out / "probe-tests.json").write_text(json.dumps(tests, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    for name, data in (("probe-tests.json", tests), ("probe-sessions.json", sessions)):
+        (out / name).write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+    def refuse(message: str) -> None:
+        errors.append({"kind": "error", "where": "merge_probe", "error": message})
+
+    roster = compare_roster([r["nodeid"] for r in tests], expected)
+    if not roster["equal"]:
+        refuse(f"probe node roster mismatch: {roster}")
+    workers = {f"gw{i}" for i in range(WORKERS)}
+    if {r["worker"] for r in tests} != workers:
+        refuse("probe did not record all test workers")
+    for worker in workers:
+        ended = [r for r in sessions if r["worker"] == worker and r.get("executes_tests") is True]
+        if len(ended) != 1 or ended[0].get("exitstatus") != 0:
+            refuse(f"{worker}: missing or unsuccessful probe session")
+    for record in tests:
+        if record.get("when") != "call" or record.get("outcome") != "passed":
+            refuse(f"{record['nodeid']}: required node did not pass its call")
+        if record.get("assertions_dropped") != 0:
+            refuse(f"{record['nodeid']}: assertions were dropped")
+
+    for error in bf16_oracle_errors(tests, expected):
+        refuse(error)
     by_worker: dict[str, dict[str, dict]] = {}
-    for record in tests + sessions:
-        by_worker.setdefault(record["worker"], {}).update(record.get("native_libraries_mapped", {}))
     seen: dict[str, set] = {}
-    for libraries in by_worker.values():
+    identities: dict[tuple, tuple] = {}
+    for record in tests + sessions:
+        worker = record["worker"]
+        libraries = record.get("native_libraries_mapped")
+        if not isinstance(libraries, dict):
+            refuse(f"{worker}: missing native mapping inventory")
+            continue
+        for error in native_identity_errors(libraries):
+            refuse(f"{worker}: {record.get('nodeid', 'session')}: {error}")
+        inventory = by_worker.setdefault(worker, {})
         for module, info in libraries.items():
-            seen.setdefault(module, set()).add(info.get("sha256"))
+            # Every observation participates. Never let a later valid record hide
+            # an earlier failure, or let dict.update erase a changed binary.
+            if native_identity_errors({module: info}):
+                continue
+            mapping = info["mappings"][0]
+            identity = (info["sha256"], *(mapping[k] for k in FILE_IDENTITY))
+            key = (worker, module)
+            if key in identities and identities[key] != identity:
+                refuse(f"{worker}: {module}: mapped backing file changed during the run")
+            identities[key] = identity
+            inventory.setdefault(module, info)
+            seen.setdefault(module, set()).add(info["sha256"])
     summary = {
+        "qualification_ok": not errors,
         "tests_recorded": len(tests),
         "workers": sorted({r["worker"] for r in tests}),
         "errors": errors,
@@ -276,9 +328,9 @@ def main(argv: list[str]) -> int:
         return finish(0)
 
     code = run_suite(files, args.out)
-    report["probe"] = merge_probe(args.out)
+    report["probe"] = merge_probe(args.out, expected)
     say("PQ1317_PROBE", report["probe"])
-    return finish(code)
+    return finish(code or (0 if report["probe"]["qualification_ok"] else 6))
 
 
 if __name__ == "__main__":
