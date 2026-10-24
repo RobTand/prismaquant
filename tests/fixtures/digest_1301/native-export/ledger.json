@@ -1,0 +1,268 @@
+{
+  "slice": "native-export",
+  "status": "blocked-on-owner-recipes; not a completion ledger",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "inspected_head": "8bc0b5af8c69af352b559dccda99bd4e6fa8b418",
+  "completed_calls": [],
+  "blocked_calls": [
+    {
+      "file": "prismaquant/nvfp4_activation_contract.py",
+      "scope": "routed_moe_stages_sha256",
+      "callee": "hashlib.sha256",
+      "source_blob": "3f2d970e8677e5c52467e0f5e0b990b2de66289e",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "original_id": "hashlib:prismaquant/nvfp4_activation_contract.py::routed_moe_stages_sha256@1193:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "nvfp4-u32le"
+    },
+    {
+      "file": "prismaquant/nvfp4_activation_contract.py",
+      "scope": "stage_values_sha256",
+      "callee": "hashlib.sha256",
+      "source_blob": "3f2d970e8677e5c52467e0f5e0b990b2de66289e",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "original_id": "hashlib:prismaquant/nvfp4_activation_contract.py::stage_values_sha256@1171:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "nvfp4-u32le"
+    },
+    {
+      "file": "prismaquant/nvfp4_activation_contract.py",
+      "scope": "target_values_sha256",
+      "callee": "hashlib.sha256",
+      "source_blob": "3f2d970e8677e5c52467e0f5e0b990b2de66289e",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "original_id": "hashlib:prismaquant/nvfp4_activation_contract.py::target_values_sha256@1380:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "nvfp4-u32le"
+    },
+    {
+      "file": "prismaquant/build_rtn_cache.py",
+      "scope": "main",
+      "callee": "json.dump",
+      "source_blob": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+      "syntax_sha256": "2e8ca471b22193b30e6802b7b8f36b12045d8e75c310f84f4f6cbd4f9e5d6f93",
+      "original_id": "supplemental-json:prismaquant/build_rtn_cache.py::main@688:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/build_rtn_cache.py",
+      "scope": "stage_multimodal",
+      "callee": "json.dump",
+      "source_blob": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+      "syntax_sha256": "a57bdbb3c559330028e780991c7a0ec439a7ced1ecbe44754e1fbe058b4c69bb",
+      "original_id": "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@171:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/build_rtn_cache.py",
+      "scope": "stage_multimodal",
+      "callee": "json.dump",
+      "source_blob": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+      "syntax_sha256": "b71a409640e5872e7112319c91a13475bc6b8ce51b6d6b6911500a8e384792d0",
+      "original_id": "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@225:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/build_rtn_cache.py",
+      "scope": "stage_multimodal",
+      "callee": "json.dump",
+      "source_blob": "36ba44fb10aed66b9dc8ab43c2b4de98029b2567",
+      "syntax_sha256": "a57bdbb3c559330028e780991c7a0ec439a7ced1ecbe44754e1fbe058b4c69bb",
+      "original_id": "supplemental-json:prismaquant/build_rtn_cache.py::stage_multimodal@245:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "IncrementalSafetensorsWriter.finalize",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "deba379e86f707a9792d28feb7f6cd04a8658a222e19e51eb6c685c30e0410e0",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::IncrementalSafetensorsWriter.finalize@5819:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "_admit_export_resume_cache._refuse",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "423816d3fb630584716e38a0815a1aecfa697f7f4e5b3ab072dd5d0a4370441b",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache._refuse@4728:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "_admit_export_resume_cache",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "423816d3fb630584716e38a0815a1aecfa697f7f4e5b3ab072dd5d0a4370441b",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::_admit_export_resume_cache@4737:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "_main_impl",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "3390786cf75b1ea41be45e118741154074e25bc9eba84241e54c4dc22e3542c2",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::_main_impl@5589:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "write_config_with_quantization",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "a57bdbb3c559330028e780991c7a0ec439a7ced1ecbe44754e1fbe058b4c69bb",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::write_config_with_quantization@5905:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_native_compressed.py",
+      "scope": "write_sharded_safetensors",
+      "callee": "json.dump",
+      "source_blob": "044af810fd7b4556689e3ae238e9a3d875bd5fdc",
+      "syntax_sha256": "f4175ae539777877f3af993139fe68ff09b97ff07894794a19ec9b7c4e13d78c",
+      "original_id": "supplemental-json:prismaquant/export_native_compressed.py::write_sharded_safetensors@5880:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-indent2-stream"
+    },
+    {
+      "file": "prismaquant/export_structure.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "acbe7fe1ae2f8f02df3c2def904bb79e731c6d33",
+      "syntax_sha256": "2f0c8292e127825b5120ca4282748ad2d5f37653f0e32c059b2631ce94edd814",
+      "original_id": "supplemental-json:prismaquant/export_structure.py::main@160:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-spaced"
+    },
+    {
+      "file": "prismaquant/native_render_codec.py",
+      "scope": "gptq_obs_rounding_nvfp4_swept",
+      "callee": "json.dumps",
+      "source_blob": "1b3e6129fc76a7d5d3a560f3f5e6d1c815d9e833",
+      "syntax_sha256": "e1219df465ce0a875b9ce732a869987806cb23722a602a5ea38cb7cbaf99b001",
+      "original_id": "supplemental-json:prismaquant/native_render_codec.py::gptq_obs_rounding_nvfp4_swept@1273:40",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-spaced"
+    },
+    {
+      "file": "prismaquant/native_render_codec.py",
+      "scope": "gptq_obs_rounding_nvfp4_swept",
+      "callee": "json.dumps",
+      "source_blob": "1b3e6129fc76a7d5d3a560f3f5e6d1c815d9e833",
+      "syntax_sha256": "e1219df465ce0a875b9ce732a869987806cb23722a602a5ea38cb7cbaf99b001",
+      "original_id": "supplemental-json:prismaquant/native_render_codec.py::gptq_obs_rounding_nvfp4_swept@1322:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "blocked-eligible",
+      "blocker": "json-insertion-spaced"
+    }
+  ],
+  "retentions": [
+    {
+      "file": "prismaquant/export_gguf.py",
+      "scope": "export_gguf",
+      "callee": "hashlib.sha256",
+      "source_blob": "f4a93664c719d1e482393469041c89d6f2d148e3",
+      "syntax_sha256": "f06da9150bb5e0bf681190ea59a7e0de173214748c260bd7ee6e3c7cca3f74b6",
+      "original_id": "hashlib:prismaquant/export_gguf.py::export_gguf@408:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "supported-deprecated-no-refactor",
+      "classification": "load-bearing",
+      "witnesses": [
+        "AGENTS.md:7-9",
+        "prismaquant/export_gguf.py:435-459"
+      ],
+      "reason": "Explicit deprecated GGUF preservation policy; not an unusual-recipe retention. Assignment identity is embedded as prismaquant.assignment_sha256; imatrix identity is embedded as prismaquant.imatrix_sha256. No GGUF source changes authorized."
+    },
+    {
+      "file": "prismaquant/export_gguf.py",
+      "scope": "export_gguf",
+      "callee": "hashlib.sha256",
+      "source_blob": "f4a93664c719d1e482393469041c89d6f2d148e3",
+      "syntax_sha256": "46ef61fb8c7d09a7bf845569bbc8968c05c256379ed5433a5aca1ba6d226695f",
+      "original_id": "hashlib:prismaquant/export_gguf.py::export_gguf@455:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "supported-deprecated-no-refactor",
+      "classification": "load-bearing",
+      "witnesses": [
+        "AGENTS.md:7-9",
+        "prismaquant/export_gguf.py:435-459"
+      ],
+      "reason": "Explicit deprecated GGUF preservation policy; not an unusual-recipe retention. Assignment identity is embedded as prismaquant.assignment_sha256; imatrix identity is embedded as prismaquant.imatrix_sha256. No GGUF source changes authorized."
+    },
+    {
+      "file": "prismaquant/export_gguf.py",
+      "scope": "export_gguf",
+      "callee": "json.dumps",
+      "source_blob": "f4a93664c719d1e482393469041c89d6f2d148e3",
+      "syntax_sha256": "901a476bd5cbb70fe9d9d5f88787e8e81b84a1237b3daa4b5726c5a09872f1f0",
+      "original_id": "supplemental-json:prismaquant/export_gguf.py::export_gguf@409:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "disposition": "supported-deprecated-no-refactor",
+      "classification": "load-bearing",
+      "witnesses": [
+        "AGENTS.md:7-9",
+        "prismaquant/export_gguf.py:435-459"
+      ],
+      "reason": "Explicit deprecated GGUF preservation policy; not an unusual-recipe retention. Assignment identity is embedded as prismaquant.assignment_sha256; imatrix identity is embedded as prismaquant.imatrix_sha256. No GGUF source changes authorized."
+    }
+  ],
+  "recipe_gaps": {
+    "json-insertion-spaced": {
+      "contract": "json.dumps with default insertion order, ASCII escaping, default spaces, lax nonfinite values, no fallback; returns str. Mixed int/string keys need not be comparable. Native renderer uses local import json as _json.",
+      "owner_evidence": "digests.JsonProfile._encoder hard-codes sort_keys=True. No insertion-order profile exists in this checkout.",
+      "required_action": "owner-recipes supplies exact unsorted text recipe; consumer owner must then characterize actual renderer and CLI paths before replacement."
+    },
+    "json-insertion-indent2-stream": {
+      "contract": "json.dump with indent=2, default insertion order/ASCII/lax nonfinite/no fallback, no trailing LF. Preserve encoder iteration and handle.write behavior and partial output on failure, not merely final text.",
+      "owner_evidence": "JsonProfile supports indent but hard-codes sort_keys=True and exposes no dump-to-handle operation. _stream_sha256 consumes encoder chunks for hashing, not publication.",
+      "required_action": "owner-recipes supplies exact insertion-ordered streamed publication route; do not substitute whole-document text allocation."
+    },
+    "nvfp4-u32le": {
+      "contract": "Per-string unsigned 32-bit little-endian byte lengths and strict UTF-8; stage identity ends in input_global_scale_tensor(value).item() serialized <f; target identity ends each target with float(scales[target]) serialized <f; routed identity appends raw bytes.fromhex of stage digests in NVFP4_ROUTED_MOE_STAGES order. Caller validation, sorting and coercions remain unchanged. Full 64-character lowercase hex.",
+      "owner_evidence": "length_framed_bytes_sha256 uses u64 big-endian for every frame, LengthFramedSourceSha256 uses big-endian name/payload lengths, LegacyNulSourceSha256 adds NUL delimiters. None reproduces this recipe.",
+      "required_action": "owner-recipes supplies a finished exact incremental/framed route; preserve refusal order without allocating a joined document or substituting u64 big-endian framing."
+    }
+  },
+  "already_owned": {
+    "file": "prismaquant/export_native_compressed.py",
+    "scope_routes": {
+      "_activation_index_fingerprint": "DIRECT_ASCII_LAX.sha256(rows) at line 232",
+      "_production_cache_fingerprint": "DIRECT_ASCII_LAX.sha256(act/rows) and DIRECT_ASCII_LAX_DEFAULT_STR.sha256(metadata) at lines 348-351",
+      "_export_resume_fingerprint": "DIRECT_ASCII_SPACED_LAX.sha256(assignment) at line 4688",
+      "_write_shipcard._hash": "DIRECT_ASCII_SPACED_LAX.sha256(payload) at line 4815"
+    },
+    "note": "Existing owner routes are not new completions and have not been added to completed_calls."
+  },
+  "audit_boundaries": [
+    "Only the six assigned source files were enumerated here. No claim of exhaustive supplemental enumeration across generated code, shell/deployment populations, dynamic aliases or validators.",
+    "No application source, shared owners, scanner, baseline, shared census, immutable acceptance files or qualification/pin files changed.",
+    "No replaced calls: no fabricated fixture/test metadata in completed_calls. Independent original-consumer compatibility fixtures remain a required part of the resumed migration.",
+    "No live PR roster is available; supplied open-issue list contains no competing native-export digest work. Historical issuegraph ownership is not treated as current ownership."
+  ]
+}
