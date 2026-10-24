@@ -1,0 +1,110 @@
+[
+  {
+    "original_id": "hashlib:tools/provision_tessera_pin.py::expected_identity@463:27",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_tree_identity_and_manifest"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/provision_tessera_pin.py::tree_digest@142:17",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_tree_identity_and_manifest"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::_VerifiedBlockReader._block@516:19",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::_freeze_artifact@841:23",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::_scan_file@642:22",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/publish_artifact.py::main@1406:32",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+    ]
+  },
+  {
+    "original_id": "hashlib:tools/tessera_campaign_container.py::inspect_or_load@948:21",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "90870799094cacd764127a1619dbe616aa5f477a",
+    "owner_route": "prismaquant.digests.file_digest_sha256hex",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/tessera_campaign_container_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_archive_hash_before_load_and_inspect_order"
+    ]
+  },
+  {
+    "original_id": "sorted-json:tools/publish_artifact.py::_freeze_artifact@841:38",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+    ]
+  },
+  {
+    "original_id": "supplemental-json:tools/publish_artifact.py::main@1386:15",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+    "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text (string operand)",
+    "fixtures": [
+      "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+    ],
+    "tests": [
+      "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+    ]
+  }
+]

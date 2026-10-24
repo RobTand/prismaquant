@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR
 from prismaquant.tessera_census_union import UnionRefused, build_plan, write_plan
 
 
@@ -36,7 +37,7 @@ def main(argv=None) -> int:
     except UnionRefused as exc:
         print(f"union refused: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(summary, indent=1, sort_keys=True, default=str))
+    print(DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR.text(summary))
     return 0
 
 

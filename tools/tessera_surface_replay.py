@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from prismaquant.digests import indent2_json_file_bytes
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.tessera_anchored_surface import replay_campaign
 
@@ -22,7 +23,7 @@ def main(argv=None):
     try:
         plan = json.loads(Path(args.plan).read_text())
         report = replay_campaign(args.costs, args.checkpoint, plan)
-        encoded = json.dumps(report, sort_keys=True, indent=2, allow_nan=False).encode() + b"\n"
+        encoded = indent2_json_file_bytes(report)
         output = Path(args.out)
         destination = output.parent.resolve(strict=False) / output.name
         created = publish_new_bytes(destination, encoded, nofollow=True)

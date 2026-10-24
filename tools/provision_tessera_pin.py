@@ -51,6 +51,7 @@ import argparse
 import ast
 import hashlib
 import json
+import runpy
 import os
 import re
 import shutil
@@ -63,6 +64,8 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Host provisioning stays stdlib-only; do not initialise prismaquant (or Torch).
+bytes_sha256hex = runpy.run_path(str(ROOT / "prismaquant/digests.py"))["bytes_sha256hex"]
 PIN_SOURCE = ROOT / "prismaquant" / "tessera_runtime_contract.py"
 PIN_NAME = "TESSERA_DEV_PIN_COMMIT"
 SHA_NAME = "TESSERA_DEV_PIN_CONTRACT_SHA256"
@@ -139,7 +142,7 @@ def tree_digest(root: Path, skip=None) -> tuple[str, int]:
             continue
         h.update(str(rel).encode("utf-8"))
         h.update(b"\0")
-        h.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+        h.update(bytes_sha256hex(path.read_bytes()).encode("ascii"))
         h.update(b"\n")
         n += 1
     return h.hexdigest(), n
@@ -460,8 +463,8 @@ def expected_identity(source: Path,
         raise SystemExit(f"{source} carries no {PACKAGE_IN_TREE}")
     digest, count = package_digest(pkg, unshipped)
     return {
-        "contract_sha256": hashlib.sha256(
-            (source / CONTRACT_IN_TREE).read_bytes()).hexdigest(),
+        "contract_sha256": bytes_sha256hex(
+            (source / CONTRACT_IN_TREE).read_bytes()),
         "package_sha256": digest,
         "package_files": count,
     }

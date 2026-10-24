@@ -1,0 +1,26 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+  "fragments": [
+    {
+      "original_id": "sorted-json:tools/build_tessera_census_cache.py::main@142:11",
+      "source": "json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False)"
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_census_cache.py::main@163:30",
+      "source": "json.dumps(summary, indent=2, sort_keys=True)"
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@100:27",
+      "source": "json.dumps(config, indent=2, allow_nan=False)"
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@131:13",
+      "source": "json.dumps(projected, indent=2, allow_nan=False)"
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@166:10",
+      "source": "json.dumps({\"summary_sha256\": shas[\"summary\"]})"
+    }
+  ]
+}

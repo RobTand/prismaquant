@@ -1,0 +1,1362 @@
+{
+  "schema": "digest-supply-ledger.v1",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "scope": [
+    "tools/accept_tessera_pin_provisioner.py",
+    "tools/build_glm_derivative_image.py",
+    "tools/build_prismasnap_27b_campaign.py",
+    "tools/build_tessera_census_cache.py",
+    "tools/build_tessera_hessian_collection.py",
+    "tools/build_tessera_mtp_cached_units.py",
+    "tools/compose_tessera_cached_units.py",
+    "tools/derive_tessera_progress_grace.py",
+    "tools/dispatch_tessera_campaign.py",
+    "tools/expand_probe_onto_tessera_census.py",
+    "tools/prismasnap.py",
+    "tools/provision_tessera_pin.py",
+    "tools/publish_artifact.py",
+    "tools/reseal_campaign_identity.py",
+    "tools/reselect_mtp_fixed.py",
+    "tools/seal_tessera_census_identity.py",
+    "tools/tessera_campaign_container.py",
+    "tools/tessera_fleet/dispatch_ladder.py",
+    "tools/tessera_fleet/dispatch_model.py",
+    "tools/tessera_surface_replay.py",
+    "tools/union_tessera_census_tables.py"
+  ],
+  "completed_calls": [
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@100:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@123:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@125:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@145:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_glm_derivative_image.py::main@85:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_rootfs_layers_sha256@260:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_prismasnap_27b_campaign.py::_sha256_file@152:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "prismaquant.digests.file_sha256hex(block_size=16777216)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@71:57",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_hessian_collection.py::publish_collection@75:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@86:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_tessera_mtp_cached_units.py::main@96:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/compose_tessera_cached_units.py::main@77:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "de30add5ce229574617fe2d6b69c4bda9535e555",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_composed_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/derive_tessera_progress_grace.py::sha256@29:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d5b2b81e755747f2348c93865f551a964d06aa8",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/derive_tessera_progress_grace.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/derive_tessera_progress_grace.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_bound_read_before_unpickle_and_refusal"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/expand_probe_onto_tessera_census.py::_bound@29:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b76526ad40622ff922651c7057c431b3231d61ef",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_bound_read_before_unpickle_and_refusal",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_expand_main_publication_bytes_and_validation"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/expand_probe_onto_tessera_census.py::main@59:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b76526ad40622ff922651c7057c431b3231d61ef",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_bound_read_before_unpickle_and_refusal",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_expand_main_publication_bytes_and_validation"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/provision_tessera_pin.py::expected_identity@463:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_tree_identity_and_manifest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/provision_tessera_pin.py::tree_digest@142:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_provision_tree_identity_and_manifest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::_VerifiedBlockReader._block@516:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::_freeze_artifact@841:23",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::_scan_file@642:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::main@1406:32",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/reselect_mtp_fixed.py::main@190:55",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_reselect_main_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/reselect_mtp_fixed.py::main@65:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_reselect_main_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/seal_tessera_census_identity.py::main@31:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ea03883f184fef792f9a35bd511a01bb357e427e",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_seal_publication_order_bytes_and_existing_output"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/seal_tessera_census_identity.py::main@43:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ea03883f184fef792f9a35bd511a01bb357e427e",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_seal_publication_order_bytes_and_existing_output"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/tessera_campaign_container.py::inspect_or_load@948:21",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "90870799094cacd764127a1619dbe616aa5f477a",
+      "owner_route": "prismaquant.digests.file_digest_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/tessera_campaign_container_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_archive_hash_before_load_and_inspect_order"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_glm_derivative_image.py::main@99:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_glm_image_bytes_and_readback"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_canonical_bytes@125:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "prismaquant.digests.DIRECT_UTF8_STRICT.encoded",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::_pretty_bytes@138:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "prismaquant.digests.DIRECT_UTF8_INDENT2_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_prismasnap_27b_campaign.py::main@1282:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f9d1504d8693049d6de6376529d7ab42a57f59c",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_STRICT.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_prismasnap_27b_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_campaign_serializers_and_file_policy"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_census_cache.py::main@142:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_build_cache_main_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_census_cache.py::main@163:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_build_cache_main_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_hessian_collection.py::publish_collection@58:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f302d3352923bcb74c9c74166d71242a16470fee",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_hessian_collection.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_hessian_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@90:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_tessera_mtp_cached_units.py::main@94:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e7d5d8c97336d22bc25d03ba92366ab2e5652bc2",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_tessera_mtp_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_mtp_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compose_tessera_cached_units.py::main@70:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "de30add5ce229574617fe2d6b69c4bda9535e555",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.encoded + LF",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/compose_tessera_cached_units.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_images.py::test_composed_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/derive_tessera_progress_grace.py::main@98:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "8d5b2b81e755747f2348c93865f551a964d06aa8",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/derive_tessera_progress_grace.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/derive_tessera_progress_grace.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_bound_read_before_unpickle_and_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_capture@536:56",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_dispatch_resources_before_submit_and_capture_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_census@505:55",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_dispatch_resources_before_submit_and_capture_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_plan@1146:45",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_dispatch_plan_publication_and_refusal"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/expand_probe_onto_tessera_census.py::main@69:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b76526ad40622ff922651c7057c431b3231d61ef",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/expand_probe_onto_tessera_census.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_bound_read_before_unpickle_and_refusal",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_expand_main_publication_bytes_and_validation"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/prismasnap.py::_print@98:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1e1e69556bf066d5a60cd379bf790ac2e800e6be",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/prismasnap.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/prismasnap.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_union_and_prismasnap_output_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/publish_artifact.py::_freeze_artifact@841:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/reselect_mtp_fixed.py::main@190:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_reselect_main_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/seal_tessera_census_identity.py::main@45:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ea03883f184fef792f9a35bd511a01bb357e427e",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_seal_publication_order_bytes_and_existing_output"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/tessera_surface_replay.py::main@25:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ca3ada41ec2286ef738bf911bfd61a56d8340651",
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/tessera_surface_replay.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/tessera_surface_replay.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_replay_publication_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/union_tessera_census_tables.py::main@39:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c94e4eb8b3c4599a5d5622b0c8f0aea6b88bc49",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT1_LAX_DEFAULT_STR",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/union_tessera_census_tables.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/union_tessera_census_tables.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_original_fragments",
+        "tests/test_digest_1301/tessera-supply/test_campaigns.py::test_union_and_prismasnap_output_and_refusals"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/publish_artifact.py::main@1386:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text (string operand)",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_manifest_canonical_bytes_and_quote"
+      ]
+    }
+  ],
+  "remaining_calls": [
+    {
+      "original_id": "hashlib:tools/provision_tessera_pin.py::tree_digest@131:8",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "tree_digest",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "hashlib.sha256()",
+      "status": "unresolved",
+      "reason": "The outer path/NUL/ASCII-hex-content-digest/LF tree recipe needs an exact shared owner. Unusual framing is not retention justification. Agreement S prevents owner edits in this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/provision_tessera_pin_original.py"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::_replay_frozen_digests@923:17",
+      "file": "tools/publish_artifact.py",
+      "scope": "_replay_frozen_digests",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "original_expression": "hashlib.sha256()",
+      "status": "retained",
+      "reason": "Replay rereads each non-inline frozen entry through its held descriptor with offset-based os.pread until EOF, accumulating byte count and SHA-256, then refuses size or digest divergence after upload. Retain this descriptor-integrated verification loop; reopening a path or substituting a whole-file owner would lose the held-inode replay boundary.",
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_retained_algorithm_source_witnesses",
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/publish_artifact.py::_scan_file@629:12",
+      "file": "tools/publish_artifact.py",
+      "scope": "_scan_file",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4e35526774d1587c2c5140d167db9a68e0e3ba0b",
+      "original_expression": "hashlib.sha256()",
+      "status": "retained",
+      "reason": "Scan computes the whole-file SHA-256 during the same offset-based _pread_exact pass over a held descriptor that creates block digests, the first-block sample, bounded inline content, and read-call accounting. Retain this integrated snapshot scan and its short-read refusals, not a second path-based file read. Nested plain-bytes block hashes already route to the shared owner.",
+      "tests": [
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_retained_algorithm_source_witnesses",
+        "tests/test_digest_1301/tessera-supply/test_artifacts.py::test_descriptor_scan_replay_and_refusals"
+      ],
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/artifacts/publish_artifact_original.py"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/seal_tessera_census_identity.py::main@40:15",
+      "file": "tools/seal_tessera_census_identity.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ea03883f184fef792f9a35bd511a01bb357e427e",
+      "original_expression": "json.dumps(roster, sort_keys=True, indent=1, allow_nan=False)",
+      "status": "unresolved",
+      "reason": "Indent1 strict: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/seal_tessera_census_identity.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/accept_tessera_pin_provisioner.py::main@120:10",
+      "file": "tools/accept_tessera_pin_provisioner.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a50ee2f70524df78d76ad029a3dee324d0811b17",
+      "original_expression": "json.dumps(out, indent=1)",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/build_glm_derivative_image.py::main@151:40",
+      "file": "tools/build_glm_derivative_image.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "original_expression": "json.dumps(result, indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted insertion-order JSON with lax nonfinite handling; existing JsonProfile owners all sort keys. Retained locally, not falsely routed to a sorted profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_glm_derivative_image.py::main@154:10",
+      "file": "tools/build_glm_derivative_image.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e8b8ba2cce08d7f1178cb288c0ca7bd43f479d23",
+      "original_expression": "json.dumps(result)",
+      "status": "unresolved",
+      "reason": "Unsorted insertion-order JSON with lax nonfinite handling; existing JsonProfile owners all sort keys. Retained locally, not falsely routed to a sorted profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/images/build_glm_derivative_image.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@100:27",
+      "file": "tools/build_tessera_census_cache.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+      "original_expression": "json.dumps(config, indent=2, allow_nan=False)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@131:13",
+      "file": "tools/build_tessera_census_cache.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+      "original_expression": "json.dumps(projected, indent=2, allow_nan=False)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_tessera_census_cache.py::main@166:10",
+      "file": "tools/build_tessera_census_cache.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cf4051eced17a8a8d667853f55a9670d2bc84b2f",
+      "original_expression": "json.dumps({\"summary_sha256\": shas[\"summary\"]})",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/build_tessera_census_cache.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_derived_data_manifests@1406:12",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_derived_data_manifests",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(manifest, indent=1, sort_keys=False).encode()",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_pbcampaign@576:28",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_pbcampaign",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(\n            {\"manifest\": str(manifest), \"returncode\": completed.returncode,\n             \"rows\": rows}, indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_publish_submitted_manifest@1541:15",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_publish_submitted_manifest",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(rows, indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1817:14",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_submit_gpu_action",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(manifest, separators=(\",\", \":\"), sort_keys=False).encode()",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1888:14",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_submit_gpu_action",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(summary, indent=1)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1900:10",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "_submit_gpu_action",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(summary, indent=1)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_capture@534:24",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "cmd_capture",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps([row], indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_census@503:24",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "cmd_census",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps([row], indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1312:24",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "cmd_plan",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(published_rows, indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1313:41",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "cmd_plan",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps(plan, indent=2)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_submit_aqua@2072:14",
+      "file": "tools/dispatch_tessera_campaign.py",
+      "scope": "cmd_submit_aqua",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+      "original_expression": "json.dumps({**summary, \"submitted\": False,\n                          \"reason\": (\n                              \"every requested cell already carries a joint \"\n                              \"A-side; the AQUA requirement is satisfied by \"\n                              \"the artifact named by --cost-in, so no stage \"\n                              \"was queued and --cost-out was not written\")},\n                         indent=1)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/dispatch_tessera_campaign.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::_write_manifest@247:11",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "_write_manifest",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps({\"commit\": commit, \"tree_sha256\": digest,\n                       \"files\": count}, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@520:18",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@545:14",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@549:14",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@578:18",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@594:14",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/provision_tessera_pin.py::main@597:10",
+      "file": "tools/provision_tessera_pin.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2dc897a8fd9c959e65cd3e457bfc1b18e513850",
+      "original_expression": "json.dumps(report, indent=1)",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_bundle@66:10",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_bundle",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(dict(ok=bundle['ok'], cells=bundle['cell_count'], strata=bundle['strata'], missing=bundle['strata_missing'],\n        engagement_missing=bundle['engagement_missing'], out=str(args.out)))",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@21:14",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_dry_run.display",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], state=plan['state'], strata=plan['strata'], shards=plan['shard_count'],\n            receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'], bytes_to_write=plan['bytes_to_write'], old_identity_sha256=plan['old_identity_sha256'],\n            new_identity_sha256=plan.get('new_identity_sha256'), plan_seconds=round(plan['plan_seconds'], 2)))",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@26:29",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_dry_run.display",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(edit, default=str)",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_hash_tree@15:10",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_hash_tree",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(reseal.hash_trees(prismaquant_root=args.prismaquant, producer_root=args.producer), indent=1)",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@37:18",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_migrate.display",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(dict(row=plan['row'], state=plan['state'], note=plan.get('note')))",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@39:14",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_migrate.display",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], shards=plan['shard_count'], receipt_seals=plan['receipt_seals'],\n            cost_seals=plan['cost_seals'], bytes_written=plan['bytes_written'], seconds=round(plan['seconds'], 2), new_identity_sha256=plan['new_identity_sha256']))",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify.display@50:14",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_verify.display",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps(dict(row=result['row'], ok=result['ok'], shards=result['shards'], wires=result['wires'], wire_bytes_checked=result['wire_bytes_checked'],\n            seconds=round(result['seconds'], 2), failures=result['failures'][:3]))",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify@57:14",
+      "file": "tools/reseal_campaign_identity.py",
+      "scope": "cmd_verify",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "original_expression": "json.dumps({key: report['consumer_merge']['error'] if key.endswith('_error') else report['consumer_merge']})",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/reselect_mtp_fixed.py::main@187:11",
+      "file": "tools/reselect_mtp_fixed.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "9c97d84b2ddb5ae59307c8e2f399cc27913285be",
+      "original_expression": "json.dumps(result, separators=(\",\", \":\"), allow_nan=False)",
+      "status": "unresolved",
+      "reason": "Unsorted recipe: no settled exact profile.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.json",
+        "tests/fixtures/digest_1301/tessera-supply/campaigns/reselect_mtp_fixed.py"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/tessera_campaign_container.py::main@1021:10",
+      "file": "tools/tessera_campaign_container.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "90870799094cacd764127a1619dbe616aa5f477a",
+      "original_expression": "json.dumps({\"schema\": \"prismaquant.tessera_campaign_container.v1\",\n                      \"requested_image\": requested, \"image_id\": image_id,\n                      \"image_content_sha256\": content_digest,\n                      \"declared_content_sha256\": declared,\n                      \"uid\": os.getuid(), \"gid\": os.getgid(),\n                      \"gpu_attached\": with_gpu, \"gpu_decision\": gpu_reason,\n                      \"checkout_commit\": commit,\n                      \"overlay_pinned_caches\": container_cache_environment(\n                          spec, _forwarded_local_scratch_environment(spec, os.environ))[1],\n                      **imports})",
+      "status": "unresolved",
+      "reason": "No exact existing profile: insertion-order JSON, including indent=1 manifest or indent=2 CLI output; unchanged, not a retention claim."
+    },
+    {
+      "original_id": "supplemental-json:tools/tessera_fleet/dispatch_ladder.py::main@88:14",
+      "file": "tools/tessera_fleet/dispatch_ladder.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "982243e3dc86da6a9c7828ae7bb783f509afcf5a",
+      "original_expression": "json.dumps(rows, indent=1)",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@144:14",
+      "file": "tools/tessera_fleet/dispatch_model.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "90acb2b76d87219fb3b52c3f5321a2879f83a1d0",
+      "original_expression": "json.dumps(setup, indent=2)",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    },
+    {
+      "original_id": "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@201:10",
+      "file": "tools/tessera_fleet/dispatch_model.py",
+      "scope": "main",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "90acb2b76d87219fb3b52c3f5321a2879f83a1d0",
+      "original_expression": "json.dumps({'out': spec['out'], 'contract': spec['contract'], 'workspace': str(workspace)})",
+      "status": "unresolved",
+      "reason": "Insertion-order JSON has no settled exact owner; sorted profiles change output. Agreement S prohibits extending shared owners in this slice."
+    }
+  ],
+  "current_calls": [
+    {
+      "id": "hashlib:tools/provision_tessera_pin.py::tree_digest@134:8",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "hashlib.sha256()"
+    },
+    {
+      "id": "hashlib:tools/publish_artifact.py::_replay_frozen_digests@922:17",
+      "source_blob": "29e64d9e742d7d87fc8aa5582e1073ebfe045944",
+      "expression": "hashlib.sha256()"
+    },
+    {
+      "id": "hashlib:tools/publish_artifact.py::_scan_file@633:12",
+      "source_blob": "29e64d9e742d7d87fc8aa5582e1073ebfe045944",
+      "expression": "hashlib.sha256()"
+    },
+    {
+      "id": "sorted-json:tools/seal_tessera_census_identity.py::main@39:15",
+      "source_blob": "ff3501665c4b0670bc7e09447534cd2d1e11491d",
+      "expression": "json.dumps(roster, sort_keys=True, indent=1, allow_nan=False)"
+    },
+    {
+      "id": "supplemental-json:tools/accept_tessera_pin_provisioner.py::main@120:10",
+      "source_blob": "a50ee2f70524df78d76ad029a3dee324d0811b17",
+      "expression": "json.dumps(out, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/build_glm_derivative_image.py::main@150:40",
+      "source_blob": "342a9f5ebcf60257a0ee783f51e19f59ba4fea7d",
+      "expression": "json.dumps(result, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/build_glm_derivative_image.py::main@153:10",
+      "source_blob": "342a9f5ebcf60257a0ee783f51e19f59ba4fea7d",
+      "expression": "json.dumps(result)"
+    },
+    {
+      "id": "supplemental-json:tools/build_tessera_census_cache.py::main@101:27",
+      "source_blob": "a4e7e48be97e81c42057838864527ae67a032bcf",
+      "expression": "json.dumps(config, indent=2, allow_nan=False)"
+    },
+    {
+      "id": "supplemental-json:tools/build_tessera_census_cache.py::main@132:13",
+      "source_blob": "a4e7e48be97e81c42057838864527ae67a032bcf",
+      "expression": "json.dumps(projected, indent=2, allow_nan=False)"
+    },
+    {
+      "id": "supplemental-json:tools/build_tessera_census_cache.py::main@167:10",
+      "source_blob": "a4e7e48be97e81c42057838864527ae67a032bcf",
+      "expression": "json.dumps({\"summary_sha256\": shas[\"summary\"]})"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_derived_data_manifests@1404:12",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(manifest, indent=1, sort_keys=False)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_pbcampaign@574:28",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(\n            {\"manifest\": str(manifest), \"returncode\": completed.returncode,\n             \"rows\": rows}, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_publish_submitted_manifest@1539:15",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(rows, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1815:14",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(manifest, separators=(\",\", \":\"), sort_keys=False)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1886:14",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(summary, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1898:10",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(summary, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_capture@534:24",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps([row], indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_census@504:24",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps([row], indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1310:24",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(published_rows, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1311:41",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps(plan, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_submit_aqua@2070:14",
+      "source_blob": "eb70251c9570b0a514ecd4c3accfe600134303d4",
+      "expression": "json.dumps({**summary, \"submitted\": False,\n                          \"reason\": (\n                              \"every requested cell already carries a joint \"\n                              \"A-side; the AQUA requirement is satisfied by \"\n                              \"the artifact named by --cost-in, so no stage \"\n                              \"was queued and --cost-out was not written\")},\n                         indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::_write_manifest@250:11",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps({\"commit\": commit, \"tree_sha256\": digest,\n                       \"files\": count}, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@523:18",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@548:14",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@552:14",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@581:18",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@597:14",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/provision_tessera_pin.py::main@600:10",
+      "source_blob": "b0682a8446930970e16b78bc9adee8db9f941cbb",
+      "expression": "json.dumps(report, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_bundle@66:10",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(dict(ok=bundle['ok'], cells=bundle['cell_count'], strata=bundle['strata'], missing=bundle['strata_missing'],\n        engagement_missing=bundle['engagement_missing'], out=str(args.out)))"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@21:14",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], state=plan['state'], strata=plan['strata'], shards=plan['shard_count'],\n            receipt_seals=plan['receipt_seals'], cost_seals=plan['cost_seals'], bytes_to_write=plan['bytes_to_write'], old_identity_sha256=plan['old_identity_sha256'],\n            new_identity_sha256=plan.get('new_identity_sha256'), plan_seconds=round(plan['plan_seconds'], 2)))"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_dry_run.display@26:29",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(edit, default=str)"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_hash_tree@15:10",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(reseal.hash_trees(prismaquant_root=args.prismaquant, producer_root=args.producer), indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@37:18",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(dict(row=plan['row'], state=plan['state'], note=plan.get('note')))"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_migrate.display@39:14",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(dict(row=plan['row'], kind=plan['kind'], journal_state=plan['journal_state'], shards=plan['shard_count'], receipt_seals=plan['receipt_seals'],\n            cost_seals=plan['cost_seals'], bytes_written=plan['bytes_written'], seconds=round(plan['seconds'], 2), new_identity_sha256=plan['new_identity_sha256']))"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify.display@50:14",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps(dict(row=result['row'], ok=result['ok'], shards=result['shards'], wires=result['wires'], wire_bytes_checked=result['wire_bytes_checked'],\n            seconds=round(result['seconds'], 2), failures=result['failures'][:3]))"
+    },
+    {
+      "id": "supplemental-json:tools/reseal_campaign_identity.py::cmd_verify@57:14",
+      "source_blob": "09ae003fcc6d0bfa9cfb1a4df49d0d50b6198c71",
+      "expression": "json.dumps({key: report['consumer_merge']['error'] if key.endswith('_error') else report['consumer_merge']})"
+    },
+    {
+      "id": "supplemental-json:tools/reselect_mtp_fixed.py::main@187:11",
+      "source_blob": "b5d5a15a2ce765dfdf0549afa70ded8c5fbba7e0",
+      "expression": "json.dumps(result, separators=(\",\", \":\"), allow_nan=False)"
+    },
+    {
+      "id": "supplemental-json:tools/tessera_campaign_container.py::main@1023:10",
+      "source_blob": "137322770847e541d7fa106060c6b9283b5ce7d9",
+      "expression": "json.dumps({\"schema\": \"prismaquant.tessera_campaign_container.v1\",\n                      \"requested_image\": requested, \"image_id\": image_id,\n                      \"image_content_sha256\": content_digest,\n                      \"declared_content_sha256\": declared,\n                      \"uid\": os.getuid(), \"gid\": os.getgid(),\n                      \"gpu_attached\": with_gpu, \"gpu_decision\": gpu_reason,\n                      \"checkout_commit\": commit,\n                      \"overlay_pinned_caches\": container_cache_environment(\n                          spec, _forwarded_local_scratch_environment(spec, os.environ))[1],\n                      **imports})"
+    },
+    {
+      "id": "supplemental-json:tools/tessera_fleet/dispatch_ladder.py::main@88:14",
+      "source_blob": "982243e3dc86da6a9c7828ae7bb783f509afcf5a",
+      "expression": "json.dumps(rows, indent=1)"
+    },
+    {
+      "id": "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@144:14",
+      "source_blob": "90acb2b76d87219fb3b52c3f5321a2879f83a1d0",
+      "expression": "json.dumps(setup, indent=2)"
+    },
+    {
+      "id": "supplemental-json:tools/tessera_fleet/dispatch_model.py::main@201:10",
+      "source_blob": "90acb2b76d87219fb3b52c3f5321a2879f83a1d0",
+      "expression": "json.dumps({'out': spec['out'], 'contract': spec['contract'], 'workspace': str(workspace)})"
+    }
+  ],
+  "audit_boundaries": {
+    "primary_and_supplemental": "Exact scanner traversal in the 21 assigned files, both primary and supplemental JSON. No scanner/exclusion/baseline changes. Current rows use current blob identities, original IDs retain research-base locations.",
+    "embedded_python": [
+      "images/ledger.json auxiliary_witnesses: Docker base-image query, no owner supplied inside original image.",
+      "artifacts/audit.json: isolated installed-target -I probe, no package requirement."
+    ],
+    "validators_and_incremental": "Publisher descriptor-integrated _scan_file and _replay_frozen_digests retained with separate witnesses. Provisioning outer tree recipe is an owner gap, not retention. SHA256 validators/parser calls are not primary constructors.",
+    "not_exhaustive": "Enumeration is not proof of shell/generated/dynamic exhaustiveness. No deployment, model-worker, qualification or pin source changes. Worker is outside assigned file footprint; its staging contract is dispatch_model.stage_checkout and has separate existing standalone coverage.",
+    "unavailable": "No Docker build, package provisioning, uploads, remote fleet, GPU, qualification or performance run observed."
+  }
+}

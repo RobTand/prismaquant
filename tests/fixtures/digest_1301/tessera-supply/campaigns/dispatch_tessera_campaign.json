@@ -1,0 +1,62 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "d8c437518c364c4e004cfe9a7f1134112f3370ba",
+  "fragments": [
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_capture@536:56",
+      "source": "json.dumps(\n            campaign_rows.streamed_resource_plan(spec, census, sorted(census['counts'])),\n            indent=2, sort_keys=True)"
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_census@505:55",
+      "source": "json.dumps(\n            campaign_rows.streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)"
+    },
+    {
+      "original_id": "sorted-json:tools/dispatch_tessera_campaign.py::cmd_plan@1146:45",
+      "source": "json.dumps(selection, indent=2, sort_keys=True)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_derived_data_manifests@1406:12",
+      "source": "json.dumps(manifest, indent=1, sort_keys=False)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_pbcampaign@576:28",
+      "source": "json.dumps(\n            {\"manifest\": str(manifest), \"returncode\": completed.returncode,\n             \"rows\": rows}, indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_publish_submitted_manifest@1541:15",
+      "source": "json.dumps(rows, indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1817:14",
+      "source": "json.dumps(manifest, separators=(\",\", \":\"), sort_keys=False)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1888:14",
+      "source": "json.dumps(summary, indent=1)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::_submit_gpu_action@1900:10",
+      "source": "json.dumps(summary, indent=1)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_capture@534:24",
+      "source": "json.dumps([row], indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_census@503:24",
+      "source": "json.dumps([row], indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1312:24",
+      "source": "json.dumps(published_rows, indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_plan@1313:41",
+      "source": "json.dumps(plan, indent=2)"
+    },
+    {
+      "original_id": "supplemental-json:tools/dispatch_tessera_campaign.py::cmd_submit_aqua@2072:14",
+      "source": "json.dumps({**summary, \"submitted\": False,\n                          \"reason\": (\n                              \"every requested cell already carries a joint \"\n                              \"A-side; the AQUA requirement is satisfied by \"\n                              \"the artifact named by --cost-in, so no stage \"\n                              \"was queued and --cost-out was not written\")},\n                         indent=1)"
+    }
+  ]
+}

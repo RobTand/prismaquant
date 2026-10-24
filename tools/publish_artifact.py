@@ -51,6 +51,10 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT,
+    bytes_sha256hex,
+)
 from prismaquant.shipcard import (  # noqa: E402
     SCHEMA as SHIPCARD_SCHEMA,
     SHIPCARD_FILENAME,
@@ -513,7 +517,7 @@ class _VerifiedBlockReader(io.BufferedIOBase):
                 f"frozen source became unreadable: "
                 f"{self._entry.relative_path}: {exc}"
             ) from exc
-        observed = hashlib.sha256(data).hexdigest()
+        observed = bytes_sha256hex(data)
         expected = self._entry.block_sha256[index]
         if observed != expected:
             raise FrozenSnapshotError(
@@ -639,7 +643,7 @@ def _scan_file(fd: int, size: int) -> _ScannedFile:
         if offset == 0:
             sample = data[:512]
         whole.update(data)
-        blocks.append(hashlib.sha256(data).hexdigest())
+        blocks.append(bytes_sha256hex(data))
         if inline_chunks is not None:
             inline_chunks.append(data)
 
@@ -838,12 +842,7 @@ def _freeze_artifact(
             }
             for entry in sorted(entries, key=lambda item: item.relative_path)
         ]
-        manifest_sha = hashlib.sha256(json.dumps(
-            manifest_rows,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")).hexdigest()
+        manifest_sha = DIRECT_ASCII_STRICT.sha256(manifest_rows)
         snapshot = _FrozenSnapshot(
             source_root=root,
             source_root_identity=source_root_identity,
@@ -1383,7 +1382,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(
             "[publish] shipcard preflight OK for "
-            f"{json.dumps(str(artifact_dir.resolve()))}"
+            f"{DIRECT_ASCII_SPACED_LAX.text(str(artifact_dir.resolve()))}"
         )
 
     # Actual publication requires the low-level API. Import it before hashing a
@@ -1403,7 +1402,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         canonical_bytes = shipcard_path.read_bytes()
-        expected_shipcard_sha = hashlib.sha256(canonical_bytes).hexdigest()
+        expected_shipcard_sha = bytes_sha256hex(canonical_bytes)
     except OSError as exc:
         print(
             f"[publish] REFUSED: canonical shipcard became unreadable: {exc}",

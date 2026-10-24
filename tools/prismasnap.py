@@ -10,6 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import indent2_json_file_bytes
 from prismaquant.prismasnap import PrismaSnapSearchConfig  # noqa: E402
 from prismaquant.prismasnap_checkpoint import (  # noqa: E402
     bind_legacy_text_probe,
@@ -95,7 +96,7 @@ def _shards_file(raw: str) -> list[str]:
 
 
 def _print(payload: object) -> None:
-    print(json.dumps(payload, sort_keys=True, indent=2, allow_nan=False))
+    print(indent2_json_file_bytes(payload).decode("utf-8")[:-1])
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -8,7 +8,6 @@ wire location, and leaves the historical wire bytes and identities untouched.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -16,6 +15,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+from prismaquant.digests import (
+    DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, bytes_sha256hex,
+)
 
 from prismaquant.glm_mtp_selection import (WIRE_BINDING_SCHEMA,
                                            backfill_mtp_selection_wires)
@@ -83,25 +85,23 @@ def main(argv=None):
     if output.exists() or output.is_symlink():
         raise FileExistsError(f'MTP child output exists: {output}')
     raw = Path(args.assignment).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != args.assignment_sha256:
+    if bytes_sha256hex(raw) != args.assignment_sha256:
         raise ValueError('MTP selected assignment SHA-256 differs')
     manifest = selected_mtp_child(
         json.loads(raw), cost_path=args.mtp_joint_cost, output=output)
-    encoded = (json.dumps(manifest, sort_keys=True, separators=(',', ':'),
-                          allow_nan=False) + '\n').encode()
+    encoded = DIRECT_ASCII_STRICT.encoded(manifest) + b"\n"
     if not publish_new_bytes(output, encoded):
         raise FileExistsError(f'MTP child output exists: {output}')
-    print(json.dumps({'schema': 'prismaquant.mtp_cached_child_handoff.v1',
+    print(DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.mtp_cached_child_handoff.v1',
                       'manifest': str(output.resolve()),
-                      'manifest_sha256': hashlib.sha256(encoded).hexdigest(),
+                      'manifest_sha256': bytes_sha256hex(encoded),
                       'assignment_sha256': args.assignment_sha256,
                       'encoder_source_sha256': next(iter({
                           record['identity']['encoder_source_sha256']
                           for record in manifest['units'].values()})),
                       'units': len(manifest['units']),
                       'root': str(output.parent.resolve()),
-                      'export_qualified': False, 'serving_qualified': False},
-                     sort_keys=True))
+                      'export_qualified': False, 'serving_qualified': False}))
     return 0
 
 

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import argparse
-import hashlib
 import pickle
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.model_profiles.structure import load_structure_spec
 from prismaquant.schemas import validate_probe_payload
@@ -26,7 +26,7 @@ from prismaquant.tessera_census_stats import META_KEY, expand_probe_onto_census
 
 def _bound(path: str, digest: str, label: str):
     raw = Path(path).read_bytes()
-    actual = hashlib.sha256(raw).hexdigest()
+    actual = bytes_sha256hex(raw)
     if actual != digest:
         raise SystemExit(f"{label} {path}: SHA-256 {actual}, expected {digest}")
     return pickle.loads(raw)
@@ -56,7 +56,7 @@ def main(argv=None) -> int:
     out = Path(args.out)
     validate_probe_payload(expanded, str(out))
     raw = pickle.dumps(expanded, protocol=pickle.HIGHEST_PROTOCOL)
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     _atomic_write_new_bytes(out, raw)
     _atomic_write_new_bytes(out.with_name(out.name + ".sha256"),
                             f"{digest}  {out.name}\n".encode())
@@ -66,7 +66,7 @@ def main(argv=None) -> int:
                     "rows": len(expanded["stats"]),
                     "dropped_row_count": len(expanded["meta"][META_KEY]["dropped_rows"]),
                     "n_params": sum(int(r["n_params"]) for r in expanded["stats"].values())})
-    print(json.dumps(summary, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(summary))
     return 0
 
 

@@ -1,0 +1,22 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "ea03883f184fef792f9a35bd511a01bb357e427e",
+  "fragments": [
+    {
+      "original_id": "hashlib:tools/seal_tessera_census_identity.py::main@31:13",
+      "source": "hashlib.sha256()"
+    },
+    {
+      "original_id": "hashlib:tools/seal_tessera_census_identity.py::main@43:10",
+      "source": "hashlib.sha256(encoded)"
+    },
+    {
+      "original_id": "sorted-json:tools/seal_tessera_census_identity.py::main@40:15",
+      "source": "json.dumps(roster, sort_keys=True, indent=1, allow_nan=False)"
+    },
+    {
+      "original_id": "sorted-json:tools/seal_tessera_census_identity.py::main@45:10",
+      "source": "json.dumps({\"roster\": str(out.resolve()), \"roster_sha256\": sha,\n                      \"identity_sha256\": roster[\"identity_sha256\"],\n                      \"units\": len(roster[\"units\"]),\n                      \"checkpoint_manifest_sha256\": roster[\"checkpoint_manifest\"][\"sha256\"]},\n                     sort_keys=True)"
+    }
+  ]
+}
