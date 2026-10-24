@@ -14,7 +14,7 @@ from typing import Any
 import torch
 
 from prismaquant.dev_mode import seal_check
-from .digests import bytes_sha256hex
+from .digests import bytes_sha256hex, indent2_json_file_bytes
 from .joint_stageb_resources import cotangent_scratch
 
 
@@ -878,7 +878,7 @@ class StreamedBoundaryArtifacts:
         path = self.status_path()
         path.parent.mkdir(exist_ok=True)
         atomic_write_bytes(path,
-            (json.dumps(data, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+            indent2_json_file_bytes(data))
 
     def checkpoint_cotangent_sink(self, records):
         """Optional sealed local workspace for one quantum's cotangent plane."""

@@ -43,7 +43,9 @@ import re
 import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
-from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex,
+)
 
 SPLIT_SCHEMA = "prismaquant.stage_a.chain_split.v1"
 PREP_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_prep.v1"
@@ -531,9 +533,8 @@ def main(argv=None) -> int:
         return 2
     receipt = join_receipt(space, record)
     if args.receipt is not None:
-        atomic_write_bytes(Path(args.receipt), (json.dumps(
-            receipt, sort_keys=True, indent=2) + "\n").encode())
-    print(json.dumps(receipt, sort_keys=True), flush=True)
+        atomic_write_bytes(Path(args.receipt), DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b"\n")
+    print(DIRECT_ASCII_SPACED_LAX.text(receipt), flush=True)
     return 0
 
 

@@ -1,0 +1,776 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "completed_calls": [
+    {
+      "original_id": "hashlib:prismaquant/joint_prewarm_phases.py::load_prepare_read_set@61:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "cd9d930bbcf4006bfcf53b5cc484f12f578c69a9",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_prewarm_phases.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_prewarm_standalone"
+      ],
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "current_node_id": "bytes_sha256hex:prismaquant/joint_prewarm_phases.py::load_prepare_read_set@81:7",
+      "current_expression": "bytes_sha256hex(blob)",
+      "current_source_blob": "62cb9818cffd32e054e1d5addb90daa3987ca85a"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_split.py::main@534:48",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5618f539e2615595a6b842594be494fedbad8eb1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_split.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.encoded",
+      "current_node_id": "DIRECT_ASCII_INDENT2_LAX.encoded:prismaquant/stage_a_chain_split.py::main@536:47",
+      "current_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(receipt)",
+      "current_source_blob": "5ff142fb96b14b2d5b9cc10bf482581918d096d9"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_split.py::main@536:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5618f539e2615595a6b842594be494fedbad8eb1",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_split.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "current_node_id": "DIRECT_ASCII_SPACED_LAX.text:prismaquant/stage_a_chain_split.py::main@537:10",
+      "current_expression": "DIRECT_ASCII_SPACED_LAX.text(receipt)",
+      "current_source_blob": "5ff142fb96b14b2d5b9cc10bf482581918d096d9"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@621:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_retirement.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retirement_outcomes"
+      ],
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "current_node_id": "DIRECT_ASCII_SPACED_LAX.text:prismaquant/stage_a_retirement.py::apply_retirement@621:14",
+      "current_expression": "DIRECT_ASCII_SPACED_LAX.text(report)",
+      "current_source_blob": "a1f13f61260158871bc2cf165f5f8076d08e882a"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ffecd485ef1d7d82d36c26260ef0ec1ad71894d2",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_resume.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_strict_publication_and_conflicts"
+      ],
+      "owner_route": "prismaquant.digests.indent2_json_file_bytes",
+      "current_node_id": "indent2_json_file_bytes:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:14",
+      "current_expression": "indent2_json_file_bytes(record)",
+      "current_source_blob": "9c8cc4a3407e81a8754f031cdb5d2cdebddd997e"
+    }
+  ],
+  "retained_calls": [
+    {
+      "original_id": "sorted-json:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_failure_record_containment",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+      "current_expression": "json.dumps({\n                    \"schema\": \"prismaquant.stage_a.produced_output_failure.v1\",\n                    \"unix\": time.time(),\n                    \"error\": f\"{type(error).__name__}: {error}\"[:2000],\n                    **block}, sort_keys=True, default=repr, allow_nan=False)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "4d02fd07857affe4c8e2a062ada93023ca37f7b8cebf30ad8bee38e992abac65",
+      "required_route": "sorted ASCII spaced strict JSON with default=repr; preserve json.loads roundtrip when present"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_consumer_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_failure_record_containment",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+      "current_expression": "json.dumps(\n            report, sort_keys=True, default=repr, allow_nan=False)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "2904b8187e6bbb21a47551b8e713e99b202d3c742cfb399693cb7a490a93b3f0",
+      "required_route": "sorted ASCII spaced strict JSON with default=repr; preserve json.loads roundtrip when present"
+    },
+    {
+      "original_id": "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_retirement.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retirement_outcomes",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_strict_publication_and_conflicts",
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+      "current_expression": "json.dumps(plan.record, sort_keys=True, indent=1, allow_nan=False)",
+      "current_source_blob": "a1f13f61260158871bc2cf165f5f8076d08e882a",
+      "syntax_sha256": "a2c35b6c01e9115309483c55f8b248cf87fd1ae660e54d3032eb3ddfe03842c7",
+      "required_route": "sorted ASCII strict indent=1 JSON with trailing newline"
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3521:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::main@3521:18",
+      "current_expression": "json.dumps(report)",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "49ba8a5e30aecb5f01b23e042c09c5210810c9e640e9fbef4fe08be6d706d910",
+      "required_route": "unsorted ASCII spaced lax JSON stdout text, insertion order preserved",
+      "boundary": "AST retention witness only; full joint_cost_stage_a CLI/GPU capture not executed."
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3545:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "fixtures": [
+        "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+        "tests/fixtures/digest_1301/stagea-custody/chain_outcomes.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/stagea-custody/test_chain_consumers.py::test_chain_retention_witnesses"
+      ],
+      "status": "blocked_missing_exact_owner_route",
+      "owner_route": null,
+      "current_node_id": "json.dumps:prismaquant/joint_cost_stage_a.py::main@3545:10",
+      "current_expression": "json.dumps({key: result[key] for key in (\n        \"command\", \"passed\", \"stride\", \"checkpoints\", \"plane_comparison\",\n        \"split_receipt\") if key in result})",
+      "current_source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "syntax_sha256": "4189b2d0e3a160e88de94136c448abb421a9d200a8dfcfa252564c219bdb6a18",
+      "required_route": "unsorted ASCII spaced lax JSON stdout text, insertion order preserved",
+      "boundary": "AST retention witness only; full joint_cost_stage_a CLI/GPU capture not executed."
+    }
+  ],
+  "boundaries": [
+    "Missing exact owner profiles are escalated blockers, not eligible retention or completed migration. No owner/shared census/baseline/scanner/acceptance/pin files changed.",
+    "Original fixtures contain exact AST-selected source slices from the frozen research base, with original and fixture line boundaries and slice hashes in source_selections. source_blob always identifies the ORIGINAL WHOLE source, not the reduced fixture. Dependencies imported by selected slices remain checkout modules; no replacement owner calls generate expectations.",
+    "File mutation/PB SDK/GPU work is mocked at consumer seams. No GPU captures or real PrismaBuild reclaim exercised.",
+    "Prewarm original capture isolates the separately owned replay parser with a no-replay result. Current consumer tests exercise the current replay parser. Standalone test loads the current consumer by path.",
+    "Supplemental joint_cost_stage_a.main calls are blocked unsorted stdout profiles and have exact AST witnesses, not full main execution.",
+    "Focused tests only; no full suite, scanner/acceptance or census update.",
+    "Package-free prewarm integration is tested with Python -I, plain and gzip manifests and the real sibling replay parser, without importing prismaquant or torch.",
+    "Unexecuted split join/receipt and retirement SDK/charge implementations are omitted and supplied at the existing mock seams (create=True). Supplemental joint_cost_stage_a.main is not copied: its existing exact AST retention witnesses inspect current source, not an executed original CLI."
+  ],
+  "blockers": [
+    {
+      "kind": "missing_exact_owner_api",
+      "original_ids": [
+        "sorted-json:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record@2376:23",
+        "sorted-json:prismaquant/joint_cost_stage_a.py::_produced_output_block@2345:46",
+        "sorted-json:prismaquant/stage_a_retirement.py::apply_retirement@577:15",
+        "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3521:18",
+        "supplemental-json:prismaquant/joint_cost_stage_a.py::main@3545:10"
+      ],
+      "action": "Escalate owner-profile additions; do not count these calls as completed or eligible retention."
+    }
+  ],
+  "evidence": "tests/fixtures/digest_1301/stagea-custody/chain_evidence.md",
+  "source_selections": [
+    {
+      "fixture": "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_cost_stage_a.py",
+      "source_file": "prismaquant/joint_cost_stage_a.py",
+      "source_blob": "e02881805c5c31612cfd6cd51e30a64ce93f8e99",
+      "original_bytes": 196378,
+      "segments": [
+        {
+          "original_lines": [
+            36,
+            36
+          ],
+          "fixture_lines": [
+            5,
+            5
+          ],
+          "sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+        },
+        {
+          "original_lines": [
+            39,
+            39
+          ],
+          "fixture_lines": [
+            8,
+            8
+          ],
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "original_lines": [
+            43,
+            43
+          ],
+          "fixture_lines": [
+            11,
+            11
+          ],
+          "sha256": "7b2ddb8a2e64c6166feedaf30ee50ac62165fe149fdd8b0d7b777ebee21ca34d"
+        },
+        {
+          "original_lines": [
+            44,
+            44
+          ],
+          "fixture_lines": [
+            14,
+            14
+          ],
+          "sha256": "21047466fe6438703c9f1e86447e1f2fb666f9088ade6f6940cfec8824653eca"
+        },
+        {
+          "original_lines": [
+            45,
+            45
+          ],
+          "fixture_lines": [
+            17,
+            17
+          ],
+          "sha256": "3cb9ffccba5146b2dd177a30c3057a4395ebd5c745d0789d2ed95d0cf4afe271"
+        },
+        {
+          "original_lines": [
+            2327,
+            2348
+          ],
+          "fixture_lines": [
+            20,
+            41
+          ],
+          "sha256": "f20bd05aad6f918d7e3395b13df1a0b13f2744c84e97c1a186fd245db72704c3"
+        },
+        {
+          "original_lines": [
+            2353,
+            2353
+          ],
+          "fixture_lines": [
+            44,
+            44
+          ],
+          "sha256": "be5d55db7a329009a38f3a20947a5acfb565289bdc915b8f6769a2d87c4d054c"
+        },
+        {
+          "original_lines": [
+            2356,
+            2389
+          ],
+          "fixture_lines": [
+            47,
+            80
+          ],
+          "sha256": "460cfe1d178b13ab71fed167858c1ee7808e78cd39642d84f9764de8f6d25909"
+        }
+      ],
+      "selected_bytes": 3330
+    },
+    {
+      "fixture": "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_split.py",
+      "source_file": "prismaquant/stage_a_chain_split.py",
+      "source_blob": "5618f539e2615595a6b842594be494fedbad8eb1",
+      "original_bytes": 25878,
+      "segments": [
+        {
+          "original_lines": [
+            35,
+            35
+          ],
+          "fixture_lines": [
+            5,
+            5
+          ],
+          "sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+        },
+        {
+          "original_lines": [
+            37,
+            37
+          ],
+          "fixture_lines": [
+            8,
+            8
+          ],
+          "sha256": "b53e5a5286172fb0a4772843ba3ed62331687bcb9939ec9c49e9066d4ee4272d"
+        },
+        {
+          "original_lines": [
+            39,
+            39
+          ],
+          "fixture_lines": [
+            11,
+            11
+          ],
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "original_lines": [
+            41,
+            41
+          ],
+          "fixture_lines": [
+            14,
+            14
+          ],
+          "sha256": "3cb9ffccba5146b2dd177a30c3057a4395ebd5c745d0789d2ed95d0cf4afe271"
+        },
+        {
+          "original_lines": [
+            43,
+            43
+          ],
+          "fixture_lines": [
+            17,
+            17
+          ],
+          "sha256": "c517577851c489e45abae2591256c40404a05c6d19cd4d5ae7fd22b0084cec6c"
+        },
+        {
+          "original_lines": [
+            45,
+            45
+          ],
+          "fixture_lines": [
+            20,
+            20
+          ],
+          "sha256": "c72460efe8ddb2e89936dc01a2d48931553dccfdeb51fc0c990b8b3b5809f907"
+        },
+        {
+          "original_lines": [
+            59,
+            60
+          ],
+          "fixture_lines": [
+            23,
+            24
+          ],
+          "sha256": "7d5558956a3d2f2d7f1fcf362725f171da09952caea8f3ff11ae8579fd94b933"
+        },
+        {
+          "original_lines": [
+            512,
+            537
+          ],
+          "fixture_lines": [
+            27,
+            52
+          ],
+          "sha256": "73c72a548071dea5ef44d4fca4b8f7847290d0a9f990cf1455203fbcc87a3a75"
+        }
+      ],
+      "selected_bytes": 2020
+    },
+    {
+      "fixture": "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_chain_resume.py",
+      "source_file": "prismaquant/stage_a_chain_resume.py",
+      "source_blob": "ffecd485ef1d7d82d36c26260ef0ec1ad71894d2",
+      "original_bytes": 27668,
+      "segments": [
+        {
+          "original_lines": [
+            63,
+            63
+          ],
+          "fixture_lines": [
+            5,
+            5
+          ],
+          "sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+        },
+        {
+          "original_lines": [
+            66,
+            66
+          ],
+          "fixture_lines": [
+            8,
+            8
+          ],
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "original_lines": [
+            67,
+            67
+          ],
+          "fixture_lines": [
+            11,
+            11
+          ],
+          "sha256": "3727adff524e0616022eadd8f4af21a0778b29fc4c77bdfefd1afce2cbf5e4b7"
+        },
+        {
+          "original_lines": [
+            68,
+            68
+          ],
+          "fixture_lines": [
+            14,
+            14
+          ],
+          "sha256": "3cb9ffccba5146b2dd177a30c3057a4395ebd5c745d0789d2ed95d0cf4afe271"
+        },
+        {
+          "original_lines": [
+            71,
+            71
+          ],
+          "fixture_lines": [
+            17,
+            17
+          ],
+          "sha256": "4bae08cbf912a473fb7509f63d1b176cf7a334a6f9a7d1eb0f39cf120dd48158"
+        },
+        {
+          "original_lines": [
+            79,
+            79
+          ],
+          "fixture_lines": [
+            20,
+            20
+          ],
+          "sha256": "3769ee81445db54be7341c2f86be3dec4b8b5c1476f1ac2395a3c113ab06e227"
+        },
+        {
+          "original_lines": [
+            96,
+            97
+          ],
+          "fixture_lines": [
+            23,
+            24
+          ],
+          "sha256": "4035346f47bb06db492ecdeb9ca174fa1879cf9e7cc56f23dd047f2d74225136"
+        },
+        {
+          "original_lines": [
+            104,
+            105
+          ],
+          "fixture_lines": [
+            27,
+            28
+          ],
+          "sha256": "bf335454a7c8d0c63151b6a96fe3376f62a0af11f8e5a6835d53c3ddbc4bad6b"
+        },
+        {
+          "original_lines": [
+            542,
+            573
+          ],
+          "fixture_lines": [
+            31,
+            62
+          ],
+          "sha256": "02355fe045f3fad45d0aecd61a9c309df4b30af8362bc3917a55f59884a6a4eb"
+        }
+      ],
+      "selected_bytes": 2527
+    },
+    {
+      "fixture": "tests/fixtures/digest_1301/stagea-custody/chain_original_stage_a_retirement.py",
+      "source_file": "prismaquant/stage_a_retirement.py",
+      "source_blob": "f7e7a2fb6ebedb70ef254ecd80c5eb7d17d759ec",
+      "original_bytes": 30011,
+      "segments": [
+        {
+          "original_lines": [
+            58,
+            58
+          ],
+          "fixture_lines": [
+            5,
+            5
+          ],
+          "sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+        },
+        {
+          "original_lines": [
+            61,
+            61
+          ],
+          "fixture_lines": [
+            8,
+            8
+          ],
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "original_lines": [
+            62,
+            62
+          ],
+          "fixture_lines": [
+            11,
+            11
+          ],
+          "sha256": "3727adff524e0616022eadd8f4af21a0778b29fc4c77bdfefd1afce2cbf5e4b7"
+        },
+        {
+          "original_lines": [
+            63,
+            63
+          ],
+          "fixture_lines": [
+            14,
+            14
+          ],
+          "sha256": "7002efbd1fd0861b54df3575e2921d2c259d2a8379c4d5fff5f8842a2552c143"
+        },
+        {
+          "original_lines": [
+            66,
+            66
+          ],
+          "fixture_lines": [
+            17,
+            17
+          ],
+          "sha256": "10c0ced64ad2be8b72de55102169bfe7aace78d2e7f655f7c645f0c10f8865ad"
+        },
+        {
+          "original_lines": [
+            67,
+            67
+          ],
+          "fixture_lines": [
+            20,
+            20
+          ],
+          "sha256": "3cb9ffccba5146b2dd177a30c3057a4395ebd5c745d0789d2ed95d0cf4afe271"
+        },
+        {
+          "original_lines": [
+            70,
+            70
+          ],
+          "fixture_lines": [
+            23,
+            23
+          ],
+          "sha256": "4bae08cbf912a473fb7509f63d1b176cf7a334a6f9a7d1eb0f39cf120dd48158"
+        },
+        {
+          "original_lines": [
+            75,
+            75
+          ],
+          "fixture_lines": [
+            26,
+            26
+          ],
+          "sha256": "c0f0e0c73a6b6ee8cf6fc4e695bc77556e353e43ffe58f941fc2ec900015c38e"
+        },
+        {
+          "original_lines": [
+            82,
+            83
+          ],
+          "fixture_lines": [
+            29,
+            30
+          ],
+          "sha256": "c08b343a444cd97c0952e23ffd46a15b0dd648a311770e546e370cb586cb639f"
+        },
+        {
+          "original_lines": [
+            86,
+            87
+          ],
+          "fixture_lines": [
+            33,
+            34
+          ],
+          "sha256": "3fd117a98b5bb01eacff55f6a9c9ec815f6c622c1c130c0a4d38df87754470d4"
+        },
+        {
+          "original_lines": [
+            403,
+            410
+          ],
+          "fixture_lines": [
+            37,
+            44
+          ],
+          "sha256": "07453666eaa2c4469e0da3c6fdc9d7665d0e3639f84679e5a6613ec0810bd113"
+        },
+        {
+          "original_lines": [
+            574,
+            622
+          ],
+          "fixture_lines": [
+            47,
+            95
+          ],
+          "sha256": "85ca9309dc209a4888f2639da87e2a0e6acd23a5d55ce29dbce37f5d7fd4808e"
+        }
+      ],
+      "selected_bytes": 3730
+    },
+    {
+      "fixture": "tests/fixtures/digest_1301/stagea-custody/chain_original_joint_prewarm_phases.py",
+      "source_file": "prismaquant/joint_prewarm_phases.py",
+      "source_blob": "cd9d930bbcf4006bfcf53b5cc484f12f578c69a9",
+      "original_bytes": 4799,
+      "segments": [
+        {
+          "original_lines": [
+            3,
+            3
+          ],
+          "fixture_lines": [
+            5,
+            5
+          ],
+          "sha256": "5384bfdb2df380b6557cc7a71d16891415bccaa87699406e236f752c6415389f"
+        },
+        {
+          "original_lines": [
+            5,
+            5
+          ],
+          "fixture_lines": [
+            8,
+            8
+          ],
+          "sha256": "27fe0461ff4b26894ab6a6739662ba03e2fa5fc02c6fb22f144eb902c6d1099d"
+        },
+        {
+          "original_lines": [
+            6,
+            6
+          ],
+          "fixture_lines": [
+            11,
+            11
+          ],
+          "sha256": "3b3ea3cdc7068a9e97cfcddbcd9d8e0c54fe4d068347b80b158fdd8b14676e3b"
+        },
+        {
+          "original_lines": [
+            7,
+            7
+          ],
+          "fixture_lines": [
+            14,
+            14
+          ],
+          "sha256": "261a9112a2918e2aba03e19a2f221a027ab4b6f9e946a6c39814f54e18e07dfc"
+        },
+        {
+          "original_lines": [
+            8,
+            8
+          ],
+          "fixture_lines": [
+            17,
+            17
+          ],
+          "sha256": "3cb9ffccba5146b2dd177a30c3057a4395ebd5c745d0789d2ed95d0cf4afe271"
+        },
+        {
+          "original_lines": [
+            22,
+            22
+          ],
+          "fixture_lines": [
+            20,
+            20
+          ],
+          "sha256": "7db64826333623d2ce30f1983d1dfdff3163985242f15edeedccc89e0d8e8572"
+        },
+        {
+          "original_lines": [
+            42,
+            82
+          ],
+          "fixture_lines": [
+            23,
+            63
+          ],
+          "sha256": "cc1c0a5fa245d24486f62c9db3c387e02f0d7affe8e2b33883084b46bcabd6a9"
+        },
+        {
+          "original_lines": [
+            88,
+            88
+          ],
+          "fixture_lines": [
+            66,
+            66
+          ],
+          "sha256": "fbd1e8df5b1aaba04a5d89afba2bd1963ca9824372869ed682dbea239c70541b"
+        },
+        {
+          "original_lines": [
+            91,
+            104
+          ],
+          "fixture_lines": [
+            69,
+            82
+          ],
+          "sha256": "627e4a1beb5b43ad70e8aa512aced945a322e6af4b39e9df84c8d1de4f947a5e"
+        }
+      ],
+      "selected_bytes": 3634
+    }
+  ],
+  "fixture_reduction_validation": {
+    "command": "python -m pytest -q tests/test_digest_1301/stagea-custody/test_chain_consumers.py --basetemp=\"$TMPDIR/pytest\"",
+    "result": "11 passed in 0.87s",
+    "original_slice_check": "All selected slices verified byte-for-byte against original source_blob git objects before testing. Runtime provenance checks use frozen slice hashes so source-only deployments do not require git history.",
+    "test_evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"f1dc9ce28bda0747f15d50ce43cc0d44d02d577403b2077198d9e7249c0e1a68\",\"size\":269}},\"operation\":\"c210727b711e8cc8ffdf3d0a82624fa49709d1bc7d80b3ab3423807b956de66e\",\"receipt\":\"e3c85523abf95c3a7e791b1867315f4ad9223a9f8798634ee9ee7e508e69cefd\"}]"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "split": {
+    "status": 0,
+    "stdout": "{\"a\": [NaN, 2], \"z\": \"\\u5c42\\u00e9\"}\n",
+    "receipt": [
+      "{\n  \"a\": [\n    NaN,\n    2\n  ],\n  \"z\": \"\\u5c42\\u00e9\"\n}\n"
+    ]
+  },
+  "resume": {
+    "record": {
+      "compatibility": {
+        "a": true,
+        "z": 1
+      },
+      "implementation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "index": 2,
+      "partial_checkpoints_set_aside": [],
+      "producer": {
+        "z": "层"
+      },
+      "removed_rolling_entries": 0,
+      "schema": "prismaquant.stage_a.chain_resume.v1",
+      "session": "é",
+      "switch_checkpoint": 4,
+      "record_sha256": "a33a9d704ae5a757d28a00bcf38e1fa8c7351fa97fd0d4c0a1486ba5743f0428"
+    },
+    "payload": "{\n  \"compatibility\": {\n    \"a\": true,\n    \"z\": 1\n  },\n  \"implementation_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n  \"index\": 2,\n  \"partial_checkpoints_set_aside\": [],\n  \"producer\": {\n    \"z\": \"\\u5c42\"\n  },\n  \"record_sha256\": \"a33a9d704ae5a757d28a00bcf38e1fa8c7351fa97fd0d4c0a1486ba5743f0428\",\n  \"removed_rolling_entries\": 0,\n  \"schema\": \"prismaquant.stage_a.chain_resume.v1\",\n  \"session\": \"\\u00e9\",\n  \"switch_checkpoint\": 4\n}\n"
+  },
+  "reports": {
+    "reports": [
+      {
+        "produced_output": {
+          "report_error": "TypeError(\"'<' not supported between instances of 'int' and 'str'\")"
+        }
+      },
+      {
+        "produced_output": {
+          "a": [
+            1,
+            2
+          ],
+          "z": "<chain odd é>"
+        }
+      },
+      {
+        "produced_output": {
+          "report_error": "ValueError('Out of range float values are not JSON compliant: nan')"
+        }
+      },
+      {},
+      {
+        "produced_output": {
+          "report_error": "RuntimeError('report failed')"
+        }
+      },
+      {}
+    ],
+    "failure_lines": "{\"error\": \"KeyboardInterrupt: capture stopped\", \"produced_output\": {\"a\": [1, 2], \"z\": \"<chain odd \\u00e9>\"}, \"schema\": \"prismaquant.stage_a.produced_output_failure.v1\", \"unix\": 123}\n{\"error\": \"KeyboardInterrupt: capture stopped\", \"produced_output\": {\"a\": [1, 2], \"z\": \"<chain odd \\u00e9>\"}, \"schema\": \"prismaquant.stage_a.produced_output_failure.v1\", \"unix\": 123}\n"
+  },
+  "prewarm": [
+    [
+      {
+        "层": "head"
+      },
+      null,
+      [
+        "head"
+      ]
+    ],
+    "joint prepare data manifest changed after submission",
+    [
+      {
+        "层": "head"
+      },
+      null,
+      [
+        "head"
+      ]
+    ],
+    "joint prepare data manifest changed after submission"
+  ],
+  "retirement": {
+    "payload": "{\n \"record_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n \"z\": \"\\u00e9\"\n}\n",
+    "refusal": "PrismaBuild kept 1 batch(es) charged: {'batch': '层 refused'}; report: {\"batches\": {\"batch\": \"\\u5c42 refused\"}, \"bindings_read\": 0, \"durable_charge_after\": 17, \"durable_charge_before\": 17, \"entries_removed\": 0, \"entry_bytes_removed\": 0, \"record\": \"chain-space/stage-a-retired.json\", \"record_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"schema\": \"prismaquant.stage_a.retirement_report.v1\", \"untouched_batches\": []}"
+  }
+}
