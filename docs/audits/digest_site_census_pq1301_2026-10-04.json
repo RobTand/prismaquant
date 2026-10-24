@@ -1164,7 +1164,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "retained-by-pq2638",
    "family": "hashlib",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -1174,11 +1174,12 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "_cb_cache_tensor_identity",
    "site": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Scoped refresh_2540.verification.tensor_leaf_2638 rechecks current main 6d8288adc94b3c4b624c143ed372fb6513f32784. Retain the cache schema (shape, dtype, logical_bytes, content_sha256) and 8388608-byte flattened memoryview windows with empty-feed handling. tensor_identity has a different result schema and materializes bytes; it does not own this no-second-copy feed."
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "retained-by-pq2638",
    "family": "hashlib",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -1188,7 +1189,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "_source_weight_value_identity",
    "site": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Scoped refresh_2540.verification.tensor_leaf_2638 rechecks current main 6d8288adc94b3c4b624c143ed372fb6513f32784. Retain (shape, hex) over recursive C-order chunks of at most 4194304 elements, converted to contiguous CPU FP32 and explicit little-endian f4. Existing tensor owners do not own this bounded conversion, traversal and result schema."
   },
   {
    "classification": "load-bearing",
@@ -1434,7 +1436,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "retained-by-pq2638",
    "family": "hashlib",
    "file": "prismaquant/stage_a_chain_seed.py",
    "linenos": [
@@ -1444,7 +1446,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "tensor_payload_sha256",
    "site": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Scoped refresh_2540.verification.tensor_leaf_2638 rechecks current main 6d8288adc94b3c4b624c143ed372fb6513f32784. Retain caller-sized payload-only element windows (default 67108864 bytes), moving and feeding one CPU uint8 NumPy window at a time. tensor_host_bytes would materialize the whole host payload; tensor_hash_update would add shape/dtype framing. No extra recipe is authorized in this leaf."
   },
   {
    "classification": "load-bearing",
@@ -1618,7 +1621,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "migrated-by-pq2638",
    "family": "hashlib",
    "file": "prismaquant/tessera_hessian.py",
    "linenos": [
@@ -1628,7 +1631,8 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "token_ids_sha256",
    "site": "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "note": "Scoped refresh_2540.verification.tensor_leaf_2638 rechecks current main 6d8288adc94b3c4b624c143ed372fb6513f32784. token_ids_int32_sha256 is the sole new owner recipe; preserve int32 cast and caller batch order, with golden evidence in tests/test_tensor_digest_owner_recipes_2638.py."
   },
   {
    "classification": "load-bearing",
@@ -13324,13 +13328,20 @@
     },
     "contract_kind": "tensor-view-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain the cache schema (shape, dtype, logical_bytes, content_sha256) and 8388608-byte flattened memoryview windows with empty-feed handling. tensor_identity has a different result schema and materializes bytes; it does not own this no-second-copy feed.",
+    "retention_evidence": {
+     "kind": "bounded-memoryview",
+     "reference": "tests/test_production_weight_cache.py; tests/test_render_identity_once_1192.py; tests/test_pwc_file_load_receipts.py",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0",
+     "source_blob": "507e47aa3e5c0aca5569769f0bd342d359d2c193",
+     "current_revalidation": "refresh_2540.verification.tensor_leaf_2638"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "tensor-view-stream:hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
@@ -13418,13 +13429,20 @@
     },
     "contract_kind": "fp32-tensor-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain (shape, hex) over recursive C-order chunks of at most 4194304 elements, converted to contiguous CPU FP32 and explicit little-endian f4. Existing tensor owners do not own this bounded conversion, traversal and result schema.",
+    "retention_evidence": {
+     "kind": "bounded-fp32-conversion",
+     "reference": "tests/test_production_weight_cache.py; tests/test_tensor_digest_owner_recipes_2638.py::test_the_fp32_stream_matches_its_golden",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0",
+     "source_blob": "507e47aa3e5c0aca5569769f0bd342d359d2c193",
+     "current_revalidation": "refresh_2540.verification.tensor_leaf_2638"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "fp32-tensor-stream:hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences@502:21",
@@ -14392,13 +14410,20 @@
     },
     "contract_kind": "device-tensor-chunks",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain caller-sized payload-only element windows (default 67108864 bytes), moving and feeding one CPU uint8 NumPy window at a time. tensor_host_bytes would materialize the whole host payload; tensor_hash_update would add shape/dtype framing. No extra recipe is authorized in this leaf.",
+    "retention_evidence": {
+     "kind": "bounded-device-chunks",
+     "reference": "tests/test_stage_a_chain_seed.py; tests/test_tensor_digest_owner_recipes_2638.py::test_the_chunked_payload_matches_its_golden_at_any_chunk_width",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0",
+     "source_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+     "current_revalidation": "refresh_2540.verification.tensor_leaf_2638"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "device-tensor-chunks:hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/stage_b_prep_io.py::_hash_range@100:13",
@@ -15400,6 +15425,13 @@
      "exact_contract": "Caller-ordered batches convert to int32 then CPU. SHA256 consumes each NumPy tobytes result with no delimiter, shape, or dtype header."
     },
     "contract_kind": "int32-token-stream",
+    "migration": {
+     "status": "migrated-by-pq2638",
+     "route": "prismaquant.tensor_digests.token_ids_int32_sha256",
+     "routed_expression": "token_ids_int32_sha256(batches)",
+     "current_revalidation": "refresh_2540.verification.tensor_leaf_2638",
+     "evidence": "tests/test_tensor_digest_owner_recipes_2638.py; tests/test_tessera_campaign.py::test_the_token_sha_identifies_the_calibration_draw"
+    },
     "ratcheted": true,
     "disposition": "add-exact-owner-recipe",
     "eligible": true,
@@ -133190,22 +133222,6 @@
     ]
    },
    {
-    "id": "tensor-view-stream:hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/production_weight_cache.py",
-    "calls": [
-     "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13"
-    ]
-   },
-   {
-    "id": "fp32-tensor-stream:hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/production_weight_cache.py",
-    "calls": [
-     "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13"
-    ]
-   },
-   {
     "id": "json-publication:supplemental-json:prismaquant/production_weight_cache.py::fill_packed_expert_cache_entries._persist_expert_sidecar@7622:23",
     "epic": "prismaquant#2542",
     "module": "prismaquant/production_weight_cache.py",
@@ -133451,14 +133467,6 @@
     "module": "prismaquant/stage_a_chain_resume.py",
     "calls": [
      "sorted-json:prismaquant/stage_a_chain_resume.py::apply_chain_resume@570:15"
-    ]
-   },
-   {
-    "id": "device-tensor-chunks:hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/stage_a_chain_seed.py",
-    "calls": [
-     "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13"
     ]
    },
    {
@@ -138221,6 +138229,124 @@
      "source_blob": "b724e8216a94648b7e907b3c9a2017a95b556f4d"
     }
    ],
+   "tensor_leaf_2638": {
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_census_blob": "ee8a93cb2cae21f46134d27cff26356f29fb1615",
+    "manifest": "refresh_2540",
+    "scope": "Scoped pre-repair refresh against served current main; every listed consumer function is byte-identical to the pre-PR implementation. Historical refresh_2540 source identities are preserved. This scoped decision supersedes the four-recipe interpretation, per Rob 2026-10-23. Recheck on a newer integration base before merging; this is not a whole-repository rescan.",
+    "sources": {
+     "prismaquant/tessera_hessian.py": {
+      "git_blob": "55f1af290bdf84eeee156e04d16f13f12c372c6e",
+      "functions": {
+       "token_ids_sha256": {
+        "sha256": "5782c0737552734b1024de8e76a14feb510c56f364f51ff7fbfb681b6aea7eca",
+        "lines": [
+         104,
+         117
+        ]
+       }
+      }
+     },
+     "prismaquant/stage_a_chain_seed.py": {
+      "git_blob": "ddc95808ec42bd05e29dfcf583ba8158c1fd905c",
+      "functions": {
+       "tensor_payload_sha256": {
+        "sha256": "b2094bc55b97806510ccd6308dee583244f99647513e10e69f7e59fe99e6a80e",
+        "lines": [
+         412,
+         425
+        ]
+       }
+      }
+     },
+     "prismaquant/production_weight_cache.py": {
+      "git_blob": "44a5c1ba83e523cb0b0014a9180bebee7f4f9a68",
+      "functions": {
+       "_cb_cache_tensor_identity": {
+        "sha256": "143e1824f5c57887ec11306092b9b977c1ffc3653c374fcc105248a9b77eaaba",
+        "lines": [
+         3594,
+         3612
+        ]
+       },
+       "_source_weight_value_identity": {
+        "sha256": "5821215132cef1768033e30573c16d2dc1176c579ea3fe7e46967528ba4bcd7e",
+        "lines": [
+         3340,
+         3369
+        ]
+       }
+      }
+     },
+     "prismaquant/tessera_export_lane.py": {
+      "git_blob": "bb8faa99057289492fdd78f1a47e8be70f827149",
+      "functions": {
+       "hessian_capture_sha256": {
+        "sha256": "2f1083d9c3c7851c2e2175027d31a47f3428ee3fec7be4c48ee77014c50a9da5",
+        "lines": [
+         1555,
+         1611
+        ]
+       }
+      }
+     },
+     "prismaquant/tensor_digests.py": {
+      "git_blob": "5c364c5d7c8fadf78ad9917668e72e1262546278",
+      "functions": {
+       "tensor_host_bytes": {
+        "sha256": "163ae0f351e618098fb536b36b4bb5300fb17226e32094367e2c0c9fa1745e45",
+        "lines": [
+         38,
+         40
+        ]
+       }
+      }
+     }
+    },
+    "sites": [
+     {
+      "id": "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256@114:13",
+      "manifest": "refresh_2540",
+      "decision": "route:prismaquant.tensor_digests.token_ids_int32_sha256"
+     },
+     {
+      "id": "hashlib:prismaquant/stage_a_chain_seed.py::tensor_payload_sha256@421:13",
+      "manifest": "refresh_2540",
+      "decision": "retain"
+     },
+     {
+      "id": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
+      "manifest": "refresh_2540",
+      "decision": "retain"
+     },
+     {
+      "id": "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity@2961:13",
+      "manifest": "refresh_2540",
+      "decision": "retain"
+     },
+     {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:13",
+      "manifest": "refresh_2540",
+      "decision": "retain framing; tensor_host_bytes already routed"
+     },
+     {
+      "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1611:15",
+      "manifest": "refresh_2540",
+      "decision": "retain framing; tensor_host_bytes already routed"
+     },
+     {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1606:18",
+      "manifest": "refresh_2540",
+      "decision": "retain framing; tensor_host_bytes already routed"
+     },
+     {
+      "id": "sorted-json:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1612:20",
+      "manifest": "refresh_2540",
+      "decision": "retain framing; tensor_host_bytes already routed"
+     }
+    ],
+    "evidence": "docs/audits/tensor_digest_leaf_2638_revalidation.md"
+   },
    "limit": "The audit records source contracts. It does not qualify migration bytes, GPU work, serving, or performance."
   },
   "summary": {
@@ -138238,12 +138364,12 @@
    },
    "supplemental_calls": 275,
    "mutable_modules": 203,
-   "eligible_cohorts": 652,
+   "eligible_cohorts": 649,
    "calls_by_disposition": {
     "migrate-exact-route": 270,
-    "retain": 25,
+    "retain": 28,
     "owner-implementation": 16,
-    "add-exact-owner-recipe": 109
+    "add-exact-owner-recipe": 106
    },
    "modules_by_epic": {
     "k2": 124,

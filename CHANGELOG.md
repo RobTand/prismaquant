@@ -44,11 +44,11 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
-- Four tensor digest sites now delegate to exact owner recipes in `prismaquant/tensor_digests.py` (#2638, part of #2542).
-  New recipes `token_ids_int32_sha256`, `tensor_chunked_payload_sha256`, `tensor_view_stream_identity`, and `fp32_tensor_stream_identity` keep the census byte contracts, chunk widths, conversions, fold order, and refusals.
-  Consumers `token_ids_sha256`, `tensor_payload_sha256`, `_cb_cache_tensor_identity`, and `_source_weight_value_identity` keep their names, signatures, and result schemas.
-  Golden tests pin byte-identical digests over multi-batch fixtures. The export-lane capture stays retained under #2543 with its Tessera seal path unchanged.
-  PB `1afa1be19d67` passes 10 golden cases; PB `aa3c9f9a8a27`, `f0257f40104a`, `80c33498a704`, `67a5acf48398`, `bcb5b6d271e5`, `0baa5eca6d29`, `8332c41a5164`, and `e075263d83ba` pass the module gates and the baseline ratchet. The primitive-digest baseline drops by four sites.
+- The Hessian token identity delegates to the single added `tensor_digests.token_ids_int32_sha256` recipe (#2638, part of #2542).
+  Multi-batch goldens preserve the int32 cast and fold order. Stage A's chunked payload and both production-cache identities remain local retentions, with their copy budgets and result schemas unchanged.
+  A scoped census refresh against main `6d8288adc94b` records those decisions and retains the export capture's JSON prefix and unit framing; its existing tensor-byte owner route and Tessera seal path are unchanged.
+  The lane reader adopts main's public Tessera metadata API and API-only `aaa417003f` pin instead of the removed private smoke validator. The v60 contract bytes, fail-closed grammar/derivation checks, and admission policies are unchanged.
+  The primitive-digest baseline drops by one site, not four. Current verification and retained test receipts are in `docs/audits/tensor_digest_leaf_2638_revalidation.md`; the earlier four-recipe gate claims are superseded.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.

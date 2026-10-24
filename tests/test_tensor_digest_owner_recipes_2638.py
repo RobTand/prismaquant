@@ -1,12 +1,8 @@
-"""Exact tensor digest recipes own four routed sites (PQ #2638).
+"""One exact token recipe and three consumer retentions (PQ #2638).
 
-Part of prismaquant#2542. Each test pins one census cohort from the
-``refresh_2540`` manifest of
-``docs/audits/digest_site_census_pq1301_2026-10-04.json`` to a golden
-digest. The goldens come from the exact byte contract (little-endian
-packing per the recorded feed), not from the code under test, so an
-identical value proves a byte-identical route. The delegation tests
-prove each consumer wrapper returns the owner value.
+The independent byte-contract goldens qualify the sole added owner recipe
+and the retained chunked feeds. The scoped refresh and retention decisions
+live under refresh_2540.verification.tensor_leaf_2638 in the digest census.
 """
 from __future__ import annotations
 
@@ -49,41 +45,38 @@ def test_the_int32_token_stream_tells_draws_apart():
     assert token_ids_int32_sha256(other) != INT32_TOKEN_STREAM_GOLDEN
 
 
-def test_the_hessian_wrapper_delegates_to_the_owner():
-    """The consumer keeps its name and returns the owner value."""
-    from prismaquant.tessera_hessian import token_ids_sha256
-    from prismaquant.tensor_digests import token_ids_int32_sha256
+def test_the_hessian_wrapper_delegates_to_the_owner(monkeypatch):
+    """The consumer passes the original batches without conversion or copies."""
+    from prismaquant import tensor_digests, tessera_hessian
 
     batches = _token_batches()
-    assert token_ids_sha256(batches) == token_ids_int32_sha256(batches)
-    assert token_ids_sha256(batches) == INT32_TOKEN_STREAM_GOLDEN
+    assert tessera_hessian.token_ids_sha256(batches) == INT32_TOKEN_STREAM_GOLDEN
+    calls = []
+
+    def owner(value):
+        calls.append(value)
+        return "owner-result"
+
+    monkeypatch.setattr(tensor_digests, "token_ids_int32_sha256", owner)
+    assert tessera_hessian.token_ids_sha256(batches) == "owner-result"
+    assert len(calls) == 1 and calls[0] is batches
 
 
 def test_the_chunked_payload_matches_its_golden_at_any_chunk_width():
     """Chunked feeds equal the whole-bytes digest at every width."""
-    from prismaquant.tensor_digests import tensor_chunked_payload_sha256
-
-    tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
-    assert tensor_chunked_payload_sha256(tensor) == DEVICE_CHUNKS_GOLDEN
-    assert tensor_chunked_payload_sha256(tensor, chunk_bytes=8) == DEVICE_CHUNKS_GOLDEN
-
-
-def test_the_chain_seed_wrapper_delegates_to_the_owner():
-    """The consumer keeps its signature and returns the owner value."""
     from prismaquant.stage_a_chain_seed import tensor_payload_sha256
-    from prismaquant.tensor_digests import tensor_chunked_payload_sha256
 
     tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
-    assert tensor_payload_sha256(tensor) == tensor_chunked_payload_sha256(tensor)
     assert tensor_payload_sha256(tensor) == DEVICE_CHUNKS_GOLDEN
+    assert tensor_payload_sha256(tensor, chunk_bytes=8) == DEVICE_CHUNKS_GOLDEN
 
 
 def test_the_view_stream_identity_matches_its_golden():
     """The chunked memoryview feed keeps its schema and content."""
-    from prismaquant.tensor_digests import tensor_view_stream_identity
+    from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
     tensor = torch.tensor([[1.0, -2.0], [3.5, 0.25]], dtype=torch.float32)
-    assert tensor_view_stream_identity(tensor) == {
+    assert _cb_cache_tensor_identity(tensor) == {
         "shape": [2, 2],
         "dtype": "torch.float32",
         "logical_bytes": 16,
@@ -93,36 +86,55 @@ def test_the_view_stream_identity_matches_its_golden():
 
 def test_the_view_stream_identity_covers_the_empty_tensor():
     """An empty tensor feeds zero bytes and keeps its shape."""
-    from prismaquant.tensor_digests import tensor_view_stream_identity
+    from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
-    identity = tensor_view_stream_identity(torch.empty(0))
+    identity = _cb_cache_tensor_identity(torch.empty(0))
     assert identity["shape"] == [0]
     assert identity["logical_bytes"] == 0
     assert identity["content_sha256"] == VIEW_STREAM_EMPTY_GOLDEN
 
 
-def test_the_cache_wrapper_delegates_to_the_owner():
-    """The consumer keeps its name and returns the owner value."""
-    from prismaquant.production_weight_cache import _cb_cache_tensor_identity
-    from prismaquant.tensor_digests import tensor_view_stream_identity
-
-    tensor = torch.tensor([[1.0, -2.0], [3.5, 0.25]], dtype=torch.float32)
-    assert _cb_cache_tensor_identity(tensor) == tensor_view_stream_identity(tensor)
-
-
 def test_the_fp32_stream_matches_its_golden():
     """The C-order fp32 conversion keeps its bytes and shape."""
-    from prismaquant.tensor_digests import fp32_tensor_stream_identity
-
-    weight = torch.tensor([[1.5, 2.5], [3.5, 4.5]], dtype=torch.float64)
-    assert fp32_tensor_stream_identity(weight) == ([2, 2], FP32_STREAM_GOLDEN)
-    assert fp32_tensor_stream_identity([1.0, 2.0]) == ([2], FP32_STREAM_LIST_GOLDEN)
-
-
-def test_the_source_weight_wrapper_delegates_to_the_owner():
-    """The consumer keeps its name and returns the owner value."""
     from prismaquant.production_weight_cache import _source_weight_value_identity
-    from prismaquant.tensor_digests import fp32_tensor_stream_identity
 
     weight = torch.tensor([[1.5, 2.5], [3.5, 4.5]], dtype=torch.float64)
-    assert _source_weight_value_identity(weight) == fp32_tensor_stream_identity(weight)
+    assert _source_weight_value_identity(weight) == ([2, 2], FP32_STREAM_GOLDEN)
+    assert _source_weight_value_identity([1.0, 2.0]) == ([2], FP32_STREAM_LIST_GOLDEN)
+
+
+def test_the_scoped_manifest_records_all_tensor_decisions():
+    """The refreshed list must not silently turn a retention into a route."""
+    import ast
+    import hashlib
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    census = json.loads((root / "docs/audits/digest_site_census_pq1301_2026-10-04.json").read_text())
+    refresh = census["refresh_2540"]
+    scoped = refresh["verification"]["tensor_leaf_2638"]
+    decisions = {site["id"]: site for site in scoped["sites"]}
+    assert len(decisions) == 8  # four tensor sites, four capture framing calls
+    rows = {row["id"]: row for row in refresh["calls"]}
+    for call_id, decision in decisions.items():
+        assert decision["manifest"] == "refresh_2540"
+        row = rows[call_id]
+        if decision["decision"].startswith("retain"):
+            assert row["disposition"] == "retain" and not row["eligible"]
+            assert row["cohort"] is None and row["retention_evidence"]
+            source = (root / row["file"]).read_text()
+            node = next(n for n in ast.parse(source).body
+                        if isinstance(n, ast.FunctionDef) and n.name == row["scope"])
+            actual = hashlib.sha256(ast.get_source_segment(source, node).encode()).hexdigest()
+            expected = scoped["sources"][row["file"]]["functions"][row["scope"]]["sha256"]
+            assert actual == expected  # unchanged bounded feed and seal grammar
+        else:
+            assert row["scope"] == "token_ids_sha256"
+            assert decision["decision"] == "route:prismaquant.tensor_digests.token_ids_int32_sha256"
+
+    owner = ast.parse((root / "prismaquant/tensor_digests.py").read_text())
+    assert {n.name for n in owner.body if isinstance(n, ast.FunctionDef)} == {
+        "_host", "_raw", "tensor_host_bytes", "tensor_identity",
+        "tensor_value_stamp", "tensor_sha256", "tensor_hash_update", "token_ids_int32_sha256",
+    }

@@ -50,7 +50,6 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 from .digests import text_sha256hex
-from .tensor_digests import token_ids_int32_sha256
 
 __all__ = [
     "HESSIAN_IDENTITY_FIELDS",
@@ -109,6 +108,8 @@ def token_ids_sha256(batches: Sequence) -> str:
     Both travel, because the reverse is also true -- one tokenizer over two
     corpora can collide on neither.
     """
+    from .tensor_digests import token_ids_int32_sha256
+
     return token_ids_int32_sha256(batches)
 
 

@@ -39,9 +39,37 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
-## Current pin: contract v60
+## Current pin: public metadata, contract v60
 
-The pin names Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).
+The current exact pin is Tessera
+`aaa417003f0ee690e8ace138acd18df7f9531369`, main's API-only v60 backport.
+It publishes `tessera.producer-metadata.v1`; the lane reader requires its
+public grammar, smoke derivation and lane-requirement capabilities rather
+than the removed private smoke validator. PQ #2638 aligns all active pin
+transcriptions with that API. The contract digest stays
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`;
+contract cells, native extensions and admission policies do not change.
+A matching v2 contract digest alone does not establish installed-code API
+compatibility; the reader checks the named public capabilities too.
+
+Resolve this exact commit from the canonical remote (not a floating branch):
+
+```bash
+TS=$(mktemp -d)
+git -C "$TS" init -q
+SHA=aaa417003f0ee690e8ace138acd18df7f9531369
+git -C "$TS" fetch -q https://github.com/RobTand/tessera "$SHA"
+git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha256sum
+```
+
+Current CPU verification, limits and retained receipts are in
+[`tensor_digest_leaf_2638_revalidation.md`](../../docs/audits/tensor_digest_leaf_2638_revalidation.md).
+The records below describe the earlier v60 qualification; they are not new
+qualification or serving evidence for the API-only backport.
+
+## Historical v60 qualification: fca4c6ce0
+
+The previous pin named Tessera `fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb` (Tessera #1033, PQ #2426).
 The contract uses v60 and lane schema v11.
 Its raw SHA-256 is `ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
 The canonical remote supplies these bytes, not a working checkout.

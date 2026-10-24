@@ -42,6 +42,7 @@ Dev mode only. The seed spec is a sealed JSON document
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -49,7 +50,6 @@ import re
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .dev_mode import seal_check
 from .digests import bytes_sha256hex, indent2_json_file_bytes, is_sha256hex
-from .tensor_digests import tensor_chunked_payload_sha256
 
 SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
@@ -415,7 +415,14 @@ def tensor_payload_sha256(tensor, *, chunk_bytes: int = 1 << 26) -> str:
     The bytes are copied to the host ``chunk_bytes`` at a time, so hashing a
     device tensor holds one chunk beside it, not a second copy of it.
     """
-    return tensor_chunked_payload_sha256(tensor, chunk_bytes=chunk_bytes)
+    import torch
+
+    data = tensor.detach().contiguous().reshape(-1)
+    digest = hashlib.sha256()
+    step = max(1, int(chunk_bytes) // max(data.element_size(), 1))
+    for start in range(0, data.numel(), step):
+        digest.update(data[start:start + step].to("cpu").view(torch.uint8).numpy())
+    return digest.hexdigest()
 
 
 def compare_seed_plane(plan: ChainSeed, digests: dict, *, max_resident_bytes=None) -> dict:

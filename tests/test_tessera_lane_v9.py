@@ -104,7 +104,7 @@ def _settle_attribution(payload: dict) -> dict:
     So the fixture asks the same function the reader asks -- and the tests that
     are ABOUT the derivation make it disagree afterwards, on purpose.
     """
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     for cell in payload["lane_eligibility"]["cells"]:
         smoke = cell["evidence"]["smoke"]
@@ -146,13 +146,13 @@ def tessera_v9(monkeypatch):
     """Tessera's v9 surface, real when the pin has it and stubbed when not.
 
     The pin moves to the v22 contract in one reviewed commit; until it does,
-    the installed ``tessera.serving.contract`` has no v9 helpers, and a test
+    the installed ``tessera.metadata`` has no v9 helpers, and a test
     that skipped would leave this reader's v9 path unexercised on the branch
     that introduces it.  The stub is deliberately NOT a second implementation
     of the repetition rule: every test below drives it to a chosen answer and
     asserts what this reader does with that answer.
     """
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     if not hasattr(ts, "EVIDENCE_SMOKE_INTERFACES"):
         monkeypatch.setattr(
@@ -691,10 +691,10 @@ def test_real_producer_and_consumer_refuse_duplicate_prompt_form(change):
 
 
 def test_v9_refuses_a_runtime_missing_the_owning_record_validator(monkeypatch):
-    from tessera.serving import contract as ts
+    from tessera import metadata as ts
 
     payload = _installed()
-    monkeypatch.delattr(ts, "_evidence_smoke_record")
+    monkeypatch.delattr(ts, "parse_smoke_record")
     with pytest.raises(lane.LaneEligibilityError,
-                       match="needs Tessera's _evidence_smoke_record"):
+                       match="Tessera metadata API does not publish callable.*parse_smoke_record"):
         _table(payload)

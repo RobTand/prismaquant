@@ -7971,6 +7971,18 @@ checked against the pre-change functions on a GB10 through PB action
 remains as historical evidence. No default, stage, format, lane, gate or byte
 changes.
 
+PQ #2638 adds only `tensor_digests.token_ids_int32_sha256`: the Hessian
+calibration token identity casts each caller-ordered batch to int32 and folds
+its bytes without shape/dtype headers or delimiters. Independent multi-batch
+goldens pin the original values. Stage A's payload-only device chunks and
+both production-cache identities stay local retentions: the host-byte owner
+does not own their bounded acquisition, FP32 conversion, or result schemas.
+The capture path already uses `tensor_host_bytes`; its sorted-JSON prefix,
+unit framing, and independent Tessera seal check remain unchanged. The scoped
+current-main source recheck and all retention evidence are recorded under
+`refresh_2540.verification.tensor_leaf_2638` in the digest census. This adds
+no second tensor owner and changes no sampling, seeds, or tensor bytes.
+
 Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
 anchors that survive a kill** (PQ #1403, P2).
 
@@ -17232,7 +17244,7 @@ for historical receipts; the missing declaration receives a named refusal.
 Re-stamped (2026-09-05, `codex/audit4-smoke-grammar`) for producer/consumer
 v9 smoke-record grammar parity (PrismaQuant #233). Before deriving admission,
 the reader delegates the entire record grammar to the pinned producer's pure
-`_evidence_smoke_record` validator. Nullable references and reference statuses
+`tessera.metadata.parse_smoke_record` validator. Nullable references and reference statuses
 survive parsed provenance and JSON round trips; unknown reference arms,
 nonportable instrument paths and duplicate `(prompt, form)` observations
 refuse. A missing validator is a named runtime mismatch. This changes no
@@ -17295,7 +17307,7 @@ and the attribution are re-derived by calling Tessera's own
 that disagrees with what they return is refused as a contract defect rather
 than resolved. The record grammar is also owned by Tessera:
 `_parse_smoke_record` calls the pinned metadata module's
-`_evidence_smoke_record` validator before converting its result to immutable
+`tessera.metadata.parse_smoke_record` validator before converting its result to immutable
 consumer dataclasses. This validates closed record and row members, known
 forms, interfaces and statuses, a portable repository-relative instrument
 path, a nonempty rule and nonempty rows. The reference is a known arm or
@@ -17303,8 +17315,17 @@ path, a nonempty rule and nonempty rows. The reference is a known arm or
 arm is named. Observation identity is `(prompt, form)`, so changing an
 interface or verdict cannot manufacture a second observation of that pair.
 A record beside a non-null v7 control is refused by the same owning validator.
-The immutable pin binds this private metadata API; its absence is a named
-refusal rather than a fallback grammar. Whether a cell's status was derived
+The reader requires the public `tessera.producer-metadata.v1` API and its
+callable capabilities; an absent or incompatible API is a named refusal,
+never a fallback grammar. PQ #2638 aligns this reader with main's public
+metadata integration instead of calling the removed private validator.
+Status derivation and lane-requirement decisions also use this public owner;
+no serving-execution module is imported to read producer metadata. The active
+reader, producer, serving and frozen-domain pin transcriptions take main's
+API-only `aaa417003f` backport together. The v60 contract digest remains
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`;
+the reviewed admission answer, native extensions and exporter/grammar source
+fingerprints do not move. The identity snapshot changes only its pin commit. Whether a cell's status was derived
 is asked through `smoke_status_is_derived` and carried into provenance.
 
 **The pin names v23, so v10 is the CURRENT grammar, not one this reader
