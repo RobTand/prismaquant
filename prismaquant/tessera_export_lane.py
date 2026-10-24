@@ -86,6 +86,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
     DIRECT_ASCII_SPACED_LAX,
     bytes_sha256hex,
     indent2_json_file_bytes,
@@ -2841,7 +2842,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             destination = Path(args.write_build_json)
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary = destination.with_name(destination.name + ".tmp")
-            build_bytes = (json.dumps(report["build"], indent=2, sort_keys=True) + "\n").encode("utf-8")
+            build_bytes = DIRECT_ASCII_INDENT2_LAX.encoded(report["build"]) + b"\n"
             temporary.write_bytes(build_bytes)
             temporary.replace(destination)
     except (TesseraExportLaneError, OSError, ValueError) as exc:
@@ -2860,7 +2861,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("[preflight] ship record this artifact must close: "
           + ", ".join(report["shipcard_slots"]), file=output)
     if "serving_target" in report:
-        print("[preflight] explicit serving target: " + json.dumps(report["serving_target"], sort_keys=True), file=output)
+        print("[preflight] explicit serving target: " + DIRECT_ASCII_SPACED_LAX.text(report["serving_target"]), file=output)
     if "selected_serving_scope" in report:
         print("[preflight] scoped selected units: "
               + str(len(report["selected_serving_scope"]["by_unit"])), file=output)

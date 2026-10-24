@@ -1,0 +1,965 @@
+{
+  "schema": "prismaquant.digest_1301.protected_inspection.v1",
+  "scope": {
+    "whole_files": [
+      "prismaquant/kernels/joint_projection_reduce.py",
+      "prismaquant/kernels/kda_chunk.py"
+    ],
+    "inventory_source": "docs/audits/digest_site_census_pq1301_2026-10-04.json#/refresh_2540",
+    "primary_calls": 4,
+    "supplemental_calls": 0,
+    "boundaries": "Whole-file inspection of the two named Python files, actual packaged qualifications and targeted admission consumers only. No exhaustive repository scan. No compilation, GPU execution, binary validation or qualification rerun. Census references are historical evidence, not runtime proof."
+  },
+  "sources_inspected": [
+    "AGENTS.md",
+    "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+    "prismaquant/kernels/joint_projection_reduce.py",
+    "prismaquant/kernels/kda_chunk.py",
+    "prismaquant/kernels/joint_projection_reduce_qualification.json",
+    "prismaquant/kernels/kda_chunk_qualification.json",
+    "prismaquant/joint_projection_contract.py",
+    "prismaquant/joint_projection_backend.py",
+    "prismaquant/glm_kda_capture_kernel.py",
+    "tests/fixtures/digest_1301/serving-evidence/ledger_values.json"
+  ],
+  "source_identities": [
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "git_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+      "sha256": "f92d13bd79c5688c5e62c7a02e0b6a8a0a38ea762c5bf74060dae3cca1ef77dd",
+      "bytes": 3531,
+      "HEAD_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "git_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f",
+      "bytes": 19890,
+      "HEAD_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce_qualification.json",
+      "git_blob": "92ec8814cb39fb2e19dd3ca24244e14dd7a37c9a",
+      "sha256": "935f83489314402f58d458afe066dd33c5ec0a8d7f11827cea118ab23a7272d1",
+      "bytes": 8806,
+      "HEAD_blob": "92ec8814cb39fb2e19dd3ca24244e14dd7a37c9a",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk_qualification.json",
+      "git_blob": "045cd3084a655626c607f2724f3d2ee2d3bccf57",
+      "sha256": "0375f03823d88bbdf7e7b9339168380cf6c4322be8b3532b89e11d5a6524d001",
+      "bytes": 13201,
+      "HEAD_blob": "045cd3084a655626c607f2724f3d2ee2d3bccf57",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/joint_projection_contract.py",
+      "git_blob": "c358a1b10ae1cbdf0bb759bc154a2b139d22e443",
+      "sha256": "575b2cb999f1f64c8ffc7b52663147360869791089030807dc2edb77866f5475",
+      "bytes": 1694,
+      "HEAD_blob": "c358a1b10ae1cbdf0bb759bc154a2b139d22e443",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/joint_projection_backend.py",
+      "git_blob": "4ebfe62b3707d6193c96996141a3014ceb5e0e9b",
+      "sha256": "b37ad028e30fcdbd5330073314675a8f0e269cbc5616696ba980001d31f693a8",
+      "bytes": 16683,
+      "HEAD_blob": "4ebfe62b3707d6193c96996141a3014ceb5e0e9b",
+      "matches_HEAD": true
+    },
+    {
+      "file": "prismaquant/glm_kda_capture_kernel.py",
+      "git_blob": "f764694d13c432c144714f11bf195576bf394c9f",
+      "sha256": "ab55551d26c37e24d61dcc982482dbce7934afb9ae9375cf716f97f21f60b011",
+      "bytes": 17149,
+      "HEAD_blob": "f764694d13c432c144714f11bf195576bf394c9f",
+      "matches_HEAD": true
+    },
+    {
+      "file": "docs/audits/digest_site_census_pq1301_2026-10-04.json",
+      "git_blob": "ee8a93cb2cae21f46134d27cff26356f29fb1615",
+      "sha256": "4fd8ef6904ff73e4953246a55148dd93d775276d6fceb3ebdfc34d1283d9b9ae",
+      "bytes": 5594862,
+      "HEAD_blob": "ee8a93cb2cae21f46134d27cff26356f29fb1615",
+      "matches_HEAD": true
+    }
+  ],
+  "retained_calls": [
+    {
+      "id": "hashlib:prismaquant/kernels/joint_projection_reduce.py::_source_digest@22:13",
+      "site": "hashlib:prismaquant/kernels/joint_projection_reduce.py::_source_digest",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "_source_digest",
+      "line": 22,
+      "column": 13,
+      "end_line": 22,
+      "source_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "resolved_aliases": {
+        "hashlib": "hashlib"
+      },
+      "classification": "load-bearing",
+      "classification_reason": "The value enters a return, state, publication, verification, or measurement contract. The audit does not infer ephemeral use.",
+      "consumer_evidence": {
+        "scope_lines": [
+          21,
+          26
+        ],
+        "statement": {
+          "line": 22,
+          "end_line": 22,
+          "source": "digest = hashlib.sha256()"
+        },
+        "nearby_lines": [
+          18,
+          27
+        ],
+        "nearby_source": "CPP_FLAGS = ['-O3']\n\n\ndef _source_digest():\n    digest = hashlib.sha256()\n    for suffix in ('.cpp', '.cu'):\n        digest.update(Path(__file__).with_suffix(suffix).read_bytes())\n    digest.update(str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)).encode())\n    return digest.hexdigest()\n",
+        "enclosing_controls": []
+      },
+      "recipe": {
+        "algorithm": "sha256",
+        "algorithm_options": {},
+        "encoding_options": {
+          "input": "Exact source expressions; each encode call retains its codec and error mode.",
+          "json_calls": []
+        },
+        "input": [],
+        "input_bindings": [],
+        "input_order": "The constructor input precedes the listed update operations. Enclosing loops and branch conditions remain authoritative.",
+        "framing": "No implicit framing. The constructor, feed expressions, and enclosing controls define all separators and lengths.",
+        "digest_bits": 256,
+        "result_type": "str (lowercase hex)",
+        "result_width": 64,
+        "output_expressions": [
+          {
+            "line": 26,
+            "end_line": 26,
+            "source": "return digest.hexdigest()"
+          }
+        ],
+        "feed_operations": [
+          {
+            "line": 24,
+            "end_line": 24,
+            "source": "digest.update(Path(__file__).with_suffix(suffix).read_bytes())",
+            "controls": [
+              "for suffix in ('.cpp', '.cu')"
+            ]
+          },
+          {
+            "line": 25,
+            "end_line": 25,
+            "source": "digest.update(str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)).encode())",
+            "controls": []
+          },
+          {
+            "line": 26,
+            "end_line": 26,
+            "source": "digest.hexdigest()",
+            "controls": []
+          }
+        ],
+        "read_boundaries": [
+          {
+            "line": 24,
+            "end_line": 24,
+            "source": "Path(__file__).with_suffix(suffix).read_bytes()"
+          }
+        ],
+        "refusal_behavior": {
+          "primitive": "hashlib preserves its buffer, algorithm, and digest-size errors. Codec and read errors remain unchanged.",
+          "caller": []
+        }
+      },
+      "owner": {
+        "route": null,
+        "gap": "No current public owner exposes this exact incremental stream without a new read, copy, framing change, or result change."
+      },
+      "contract_kind": "byte-digest",
+      "ratcheted": true,
+      "disposition": "retain",
+      "eligible": false,
+      "disposition_reason": "The native qualification binds source inputs, flags, and toolchain identity.",
+      "retention_evidence": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/joint_projection_reduce_qualification.json:9-24",
+        "source_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500"
+      },
+      "deployment_or_reference_contract": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/joint_projection_reduce_qualification.json:9-24",
+        "migration_precondition": "Prove owner availability in the current layout. Preserve isolated imports, source rosters, and independent checks. This census grants no deployment change."
+      },
+      "epic_key": "k5",
+      "epic": "prismaquant#2543",
+      "cohort": null,
+      "inventory_group": "calls",
+      "current_expression_verified": true,
+      "current_identity": {
+        "file": "prismaquant/kernels/joint_projection_reduce.py",
+        "git_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+        "sha256": "f92d13bd79c5688c5e62c7a02e0b6a8a0a38ea762c5bf74060dae3cca1ef77dd",
+        "bytes": 3531,
+        "HEAD_blob": "f275dd1f0abadb2522d07cea08d57b2591e22500",
+        "matches_HEAD": true
+      },
+      "current_full_scope_witness": {
+        "file": "prismaquant/kernels/joint_projection_reduce.py",
+        "scope": "_source_digest",
+        "lines": [
+          21,
+          26
+        ],
+        "source": "def _source_digest():\n    digest = hashlib.sha256()\n    for suffix in ('.cpp', '.cu'):\n        digest.update(Path(__file__).with_suffix(suffix).read_bytes())\n    digest.update(str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)).encode())\n    return digest.hexdigest()"
+      },
+      "inventory_blob_matches_current": true
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::_code_sha256@374:13",
+      "site": "hashlib:prismaquant/kernels/kda_chunk.py::_code_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "_code_sha256",
+      "line": 374,
+      "column": 13,
+      "end_line": 374,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])",
+      "resolved_aliases": {
+        "hashlib": "hashlib"
+      },
+      "classification": "load-bearing",
+      "classification_reason": "The value enters a return, state, publication, verification, or measurement contract. The audit does not infer ephemeral use.",
+      "consumer_evidence": {
+        "scope_lines": [
+          355,
+          383
+        ],
+        "statement": {
+          "line": 374,
+          "end_line": 374,
+          "source": "digest = hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])"
+        },
+        "nearby_lines": [
+          370,
+          379
+        ],
+        "nearby_source": "    def section(index):\n        return struct.unpack_from(\"<IIQQQQIIQQ\", cubin, section_offset + index * entry_size)\n\n    names_offset = section(names_index)[4]\n    digest = hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])  # type, machine, version, flags\n    for index in range(count):\n        name_at, kind, flags, _address, offset, size = section(index)[:6]\n        name = cubin[names_offset + name_at:cubin.index(b\"\\0\", names_offset + name_at)]\n        if b\"debug\" in name:\n            continue",
+        "enclosing_controls": []
+      },
+      "recipe": {
+        "algorithm": "sha256",
+        "algorithm_options": {},
+        "encoding_options": {
+          "input": "Exact source expressions; each encode call retains its codec and error mode.",
+          "json_calls": []
+        },
+        "input": [
+          "cubin[16:24] + cubin[48:52]"
+        ],
+        "input_bindings": [],
+        "input_order": "The constructor input precedes the listed update operations. Enclosing loops and branch conditions remain authoritative.",
+        "framing": "No implicit framing. The constructor, feed expressions, and enclosing controls define all separators and lengths.",
+        "digest_bits": 256,
+        "result_type": "str (lowercase hex)",
+        "result_width": 64,
+        "output_expressions": [
+          {
+            "line": 383,
+            "end_line": 383,
+            "source": "return digest.hexdigest()"
+          }
+        ],
+        "feed_operations": [
+          {
+            "line": 380,
+            "end_line": 380,
+            "source": "digest.update(name + b\"\\0\" + struct.pack(\"<IQQ\", kind, flags, size))",
+            "controls": [
+              "for index in range(count)"
+            ]
+          },
+          {
+            "line": 382,
+            "end_line": 382,
+            "source": "digest.update(cubin[offset:offset + size])",
+            "controls": [
+              "for index in range(count)",
+              "if kind != 8"
+            ]
+          },
+          {
+            "line": 383,
+            "end_line": 383,
+            "source": "digest.hexdigest()",
+            "controls": []
+          }
+        ],
+        "read_boundaries": [],
+        "refusal_behavior": {
+          "primitive": "hashlib preserves its buffer, algorithm, and digest-size errors. Codec and read errors remain unchanged.",
+          "caller": [
+            {
+              "line": 366,
+              "end_line": 366,
+              "source": "raise KdaKernelRefused(\"a compiled KDA kernel is not a 64-bit little-endian ELF\")"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "route": null,
+        "gap": "No current public owner exposes this exact incremental stream without a new read, copy, framing change, or result change."
+      },
+      "contract_kind": "byte-digest",
+      "ratcheted": true,
+      "disposition": "retain",
+      "eligible": false,
+      "disposition_reason": "The qualification binds the Python source bytes and executed kernel digests.",
+      "retention_evidence": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878"
+      },
+      "deployment_or_reference_contract": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "migration_precondition": "Prove owner availability in the current layout. Preserve isolated imports, source rosters, and independent checks. This census grants no deployment change."
+      },
+      "epic_key": "k5",
+      "epic": "prismaquant#2543",
+      "cohort": null,
+      "inventory_group": "calls",
+      "current_expression_verified": true,
+      "current_identity": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "git_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f",
+        "bytes": 19890,
+        "HEAD_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "matches_HEAD": true
+      },
+      "current_full_scope_witness": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "scope": "_code_sha256",
+        "lines": [
+          355,
+          383
+        ],
+        "source": "def _code_sha256(cubin: bytes) -> str:\n    \"\"\"sha256 of a cubin's sections, leaving out its debug sections.\n\n    ptxas writes each source file's modification time into the cubin's line\n    tables, so two checkouts of one source compile to cubins whose bytes\n    differ there and nowhere else. Every other section (machine code,\n    constants, kernel attributes, symbols, the toolkit note) is hashed by\n    name, type, flags and contents; offsets are not, because a debug section\n    of another length would move them.\n    \"\"\"\n    if cubin[:6] != b\"\\x7fELF\\x02\\x01\":\n        raise KdaKernelRefused(\"a compiled KDA kernel is not a 64-bit little-endian ELF\")\n    section_offset, = struct.unpack_from(\"<Q\", cubin, 0x28)\n    entry_size, count, names_index = struct.unpack_from(\"<HHH\", cubin, 0x3A)\n\n    def section(index):\n        return struct.unpack_from(\"<IIQQQQIIQQ\", cubin, section_offset + index * entry_size)\n\n    names_offset = section(names_index)[4]\n    digest = hashlib.sha256(cubin[16:24] + cubin[0x30:0x34])  # type, machine, version, flags\n    for index in range(count):\n        name_at, kind, flags, _address, offset, size = section(index)[:6]\n        name = cubin[names_offset + name_at:cubin.index(b\"\\0\", names_offset + name_at)]\n        if b\"debug\" in name:\n            continue\n        digest.update(name + b\"\\0\" + struct.pack(\"<IQQ\", kind, flags, size))\n        if kind != 8:  # SHT_NOBITS occupies no bytes in the file\n            digest.update(cubin[offset:offset + size])\n    return digest.hexdigest()"
+      },
+      "inventory_blob_matches_current": true
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::probe_digest@422:13",
+      "site": "hashlib:prismaquant/kernels/kda_chunk.py::probe_digest",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "probe_digest",
+      "line": 422,
+      "column": 13,
+      "end_line": 422,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256()",
+      "resolved_aliases": {
+        "hashlib": "hashlib"
+      },
+      "classification": "load-bearing",
+      "classification_reason": "The value enters a return, state, publication, verification, or measurement contract. The audit does not infer ephemeral use.",
+      "consumer_evidence": {
+        "scope_lines": [
+          401,
+          425
+        ],
+        "statement": {
+          "line": 422,
+          "end_line": 422,
+          "source": "digest = hashlib.sha256()"
+        },
+        "nearby_lines": [
+          418,
+          425
+        ],
+        "nearby_source": "    stimulus = draw(*shape).to(torch.bfloat16).to(device)\n    inputs = [x.to(device).requires_grad_(True) for x in inputs]\n    out, _ = chunk_kimi_delta_attention(*inputs, use_qk_l2norm_in_kernel=True)\n    torch.autograd.backward([out], [stimulus])\n    digest = hashlib.sha256()\n    for tensor in (out, *(x.grad for x in inputs)):\n        digest.update(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())\n    return {\"shape\": list(shape), \"sha256\": digest.hexdigest()}",
+        "enclosing_controls": []
+      },
+      "recipe": {
+        "algorithm": "sha256",
+        "algorithm_options": {},
+        "encoding_options": {
+          "input": "Exact source expressions; each encode call retains its codec and error mode.",
+          "json_calls": []
+        },
+        "input": [],
+        "input_bindings": [],
+        "input_order": "The constructor input precedes the listed update operations. Enclosing loops and branch conditions remain authoritative.",
+        "framing": "No implicit framing. The constructor, feed expressions, and enclosing controls define all separators and lengths.",
+        "digest_bits": 256,
+        "result_type": "str (lowercase hex)",
+        "result_width": 64,
+        "output_expressions": [
+          {
+            "line": 425,
+            "end_line": 425,
+            "source": "return {\"shape\": list(shape), \"sha256\": digest.hexdigest()}"
+          }
+        ],
+        "feed_operations": [
+          {
+            "line": 424,
+            "end_line": 424,
+            "source": "digest.update(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())",
+            "controls": [
+              "for tensor in (out, *(x.grad for x in inputs))"
+            ]
+          },
+          {
+            "line": 425,
+            "end_line": 425,
+            "source": "digest.hexdigest()",
+            "controls": []
+          }
+        ],
+        "read_boundaries": [],
+        "refusal_behavior": {
+          "primitive": "hashlib preserves its buffer, algorithm, and digest-size errors. Codec and read errors remain unchanged.",
+          "caller": []
+        }
+      },
+      "owner": {
+        "route": null,
+        "gap": "No current public owner exposes this exact incremental stream without a new read, copy, framing change, or result change."
+      },
+      "contract_kind": "byte-digest",
+      "ratcheted": true,
+      "disposition": "retain",
+      "eligible": false,
+      "disposition_reason": "The qualification binds the Python source bytes and executed kernel digests.",
+      "retention_evidence": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878"
+      },
+      "deployment_or_reference_contract": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "migration_precondition": "Prove owner availability in the current layout. Preserve isolated imports, source rosters, and independent checks. This census grants no deployment change."
+      },
+      "epic_key": "k5",
+      "epic": "prismaquant#2543",
+      "cohort": null,
+      "inventory_group": "calls",
+      "current_expression_verified": true,
+      "current_identity": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "git_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f",
+        "bytes": 19890,
+        "HEAD_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "matches_HEAD": true
+      },
+      "current_full_scope_witness": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "scope": "probe_digest",
+        "lines": [
+          401,
+          425
+        ],
+        "source": "def probe_digest(device) -> dict:\n    \"\"\"Run a fixed small problem forward and backward and hash every result.\n\n    Compiles all six kernels on first use. The inputs come from a seeded CPU\n    generator, so the global Torch RNG is untouched; the digest names the\n    output and gradient bits the whole path produced on this device.\n    \"\"\"\n    generator = torch.Generator().manual_seed(1199)\n    shape = (1, 2 * CHUNK, 2, HEAD_DIM)\n\n    def draw(*size, low=None):\n        value = torch.randn(*size, generator=generator)\n        return value if low is None else low * torch.sigmoid(value)\n\n    inputs = [draw(*shape).to(torch.bfloat16), draw(*shape).to(torch.bfloat16),\n              draw(*shape).to(torch.bfloat16), draw(*shape, low=-5.0),\n              torch.sigmoid(draw(*shape[:3])).to(torch.bfloat16)]\n    stimulus = draw(*shape).to(torch.bfloat16).to(device)\n    inputs = [x.to(device).requires_grad_(True) for x in inputs]\n    out, _ = chunk_kimi_delta_attention(*inputs, use_qk_l2norm_in_kernel=True)\n    torch.autograd.backward([out], [stimulus])\n    digest = hashlib.sha256()\n    for tensor in (out, *(x.grad for x in inputs)):\n        digest.update(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())\n    return {\"shape\": list(shape), \"sha256\": digest.hexdigest()}"
+      },
+      "inventory_blob_matches_current": true
+    },
+    {
+      "id": "hashlib:prismaquant/kernels/kda_chunk.py::source_sha256@352:11",
+      "site": "hashlib:prismaquant/kernels/kda_chunk.py::source_sha256",
+      "family": "hashlib",
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "source_sha256",
+      "line": 352,
+      "column": 11,
+      "end_line": 352,
+      "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+      "callee": "hashlib.sha256",
+      "expression": "hashlib.sha256(Path(__file__).read_bytes())",
+      "resolved_aliases": {
+        "hashlib": "hashlib"
+      },
+      "classification": "load-bearing",
+      "classification_reason": "The value enters a return, state, publication, verification, or measurement contract. The audit does not infer ephemeral use.",
+      "consumer_evidence": {
+        "scope_lines": [
+          351,
+          352
+        ],
+        "statement": {
+          "line": 352,
+          "end_line": 352,
+          "source": "return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()"
+        },
+        "nearby_lines": [
+          348,
+          357
+        ],
+        "nearby_source": "    return dict(_COUNTS)\n\n\ndef source_sha256() -> str:\n    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()\n\n\ndef _code_sha256(cubin: bytes) -> str:\n    \"\"\"sha256 of a cubin's sections, leaving out its debug sections.\n",
+        "enclosing_controls": []
+      },
+      "recipe": {
+        "algorithm": "sha256",
+        "algorithm_options": {},
+        "encoding_options": {
+          "input": "Exact source expressions; each encode call retains its codec and error mode.",
+          "json_calls": []
+        },
+        "input": [
+          "Path(__file__).read_bytes()"
+        ],
+        "input_bindings": [],
+        "input_order": "The constructor input precedes the listed update operations. Enclosing loops and branch conditions remain authoritative.",
+        "framing": "No implicit framing. The constructor, feed expressions, and enclosing controls define all separators and lengths.",
+        "digest_bits": 256,
+        "result_type": "str (lowercase hex)",
+        "result_width": 64,
+        "output_expressions": [
+          {
+            "line": 352,
+            "end_line": 352,
+            "source": "return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()"
+          }
+        ],
+        "feed_operations": [
+          {
+            "line": 352,
+            "end_line": 352,
+            "source": "hashlib.sha256(Path(__file__).read_bytes()).hexdigest()",
+            "controls": []
+          }
+        ],
+        "read_boundaries": [
+          {
+            "line": 352,
+            "end_line": 352,
+            "source": "Path(__file__).read_bytes()"
+          }
+        ],
+        "refusal_behavior": {
+          "primitive": "hashlib preserves its buffer, algorithm, and digest-size errors. Codec and read errors remain unchanged.",
+          "caller": []
+        }
+      },
+      "owner": {
+        "route": "prismaquant.digests.bytes_sha256hex",
+        "gap": null,
+        "constraints": "Pass the identical existing bytes. Keep input construction, validation, result slices, and return wrappers at the consumer."
+      },
+      "contract_kind": "byte-digest",
+      "ratcheted": true,
+      "disposition": "retain",
+      "eligible": false,
+      "disposition_reason": "The qualification binds the Python source bytes and executed kernel digests.",
+      "retention_evidence": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "source_blob": "177fcad5bd5c731fb990534c3575d01eee243878"
+      },
+      "deployment_or_reference_contract": {
+        "kind": "qualified-source",
+        "reference": "prismaquant/kernels/kda_chunk_qualification.json",
+        "migration_precondition": "Prove owner availability in the current layout. Preserve isolated imports, source rosters, and independent checks. This census grants no deployment change."
+      },
+      "epic_key": "k5",
+      "epic": "prismaquant#2543",
+      "cohort": null,
+      "inventory_group": "calls",
+      "current_expression_verified": true,
+      "current_identity": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "git_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f",
+        "bytes": 19890,
+        "HEAD_blob": "177fcad5bd5c731fb990534c3575d01eee243878",
+        "matches_HEAD": true
+      },
+      "current_full_scope_witness": {
+        "file": "prismaquant/kernels/kda_chunk.py",
+        "scope": "source_sha256",
+        "lines": [
+          351,
+          352
+        ],
+        "source": "def source_sha256() -> str:\n    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()"
+      },
+      "inventory_blob_matches_current": true
+    }
+  ],
+  "additional_digest_operations": [
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 24,
+      "column": 8,
+      "expression": "digest.update(Path(__file__).with_suffix(suffix).read_bytes())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 25,
+      "column": 4,
+      "expression": "digest.update(str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)).encode())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 26,
+      "column": 11,
+      "expression": "digest.hexdigest()",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 40,
+      "column": 43,
+      "expression": "_source_digest()",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 72,
+      "column": 29,
+      "expression": "_source_digest()",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 73,
+      "column": 36,
+      "expression": "bytes_sha256hex(Path(__file__).read_bytes())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 79,
+      "column": 29,
+      "expression": "bytes_sha256hex(Path(module.__file__).read_bytes())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 80,
+      "column": 30,
+      "expression": "bytes_sha256hex((include / name).read_bytes())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 380,
+      "column": 8,
+      "expression": "digest.update(name + b\"\\0\" + struct.pack(\"<IQQ\", kind, flags, size))",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 382,
+      "column": 12,
+      "expression": "digest.update(cubin[offset:offset + size])",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 383,
+      "column": 11,
+      "expression": "digest.hexdigest()",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 396,
+      "column": 27,
+      "expression": "_code_sha256(compiled.kernel)",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 424,
+      "column": 8,
+      "expression": "digest.update(tensor.detach().contiguous().view(torch.uint8).cpu().numpy().tobytes())",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 425,
+      "column": 44,
+      "expression": "digest.hexdigest()",
+      "classification": "load-bearing",
+      "disposition": "preserve exact existing recipe"
+    }
+  ],
+  "whole_file_explicit_raise_validators": [
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "line": 61,
+      "expression": "raise RuntimeError('joint projection reduction has no autograd registration; use under no_grad')"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 209,
+      "expression": "raise KdaKernelRefused(\n            f\"KDA kernel {name} (inclusive={inclusive}) compiled a second specialization \"\n            f\"{compiled.hash} after {known.hash}; the kernel identity names one\")"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 216,
+      "expression": "raise KdaKernelRefused(f\"KDA Gram operand {name} must be contiguous, 16-byte aligned FP32\")"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 279,
+      "expression": "raise KdaKernelRefused(\n            \"the KDA kernel serves only chunk_size=64, no initial or final state and \"\n            \"use_qk_l2norm_in_kernel=True: the Stage B capture's call\")"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 283,
+      "expression": "raise KdaKernelRefused(\"the KDA kernel runs on CUDA only\")"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 285,
+      "expression": "raise KdaKernelRefused(\n            f\"the KDA kernel is compiled for key head dim {HEAD_DIM}, got \"\n            f\"q {tuple(query.shape)} k {tuple(key.shape)} g {tuple(g.shape)}\")"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "line": 366,
+      "expression": "raise KdaKernelRefused(\"a compiled KDA kernel is not a 64-bit little-endian ELF\")"
+    }
+  ],
+  "additional_full_scope_witnesses": [
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "load_backend",
+      "lines": [
+        30,
+        45
+      ],
+      "source": "def load_backend():\n    \"\"\"Compile/load before the measured projection lease is entered.\n\n    The build runs under :func:`jit_build_lock`, so a builder killed while it\n    held torch's build lock cannot leave every later load waiting (PQ #1174).\n    \"\"\"\n    from torch.utils.cpp_extension import load\n\n    from .jit_build_lock import jit_build_lock, torch_build_directory\n\n    name = 'pq_joint_projection_reduce_' + _source_digest()[:16]\n    with jit_build_lock(torch_build_directory(name)):\n        return load(name=name,\n                    sources=[str(Path(__file__).with_suffix(suffix)) for suffix in ('.cpp', '.cu')],\n                    extra_cflags=CPP_FLAGS, extra_cuda_cflags=CUDA_FLAGS,\n                    with_cuda=True, verbose=True)"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "build_identity",
+      "lines": [
+        65,
+        80
+      ],
+      "source": "def build_identity():\n    \"\"\"Bind the actual loaded binary, compiler flags and reduction headers.\"\"\"\n    module = load_backend()\n    include = Path(torch.__file__).parent / 'include'\n    names = ['ATen/native/cuda/Reduce.cuh', 'ATen/native/cuda/MemoryAccess.cuh',\n             'ATen/native/cuda/thread_constants.h', 'ATen/cuda/DeviceUtils.cuh',\n             'ATen/TensorIterator.h']\n    return {'source_sha256': _source_digest(),\n            'python_source_sha256': bytes_sha256hex(Path(__file__).read_bytes()),\n            'torch': str(torch.__version__),\n            'torch_git': torch.version.git_version, 'cuda': torch.version.cuda,\n            'arch_list': os.environ.get('TORCH_CUDA_ARCH_LIST'),\n            'cpp_flags': CPP_FLAGS, 'cuda_flags': CUDA_FLAGS,\n            'binary_path': module.__file__,\n            'binary_sha256': bytes_sha256hex(Path(module.__file__).read_bytes()),\n            'headers': {name: bytes_sha256hex((include / name).read_bytes()) for name in names}}"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "fast_path_eligible",
+      "lines": [
+        48,
+        53
+      ],
+      "source": "def fast_path_eligible(left, right):\n    return (left.device.type == 'cuda' and left.device == right.device\n            and left.dtype == right.dtype == torch.float32 and left.shape == right.shape\n            and left.is_contiguous() and right.is_contiguous()\n            and 0 < left.numel() < (2**31 // 4)\n            and left.data_ptr() % 16 == 0 and right.data_ptr() % 16 == 0)"
+    },
+    {
+      "file": "prismaquant/kernels/joint_projection_reduce.py",
+      "scope": "fused_product_sum",
+      "lines": [
+        56,
+        62
+      ],
+      "source": "def fused_product_sum(left, right):\n    \"\"\"Opt-in experimental equivalent of ``(left * right).sum()``.\"\"\"\n    if not fast_path_eligible(left, right):\n        return (left * right).sum()\n    if torch.is_grad_enabled() and (left.requires_grad or right.requires_grad):\n        raise RuntimeError('joint projection reduction has no autograd registration; use under no_grad')\n    return load_backend().mul_sum(left, right)"
+    },
+    {
+      "file": "prismaquant/kernels/kda_chunk.py",
+      "scope": "compiled_kernels",
+      "lines": [
+        386,
+        398
+      ],
+      "source": "def compiled_kernels() -> dict:\n    \"\"\"``{\"<kernel>_<strict|inclusive>\": identity}`` for every kernel compiled so far.\n\n    ``code_sha256`` is the cubin without its debug sections (``_code_sha256``);\n    ``triton_hash`` is Triton's key for the compile inputs, which covers the\n    source, the specialization, the options and the ptxas version.\n    \"\"\"\n    result = {}\n    for (name, inclusive), compiled in sorted(_COMPILED.items()):\n        result[f\"{name}_{'inclusive' if inclusive else 'strict'}\"] = {\n            \"code_sha256\": _code_sha256(compiled.kernel),\n            \"triton_hash\": compiled.hash}\n    return result"
+    }
+  ],
+  "qualification_bindings": {
+    "joint": {
+      "qualification": "prismaquant/kernels/joint_projection_reduce_qualification.json",
+      "schema": "prismaquant.joint_projection_qualification.v1",
+      "status": "qualified",
+      "qualified_build": {
+        "source_sha256": "17d100e93d552b8566e58c3764f2aa8d9d5d93746ccd6802db26b6e124344a80",
+        "binary_sha256": "9305c183c5214dc5ff1f73382963f8275eb1b6197cb8d173c6a93bffd700c115",
+        "cpp_flags": [
+          "-O3"
+        ],
+        "cuda_flags": [
+          "-O3",
+          "--fmad=false",
+          "--ftz=false",
+          "--prec-div=true",
+          "--prec-sqrt=true",
+          "-lineinfo"
+        ],
+        "arch_list": "12.1",
+        "module_name": "pq_joint_projection_reduce_17d100e93d552b85"
+      },
+      "recipe": "SHA256 of .cpp then .cu exact bytes then UTF-8 str((torch.__version__, torch.version.cuda, CUDA_FLAGS, CPP_FLAGS)), no framing; full lowercase hex returned by build_identity, first 16 chars form extension name in load_backend.",
+      "binding": "prewarm_projection_backend compares _source_digest and flags directly to build, checks runtime via seal_check, hashes and loads selected binary. projection_qualification hashes raw qualification bytes; validate_projection_backend_identity binds digest/build/runtime/shapes. build_identity also separately hashes wrapper bytes, binary bytes and each header via bytes_sha256hex. Packaged build has no python_source_sha256 field: do not claim direct Python self-source binding here.",
+      "witnesses": [
+        {
+          "file": "prismaquant/joint_projection_contract.py",
+          "scope": "projection_qualification",
+          "lines": [
+            23,
+            30
+          ],
+          "source": "def projection_qualification():\n    # Immutable package metadata, like the loaded code; row admission must not\n    # reopen the qualification file for every format/probe result.\n    data = QUALIFICATION_PATH.read_bytes()\n    value = json.loads(data)\n    if value.get('schema') != 'prismaquant.joint_projection_qualification.v1' or value.get('status') != 'qualified':\n        raise RuntimeError('joint projection backend has no qualified packaged runtime')\n    return value, bytes_sha256hex(data)"
+        },
+        {
+          "file": "prismaquant/joint_projection_contract.py",
+          "scope": "validate_projection_backend_identity",
+          "lines": [
+            33,
+            43
+          ],
+          "source": "def validate_projection_backend_identity(identity):\n    \"\"\"Validate the serialized arithmetic contract without loading GPU code.\"\"\"\n    if identity == REFERENCE_IDENTITY:\n        return\n    qualification, digest = projection_qualification()\n    expected = {'schema': SCHEMA, 'name': FUSED_NAME, 'qualification_sha256': digest,\n                'build': qualification['build'], 'runtime': qualification['runtime'],\n                'qualified_shapes': qualification['qualified_shapes'],\n                'ineligible_layout': 'torch_reference'}\n    if identity != expected:\n        raise ValueError('joint projection arithmetic has an unqualified backend identity')"
+        },
+        {
+          "file": "prismaquant/joint_projection_backend.py",
+          "scope": "prewarm_projection_backend",
+          "lines": [
+            292,
+            343
+          ],
+          "source": "def prewarm_projection_backend(config=None, *, device):\n    \"\"\"Verify/load a qualified binary before source/cotangent hot execution.\"\"\"\n    if type(config) in (_TorchProjection, _FusedProjection):\n        return require_prewarmed_projection(config, device=device)\n    config = normalize_projection_backend(config)\n    if config['name'] == 'torch':\n        return _TorchProjection()\n    device = torch.device(device)\n    if device.type != 'cuda' or not torch.cuda.is_available():\n        raise RuntimeError('qualified joint projection requires a CUDA device')\n    if device.index is None:\n        device = torch.device('cuda', torch.cuda.current_device())\n    qualification, digest = joint_projection_contract.projection_qualification()\n    runtime = _runtime_identity(device)\n    _require_runtime(runtime, qualification['runtime'])\n    build = qualification['build']\n    if (kernel._source_digest() != build['source_sha256'] or kernel.CPP_FLAGS != build['cpp_flags']\n            or kernel.CUDA_FLAGS != build['cuda_flags']):\n        raise RuntimeError('joint projection kernel source/compiler flags differ from qualification')\n    path = Path(config['binary']['path']).resolve(strict=True)\n    if _sha(path) != build['binary_sha256']:\n        raise RuntimeError('joint projection binary bytes differ from qualification')\n    # The qualified extension name is part of its Python initialization ABI.\n    name = build['module_name']\n    key = (str(path), build['binary_sha256'])\n    module = _LOADED_MODULES.get(key)\n    if module is None:\n        loader = importlib.machinery.ExtensionFileLoader(name, str(path))\n        spec = importlib.util.spec_from_file_location(name, path, loader=loader)\n        module = importlib.util.module_from_spec(spec)\n        loader.exec_module(module)\n        if Path(module.__file__).resolve() != path or _sha(module.__file__) != build['binary_sha256']:\n            raise RuntimeError('joint projection actually loaded a different binary')\n        _LOADED_MODULES[key] = module\n    warm_key = (key, device.index)\n    if warm_key not in _WARMED_DEVICES:\n        # Temporary zero operands load the qualified kernel on the current\n        # stream before a lease; only the code/device marker survives.\n        with torch.no_grad():\n            zeros = torch.zeros(qualification['qualified_shapes'][0], device=device, dtype=torch.float32)\n            actual = module.mul_sum(zeros, zeros)\n            expected = (zeros * zeros).sum()\n            if actual.view(torch.int32).item() != expected.view(torch.int32).item():\n                raise RuntimeError('joint projection prewarm changed reference reduction bits')\n        del zeros, actual, expected\n        _WARMED_DEVICES.add(warm_key)\n    identity = {'schema': joint_projection_contract.SCHEMA, 'name': joint_projection_contract.FUSED_NAME, 'qualification_sha256': digest,\n                'build': deepcopy(build), 'runtime': runtime,\n                'qualified_shapes': deepcopy(qualification['qualified_shapes']),\n                'ineligible_layout': 'torch_reference'}\n    joint_projection_contract.validate_projection_backend_identity(identity)\n    return _FusedProjection(module, device, identity, seal=_PREWARM_SEAL)"
+        }
+      ],
+      "runtime_check": "Not executed: current toolchain stream digest not asserted equal to packaged source digest."
+    },
+    "kda": {
+      "qualification": "prismaquant/kernels/kda_chunk_qualification.json",
+      "schema": "prismaquant.kda_capture_kernel_qualification.v1",
+      "status": "qualified",
+      "qualified_identity": {
+        "compiled": {
+          "gram_bwd_cols_inclusive": {
+            "code_sha256": "c622b621b6c0d10ebe21282b7709eda6c4849c80666d75e8f43cb656487e26ad",
+            "triton_hash": "3af52cd0a3d065d52ed9925cc0b7c13c05a9453665e3e0ad390f13bd95340693"
+          },
+          "gram_bwd_cols_strict": {
+            "code_sha256": "d6ef68d12f25f83b0bc1c2b799c840130c93efea510f339b596d5a4e51a841da",
+            "triton_hash": "630e83c68cb5a10f4a43fa0473f90bf8bf1142e338d5802bd90b2c53560df2f1"
+          },
+          "gram_bwd_rows_inclusive": {
+            "code_sha256": "03cb2893bcdef9ffbeb7a5b4b24dc489ba386f9831cb09489cf273cc6d75899d",
+            "triton_hash": "a3c241fa4b61dd1a30a63740584b33c70f7f3bd80217c2a329813ddc716ec952"
+          },
+          "gram_bwd_rows_strict": {
+            "code_sha256": "9bc87f2b8cc8a0ea6884d4804f39948c3647f461c825ca123923da284db7f500",
+            "triton_hash": "b98d81b0b687d7b44a2e68af1aa16cfb5ab33cdcfd136df1d41a3c2bb96e84be"
+          },
+          "gram_fwd_inclusive": {
+            "code_sha256": "2b3f3460071f5478292322a21f857442b4a7a4f71612d1f9600c83f1826158f2",
+            "triton_hash": "c39b023c7d052d24bba50800fb7c3698c334a24f68251923784a39c5350a939b"
+          },
+          "gram_fwd_strict": {
+            "code_sha256": "584818faabffabddded811cd6a9b376aed168d507c2504f52cade085558b6322",
+            "triton_hash": "a6dec308ce8fbbe2cb3b15b7769dba4281b7d552dbe9602f5a03f85d829a557a"
+          }
+        },
+        "name": "kda_gram_v1",
+        "probe": {
+          "sha256": "844e6ad2f98c481dcb6de63099428b7d49fa6b464da2f89dc4edf2afd6235f45",
+          "shape": [
+            1,
+            128,
+            2,
+            128
+          ]
+        },
+        "runtime": {
+          "cuda": "13.0",
+          "device": {
+            "major": 12,
+            "minor": 1,
+            "multi_processor_count": 48,
+            "name": "NVIDIA GB10"
+          },
+          "image": "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026",
+          "machine": "aarch64",
+          "torch": "2.13.0+cu130",
+          "torch_git": "cf30153c4c131c8164ee7798e5022d810682e2cb",
+          "triton": "3.7.1"
+        },
+        "source_sha256": "ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f"
+      },
+      "current_source_sha256_matches": true,
+      "recipe": "source_sha256: exact Python file bytes to lowercase SHA256 hex. _code_sha256: ELF64 little-endian guard; constructor header bytes [16:24]+[0x30:0x34], then sections in index order except names containing debug; feed name+NUL+struct.pack(<IQQ,kind,flags,size), then contents unless SHT_NOBITS (kind 8). Offsets/debug bytes omitted. probe_digest: seeded CPU generator 1199, shape (1,2*CHUNK,2,HEAD_DIM); hash output then five input gradients in input order using detach/contiguous/view(uint8)/cpu/numpy/tobytes, no separators.",
+      "binding": "compiled_kernels exports each cubin code_sha256 and Triton hash. Admission constructs source_sha256/compiled/probe/runtime identity. _require_qualified compares name, source_sha256, compiled, probe, runtime via seal_check; dev mode can continue with qualification_matched false. Packaged qualified status does not prove current runtime equality.",
+      "witnesses": [
+        {
+          "file": "prismaquant/glm_kda_capture_kernel.py",
+          "scope": "_qualification",
+          "lines": [
+            171,
+            179
+          ],
+          "source": "def _qualification():\n    try:\n        raw = QUALIFICATION_PATH.read_bytes()\n    except FileNotFoundError:\n        return None, None\n    value = json.loads(raw)\n    if value.get(\"schema\") != QUALIFICATION_SCHEMA or value.get(\"status\") != \"qualified\":\n        raise KdaCaptureKernelRefused(\"the packaged KDA kernel qualification is not qualified\")\n    return value, bytes_sha256hex(raw)"
+        },
+        {
+          "file": "prismaquant/glm_kda_capture_kernel.py",
+          "scope": "_require_qualified",
+          "lines": [
+            186,
+            205
+          ],
+          "source": "def _require_qualified(identity) -> tuple[str | None, bool]:\n    \"\"\"The packaged qualification's digest, and whether this runtime matches it.\n\n    Certified mode refuses a mismatch. Dev mode prints it and returns\n    ``False``, so the kernel record says the run is not the qualified one.\n    \"\"\"\n    from .dev_mode import seal_check\n    qualification, digest = _qualification()\n    expected = None if qualification is None else {\n        key: qualification[\"identity\"].get(key) for key in QUALIFIED_FIELDS}\n    actual = {key: identity.get(key) for key in QUALIFIED_FIELDS}\n    changed = ([\"qualification file\"] if expected is None else\n               sorted(key for key in QUALIFIED_FIELDS if actual[key] != expected[key]))\n    matched = seal_check(\n        \"KDA capture kernel qualification\", expected, actual,\n        where=\"packaged kernels/kda_chunk_qualification.json versus this runtime\",\n        refusal=lambda: KdaCaptureKernelRefused(\n            \"KDA capture kernel runs outside its packaged qualification: \"\n            + \", \".join(changed)))\n    return digest, matched"
+        },
+        {
+          "file": "prismaquant/glm_kda_capture_kernel.py",
+          "scope": "qualification_candidate",
+          "lines": [
+            344,
+            354
+          ],
+          "source": "def qualification_candidate(device) -> dict:\n    \"\"\"The identity fields a qualification binds, read from this runtime.\n\n    For the numerics harness, which records them next to the numbers that\n    qualify them. Compiles the kernel and runs its probe.\n    \"\"\"\n    from .kernels import kda_chunk\n    probe = kda_chunk.probe_digest(device)\n    return {\"name\": kda_chunk.NAME, \"source_sha256\": kda_chunk.source_sha256(),\n            \"compiled\": kda_chunk.compiled_kernels(), \"probe\": probe,\n            \"runtime\": _runtime_identity(device)}"
+        }
+      ],
+      "admission_witness": {
+        "file": "prismaquant/glm_kda_capture_kernel.py",
+        "lines": [
+          330,
+          341
+        ],
+        "source": "    try:\n        probe = kda_chunk.probe_digest(device)\n    except Exception as exc:  # noqa: BLE001 - any probe failure refuses the kernel\n        raise KdaCaptureKernelRefused(f\"the KDA kernel probe failed: {exc!r}\") from exc\n    compiled = kda_chunk.compiled_kernels()\n    if len(compiled) != len(kda_chunk.KERNEL_KEYS):\n        raise KdaCaptureKernelRefused(f\"the KDA kernel probe compiled {sorted(compiled)}\")\n    identity = {\"schema\": IDENTITY_SCHEMA, \"name\": name, \"declaration\": declaration,\n                \"source_sha256\": kda_chunk.source_sha256(), \"compiled\": compiled,\n                \"probe\": probe, \"runtime\": _runtime_identity(device)}\n    digest, matched = _require_qualified(identity)\n    return AdmittedKdaKernel(dispatch, identity, digest, qualification_matched=matched)"
+      }
+    }
+  },
+  "observed_checks": {
+    "inventory_expressions_verified": true,
+    "kda_source_matches": true,
+    "tests": "Not run; inspection only, no application code changes."
+  },
+  "limitations": [
+    "No native binary, cubins, numerical results or probe execution independently verified.",
+    "Existing unrelated worktree modifications were present and left untouched.",
+    "Only ledger_protected.json written; no protected source, pins, qualifications, application code or test code edited."
+  ]
+}

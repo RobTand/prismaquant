@@ -1,0 +1,12 @@
+{
+  "original_id": "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@918:23",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+  "file": "prismaquant/shipcard_slots.py",
+  "scope": "make_uniform_control_record",
+  "callee": "json.dumps",
+  "syntax_sha256": "4c4d38186329ad34459a0ae6ba536434ccff6d7ff8a96074d8a327bcc1c330e4",
+  "function_source": "def make_uniform_control_record(\n    *,\n    tool: str,\n    model_sha: str | None,\n    control_block: Mapping[str, Any],\n    control_arm: Mapping[str, Any],\n    gold_metric_key: str,\n    git_commit: str | None = None,\n    detail: str | None = None,\n) -> dict[str, Any]:\n    \"\"\"One byte-matched-uniform-control verdict block.\n\n    ``control_block`` is stored verbatim -- it is Tessera's accountant's\n    output and this module does not import Tessera -- and every number in it\n    is replayed by :func:`verify`.  ``control_arm`` is the gold-shaped record\n    of the CONTROL checkpoint's own served KL, produced by the same tool that\n    filled ``gold.kl`` on this artifact.\n    \"\"\"\n    if gold_metric_key not in UNIFORM_CONTROL_METRIC_KEYS:\n        raise ValueError(\n            f\"gold_metric_key must be one of {list(UNIFORM_CONTROL_METRIC_KEYS)}\"\n        )\n    block = json.loads(json.dumps(dict(control_block)))\n    schemas = uniform_control_schemas()\n    if block.get(\"schema\") not in schemas:\n        raise ValueError(\n            f\"control block schema {block.get('schema')!r} != \"\n            f\"{_schema_names(schemas)}\"\n        )\n    verdict = block.get(\"verdict\") or {}\n    beat = bool(verdict.get(\"measured\")) and bool(verdict.get(\"beat_control\"))\n    if detail is None:\n        detail = str(\n            verdict.get(\"detail\")\n            or \"the control was built and priced; neither arm was served\"\n        )\n    return make_record(\n        slot=UNIFORM_CONTROL_SLOT,\n        tool=tool,\n        passed=beat,\n        model_sha=model_sha,\n        metrics={\"gold_metric_key\": gold_metric_key},\n        detail=detail,\n        git_commit=git_commit,\n        extra={\n            \"uniform_control\": block,\n            \"control_arm\": json.loads(json.dumps(dict(control_arm))),\n        },\n    )",
+  "expression": "json.loads(json.dumps(dict(control_block)))",
+  "roundtrip": true
+}

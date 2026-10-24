@@ -1,0 +1,12 @@
+{
+  "original_id": "supplemental-json:prismaquant/tessera_tp_audit.py::_write@250:11",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "6cd2c62f4c91f7f86247592bbe73af721ea7917a",
+  "file": "prismaquant/tessera_tp_audit.py",
+  "scope": "_write",
+  "callee": "json.dumps",
+  "syntax_sha256": "c9532bb6d1985881d1211d8ca04a01512beab8ad93d17889d15012729f8cc4b1",
+  "function_source": "def _write(receipt: dict[str, Any], out: str) -> None:\n    text = json.dumps(receipt, indent=2, sort_keys=False)\n    if out == \"-\":\n        sys.stdout.write(text + \"\\n\")\n        return\n    path = Path(out)\n    if path.parent and not path.parent.exists():\n        path.parent.mkdir(parents=True, exist_ok=True)\n    path.write_text(text + \"\\n\", encoding=\"utf-8\")",
+  "expression": "json.dumps(receipt, indent=2, sort_keys=False)",
+  "roundtrip": false
+}

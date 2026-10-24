@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
-from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex, indent2_json_file_bytes
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
@@ -34,8 +34,7 @@ _sha = file_sha256hex
 
 
 def _json(path, value):
-    atomic_write_bytes(Path(path), (json.dumps(value, indent=2, sort_keys=True,
-                                             allow_nan=False) + '\n').encode())
+    atomic_write_bytes(Path(path), indent2_json_file_bytes(value))
 
 
 def write_selection_request(path, *, layer_config, assignment, cost_path,

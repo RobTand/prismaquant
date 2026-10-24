@@ -1,0 +1,396 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "scope": "serving-evidence",
+  "owner": "prismaquant/digests.py",
+  "owner_modified": false,
+  "accounting_kind": "whole-file json.dump/json.dumps/JSONEncoder calls; decoders excluded",
+  "calls": [
+    {
+      "original_id": "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "976f489cccdc658d9e997f2aca8b0fe0b1235e20",
+      "file": "prismaquant/compressed_route_sweep.py",
+      "scope": "write_sweep",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": false,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/compressed_route_sweep-write_sweep-297.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[compressed_route_sweep-write_sweep-297]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[compressed_route_sweep-write_sweep-297]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dump",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": 1,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "direct_text",
+        "consumer_expression": "json.dump(record, handle, indent=1, sort_keys=False)",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "Caller retains UTF-8 file output and final LF."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/glm_source_derivative.py::bind_source_derivative@210:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+      "file": "prismaquant/glm_source_derivative.py",
+      "scope": "bind_source_derivative",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": true,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/glm_source_derivative-bind_source_derivative-210.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[glm_source_derivative-bind_source_derivative-210]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[glm_source_derivative-bind_source_derivative-210]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "loads_roundtrip",
+        "consumer_expression": "json.loads(json.dumps(identity))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "013fb3311b014cef293c1f7872fed290f496d1c0",
+      "file": "prismaquant/glm_source_derivative.py",
+      "scope": "normalize_source_derivative",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": true,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/glm_source_derivative-normalize_source_derivative-72.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[glm_source_derivative-normalize_source_derivative-72]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[glm_source_derivative-normalize_source_derivative-72]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": false,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "loads_roundtrip",
+        "consumer_expression": "json.loads(json.dumps(value, allow_nan=False))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/shipcard_slots.py::_verify_route_sweep_record@1044:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "_verify_route_sweep_record",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": false,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/shipcard_slots-_verify_route_sweep_record-1044.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[shipcard_slots-_verify_route_sweep_record-1044]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[shipcard_slots-_verify_route_sweep_record-1044]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "direct_text",
+        "consumer_expression": "json.dumps(row.get(\"sweep\"))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@918:23",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "make_uniform_control_record",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": true,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/shipcard_slots-make_uniform_control_record-918.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[shipcard_slots-make_uniform_control_record-918]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[shipcard_slots-make_uniform_control_record-918]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "loads_roundtrip",
+        "consumer_expression": "json.loads(json.dumps(dict(control_block)))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@942:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "df7d8dd675d21fd0df1577e672de363ba39e08e7",
+      "file": "prismaquant/shipcard_slots.py",
+      "scope": "make_uniform_control_record",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": true,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/shipcard_slots-make_uniform_control_record-942.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[shipcard_slots-make_uniform_control_record-942]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[shipcard_slots-make_uniform_control_record-942]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "loads_roundtrip",
+        "consumer_expression": "json.loads(json.dumps(dict(control_arm)))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/tessera_route_receipt.py::_check_runtime_image_declaration@415:51",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c213081ca83e743eead89a9fd9d34d62164f4c8",
+      "file": "prismaquant/tessera_route_receipt.py",
+      "scope": "_check_runtime_image_declaration",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": false,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/tessera_route_receipt-_check_runtime_image_declaration-415.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[tessera_route_receipt-_check_runtime_image_declaration-415]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[tessera_route_receipt-_check_runtime_image_declaration-415]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": null,
+          "separators": [
+            ", ",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "direct_text",
+        "consumer_expression": "json.dumps(dict(record))",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "No added final LF or encoding step."
+      }
+    },
+    {
+      "original_id": "supplemental-json:prismaquant/tessera_tp_audit.py::_write@250:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6cd2c62f4c91f7f86247592bbe73af721ea7917a",
+      "file": "prismaquant/tessera_tp_audit.py",
+      "scope": "_write",
+      "owner_route": null,
+      "disposition": "blocked_eligible",
+      "reason": "Eligible insertion-order recipe gap; blocked awaiting shared owner integration. Missing owner recipes do not justify retention.",
+      "roundtrip": false,
+      "fixtures": [
+        "tests/fixtures/digest_1301/serving-evidence/tessera_tp_audit-_write-250.json"
+      ],
+      "executable_test_nodes": [
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_original_consumer_behavior[tessera_tp_audit-_write-250]",
+        "tests/test_digest_1301/serving-evidence/test_serving_1301_serving_evidence.py::test_frozen_provenance_and_recipe_gap[tessera_tp_audit-_write-250]"
+      ],
+      "integration_status": "awaiting_shared_owner_integration",
+      "requested_recipe": {
+        "owner": "prismaquant/digests.py",
+        "encoder": "dumps",
+        "options": {
+          "skipkeys": false,
+          "ensure_ascii": true,
+          "check_circular": true,
+          "allow_nan": true,
+          "cls": null,
+          "indent": 2,
+          "separators": [
+            ",",
+            ": "
+          ],
+          "default": null,
+          "sort_keys": false
+        },
+        "result": "direct_text",
+        "consumer_expression": "json.dumps(receipt, indent=2, sort_keys=False)",
+        "caller_policy": "Preserve dict conversion and json.loads roundtrip exactly as in consumer_expression; preserve stdlib errors and stream partial writes; no fallback serializer or sorting.",
+        "publication": "Caller retains UTF-8 file output and final LF."
+      }
+    }
+  ],
+  "whole_file_raw_call_accounting": [
+    {
+      "file": "prismaquant/compressed_route_sweep.py",
+      "original_raw_json_encoder_calls": 1,
+      "current_raw_json_encoder_calls": 1,
+      "replaced": 0,
+      "original_ids": [
+        "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8"
+      ],
+      "blocked_eligible": 1
+    },
+    {
+      "file": "prismaquant/glm_source_derivative.py",
+      "original_raw_json_encoder_calls": 2,
+      "current_raw_json_encoder_calls": 2,
+      "replaced": 0,
+      "original_ids": [
+        "supplemental-json:prismaquant/glm_source_derivative.py::bind_source_derivative@210:22",
+        "supplemental-json:prismaquant/glm_source_derivative.py::normalize_source_derivative@72:22"
+      ],
+      "blocked_eligible": 2
+    },
+    {
+      "file": "prismaquant/shipcard_slots.py",
+      "original_raw_json_encoder_calls": 3,
+      "current_raw_json_encoder_calls": 3,
+      "replaced": 0,
+      "original_ids": [
+        "supplemental-json:prismaquant/shipcard_slots.py::_verify_route_sweep_record@1044:27",
+        "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@918:23",
+        "supplemental-json:prismaquant/shipcard_slots.py::make_uniform_control_record@942:38"
+      ],
+      "blocked_eligible": 3
+    },
+    {
+      "file": "prismaquant/tessera_route_receipt.py",
+      "original_raw_json_encoder_calls": 1,
+      "current_raw_json_encoder_calls": 1,
+      "replaced": 0,
+      "original_ids": [
+        "supplemental-json:prismaquant/tessera_route_receipt.py::_check_runtime_image_declaration@415:51"
+      ],
+      "blocked_eligible": 1
+    },
+    {
+      "file": "prismaquant/tessera_tp_audit.py",
+      "original_raw_json_encoder_calls": 1,
+      "current_raw_json_encoder_calls": 1,
+      "replaced": 0,
+      "original_ids": [
+        "supplemental-json:prismaquant/tessera_tp_audit.py::_write@250:11"
+      ],
+      "blocked_eligible": 1
+    }
+  ],
+  "disposition": "blocked_eligible",
+  "integration_status": "awaiting_shared_owner_integration",
+  "retained_calls": [],
+  "production_replacements": 0
+}

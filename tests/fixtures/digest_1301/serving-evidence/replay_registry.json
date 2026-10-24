@@ -1,0 +1,18 @@
+[
+  {
+    "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@179:33",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+    "expression": "hashlib.sha256(Path(__file__).read_bytes()).hexdigest()",
+    "snippet": "replay_original_179.py",
+    "owner_route": "prismaquant.digests.bytes_sha256hex"
+  },
+  {
+    "original_id": "hashlib:prismaquant/glm_routing_replay.py::glm_route_record@159:33",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "91e76ed34850f4ef5090b35870b76d8501856654",
+    "expression": "hashlib.sha256(inspect.getsource(type(router)).encode()).hexdigest()",
+    "snippet": "replay_original_159.py",
+    "owner_route": "prismaquant.digests.text_sha256hex"
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "original_id": "supplemental-json:prismaquant/compressed_route_sweep.py::write_sweep@297:8",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "source_blob": "976f489cccdc658d9e997f2aca8b0fe0b1235e20",
+  "file": "prismaquant/compressed_route_sweep.py",
+  "scope": "write_sweep",
+  "callee": "json.dump",
+  "syntax_sha256": "235a66babc4c190648502f290dd9a6c9bf2a91a141fc9eb520a058402de345b0",
+  "function_source": "def write_sweep(path: str, record: dict) -> str:\n    with open(path, \"w\", encoding=\"utf-8\") as handle:\n        json.dump(record, handle, indent=1, sort_keys=False)\n        handle.write(\"\\n\")\n    return path",
+  "expression": "json.dump(record, handle, indent=1, sort_keys=False)",
+  "roundtrip": false
+}
