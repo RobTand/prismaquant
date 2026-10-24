@@ -7,7 +7,6 @@ handoff or selected allocation exists, and does not write campaign files.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import pickle
@@ -15,6 +14,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
 from prismaquant.tessera_campaign_table import STAGE
 from tessera.cached_unit import verify_cached_unit
@@ -46,7 +46,7 @@ def main(argv=None):
             raise ValueError(f"{name}@{fmt}: wire escaped campaign directory")
         blob = wire.read_bytes()
         accepted = verify_cached_unit(blob, record, observed)
-        results.append({"unit": name, "format": fmt, "blob_sha256": hashlib.sha256(blob).hexdigest(),
+        results.append({"unit": name, "format": fmt, "blob_sha256": bytes_sha256hex(blob),
                         "bytes": len(blob), "wire_bytes": accepted.wire_bytes,
                         "source_hessian_encoder_claimed": True,
                         "current_source_hessian_encoder_rederived": False})

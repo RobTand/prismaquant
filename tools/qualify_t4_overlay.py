@@ -1,5 +1,5 @@
 """PB task-batch adapter: qualify retained renders, without encoding or rewriting them."""
-import argparse,functools,hashlib,io,json,os,time
+import argparse,functools,io,json,os,time
 from contextlib import closing
 from pathlib import Path
 import torch
@@ -7,7 +7,7 @@ from tessera.cached_unit import verify_cached_unit
 from prismaquant.tessera_joint_aura import _decode_wire, _resolve_render_origin, RENDER_COMPARISON_BY_ORIGIN, _read_verified_wire_blob, _drive_ordered_walk, _decoder_identity
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity, ProductionWeightCache
 from prismaquant.io_engine import SealedBuffer, read_file
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import DIRECT_ASCII_LAX, DIRECT_ASCII_SPACED_LAX, text_sha256hex
 from prismaquant.residency_map import residency_resolver
 from prismaquant.staged_tier_policy import policy_is_active, refuse_pool_bulk_read
 
@@ -16,7 +16,7 @@ def decoder_provenance():
  from prismaquant.tessera_campaign_wire import require_checkpoint_identity_api
  import importlib.metadata
  distribution=importlib.metadata.distribution('tessera-quant');direct_url=distribution.read_text('direct_url.json')
- return {'schema':'prismaquant.catalog_qualification_decoder.v1','decoder':_decoder_identity(None),'distribution':{'name':distribution.metadata['Name'],'version':distribution.version,'direct_url':None if direct_url is None else json.loads(direct_url),'direct_url_sha256':None if direct_url is None else hashlib.sha256(direct_url.encode()).hexdigest()},'installed_encoder_source_sha256':require_checkpoint_identity_api().encoder_source_sha256(),'torch':torch.__version__,'cuda':torch.version.cuda,'scope':'actual installed decoder used for this cell; no encoding performed'}
+ return {'schema':'prismaquant.catalog_qualification_decoder.v1','decoder':_decoder_identity(None),'distribution':{'name':distribution.metadata['Name'],'version':distribution.version,'direct_url':None if direct_url is None else json.loads(direct_url),'direct_url_sha256':None if direct_url is None else text_sha256hex(direct_url)},'installed_encoder_source_sha256':require_checkpoint_identity_api().encoder_source_sha256(),'torch':torch.__version__,'cuda':torch.version.cuda,'scope':'actual installed decoder used for this cell; no encoding performed'}
 from prismaquant.digests import bytes_sha256hex as digest
 from prismaquant.joint_catalog_extension import catalog_stat_fence
 def read_cell(cell):
@@ -68,8 +68,8 @@ def main():
  def read_task(task):
   cell=task['payload']['cell'];out=Path(task['payload']['output'])
   if out.exists():
-   raw=out.read_bytes();expected=task['payload'].get('existing_result_sha256');assert expected is None or digest(raw)==expected;value=json.loads(raw);assert value['cell_sha256']==digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());assert catalog_stat_fence(Path(cell['render']).stat())==cell['render_stat'];assert catalog_stat_fence(Path(cell['wire']).stat())==cell['wire_stat']
-   if expected is None:assert value.get('verified_cell_sha256')==digest(json.dumps(value['verified_cell'],sort_keys=True,separators=(',',':')).encode())
+   raw=out.read_bytes();expected=task['payload'].get('existing_result_sha256');assert expected is None or digest(raw)==expected;value=json.loads(raw);assert value['cell_sha256']==DIRECT_ASCII_LAX.sha256(cell);assert catalog_stat_fence(Path(cell['render']).stat())==cell['render_stat'];assert catalog_stat_fence(Path(cell['wire']).stat())==cell['wire_stat']
+   if expected is None:assert value.get('verified_cell_sha256')==DIRECT_ASCII_LAX.sha256(value['verified_cell'])
    return ('existing',raw,value)
   if task['payload'].get('existing_result_sha256'):raise RuntimeError('previously qualified result is missing; sealed task declares no payload reads')
   return ('new',read_cell(cell))
@@ -77,7 +77,7 @@ def main():
   cell=task['payload']['cell'];out=Path(task['payload']['output']);out.parent.mkdir(parents=True,exist_ok=True)
   if loaded[0]=='existing':raw,value=loaded[1:]
   else:
-   value={'qname':cell['qname'],'format':cell['format'],'cell_sha256':digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode()),'verified_cell':finish_cell(loaded[1])};value['verified_cell_sha256']=digest(json.dumps(value['verified_cell'],sort_keys=True,separators=(',',':')).encode());raw=(json.dumps(value,sort_keys=True,separators=(',',':'))+'\n').encode();tmp=out.with_suffix('.tmp')
+   value={'qname':cell['qname'],'format':cell['format'],'cell_sha256':DIRECT_ASCII_LAX.sha256(cell),'verified_cell':finish_cell(loaded[1])};value['verified_cell_sha256']=DIRECT_ASCII_LAX.sha256(value['verified_cell']);raw=DIRECT_ASCII_LAX.encoded(value)+b'\n';tmp=out.with_suffix('.tmp')
    with tmp.open('wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
    os.replace(tmp,out)
   results.append({'task_id':task['id'],'output_id':task['output_id'],'value_sha256':digest(raw)})
@@ -86,5 +86,5 @@ def main():
  _drive_ordered_walk(batch['tasks'],read_task,commit_task,workers=workers)
  manifest=({k:batch[k] for k in ('parent_key','plan_key','child_ordinal')} if args.pb_task_batch else {});manifest.update(schema=('prismabuild.child_result_manifest.v1' if args.pb_task_batch else 'prismaquant.t4_qualification_pilot_result.v1'),results=results);Path(batch['result_manifest_path']).write_text(DIRECT_ASCII_SPACED_LAX.text(manifest)+'\n')
  from prismaquant.residency_map import residency_report
- print(json.dumps({'residency_report':residency_report()},sort_keys=True),flush=True)
+ print(DIRECT_ASCII_SPACED_LAX.text({'residency_report':residency_report()}),flush=True)
 if __name__=='__main__':main()

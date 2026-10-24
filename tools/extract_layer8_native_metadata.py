@@ -4,7 +4,7 @@ from pathlib import Path
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex
 ROOT=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922')
 BASE=Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911')
 PREP=ROOT.parent/'allocation/joint-panel/complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json'
@@ -36,5 +36,5 @@ def main():
   for key,value in list(group.items()):group[key]=sorted(value)
   group['uniform_group_maximum']=len(group['activation_max_abs'])==1;group['uniform_a4_input_scale']=len(group['a4_input_global_scale'])==1
  result={'schema':'prismaquant.glm_native_operator_inputs.v1','layer':layer,'experts':288,'projections_per_expert':3,'qnames':864,'formats':list(FORMATS),'inputs':{'prepared':binding(PREP),'production_cache':pwc,'a4_plan':binding(planpath),'adopted_catalog':{'path':str(ROOT/'adopted-catalog.json'),'sha256':'71238bdab85bdccabed921ce94b03459d5aba3607021b85007bf41f3e376fbc8'}},'source_model_identity':prepared['source_model_identity'],'calibration_input':prepared['calibration_input'],'executed_group_static_scales':groups,'rows':rows,'scope':'metadata census only; no wire/render/H payload reads; pending A4 render hashes remain null'}
- out=ROOT/f'layer{layer}-native-metadata.json';assert not out.exists();raw=(json.dumps(result,sort_keys=True,separators=(',',':'))+'\n').encode();out.write_bytes(raw);print(json.dumps({'path':str(out),'sha256':sha(raw),'qnames':len(rows),'cells':len(rows)*len(FORMATS),'group_static_scales':groups}),flush=True)
+ out=ROOT/f'layer{layer}-native-metadata.json';assert not out.exists();raw=(DIRECT_ASCII_LAX.text(result)+'\n').encode();out.write_bytes(raw);print(json.dumps({'path':str(out),'sha256':sha(raw),'qnames':len(rows),'cells':len(rows)*len(FORMATS),'group_static_scales':groups}),flush=True)
 if __name__=='__main__':main()

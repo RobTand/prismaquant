@@ -27,21 +27,14 @@ accepts one existing pair-keyed or legacy qname-keyed input, but refuses when
 both exist; the explicit layouts never fall back. No input file is changed.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
-from prismaquant.digests import DIRECT_ASCII_LAX
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex as sha
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
-
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
-
-
-def cell_sha256(cell):
-    return sha(json.dumps(cell, sort_keys=True, separators=(',', ':')).encode())
+cell_sha256 = DIRECT_ASCII_LAX.sha256
 
 
 def cell_task_id(cell):
@@ -153,7 +146,7 @@ def main():
                 'rows': rows}
     if rebound is not None:
         document['old_prepared_rebound'] = rebound
-    raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    raw = DIRECT_ASCII_LAX.encoded(document) + b'\n'
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open('xb') as handle:
         handle.write(raw)

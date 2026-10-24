@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "calls": [
+    {
+      "original_id": "hashlib:tools/audit_existing_t4.py::main@22:136",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6b4270fdfae274723e29021c7618819b02b42855",
+      "expression": "hashlib.sha256(outer['payload']).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "c093f0ecf357dc34d3566da5346e6823804f87db7871939a2081394ad2ec3380",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/audit_existing_t4.py:22:136",
+      "fixture": "audits_original_audit_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    },
+    {
+      "original_id": "hashlib:tools/audit_t4_render_paths.py::main@26:187",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "558a60d9cab7ff14824faa9105819e3c9e065d65",
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "owner_route": "digests.bytes_sha256hex",
+      "import_mechanism": "existing temporary sys.path stdlib-owner import from prismaquant directory",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "149fe03908f11a44c5820143025e32685ffd6834a2a9966594d31981feaa7d8d",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_t4_render_paths.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/audit_t4_render_paths.py:26:187",
+      "fixture": "audits_original_audit_t4_render_paths.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    },
+    {
+      "original_id": "hashlib:tools/audit_tessera_selected_cache_slice.py::main@49:68",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3373b29c0f659b2ef1b1e9aec93c0fa2fe82d4eb",
+      "expression": "hashlib.sha256(blob).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 23,
+      "fixture_sha256": "ebd7a9ad7b2008f283ba3ca88be1d3e5b544302d0c8b7280b397be1edb62fe21",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_tessera_selected_cache_slice.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/audit_tessera_selected_cache_slice.py:49:68",
+      "fixture": "audits_original_audit_tessera_selected_cache_slice.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    },
+    {
+      "original_id": "hashlib:tools/inspect_t4_binding.py::main@12:211",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ac692cfa831c1df621cf5231939f4660712c0172",
+      "expression": "hashlib.sha256(q.encode()).hexdigest()",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixture_main_start_line": 9,
+      "fixture_sha256": "0df419ddf8941f30f8c02c8cea9836fab95ded668305dd35a6ea2db1b85c2631",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_inspect_t4_binding.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/inspect_t4_binding.py:12:211",
+      "fixture": "audits_original_inspect_t4_binding.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    },
+    {
+      "original_id": "hashlib:tools/pilot_existing_t4.py::main@18:93",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "hashlib.sha256(q.encode()).hexdigest()",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_pilot_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/pilot_existing_t4.py:18:93",
+      "fixture": "audits_original_pilot_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    },
+    {
+      "original_id": "hashlib:tools/pilot_existing_t4.py::main.unit@20:89",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "hashlib.sha256(outer['payload']).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_pilot_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated",
+      "original_location": "tools/pilot_existing_t4.py:20:89",
+      "fixture": "audits_original_pilot_existing_t4.py",
+      "test_node": "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+    }
+  ],
+  "qualification": "CPU/path/decoder adapters exercise consumer mains; pilot is not GPU qualification; no protected current source pin found (historical measured qualifier is not current)."
+}

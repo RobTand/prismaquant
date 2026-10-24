@@ -1,0 +1,403 @@
+{
+  "schema": "prismaquant.digest_consumer_ledger.v1",
+  "piece": "t4-qualification",
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "completed_calls": [
+    {
+      "original_id": "hashlib:tools/build_t4_recovery_request.py::sha@5:20",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.bytes_sha256hex (import alias sha)",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_aliases_and_lax_recipes"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/rebind_t4_qualified_results.py::sha@40:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.bytes_sha256hex (import alias sha)",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_aliases_and_lax_recipes"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@18:103",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@20:50",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@28:51",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_recovery_request.py::main@31:46",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ecf126463d7ae404b20f6ade15619bd7ce50b262",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_publications",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_recovery_main_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/rebind_t4_qualified_results.py::cell_sha256@44:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/rebind_t4_qualified_results.py::main@156:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "7eaee8dd4c0034032faba4bfeb0e6d9ba45296e5",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/rebinding_recovery_original_rebind.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_row_and_refusals",
+        "tests/test_digest_1301/t4-qualification/test_rebinding_recovery.py::test_rebind_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/qualify_t4_overlay.py::decoder_provenance@19:303",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_decoder_provenance_text_hash"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:217",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:303",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded + external newline",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.commit_task@80:77",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.read_task@71:186",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main.read_task@72:72",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.sha256",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/qualify_t4_overlay.py::main@89:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "be4021289f08520449ba331aaf8dbd8eb5ca3c0a",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "status": "migrated",
+      "gap": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/qualifier_original.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_main_publication_and_adoption",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_checkpoint_refusal",
+        "tests/test_digest_1301/t4-qualification/test_qualifier.py::test_mixed_keys_refuse_before_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/audit_existing_t4.py::main@22:136",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6b4270fdfae274723e29021c7618819b02b42855",
+      "expression": "hashlib.sha256(outer['payload']).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "c093f0ecf357dc34d3566da5346e6823804f87db7871939a2081394ad2ec3380",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/audit_t4_render_paths.py::main@26:187",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "558a60d9cab7ff14824faa9105819e3c9e065d65",
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "owner_route": "digests.bytes_sha256hex",
+      "import_mechanism": "existing temporary sys.path stdlib-owner import from prismaquant directory",
+      "fixture_main_start_line": 11,
+      "fixture_sha256": "149fe03908f11a44c5820143025e32685ffd6834a2a9966594d31981feaa7d8d",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_t4_render_paths.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/audit_tessera_selected_cache_slice.py::main@49:68",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3373b29c0f659b2ef1b1e9aec93c0fa2fe82d4eb",
+      "expression": "hashlib.sha256(blob).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 23,
+      "fixture_sha256": "ebd7a9ad7b2008f283ba3ca88be1d3e5b544302d0c8b7280b397be1edb62fe21",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_audit_tessera_selected_cache_slice.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/inspect_t4_binding.py::main@12:211",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ac692cfa831c1df621cf5231939f4660712c0172",
+      "expression": "hashlib.sha256(q.encode()).hexdigest()",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixture_main_start_line": 9,
+      "fixture_sha256": "0df419ddf8941f30f8c02c8cea9836fab95ded668305dd35a6ea2db1b85c2631",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_inspect_t4_binding.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/pilot_existing_t4.py::main@18:93",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "hashlib.sha256(q.encode()).hexdigest()",
+      "owner_route": "prismaquant.digests.text_sha256hex",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_pilot_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/pilot_existing_t4.py::main.unit@20:89",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "acce3e188d903f32757fcfdbf381324b84219b74",
+      "expression": "hashlib.sha256(outer['payload']).hexdigest()",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixture_main_start_line": 15,
+      "fixture_sha256": "751f084260a22b00f2377e834f86eb6ecdd545fc5d10683ee155be1a652a4d77",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/audits_original_pilot_existing_t4.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_audits.py::test_consumer_main"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "sorted-json:tools/assemble_t4_overlay.py::doc@56:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "0de406a560b46dfc0deebdd3fa2e7dfc75566cad",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/publication_original.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_publication.py::test_assembler_pretty_document_and_publication"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "sorted-json:tools/build_t4_overlay_catalog.py::main@320:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b5be06210beb30099d88e48c1cf8d11ce14c7355",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.encoded",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/publication_original.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_publication.py::test_publication_bytes_hash_feeds_and_refusals"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "hashlib:tools/check_t4_overlay_prepare.py::sha@36:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f6ef38d381927c8b75b9973778e51825ceb348d",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/publication_original.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_publication.py::test_prepare_bound_json_authenticates_before_decode"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "sorted-json:tools/check_t4_overlay_prepare.py::main@131:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "4f6ef38d381927c8b75b9973778e51825ceb348d",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/publication_original.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_publication.py::test_publication_bytes_hash_feeds_and_refusals"
+      ],
+      "status": "migrated"
+    },
+    {
+      "original_id": "sorted-json:tools/extract_layer8_native_metadata.py::main@39:76",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "06d4bde199f2e2f03236961048637cb8bb02560f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/t4-qualification/publication_original.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/t4-qualification/test_publication.py::test_publication_bytes_hash_feeds_and_refusals"
+      ],
+      "status": "migrated"
+    }
+  ],
+  "audit_boundary": "This shard covers only assigned T4 tools and the independent malformed-checkpoint reference. It does not change the census, baseline, scanner or digest owners. Residual eligible unsorted JSON is blocked on the shared owner-recipes prerequisite, NOT retained. No GPU, numerical, source-pin repair, deployment or qualification expansion is claimed."
+}
