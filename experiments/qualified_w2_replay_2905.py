@@ -7,10 +7,12 @@ No artifact discovery, synthetic costs, research fallback, or serving launch.
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import importlib
 import json
 import math
 from pathlib import Path
+import sys
 
 from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex, is_sha256hex
 
@@ -111,6 +113,22 @@ def _require_scientific_rows(stats, costs, parsed, currency, identities):
         raise HandoffError("source_identity source_weights must cover the mutable scope")
     first = None
     for unit, rows in costs.items():
+        entry = stats[unit]
+        # Do not let the production shape helper's (n_params,) fallback or
+        # int() coercions turn an asserted denominator into its own proof.
+        for key in ("n_params", "out_features", "in_features"):
+            if type(entry.get(key)) is not int or entry[key] <= 0:
+                raise HandoffError(f"{unit}: positive integer {key} required")
+        experts = entry.get("num_experts", 0)
+        if type(experts) is not int or experts < 0:
+            raise HandoffError(f"{unit}: nonnegative integer num_experts required")
+        shape = tuple(_shape_from_stats(entry))
+        expected_params = math.prod(shape)
+        if entry["n_params"] != expected_params:
+            raise HandoffError(
+                f"{unit}: n_params {entry['n_params']} differs from production "
+                f"shape {shape} parameter count {expected_params}")
+        unit_first = None
         for name, row in rows.items():
             where = f"{unit}/{name}"
             if complete_scientific_price(row, format_name=name) is None:
@@ -119,16 +137,21 @@ def _require_scientific_rows(stats, costs, parsed, currency, identities):
                                          unit=unit, format_name=name)
             if scope is None or scope["currency"] != currency:
                 raise HandoffError(f"{where}: common-reference scope required")
-            if tuple(scope["shape"]) != tuple(_shape_from_stats(stats[unit])):
+            if tuple(scope["shape"]) != shape:
                 raise HandoffError(f"{where}: scientific source shape differs from stats")
             if not math.isfinite(float(row["predicted_dloss"])):
                 raise HandoffError(f"{where}: finite canonical quality required")
             # Production owns mathematical alignment and D32 provenance policy.
+            # Cross-unit alignment intentionally ignores activation contracts;
+            # also compare each unit's formats against that unit's own anchor.
             if first is None:
                 first = scope
             else:
-                require_quality_scope_alignment(
-                    first, scope, where=where, same_unit=first["unit"] == unit)
+                require_quality_scope_alignment(first, scope, where=where, same_unit=False)
+            if unit_first is None:
+                unit_first = scope
+            else:
+                require_quality_scope_alignment(unit_first, scope, where=where, same_unit=True)
             require_probe_alignment(probe_scope, scope, where=where,
                                     message="handoff probe coordinates differ")
             window = identities["calibration"]
@@ -376,7 +399,10 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, help="Write the complete report and assignment configs as JSON")
     args = parser.parse_args(argv)
     try:
-        result = run(args.inputs)
+        # The CLI's stdout is a single JSON document. Production builders and
+        # grouping/solver helpers may print diagnostics; keep them on stderr.
+        with redirect_stdout(sys.stderr):
+            result = run(args.inputs)
         encoded = json.dumps(result, sort_keys=True, indent=2, allow_nan=False)
         if args.output is not None:
             with args.output.open("x", encoding="utf-8") as stream:

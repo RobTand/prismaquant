@@ -19,7 +19,19 @@ This repair addresses the production defects found in review:
   anchors; a changed non-chord row refuses.
 * Identity documents are no longer merely hashed/discarded. Actual supplied and
   effective scientific coordinates must match their contents, and must align
-  across units under production scope/probe owners.
+  across units under production scope/probe owners. Each unit also has its own
+  reference scope: later units cannot mix activation contracts across formats
+  merely because cross-unit alignment intentionally ignores that coordinate.
+* The frozen denominator is bound to production-interpreted mutable geometry
+  before building candidates or calculating budgets. Explicit positive integer
+  dimensions/counts are required; `n_params` must equal the product of
+  `_shape_from_stats`, including a declared expert axis. Missing dimensions,
+  booleans and lossy numeric coercions cannot use the helper's count-only fallback
+  as a circular certificate. Qualified source geometry still has to match; this
+  count check grants no additional format or population qualification.
+* The CLI redirects internal builder/grouping/solver stdout to stderr while
+  replaying. Stdout contains only the final JSON report, including when the
+  optional exclusive-create `--output` file is also requested.
 * The local `_sha` recipe is removed. Core candidate/assignment identities and
   driver canonical digests use the existing `DIRECT_ASCII_STRICT` owner profile;
   raw artifact/code digests use `bytes_sha256hex`. This preserves the former
@@ -69,7 +81,9 @@ python -m experiments.qualified_w2_replay_2905 --inputs /operator/inputs.json \
 Paths are configuration, not deployment defaults. Relative artifact and
 allowability paths resolve against the input file. Optional `--output` is
 exclusive-create; an existing file refuses. A complete JSON report also goes to
-stdout. Validation/replay refusal produces no report.
+stdout; internal allocator diagnostics go to stderr, so default stdout may be
+redirected to a JSON file or piped to a JSON consumer. Validation/replay refusal
+produces no report.
 
 Input schema: `prismaquant.o5_explicit_w2_inputs.v2`. Artifact entries are
 `{ "path": "...", "sha256": "<raw-file-sha256>" }`. Required artifacts:
@@ -105,10 +119,15 @@ and span coverage must agree. Stats and cost units must match.
 Supplied **and effective** rows must match the documents' actual coordinates.
 Across units, `require_quality_scope_alignment(..., same_unit=False)` and production
 probe alignment require common scientific context (including family, currency,
-calibration, teacher, window, objective and samples). Per-unit weight/shape or
-activation coordinates are not spuriously required to be identical. The adapter
-neither remeasures nor authenticates these artifacts. Duplicate JSON keys,
-nonfinite constants and overflowing JSON floats refuse.
+calibration, teacher, window, objective and samples). Within each unit,
+`same_unit=True` additionally requires all formats to agree on activation contract,
+source and shape. Different units' weight/shape/activation coordinates need not be
+identical. Stats require positive integer `n_params`, `out_features`, `in_features`
+and absent or nonnegative integer `num_experts` (zero is the production dense
+sentinel). Each `n_params` must equal the product of production-interpreted shape,
+which must also match the qualified source identity. The adapter neither
+remeasures nor authenticates these artifacts. Duplicate JSON keys, nonfinite
+constants and overflowing JSON floats refuse.
 
 ### Qualification and effective-row provenance
 
@@ -186,7 +205,56 @@ validated real export configuration**. O6 and real-input O5 validation remain
 blocked through existing #3044, not a new duplicate issue. No GPU acquisition,
 W4, joint-currency audit, export or served run was performed.
 
-## Verification after repair
+## Verification of the remaining O5 and CLI repairs
+
+The new boundary regressions cover per-unit activation alignment in supplied and
+real-builder effective tables, including a later unit whose activation contract
+legitimately differs from the first unit's. They reject a rehashed handoff with
+819,200 asserted parameters for unchanged 64×128 geometry before building or
+replaying. Strict integer/missing-dimension checks and the production expert-axis
+multiplier are covered separately. This does not extend the scientific owner's
+2D qualification contract to packed 3D rows.
+
+The CLI regression calls the actual `main` → `run` → production builder → replay
+and accounting path, not a mocked `run`. It parses stdout with `json.loads`, checks
+that the optional report file contains the same JSON, and checks that allocator
+diagnostics are on stderr. Its 8,192-parameter synthetic denominator gives exactly
+3,584 / 4,608 / 6,144 target bytes. Test-only contract/admission emulation is still
+explicit; none of these numbers qualifies a W2 payload or completes O6.
+
+```sh
+python -m pytest tests/test_interpolation_regret_replay_2905.py tests/test_interpolation_regret_canonical_2905.py experiments/test_qualified_w2_driver_2905.py tests/test_allocator_byte_budget_selection.py tests/test_checkpoint_artifact_budget.py tests/test_whole_artifact_budget.py tests/test_allocator_packed_group_units.py tests/test_allocator_packed_group_menu_reduction.py tests/test_fused_fold_enumeration_2287.py tests/test_canonical_quality_quantity.py tests/test_canonical_consumer_join.py tests/test_rung_allowability.py tests/test_duplication_baseline.py tests/test_duplication_alias_scope_audit.py tests/test_architecture_doc.py tests/test_docs_entrypoints.py tests/test_docs_staleness.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed **323 passed, 62 subtests passed**, exit 0; 14 upstream Torch/Python
+deprecation warnings. Retained stdout was verified with `read_test_artifact`.
+All eight immutable portable acceptance cases pass. Existing byte accounting,
+grouping, canonical-price, duplication and documentation guards also pass. No
+acceptance file or production allocator/digest owner was modified in this repair.
+The full repository suite and real-input campaign/export/serving checks were not
+run. The missing-input disposition above remains unchanged.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"76a1a72db96f1e4b6ce31b0ec549e4ae63c323b576bdd1bb4b4afcc39ed9e00a","size":1183}},"operation":"029f952a53554fbb4fe1217bbc6ebe49bb4369642a37184b3a00bff4a11baa35","receipt":"ee867f73259ceabf23b8e75ff03a0696b75bebcab2a51bf23c0cb68ce521f8bb"}]
+
+A follow-up after the evidence text changes also preserved incomplete-fused-group
+refusals and passed the documentation guards:
+
+```sh
+python -m pytest tests/test_incomplete_fused_group.py tests/test_incomplete_fused_ignore.py tests/test_architecture_doc.py tests/test_docs_entrypoints.py tests/test_docs_staleness.py -q --basetemp="$TMPDIR/pytest"
+```
+
+Observed **30 passed**, exit 0, 14 upstream warnings; retained stdout verified.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"68b3aafea114ba54e95a2b2032da88df166409b3ebe10d4a128b509705785deb","size":821}},"operation":"44ee670804c16301d2959c540c594ddfa71c1068e6ecfcf3d2e38cf653e242ff","receipt":"38af7ab2f3f07f7f7bd3968956fe770b9be35ba466e1beca7e1ce0823b1bb2e9"}]
+
+Preliminary regression-development runs were not passes. They exposed the count
+and stdout defects, as well as test setup assumptions: the CLI requires `--inputs`
+and returns no value; requesting an intermediate chord across mismatched anchors
+fails in the production chord owner; missing fixture serving context excludes the
+low anchor. Those fixture assumptions were corrected without weakening production
+validation. The final combined run above passes with the current code and fixtures.
+
+## Prior repair verification
 
 ```sh
 python -m pytest tests/test_interpolation_regret_canonical_2905.py tests/test_interpolation_regret_replay_2905.py experiments/test_qualified_w2_driver_2905.py tests/test_canonical_quality_quantity.py tests/test_canonical_consumer_join.py tests/test_rung_allowability.py tests/test_duplication_baseline.py tests/test_duplication_alias_scope_audit.py tests/test_allocator_byte_budget_selection.py tests/test_allocator_packed_group_menu_reduction.py tests/test_allocator_packed_group_units.py tests/test_fused_fold_enumeration_2287.py tests/test_incomplete_fused_group.py tests/test_incomplete_fused_ignore.py -q --basetemp="$TMPDIR/pytest"

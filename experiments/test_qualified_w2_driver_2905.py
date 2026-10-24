@@ -328,9 +328,68 @@ class EffectiveScientificRowsTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 self.scientific(identities, changed, stats)
 
+    def test_later_units_align_activation_contracts_within_each_unit(self):
+        self.driver_environment()
+        from prismaquant import allocator_candidates as ac
+        stats = {**self.stats, "v": deepcopy(self.stats["u"])}
+        # Production may retain both independently valid measured cells even
+        # when no chord can be made between them. Global same_unit=False
+        # comparisons must not hide a within-v activation-contract mismatch.
+        other = {fmt: deepcopy(self.costs["u"][fmt]) for fmt in (self.F[0], self.F[2])}
+        for row in other.values():
+            row["quality_scope"]["unit"] = "v"
+            row["quality_scope"]["activation_contract"] = {"fixture": "v activation"}
+        identities = deepcopy(self.identities)
+        identities["source"]["source_weights"]["v"] = deepcopy(
+            other[self.F[0]]["quality_scope"]["source_weight"])
+        costs = {**self.costs, "v": other}
+        # Different units need not have identical activation contracts.
+        self.scientific(identities, costs, stats)
+        other[self.F[2]]["quality_scope"]["activation_contract"] = {"fixture": "different activation"}
+        built = ac.build_candidates(
+            stats, deepcopy(costs), [self.formats[0], self.formats[2]], target_profile="research",
+            rung_allowability={self.fixtures.FAMILY: self.owner}, allowability_m=8)
+        self.assertEqual({c.fmt for c in built.candidates["v"]}, set(other))
+        for stage, table in (("supplied", costs), ("effective", built.cost_rows)):
+            with self.subTest(stage=stage), self.assertRaisesRegex(ValueError, "different activation_contract"):
+                self.scientific(identities, table, stats)
+
+    def test_denominator_requires_explicit_integral_mutable_geometry(self):
+        for key, values in {
+            "n_params": (0, -1, True, 8192.0, "8192"),
+            "out_features": (None, 0, -1, True, 64.5, "64"),
+            "in_features": (None, 0, -1, True, 128.5, "128"),
+            "num_experts": (None, -1, True, 1.5, "1"),
+        }.items():
+            for value in values:
+                stats = deepcopy(self.stats)
+                stats["u"][key] = value
+                with self.subTest(key=key, value=value), self.assertRaises(HandoffError):
+                    self.scientific(stats=stats)
+        for key in ("n_params", "out_features", "in_features"):
+            stats = deepcopy(self.stats)
+            del stats["u"][key]
+            with self.subTest(missing=key), self.assertRaises(HandoffError):
+                self.scientific(stats=stats)
+        stats = deepcopy(self.stats)
+        stats["u"]["num_experts"] = 0  # Production's dense sentinel.
+        self.scientific(stats=stats)
+
+    def test_expert_axis_is_part_of_production_parameter_geometry(self):
+        stats = deepcopy(self.stats)
+        stats["u"]["num_experts"] = 4
+        with self.assertRaisesRegex(HandoffError, "n_params.*32768"):
+            self.scientific(stats=stats)
+        stats["u"]["n_params"] = 32768
+        # A matching count does not make a 3D population match qualified 2D
+        # source geometry, nor extend the current owner's qualification scope.
+        with self.assertRaisesRegex(HandoffError, "source shape differs"):
+            self.scientific(stats=stats)
+
     def test_price_source_shape_must_match_actual_mutable_stats(self):
         stats = deepcopy(self.stats)
         stats["u"]["out_features"] *= 2
+        stats["u"]["n_params"] *= 2
         with self.assertRaisesRegex(HandoffError, "source shape differs"):
             self.scientific(stats=stats)
 
@@ -363,7 +422,7 @@ class EffectiveScientificRowsTests(unittest.TestCase):
                                "measurement_reference": "synthetic boundary fixture"}}
         config = {
             "schema": "prismaquant.o5_explicit_w2_inputs.v2",
-            "formats": self.F, "currency": self.currency, "profile": "fixture",
+            "formats": self.F, "currency": self.currency, "profile": "default",
             "allowability_root": ".",
             "serving_context": {"platform": "sm_120",
                                 "runtime_image": "example/vllm@sha256:" + "a" * 64,
@@ -395,7 +454,7 @@ class EffectiveScientificRowsTests(unittest.TestCase):
         path.write_text(json.dumps(config))
         return path
 
-    def driver_environment(self):
+    def driver_environment(self, *, real_replay=False):
         from prismaquant import allocator_candidates as ac, format_registry as fr
         from prismaquant import interpolation_regret as replay, rung_allowability as ra
         from prismaquant import model_profiles as mp, tessera_menu as tm, tessera_serving_scope as scope
@@ -407,7 +466,7 @@ class EffectiveScientificRowsTests(unittest.TestCase):
         # runs under the same emulation seam as the canonical fixture's tests;
         # never pass this stub off as an admission/reader contract to production.
         contract = SimpleNamespace(allowable_rungs={self.fixtures.FAMILY: None},
-                                   identity=lambda: {"fixture": True})
+                                   fused_module=None, identity=lambda: {"fixture": True})
         self.enterContext(patch.object(tm, "tessera_runtime_contract", return_value=contract))
         # Use the already-synthesized canonical fixture specs at the driver seam.
         real_get_format = fr.get_format
@@ -426,9 +485,45 @@ class EffectiveScientificRowsTests(unittest.TestCase):
         self.enterContext(patch.object(ac, "candidate_rung_admission", return_value=SimpleNamespace(
             requires_serving_context=False, admits=lambda _mode: True)))
         self.enterContext(patch.object(ra, "load_rung_allowability", return_value=self.owner))
-        self.enterContext(patch.object(mp, "profile_from_config", return_value=SimpleNamespace(name="fixture")))
+        self.enterContext(patch.object(mp, "profile_from_config", return_value=mp.DefaultProfile()))
         self.enterContext(patch.object(scope, "context_by_unit_from_stats", return_value={"u": context}))
-        return self.enterContext(patch.object(replay, "replay_three_arms", return_value={"targets": []}))
+        if not real_replay:
+            return self.enterContext(patch.object(replay, "replay_three_arms", return_value={"targets": []}))
+
+    def test_hash_consistent_inflated_denominator_refuses_before_build_or_replay(self):
+        replay = self.driver_environment()
+        from prismaquant import allocator_candidates as ac
+        self.stats["u"]["n_params"] *= 100
+        # Regenerate every binding: a self-consistent hash roster is not a
+        # certificate that 64x128 has 819200 mutable parameters.
+        with tempfile.TemporaryDirectory() as tmp, patch.object(ac, "build_candidates") as build:
+            with self.assertRaisesRegex(HandoffError, "u.*n_params.*819200.*8192"):
+                run(self.write_handoff(Path(tmp)))
+        build.assert_not_called()
+        replay.assert_not_called()
+
+    def test_stdout_json_uses_real_production_build_and_replay(self):
+        from contextlib import redirect_stderr, redirect_stdout
+        import io
+        self.driver_environment(real_replay=True)
+        for output_file in (False, True):
+            with self.subTest(output_file=output_file), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                manifest = self.write_handoff(root)
+                output = root / "result.json"
+                args = ["--inputs", str(manifest)] + (["--output", str(output)] if output_file else [])
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    main(args)
+                result = json.loads(stdout.getvalue())
+                if output_file:
+                    self.assertEqual(result, json.loads(output.read_text()))
+                report = result["replay"]
+                self.assertEqual(report["frozen_mutable_n_params"], 8192)
+                self.assertEqual([t["target_bpp"] for t in report["targets"]], ["3.5", "4.5", "6.0"])
+                self.assertEqual([t["target_bytes"] for t in report["targets"]], [3584, 4608, 6144])
+                self.assertEqual(report["status"], "surrogate_only_pending_w4")
+                self.assertIn("[alloc] cost-source usage:", stderr.getvalue())
 
     def test_driver_replays_immutable_effective_production_rows_and_records_both_stages(self):
         # Production ignores these supplied annotations when rebuilding R3.5.
