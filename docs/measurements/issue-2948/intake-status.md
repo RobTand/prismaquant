@@ -10,9 +10,24 @@ The repository does not currently contain the acceptance handoff at
 `docs/measurements/issue-2948/handoff.json`. No original selection/capture or
 historical recorded 29-file roster was identified in the inspected repository
 and targeted shared-measurement searches. Those searches were not exhaustive.
-Shared fleet storage listing was denied. This establishes neither global
-absence nor corruption; artifacts may remain with the existing owner elsewhere.
-No credentials or specific host-privilege remedy have been established.
+The earlier intake reported denied shared fleet storage listing. On this
+follow-up, the shared measurement, evidence, results, investigations and CAS
+roots were listable. Bounded targeted searches still did not identify the
+required owner-provided artifact set; neither result establishes global absence
+or corruption. Artifacts may remain with the existing owner elsewhere. No
+credentials or specific host-privilege remedy have been established.
+
+Follow-up candidate inspection did not establish a historical selection/capture
+join: the pin-named `pq503-tessera-pin-7dbbacbd` measurement directory contains a
+source tree, not an identified original 29-file roster;
+`fused-selected-config-cpu.json` is a test-surface measurement reporting 1,146
+files; `ig-ts-1053-dependency-surface.json` is another test-surface result,
+reporting 2,082 files. The provision record
+`glm-resident-hessian-provision-cas-source-20260909.json` contains an install
+audit for 71 package files at pin
+`7f8aef0dd1ba4ef6a6ff5cf00ee9c2bc06c73e5d`, but no demonstrated join to this
+issue's historical selected image. None was retained as a substitute. Searches
+were bounded, some stopped at tool limits, and CAS was not exhaustively scanned.
 
 The supplied issue discussion attributes the delivery requirement to Rob's
 2026-10-24 comment on #2948, explicitly reusing #2999/#2427. That discussion
@@ -54,10 +69,10 @@ Command:
 python -m pytest tests/test_issue_2948_selected_image_capture.py -q --basetemp="$TMPDIR/pytest"
 ```
 
-Observed: **2 failed in 0.69s**, exit 1. Both tests collected and failed at the
+Observed: **2 failed in 0.66s**, exit 1. Both tests collected and failed at the
 explicit missing-handoff assertion in `_records`, before any artifact joins.
 This is an unmet evidence requirement, not a demonstrated acceptance-fixture or
 application defect. Retained stdout was read back using `read_test_artifact`.
 The acceptance tests and application code were not modified.
 
-[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"92b3a4a7aacf04891db46b9e5713946334863eacb62941d50433639a99240777","size":3123}},"operation":"247b5282b24526e7179e4b1c9606ac73574004d735e906b4ef5bc0f1f437d26e","receipt":"d8ab3401962f8cdf797a9785de890c998e6326e8e716c1b36caadd8b3e4ba194"}]
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"5eeba67f1f32f4669807eff8be49be0ee82432fcc46ba9c191e05477154f95e8","size":3123}},"operation":"10543fb4154495512b035504ce2e60cfa9316eac08369481de65aafdc53f8815","receipt":"ff7e014be8b33da77dc1a5f02c73066e7a15a6a70010ffd49f1c375489b727f1"}]
