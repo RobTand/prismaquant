@@ -17,7 +17,6 @@ no model bytes and never touches CUDA, so it is a CPU probe by construction.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -43,7 +42,8 @@ def main(argv=None) -> int:
     # 3. The sealed plan, through the pass's own config construction.
     plan_path = Path(args.plan)
     if args.plan_sha256 is not None:
-        actual = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+        from prismaquant.digests import bytes_sha256hex
+        actual = bytes_sha256hex(plan_path.read_bytes())
         if actual != args.plan_sha256:
             raise SystemExit(
                 f"plan {plan_path} hashes to {actual}, not {args.plan_sha256}")

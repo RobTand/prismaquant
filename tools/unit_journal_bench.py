@@ -41,7 +41,6 @@ Writes only under ``--scratch``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import pickle
@@ -60,6 +59,16 @@ if str(REPO) not in sys.path:
 
 MARKER = "[unit-journal-bench] "
 ARMS = ("clean", "pyspy-block", "pyspy-nonblock", "pressure")
+
+
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
 
 
 def _cgroup_dir() -> Path | None:
@@ -205,7 +214,7 @@ def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict |
     from prismaquant.cost_stage_checkpoint import atomic_write_bytes
     state_bytes = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
     pickled = time.perf_counter()
-    digest = hashlib.sha256(state_bytes).hexdigest()
+    digest = bytes_sha256hex(state_bytes)
     hashed = time.perf_counter()
     encoded = pickle.dumps({"schema": AURA_CHECKPOINT_UNIT_SCHEMA, "qname": str(name),
                             "identity_sha256": str(identity_sha256),
@@ -245,7 +254,7 @@ def cmd_child(args) -> int:
     root = Path(args.scratch) / f"checkpoints-{args.arm}-{args.repeat}"
     shutil.rmtree(root, ignore_errors=True)
     (root / "units").mkdir(parents=True)
-    identity_sha256 = hashlib.sha256(b"unit-journal-bench").hexdigest()
+    identity_sha256 = bytes_sha256hex(b"unit-journal-bench")
     result = {"arm": args.arm, "repeat": args.repeat, "pid": os.getpid(),
               "cgroup": str(group) if group else None,
               "formats": len(inputs.formats), "render_formats": len(inputs.render_formats),
@@ -273,8 +282,7 @@ def cmd_child(args) -> int:
     result["windows"] = windows
     sizes = sorted({path.stat().st_size for path in (root / "units").glob("*.pkl")})
     result["checkpoint_bytes"] = sizes
-    result["checkpoint_sha256_first"] = hashlib.sha256(
-        sorted((root / "units").glob("*.pkl"))[0].read_bytes()).hexdigest()
+    result["checkpoint_sha256_first"] = bytes_sha256hex(sorted((root / "units").glob("*.pkl"))[0].read_bytes())
     Path(args.result).write_text(json.dumps(result, indent=1, sort_keys=True))
     _drop_cache(root)
     shutil.rmtree(root, ignore_errors=True)

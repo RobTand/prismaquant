@@ -1,0 +1,339 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "replacements": [
+    {
+      "original_id": "hashlib:tools/benchmarks/joint_validation_pair.py::sha@20:15",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "hashlib.file_digest(stream, 'sha256')",
+      "owner_route": "prismaquant.digests.file_digest_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_file_hash"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compare_joint_layer_gate.py::main@201:29",
+      "file": "tools/compare_joint_layer_gate.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f60263a39812dd0c702adfdf6d0b932c05a6d333",
+      "SOURCE": "json.dumps(record, sort_keys=True, indent=2)",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_gate_writer"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compare_stage_a_checkpoints.py::main@53:43",
+      "file": "tools/compare_stage_a_checkpoints.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "95ebc85453000f49340f807cc1d788c429603a16",
+      "SOURCE": "json.dumps(result, indent=2, sort_keys=True)",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_stage_writer"
+      ]
+    }
+  ],
+  "blocked_calls": [
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@58:52",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(report, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@59:10",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps({'output_files': len(files), 'differences': differences,\n                      'excluded_solver_seconds': len(timing_keys),\n                      'audit_sha256': sha(output / 'comparison-audited.json')})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@94:49",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps({'argv': argv, 'env': inv['env'], 'cwd': str(cwd)}, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@109:37",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(record)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@131:45",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(result, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@132:18",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(result)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:45",
+      "file": "tools/measure_container_cache_quantum_row.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c1be24cbe08ac9214943d5dae0625eec676553a",
+      "SOURCE": "json.dumps(receipt)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@86:8",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dump(before, stream, indent=2, ensure_ascii=False, allow_nan=False)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dump(receipt, handle, indent=2, ensure_ascii=False, allow_nan=False)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@163:10",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dumps({\"receipt\": str(output), \"sha256\": bc.digest(receipt),\n                      \"comparison\": comparison, \"decision\": decision,\n                      \"fixed_point\": measurement.get(\"fixed_point\")})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_produced_group_lookup.py::main@117:10",
+      "file": "tools/profile_produced_group_lookup.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "74063e14a0dc6fccfcd4bee3f43df4a32149bf60",
+      "SOURCE": "json.dumps(out, indent=1)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/device_envelope_probe.py::main@59:14",
+      "file": "tools/device_envelope_probe.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363",
+      "SOURCE": "json.dumps(record, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/device_envelope_probe.py::main@93:10",
+      "file": "tools/device_envelope_probe.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363",
+      "SOURCE": "json.dumps(record, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@124:42",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(\n            {json.dumps(list(key)): value for key, value in sizes.items()})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@125:13",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(list(key))",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/derive_retained_window_budget.py::main@179:24",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(plan, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@180:10",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps({\n        'out': str(args.out.resolve()), 'sha256': _sha256(args.out),\n        'superseded_plan_sha256': plan_sha256,\n        'changed': {name: [sealed.as_dict()[name], budget.as_dict()[name]]\n                    for name in budget.as_dict()\n                    if sealed.as_dict()[name] != budget.as_dict()[name]},\n        'available_window_bytes': record['available_window_bytes'],\n        'host_cap_bytes': host_cap_bytes,\n        'host_render_bound_bytes': record['host_render_bound_bytes'],\n        'windows_by_layer_max': max(record['windows_by_layer'].values()),\n        'retained_window_replay_multiplier': record['retained_window_replay_multiplier'],\n        'candidate_files_measured': len(sizes),\n        'measure_seconds': round(measured_seconds, 3),\n    }, indent=1)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null
+    }
+  ],
+  "json_readers_outside_digest_population": [
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@25:15",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.loads((output / arm / 'result.json').read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@30:27",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.loads(original.read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@42:19",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.loads(a)",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@42:34",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.loads(b)",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@71:10",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.loads(args.invocation.read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:34",
+      "file": "tools/measure_container_cache_quantum_row.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c1be24cbe08ac9214943d5dae0625eec676553a",
+      "SOURCE": "json.loads(json.dumps(receipt))",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@69:19",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.loads(Path(args.contract).read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@70:23",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.loads((Path(args.model_dir) / \"config.json\").read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@75:18",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.loads(Path(args.control).read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@125:12",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.loads(Path(args.stack_contract).read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/compare_joint_layer_gate.py::_journal_identity@38:15",
+      "file": "tools/compare_joint_layer_gate.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f60263a39812dd0c702adfdf6d0b932c05a6d333",
+      "SOURCE": "json.loads((checkpoint_dir / \"manifest.json\").read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@79:11",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.loads(args.plan.read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@89:15",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.loads(args.prepared.read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@92:13",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.loads(args.census.read_text())",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@104:52",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.load(response)",
+      "reason": "No settled JSON parsing owner; preserve reader behavior.",
+      "owner_route": null
+    }
+  ]
+}

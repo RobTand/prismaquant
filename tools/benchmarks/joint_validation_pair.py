@@ -1,6 +1,6 @@
 """PB-only paired allocator profiles against an exact Git baseline/input receipt."""
 import argparse
-import hashlib
+import sys
 import json
 import math
 import os
@@ -15,9 +15,16 @@ import urllib.parse
 import urllib.request
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from tools.pq_profile_digest import profile_digest_owner  # noqa: E402
+
+file_digest_sha256hex = profile_digest_owner().file_digest_sha256hex
+
+
 def sha(path):
     with path.open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        return file_digest_sha256hex(stream)
 
 
 def audit_outputs(output, inv, root):

@@ -84,6 +84,14 @@ def main(argv=None) -> int:
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    try:
+        from tools.pq_profile_digest import profile_digest_owner
+    finally:
+        sys.path.pop(0)
+    DIRECT_ASCII_SPACED_LAX = profile_digest_owner().DIRECT_ASCII_SPACED_LAX
 
     source = _candidates(Path(args.wire_dir), args.format,
                          range(args.first_layer, args.last_layer + 1), args.experts)
@@ -117,7 +125,7 @@ def main(argv=None) -> int:
             arm["nfs_read"] = {"ops": delta[0], "queue_ms_per_op": round(delta[5] / ops, 2),
                                "rtt_ms_per_op": round(delta[6] / ops, 2),
                                "execute_ms_per_op": round(delta[7] / ops, 2)}
-        print(json.dumps(arm, sort_keys=True), flush=True)
+        print(DIRECT_ASCII_SPACED_LAX.text(arm), flush=True)
         arms.append(arm)
     report = {"schema": "prismaquant.wire_rehash_reader_sweep.v1", "host": os.uname().nodename,
               "format": args.format, "block_bytes": _BLOCK, "arms": arms}

@@ -36,7 +36,6 @@ thing a correct tensor alone says nothing about:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -52,7 +51,8 @@ PHASE = "boundary-live-cycle"
 
 
 def _digest(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+    from prismaquant.digests import bytes_sha256hex
+    return bytes_sha256hex(raw)
 
 
 def _declared_entry(map_path: str) -> tuple[str, dict]:

@@ -41,7 +41,6 @@ unlinked scratch file under ``--out`` and ``--scratch-root``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import inspect
 import json
 import os
@@ -61,6 +60,17 @@ OPS = ("READ", "LOOKUP", "GETATTR", "ACCESS", "OPEN", "CLOSE", "WRITE",
 
 
 # -- host instruments --------------------------------------------------------
+
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+DIRECT_ASCII_SPACED_LAX = profile_digest_owner().DIRECT_ASCII_SPACED_LAX
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+
 
 def mountstats() -> dict:
     """``{mount: {"bytes": [...], "ops": {OP: [ops, trans, ..., execute_ms]}}}``."""
@@ -111,7 +121,7 @@ def drop_client_cache(paths) -> int:
 
 def load_slice(path: str, sha256: str) -> dict:
     raw = Path(path).read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if digest != sha256:
         raise SystemExit(f"slice digest {digest} is not --slice-sha256 {sha256}")
     return json.loads(raw)
@@ -887,7 +897,7 @@ def child_main(args) -> int:
     result = CHILDREN[args.child](args, slice_doc)
     result["tree"] = str(Path(__import__("prismaquant").__file__).resolve().parents[1])
     result["pid"] = os.getpid()
-    print(MARKER + json.dumps(result, sort_keys=True), flush=True)
+    print(MARKER + DIRECT_ASCII_SPACED_LAX.text(result), flush=True)
     return 0
 
 

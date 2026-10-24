@@ -1,0 +1,356 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "snippets": [
+    {
+      "original_id": "hashlib:tools/chain_roll_bench.py::_sha256_file",
+      "SOURCE": "hashlib.sha256()",
+      "expression": "hashlib.sha256()",
+      "owner_route": "file_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/chain_roll_bench.py::load_verified_json",
+      "SOURCE": "hashlib.sha256(raw)",
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_manifest@179:30",
+      "SOURCE": "json.dumps(document, indent=1)",
+      "expression": "json.dumps(document, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_host@226:19",
+      "SOURCE": "json.dumps({\"base_ref\": args.base_ref, \"base_commit\": commit,\n                               \"head_commit\": head, \"base_tree\": str(base)})",
+      "expression": "json.dumps({\"base_ref\": args.base_ref, \"base_commit\": commit,\n                               \"head_commit\": head, \"base_tree\": str(base)})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@476:33",
+      "SOURCE": "json.dumps(result, indent=1)",
+      "expression": "json.dumps(result, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@477:19",
+      "SOURCE": "json.dumps({key: result[key] for key in (\n        \"label\", \"roll_s\", \"backwards\", \"plane_sha256\")})",
+      "expression": "json.dumps({key: result[key] for key in (\n        \"label\", \"roll_s\", \"backwards\", \"plane_sha256\")})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_analyze@670:37",
+      "SOURCE": "json.dumps(report, indent=1)",
+      "expression": "json.dumps(report, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_drive@283:44",
+      "SOURCE": "json.dumps({\"arms\": arms, \"runs\": runs},\n                                                       indent=1)",
+      "expression": "json.dumps({\"arms\": arms, \"runs\": runs},\n                                                       indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_setup@153:39",
+      "SOURCE": "json.dumps(fixture, indent=1)",
+      "expression": "json.dumps(fixture, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_window@234:35",
+      "SOURCE": "json.dumps({\n        'windows': windows, 'digest': digest, 'lease_counters': counters,\n        'bytes_from_pool': report.get('bytes_from_pool'),\n        'bytes_from_stage': report.get('bytes_from_stage'),\n        'pid': os.getpid()}, indent=1)",
+      "expression": "json.dumps({\n        'windows': windows, 'digest': digest, 'lease_counters': counters,\n        'bytes_from_pool': report.get('bytes_from_pool'),\n        'bytes_from_stage': report.get('bytes_from_stage'),\n        'pid': os.getpid()}, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_quantum@312:35",
+      "SOURCE": "json.dumps({\n        'payload_sha256': hashlib.sha256(pickle.dumps(payload)).hexdigest(),\n        'costs': len(payload['costs']), 'files': files, 'leaves': leaves,\n        'package': str(Path(prismaquant.__file__).parent)}, indent=1)",
+      "expression": "json.dumps({\n        'payload_sha256': hashlib.sha256(pickle.dumps(payload)).hexdigest(),\n        'costs': len(payload['costs']), 'files': files, 'leaves': leaves,\n        'package': str(Path(prismaquant.__file__).parent)}, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves",
+      "SOURCE": "hashlib.sha256(f'{obj.dtype}|{tuple(obj.shape)}|'.encode())",
+      "expression": "hashlib.sha256(f'{obj.dtype}|{tuple(obj.shape)}|'.encode())",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_identity@496:39",
+      "SOURCE": "json.dumps(summary, indent=1, default=str)",
+      "expression": "json.dumps(summary, indent=1, default=str)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@609:38",
+      "SOURCE": "json.dumps(summary, indent=1, default=str)",
+      "expression": "json.dumps(summary, indent=1, default=str)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@610:9",
+      "SOURCE": "json.dumps({name: {key: arm[key] for key in (\n        'load_s_median', 'compute_s_median', 'wall_s_median', 'load_share_of_wall_median',\n        'gpu_power_w_mean')} for name, arm in summary['arms'].items()}, indent=1)",
+      "expression": "json.dumps({name: {key: arm[key] for key in (\n        'load_s_median', 'compute_s_median', 'wall_s_median', 'load_share_of_wall_median',\n        'gpu_power_w_mean')} for name, arm in summary['arms'].items()}, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves",
+      "SOURCE": "hashlib.sha256(f'{array.dtype}|{array.shape}|'.encode())",
+      "expression": "hashlib.sha256(f'{array.dtype}|{array.shape}|'.encode())",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_setup",
+      "SOURCE": "hashlib.sha256(blob)",
+      "expression": "hashlib.sha256(blob).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_window",
+      "SOURCE": "hashlib.sha256()",
+      "expression": "hashlib.sha256()",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum",
+      "SOURCE": "hashlib.sha256(b'pwc-window-load-bench source')",
+      "expression": "hashlib.sha256(b'pwc-window-load-bench source').hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum",
+      "SOURCE": "hashlib.sha256(path.read_bytes())",
+      "expression": "hashlib.sha256(path.read_bytes()).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum",
+      "SOURCE": "hashlib.sha256(path.read_bytes())",
+      "expression": "hashlib.sha256(path.read_bytes()).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum",
+      "SOURCE": "hashlib.sha256(pickle.dumps(payload))",
+      "expression": "hashlib.sha256(pickle.dumps(payload)).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "sorted-json:tools/pwc_window_load_bench.py::run_window",
+      "SOURCE": "json.dumps(\n                        [list(key), list(tensor.shape), str(tensor.dtype),\n                         {k: v for k, v in file_receipt.items() if k != 'path'},\n                         identity], sort_keys=True)",
+      "expression": "json.dumps(\n                        [list(key), list(tensor.shape), str(tensor.dtype),\n                         {k: v for k, v in file_receipt.items() if k != 'path'},\n                         identity], sort_keys=True)",
+      "owner_route": "DIRECT_ASCII_SPACED_LAX.text"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves",
+      "SOURCE": "hashlib.sha256(text.encode())",
+      "expression": "hashlib.sha256(text.encode()).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves",
+      "SOURCE": "hashlib.sha256(obj)",
+      "expression": "hashlib.sha256(obj).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/render_window_bench.py::cmd_child",
+      "SOURCE": "hashlib.sha256()",
+      "expression": "hashlib.sha256()",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::_renders",
+      "SOURCE": "json.dumps(manifest, indent=1, sort_keys=True)",
+      "expression": "json.dumps(manifest, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@156:35",
+      "SOURCE": "json.dumps({**identity, \"runs\": runs}, indent=1)",
+      "expression": "json.dumps({**identity, \"runs\": runs}, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::cmd_child",
+      "SOURCE": "json.dumps(result, indent=1, sort_keys=True)",
+      "expression": "json.dumps(result, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::cmd_analyze",
+      "SOURCE": "json.dumps(report, indent=1, sort_keys=True)",
+      "expression": "json.dumps(report, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@122:19",
+      "SOURCE": "json.dumps(identity)",
+      "expression": "json.dumps(identity)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@126:19",
+      "SOURCE": "json.dumps({\"py_spy\": spy})",
+      "expression": "json.dumps({\"py_spy\": spy})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_child@358:19",
+      "SOURCE": "json.dumps({\"label\": args.label, \"replay_s\": result[\"replay_s\"],\n                               \"projection_digest\": result[\"projection_digest\"]})",
+      "expression": "json.dumps({\"label\": args.label, \"replay_s\": result[\"replay_s\"],\n                               \"projection_digest\": result[\"projection_digest\"]})",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/render_window_bench.py::_renders",
+      "SOURCE": "hashlib.sha256(path.read_bytes())",
+      "expression": "hashlib.sha256(path.read_bytes()).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/staged_exact_read_bench.py::load_slice",
+      "SOURCE": "hashlib.sha256(raw)",
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::child_main",
+      "SOURCE": "json.dumps(result, sort_keys=True)",
+      "expression": "json.dumps(result, sort_keys=True)",
+      "owner_route": "DIRECT_ASCII_SPACED_LAX.text"
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@985:41",
+      "SOURCE": "json.dumps(copies)",
+      "expression": "json.dumps(copies)",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main",
+      "SOURCE": "json.dumps(report, indent=1, sort_keys=True)",
+      "expression": "json.dumps(report, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main",
+      "SOURCE": "json.dumps(report, indent=1, sort_keys=True)",
+      "expression": "json.dumps(report, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@1017:22",
+      "SOURCE": "json.dumps({k: result.get(k) for k in (\n                    \"label\", \"entries\", \"wall_s\", \"entries_per_s\", \"mb_s\")})",
+      "expression": "json.dumps({k: result.get(k) for k in (\n                    \"label\", \"entries\", \"wall_s\", \"entries_per_s\", \"mb_s\")})",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main",
+      "SOURCE": "json.dumps(report, indent=1, sort_keys=True)",
+      "expression": "json.dumps(report, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_read_stream_ab.py::main@236:10",
+      "SOURCE": "json.dumps({\"summary\": summary, \"mismatches\": mismatches})",
+      "expression": "json.dumps({\"summary\": summary, \"mismatches\": mismatches})",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/staged_read_stream_ab.py::digest_tensor",
+      "SOURCE": "hashlib.sha256(\n        memoryview(tensor.reshape(-1).view(torch.uint8).numpy()))",
+      "expression": "hashlib.sha256(\n        memoryview(tensor.reshape(-1).view(torch.uint8).numpy())).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "sorted-json:tools/unit_journal_bench.py::cmd_child",
+      "SOURCE": "json.dumps(result, indent=1, sort_keys=True)",
+      "expression": "json.dumps(result, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "sorted-json:tools/unit_journal_bench.py::cmd_host",
+      "SOURCE": "json.dumps(records, indent=1, sort_keys=True)",
+      "expression": "json.dumps(records, indent=1, sort_keys=True)",
+      "owner_route": null
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::_commit_unit",
+      "SOURCE": "hashlib.sha256(state_bytes)",
+      "expression": "hashlib.sha256(state_bytes).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::cmd_child",
+      "SOURCE": "hashlib.sha256(b\"unit-journal-bench\")",
+      "expression": "hashlib.sha256(b\"unit-journal-bench\").hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::cmd_child",
+      "SOURCE": "hashlib.sha256(\n        sorted((root / \"units\").glob(\"*.pkl\"))[0].read_bytes())",
+      "expression": "hashlib.sha256(\n        sorted((root / \"units\").glob(\"*.pkl\"))[0].read_bytes()).hexdigest()",
+      "owner_route": "bytes_sha256hex"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@344:19",
+      "SOURCE": "json.dumps({\"py_spy\": spy, \"perf\": perf, \"arms\": arms,\n                               \"cgroup\": str(_cgroup_dir()), \"host\": os.uname().nodename,\n                               \"cpus\": _cpu_parts(), \"loadavg\": os.getloadavg()})",
+      "expression": "json.dumps({\"py_spy\": spy, \"perf\": perf, \"arms\": arms,\n                               \"cgroup\": str(_cgroup_dir()), \"host\": os.uname().nodename,\n                               \"cpus\": _cpu_parts(), \"loadavg\": os.getloadavg()})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@406:19",
+      "SOURCE": "json.dumps({\"analysis\": _analyze(records)}, indent=1)",
+      "expression": "json.dumps({\"analysis\": _analyze(records)}, indent=1)",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@397:27",
+      "SOURCE": "json.dumps(_summary(record))",
+      "expression": "json.dumps(_summary(record))",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@403:31",
+      "SOURCE": "json.dumps({\"arm\": arm, \"repeat\": repeat,\n                                           \"stderr_tail\": record[\"stderr_tail\"]})",
+      "expression": "json.dumps({\"arm\": arm, \"repeat\": repeat,\n                                           \"stderr_tail\": record[\"stderr_tail\"]})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@400:35",
+      "SOURCE": "json.dumps({\"arm\": arm, \"repeat\": repeat,\n                                               key: record[key]})",
+      "expression": "json.dumps({\"arm\": arm, \"repeat\": repeat,\n                                               key: record[key]})",
+      "owner_route": null
+    },
+    {
+      "original_id": "supplemental-json:tools/render_identity.py::main@115:14",
+      "SOURCE": "json.dumps({\"host\": socket.gethostname(),\n                      \"torch\": torch.__version__,\n                      \"device\": torch.cuda.get_device_name(0),\n                      \"input_digest\": tensor_sha256(X),\n                      \"lever_proof\": lever_proof,\n                      \"rows\": rows}, indent=1)",
+      "expression": "json.dumps({\"host\": socket.gethostname(),\n                      \"torch\": torch.__version__,\n                      \"device\": torch.cuda.get_device_name(0),\n                      \"input_digest\": tensor_sha256(X),\n                      \"lever_proof\": lever_proof,\n                      \"rows\": rows}, indent=1)",
+      "owner_route": null
+    }
+  ],
+  "functions": [
+    {
+      "file": "tools/chain_roll_bench.py",
+      "name": "_sha256_file",
+      "SOURCE": "def _sha256_file(path) -> str:\n    digest = hashlib.sha256()\n    with open(path, \"rb\") as handle:\n        for block in iter(lambda: handle.read(1 << 20), b\"\"):\n            digest.update(block)\n    return digest.hexdigest()"
+    },
+    {
+      "file": "tools/chain_roll_bench.py",
+      "name": "load_verified_json",
+      "SOURCE": "def load_verified_json(path, sha256):\n    raw = Path(path).read_bytes()\n    digest = hashlib.sha256(raw).hexdigest()\n    if digest != sha256:\n        raise SystemExit(f\"{path}: sha256 {digest} is not {sha256}\")\n    return json.loads(raw)"
+    },
+    {
+      "file": "tools/staged_exact_read_bench.py",
+      "name": "load_slice",
+      "SOURCE": "def load_slice(path: str, sha256: str) -> dict:\n    raw = Path(path).read_bytes()\n    digest = hashlib.sha256(raw).hexdigest()\n    if digest != sha256:\n        raise SystemExit(f\"slice digest {digest} is not --slice-sha256 {sha256}\")\n    return json.loads(raw)"
+    },
+    {
+      "file": "tools/staged_read_stream_ab.py",
+      "name": "digest_tensor",
+      "SOURCE": "def digest_tensor(tensor, torch):\n    \"\"\"A frame of its own, so a profile does not charge it to the read.\n\n    Hashing 1.2 GB costs real time and it is this tool's cost, not the\n    reader's; unnamed it lands inside the read's frame and reads as if the\n    reader spent it.\n    \"\"\"\n    return hashlib.sha256(\n        memoryview(tensor.reshape(-1).view(torch.uint8).numpy())).hexdigest()"
+    },
+    {
+      "file": "tools/pwc_window_load_bench.py",
+      "name": "_leaves",
+      "SOURCE": "def _leaves(obj, path: str, out: dict | None = None) -> dict:\n    \"\"\"``{path: value}`` for every leaf of ``obj``; tensors and arrays by digest.\"\"\"\n    import numpy as np\n    import torch\n    out = {} if out is None else out\n    if isinstance(obj, torch.Tensor):\n        flat = obj.detach().cpu().contiguous().reshape(-1)\n        digest = hashlib.sha256(f'{obj.dtype}|{tuple(obj.shape)}|'.encode())\n        digest.update(flat.view(torch.uint8).numpy().tobytes())\n        out[path] = f'tensor:{digest.hexdigest()}'\n    elif isinstance(obj, np.ndarray):\n        array = np.ascontiguousarray(obj)\n        digest = hashlib.sha256(f'{array.dtype}|{array.shape}|'.encode())\n        digest.update(array.tobytes())\n        out[path] = f'array:{digest.hexdigest()}'\n    elif isinstance(obj, dict):\n        for key in sorted(obj, key=repr):\n            _leaves(obj[key], f'{path}/{key}', out)\n    elif isinstance(obj, (list, tuple)):\n        for index, value in enumerate(obj):\n            _leaves(value, f'{path}[{index}]', out)\n    elif isinstance(obj, float):\n        out[path] = f'float:{obj.hex()}'\n    elif isinstance(obj, (bytes, bytearray)):\n        try:\n            inner = pickle.loads(obj)\n        except Exception:  # not a pickle: compare the bytes\n            out[path] = f'bytes:{hashlib.sha256(obj).hexdigest()}'\n        else:\n            _leaves(inner, f'{path}<pickle>', out)\n    else:\n        text = repr(obj)\n        out[path] = text if len(text) <= 160 else (\n            f'{type(obj).__name__}:{hashlib.sha256(text.encode()).hexdigest()}')\n    return out"
+    }
+  ]
+}

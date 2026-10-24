@@ -20,13 +20,22 @@ Each arm:
 Read-only. Writes nothing anywhere.
 """
 import argparse
-import hashlib
 import json
 import os
 import resource
 import statistics
 import sys
 import time
+
+
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
 
 
 def drop_client_cache(paths):
@@ -42,8 +51,7 @@ def digest_tensor(tensor, torch):
     reader's; unnamed it lands inside the read's frame and reads as if the
     reader spent it.
     """
-    return hashlib.sha256(
-        memoryview(tensor.reshape(-1).view(torch.uint8).numpy())).hexdigest()
+    return bytes_sha256hex(memoryview(tensor.reshape(-1).view(torch.uint8).numpy()))
 
 
 def main():

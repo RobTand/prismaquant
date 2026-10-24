@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes  # noqa: E402
 from prismaquant.stage_a_chain_seed import checkpoint_plane_distance  # noqa: E402
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_INDENT2_LAX
 
 
 def main(argv=None) -> int:
@@ -50,7 +50,7 @@ def main(argv=None) -> int:
         {"path": args.candidate, "sha256": args.candidate_sha256},
         device=device, read_ahead=args.read_ahead)
     result["device"] = device
-    if not publish_new_bytes(args.output, (json.dumps(result, indent=2, sort_keys=True)
+    if not publish_new_bytes(args.output, (DIRECT_ASCII_INDENT2_LAX.text(result)
                                            + "\n").encode()):
         parser.error(f"{args.output} already exists; a distance record is never replaced")
     summary = {key: result[key] for key in ("boundary", "equal", "different",

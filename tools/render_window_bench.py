@@ -66,6 +66,16 @@ FORMATS = ("FP8_E4M3", "NVFP4A16")
 
 # -- host ----------------------------------------------------------------------------------
 
+# Use the existing profiler loader; host-side tools must stay stdlib-only.
+import sys as _digest_sys
+from pathlib import Path as _DigestPath
+
+_digest_sys.path.insert(0, str(_DigestPath(__file__).resolve().parents[1]))
+from tools.pq_profile_digest import profile_digest_owner
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+
+
 def _git(*args):
     return subprocess.run(["git", "-c", "safe.directory=*", *args], check=True,
                           capture_output=True).stdout
@@ -86,7 +96,7 @@ def _renders(args, root: Path):
             path = root / f"{name}.{fmt}.pt"
             torch.save((source + (index + 1) / 128).to(torch.bfloat16), path)
             manifest[f"{name}|{fmt}"] = {
-                "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+                "path": str(path), "sha256": bytes_sha256hex(path.read_bytes())}
     (root / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True))
     return manifest
 

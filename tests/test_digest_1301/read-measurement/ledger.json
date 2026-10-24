@@ -1,0 +1,1747 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "agreement": "S: settled exact owners only. Shared owners/census/baseline/scanner unchanged. Leaf handoff, NOT parent closure.",
+  "assigned_files": [
+    "tools/bench_fence_rehash.py",
+    "tools/benchmarks/joint_validation_pair.py",
+    "tools/chain_roll_bench.py",
+    "tools/measure_wire_rehash_readers.py",
+    "tools/pwc_window_load_bench.py",
+    "tools/render_window_bench.py",
+    "tools/staged_exact_read_bench.py",
+    "tools/staged_read_stream_ab.py",
+    "tools/unit_journal_bench.py",
+    "tools/render_identity.py",
+    "tools/joint_prepare_startup_probe.py",
+    "tools/profile_stage_b_head.py",
+    "tools/measure_container_cache_quantum_row.py",
+    "tools/measure_boundary_control.py",
+    "tools/profile_produced_group_lookup.py",
+    "tools/device_envelope_probe.py",
+    "tools/band_serial_handoff_live_pair.py",
+    "tools/compare_joint_layer_gate.py",
+    "tools/compare_stage_a_checkpoints.py",
+    "tools/derive_retained_window_budget.py",
+    "tools/stagea_produced_live_cycle.py"
+  ],
+  "completed_calls": [
+    {
+      "original_id": "hashlib:tools/benchmarks/joint_validation_pair.py::sha@20:15",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "hashlib.file_digest(stream, 'sha256')",
+      "owner_route": "prismaquant.digests.file_digest_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_file_hash",
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_pair_file_digest_preserves_handle_contract"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/chain_roll_bench.py::_sha256_file@73:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "_sha256_file",
+      "line": 73,
+      "col": 13,
+      "owner_route": "prismaquant.digests.file_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_file_consumer_original",
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_file_retention_read_witness"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/chain_roll_bench.py::load_verified_json@82:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "load_verified_json",
+      "line": 82,
+      "col": 13,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_verified_json_errors_and_parsing"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/joint_prepare_startup_probe.py::main@46:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/profile_stage_b_head.py::load_record@242:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@345:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "_leaves",
+      "line": 345,
+      "col": 33,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_leaf_walker_original_behavior"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@351:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "_leaves",
+      "line": 351,
+      "col": 36,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_leaf_walker_original_behavior"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum@281:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_quantum",
+      "line": 281,
+      "col": 17,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_quantum_pinned_files_summary"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum@293:42",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_quantum",
+      "line": 293,
+      "col": 42,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_quantum_pinned_files_summary"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum@310:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_quantum",
+      "line": 310,
+      "col": 27,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_quantum_pinned_files_summary"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_quantum@313:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_quantum",
+      "line": 313,
+      "col": 26,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_quantum_pinned_files_summary"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_setup@140:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_setup",
+      "line": 140,
+      "col": 29,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_setup_write_hash_publish"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/render_window_bench.py::_renders@89:45",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "_renders",
+      "line": 89,
+      "col": 45,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_renders_real_files"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/stagea_produced_live_cycle.py::_digest@55:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_byte_consumers"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/staged_exact_read_bench.py::load_slice@114:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "load_slice",
+      "line": 114,
+      "col": 13,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_verified_json_errors_and_parsing"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/staged_read_stream_ab.py::digest_tensor@45:11",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6959fa59c745042d8d5873c2a2c56cb1f0b08c74",
+      "file": "tools/staged_read_stream_ab.py",
+      "scope": "digest_tensor",
+      "line": 45,
+      "col": 11,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_real_tensor_view_digest"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::_commit_unit@208:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "_commit_unit",
+      "line": 208,
+      "col": 13,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_commit_unit_pickle_framing"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::cmd_child@248:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_child",
+      "line": 248,
+      "col": 22,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_unit_child_setup_receipt"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/unit_journal_bench.py::cmd_child@276:40",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_child",
+      "line": 276,
+      "col": 40,
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_unit_child_setup_receipt"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::consumer_role@452:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_role_report_boundaries"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::main@480:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_derive_report"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::producer_role@357:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX_DEFAULT_STR.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_role_report_boundaries"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compare_joint_layer_gate.py::main@201:29",
+      "file": "tools/compare_joint_layer_gate.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f60263a39812dd0c702adfdf6d0b932c05a6d333",
+      "SOURCE": "json.dumps(record, sort_keys=True, indent=2)",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_gate_writer"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/compare_stage_a_checkpoints.py::main@53:43",
+      "file": "tools/compare_stage_a_checkpoints.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "95ebc85453000f49340f807cc1d788c429603a16",
+      "SOURCE": "json.dumps(result, indent=2, sort_keys=True)",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/subset_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_subset_reports.py::test_subset_reports_stage_writer"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/measure_wire_rehash_readers.py::main@120:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "663156e3b25a095f5a8258e780fc9edca675207f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_wire_report_actual_main_matches_original"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/profile_stage_b_head.py::main@500:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_live_reports.py::test_profile_report"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/pwc_window_load_bench.py::run_window@209:34",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_window",
+      "line": 209,
+      "col": 34,
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_window_metadata_before_tensor"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::child_main@890:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "child_main",
+      "line": 890,
+      "col": 19,
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json",
+        "tests/fixtures/digest_1301/read-measurement/windows_consumers.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows_consumers.py::test_staged_child_stdout"
+      ]
+    }
+  ],
+  "retained_calls": [
+    {
+      "original_id": "hashlib:tools/bench_fence_rehash.py::_busy_consumer@220:16",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_busy_consumer_work_and_release_order"
+      ],
+      "reason": "Synthetic CPU work is the measured consumer operation: SHA256 over one first-wire-sized zero buffer per take; binary .digest discarded before release. The module docstring/main --busy-consumer describe this workload. Does NOT justify retaining setup receipts.",
+      "file": "tools/bench_fence_rehash.py",
+      "scope": "_busy_consumer",
+      "current_id": "hashlib:tools/bench_fence_rehash.py::_busy_consumer@220:16",
+      "current_source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1"
+    },
+    {
+      "original_id": "hashlib:tools/bench_fence_rehash.py::_read_digest@197:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_fence_read_digest_independent_reference"
+      ],
+      "reason": "Independent stdlib file_digest reader reference in busy-consumer stream. _busy_consumer builds ReadEntry(reader=partial(_read_digest,path)) and compares delivered values to setup receipts. Keep file_digest on the caller-owned rb handle, independent of production fences being measured.",
+      "file": "tools/bench_fence_rehash.py",
+      "scope": "_read_digest",
+      "current_id": "hashlib:tools/bench_fence_rehash.py::_read_digest@197:15",
+      "current_source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1"
+    },
+    {
+      "original_id": "hashlib:tools/bench_fence_rehash.py::main@123:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_in_memory_reference_executes_four_primitive_hashes"
+      ],
+      "reason": "Independent in-memory SHA256 throughput reference, four hexdigest constructions over one pre-read buffer inside the timed interval. Compared with plain reads and production fence throughput. This witness covers only this loop, not unrelated setup.",
+      "file": "tools/bench_fence_rehash.py",
+      "scope": "main",
+      "current_id": "hashlib:tools/bench_fence_rehash.py::main@123:12",
+      "current_source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1"
+    },
+    {
+      "original_id": "hashlib:tools/measure_wire_rehash_readers.py::_hash@52:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "663156e3b25a095f5a8258e780fc9edca675207f",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_read_references.py::test_wire_hash_caller_owned_readinto_trace"
+      ],
+      "reason": "Measured unbuffered readinto/hash loop: one caller-owned 16 MiB bytearray/memoryview reused for each partial/EOF read; hashes view[:count], returns byte count without finalizing digest. main maps this reader over disjoint file slices. Whole-file/whole-byte owners change acquisition or the measured operation.",
+      "file": "tools/measure_wire_rehash_readers.py",
+      "scope": "_hash",
+      "current_id": "hashlib:tools/measure_wire_rehash_readers.py::_hash@52:13",
+      "current_source_blob": "c016aadd91ead807d7384ce7a948df8688ce79d8"
+    }
+  ],
+  "blocked_calls": [
+    {
+      "original_id": "hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact raw digest-bytes owner",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "scope": "prepare",
+      "current_id": "hashlib:tools/band_serial_handoff_live_pair.py::prepare@154:15",
+      "current_source_blob": "9da8a9ae48ccbbc17b99bb9304deac2ca36a8836"
+    },
+    {
+      "original_id": "hashlib:tools/bench_fence_rehash.py::_write_drifted_wires@56:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [],
+      "reason": "Eligible setup receipt, NOT a benchmark reference: SHA256 updates immediately after each generated 1 MiB piece is written, before stat and hardlink ctime drift. No settled raw incremental SHA256 owner preserves write/hash interleaving. A second file pass is incompatible.",
+      "file": "tools/bench_fence_rehash.py",
+      "scope": "_write_drifted_wires",
+      "current_id": "hashlib:tools/bench_fence_rehash.py::_write_drifted_wires@56:17",
+      "current_source_blob": "eaa597282573cbde6276acf556f6cdcf3a953dc1"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@325:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "_leaves",
+      "line": 325,
+      "col": 17,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner for this incremental digest recipe.",
+      "current_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@335:17",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@330:17",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "_leaves",
+      "line": 330,
+      "col": 17,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner for this incremental digest recipe.",
+      "current_id": "hashlib:tools/pwc_window_load_bench.py::_leaves@340:17",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "hashlib:tools/pwc_window_load_bench.py::run_window@204:25",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_window",
+      "line": 204,
+      "col": 25,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner for this incremental digest recipe.",
+      "current_id": "hashlib:tools/pwc_window_load_bench.py::run_window@215:25",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "hashlib:tools/render_window_bench.py::cmd_child@303:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_child",
+      "line": 303,
+      "col": 13,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner for this incremental digest recipe.",
+      "current_id": "hashlib:tools/render_window_bench.py::cmd_child@313:13",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "scope": "prepare",
+      "current_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@178:15",
+      "current_source_blob": "9da8a9ae48ccbbc17b99bb9304deac2ca36a8836"
+    },
+    {
+      "original_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f0325a85951a0f4c4dc3a7b779abf9787153cff4",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None",
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "scope": "prepare",
+      "current_id": "sorted-json:tools/band_serial_handoff_live_pair.py::prepare@192:29",
+      "current_source_blob": "9da8a9ae48ccbbc17b99bb9304deac2ca36a8836"
+    },
+    {
+      "original_id": "sorted-json:tools/derive_retained_window_budget.py::main@179:24",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(plan, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "sorted-json:tools/derive_retained_window_budget.py::main@179:24",
+      "current_source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43"
+    },
+    {
+      "original_id": "sorted-json:tools/device_envelope_probe.py::main@59:14",
+      "file": "tools/device_envelope_probe.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363",
+      "SOURCE": "json.dumps(record, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "sorted-json:tools/device_envelope_probe.py::main@59:14",
+      "current_source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363"
+    },
+    {
+      "original_id": "sorted-json:tools/device_envelope_probe.py::main@93:10",
+      "file": "tools/device_envelope_probe.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363",
+      "SOURCE": "json.dumps(record, indent=1, sort_keys=True)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "sorted-json:tools/device_envelope_probe.py::main@93:10",
+      "current_source_blob": "5f74da24152382cc085c0eed1bb179d94b4b8363"
+    },
+    {
+      "original_id": "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "ab551c6ea57d9a286ed4f500a4e37400fc1ce07a",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: sort_keys=True, indent=1, default=None",
+      "file": "tools/joint_prepare_startup_probe.py",
+      "scope": "main",
+      "current_id": "sorted-json:tools/joint_prepare_startup_probe.py::main@83:10",
+      "current_source_blob": "70a7c57a34142f1d0441c1aeede29d268108771b"
+    },
+    {
+      "original_id": "sorted-json:tools/measure_wire_rehash_readers.py::main@124:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "663156e3b25a095f5a8258e780fc9edca675207f",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [],
+      "reason": "Eligible sorted indent=1 ASCII/lax publication without fallback serializer. Existing indent=1 profile uses default=str and changes unsupported-object refusals. Requires exact named recipe.",
+      "file": "tools/measure_wire_rehash_readers.py",
+      "scope": "main",
+      "current_id": "sorted-json:tools/measure_wire_rehash_readers.py::main@132:30",
+      "current_source_blob": "c016aadd91ead807d7384ce7a948df8688ce79d8"
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::_renders@90:40",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "_renders",
+      "line": 90,
+      "col": 40,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/render_window_bench.py::_renders@100:40",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::cmd_analyze@438:39",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_analyze",
+      "line": 438,
+      "col": 39,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/render_window_bench.py::cmd_analyze@448:39",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "sorted-json:tools/render_window_bench.py::cmd_child@357:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_child",
+      "line": 357,
+      "col": 33,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/render_window_bench.py::cmd_child@367:33",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@1001:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "driver_main",
+      "line": 1001,
+      "col": 41,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@1011:41",
+      "current_source_blob": "f148252e3caa5574e6146ae552eabb390b136306"
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@1020:20",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "driver_main",
+      "line": 1020,
+      "col": 20,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@1030:20",
+      "current_source_blob": "f148252e3caa5574e6146ae552eabb390b136306"
+    },
+    {
+      "original_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@994:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "driver_main",
+      "line": 994,
+      "col": 41,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/staged_exact_read_bench.py::driver_main@1004:41",
+      "current_source_blob": "f148252e3caa5574e6146ae552eabb390b136306"
+    },
+    {
+      "original_id": "sorted-json:tools/unit_journal_bench.py::cmd_child@278:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_child",
+      "line": 278,
+      "col": 33,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/unit_journal_bench.py::cmd_child@286:33",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "sorted-json:tools/unit_journal_bench.py::cmd_host@405:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 405,
+      "col": 38,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1, 'sort_keys': True}.",
+      "current_id": "sorted-json:tools/unit_journal_bench.py::cmd_host@413:38",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@58:52",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(report, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "audit_outputs",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@65:52",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@59:10",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps({'output_files': len(files), 'differences': differences,\n                      'excluded_solver_seconds': len(timing_keys),\n                      'audit_sha256': sha(output / 'comparison-audited.json')})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "audit_outputs",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::audit_outputs@66:10",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@109:37",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(record)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main.sample",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main.sample@116:37",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@131:45",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(result, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@138:45",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@132:18",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps(result)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@139:18",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@94:49",
+      "file": "tools/benchmarks/joint_validation_pair.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "298b0b965f0a431ea6cffc06b4e4515af0b4540a",
+      "SOURCE": "json.dumps({'argv': argv, 'env': inv['env'], 'cwd': str(cwd)}, indent=2)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/benchmarks/joint_validation_pair.py::main@101:49",
+      "current_source_blob": "11a2e6a58e828692b1ace40033cf999b54ccec67"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_analyze@670:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_analyze",
+      "line": 670,
+      "col": 37,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_analyze@676:37",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@476:33",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_child",
+      "line": 476,
+      "col": 33,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@482:33",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@477:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_child",
+      "line": 477,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_child@483:19",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_drive@283:44",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_drive",
+      "line": 283,
+      "col": 44,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_drive@289:44",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_host@226:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_host",
+      "line": 226,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_host@232:19",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/chain_roll_bench.py::cmd_manifest@179:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "711a01ecbb6eeb68256d6f038efdc7be05c19580",
+      "file": "tools/chain_roll_bench.py",
+      "scope": "cmd_manifest",
+      "line": 179,
+      "col": 30,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/chain_roll_bench.py::cmd_manifest@185:30",
+      "current_source_blob": "90d9acd00129d0d4bb229abe3d197bbcdf5dc0ea"
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@124:42",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(\n            {json.dumps(list(key)): value for key, value in sizes.items()})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/derive_retained_window_budget.py::main@124:42",
+      "current_source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43"
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@125:13",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps(list(key))",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/derive_retained_window_budget.py::main@125:13",
+      "current_source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43"
+    },
+    {
+      "original_id": "supplemental-json:tools/derive_retained_window_budget.py::main@180:10",
+      "file": "tools/derive_retained_window_budget.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43",
+      "SOURCE": "json.dumps({\n        'out': str(args.out.resolve()), 'sha256': _sha256(args.out),\n        'superseded_plan_sha256': plan_sha256,\n        'changed': {name: [sealed.as_dict()[name], budget.as_dict()[name]]\n                    for name in budget.as_dict()\n                    if sealed.as_dict()[name] != budget.as_dict()[name]},\n        'available_window_bytes': record['available_window_bytes'],\n        'host_cap_bytes': host_cap_bytes,\n        'host_render_bound_bytes': record['host_render_bound_bytes'],\n        'windows_by_layer_max': max(record['windows_by_layer'].values()),\n        'retained_window_replay_multiplier': record['retained_window_replay_multiplier'],\n        'candidate_files_measured': len(sizes),\n        'measure_seconds': round(measured_seconds, 3),\n    }, indent=1)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/derive_retained_window_budget.py::main@180:10",
+      "current_source_blob": "56bcdad6ff8ed80eef6a71460288fef5ada0ff43"
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dump(receipt, handle, indent=2, ensure_ascii=False, allow_nan=False)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/measure_boundary_control.py::main@161:8",
+      "current_source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2"
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@163:10",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dumps({\"receipt\": str(output), \"sha256\": bc.digest(receipt),\n                      \"comparison\": comparison, \"decision\": decision,\n                      \"fixed_point\": measurement.get(\"fixed_point\")})",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/measure_boundary_control.py::main@163:10",
+      "current_source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2"
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_boundary_control.py::main@86:8",
+      "file": "tools/measure_boundary_control.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2",
+      "SOURCE": "json.dump(before, stream, indent=2, ensure_ascii=False, allow_nan=False)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/measure_boundary_control.py::main@86:8",
+      "current_source_blob": "a3afe5a9023c9dc25cbf1f442498e60fcfe0f1d2"
+    },
+    {
+      "original_id": "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:45",
+      "file": "tools/measure_container_cache_quantum_row.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6c1be24cbe08ac9214943d5dae0625eec676553a",
+      "SOURCE": "json.dumps(receipt)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "_run_complete_row",
+      "current_id": "supplemental-json:tools/measure_container_cache_quantum_row.py::_run_complete_row@354:45",
+      "current_source_blob": "6c1be24cbe08ac9214943d5dae0625eec676553a"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_produced_group_lookup.py::main@117:10",
+      "file": "tools/profile_produced_group_lookup.py",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "74063e14a0dc6fccfcd4bee3f43df4a32149bf60",
+      "SOURCE": "json.dumps(out, indent=1)",
+      "reason": "No exact settled JSON profile: preserve key order, indentation, nonfinite and fallback behavior.",
+      "owner_route": null,
+      "fixtures": [],
+      "scope": "main",
+      "current_id": "supplemental-json:tools/profile_produced_group_lookup.py::main@117:10",
+      "current_source_blob": "74063e14a0dc6fccfcd4bee3f43df4a32149bf60"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/profile_stage_b_head.py",
+      "scope": "main.on_stop",
+      "current_id": "supplemental-json:tools/profile_stage_b_head.py::main.on_stop@442:52",
+      "current_source_blob": "3baaa67dce6b28235d9367d0bc72803f9723702c"
+    },
+    {
+      "original_id": "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "36bf3b3241ad8b8a82bc93b5093ed327a55cadfb",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/profile_stage_b_head.py",
+      "scope": "main.sigterm_report",
+      "current_id": "supplemental-json:tools/profile_stage_b_head.py::main.sigterm_report@452:52",
+      "current_source_blob": "3baaa67dce6b28235d9367d0bc72803f9723702c"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@609:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_ab",
+      "line": 609,
+      "col": 38,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner: indent=1, default=str without sorting; the existing indent1 owner sorts keys.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@619:38",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@610:9",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_ab",
+      "line": 610,
+      "col": 9,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_ab@620:9",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_identity@496:39",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_identity",
+      "line": 496,
+      "col": 39,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled owner: indent=1, default=str without sorting; the existing indent1 owner sorts keys.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_identity@506:39",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_quantum@312:35",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_quantum",
+      "line": 312,
+      "col": 35,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_quantum@322:35",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_setup@153:39",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_setup",
+      "line": 153,
+      "col": 39,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_setup@164:39",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/pwc_window_load_bench.py::run_window@234:35",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "c58b12ebaeb10e701985fd6917bd42df5396a75f",
+      "file": "tools/pwc_window_load_bench.py",
+      "scope": "run_window",
+      "line": 234,
+      "col": 35,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/pwc_window_load_bench.py::run_window@244:35",
+      "current_source_blob": "73b59b5c18f23fc0aff98a765a1cd1b9b39355f7"
+    },
+    {
+      "original_id": "supplemental-json:tools/render_identity.py::main@115:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1e6dc70b15809067ae7a81fdd7803036e0c7b36d",
+      "file": "tools/render_identity.py",
+      "scope": "main",
+      "line": 115,
+      "col": 14,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/render_identity.py::main@115:14",
+      "current_source_blob": "1e6dc70b15809067ae7a81fdd7803036e0c7b36d"
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_child@358:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_child",
+      "line": 358,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/render_window_bench.py::cmd_child@368:19",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@122:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_host",
+      "line": 122,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/render_window_bench.py::cmd_host@132:19",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@126:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_host",
+      "line": 126,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/render_window_bench.py::cmd_host@136:19",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "supplemental-json:tools/render_window_bench.py::cmd_host@156:35",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "b2e44d71c098b413d2dcbcc35ab1e4df0c66acf8",
+      "file": "tools/render_window_bench.py",
+      "scope": "cmd_host",
+      "line": 156,
+      "col": 35,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/render_window_bench.py::cmd_host@166:35",
+      "current_source_blob": "4ac30d8f6dcc138572e0dfb768fddfe9e6315161"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "_chain_cycle",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@305:38",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "_chain_cycle",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@327:30",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "_chain_cycle",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@367:42",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "_chain_cycle",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::_chain_cycle@481:10",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@559:14",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@576:14",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@665:14",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@740:26",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@767:26",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1d6604fcd11a19cfc53e62b9bf60fb2dec4a7e3b",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/live_reports_source.json"
+      ],
+      "tests": [],
+      "reason": "No settled exact JSON recipe: insertion-order ASCII spaced lax, default=None",
+      "file": "tools/stagea_produced_live_cycle.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/stagea_produced_live_cycle.py::main@847:10",
+      "current_source_blob": "560609e11d521c9b089a434f5d2fea95c3405de0"
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@1017:22",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "driver_main",
+      "line": 1017,
+      "col": 22,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@1027:22",
+      "current_source_blob": "f148252e3caa5574e6146ae552eabb390b136306"
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@985:41",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "d35219123b0f466869c5c3b65ce62c24a0064cc7",
+      "file": "tools/staged_exact_read_bench.py",
+      "scope": "driver_main",
+      "line": 985,
+      "col": 41,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/staged_exact_read_bench.py::driver_main@995:41",
+      "current_source_blob": "f148252e3caa5574e6146ae552eabb390b136306"
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_read_stream_ab.py::main@235:12",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6959fa59c745042d8d5873c2a2c56cb1f0b08c74",
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/read_references_source.json"
+      ],
+      "tests": [],
+      "reason": "Eligible json.dump(out,handle,indent=1): insertion-order ASCII/lax streaming writer. No settled exact profile preserving unsorted keys, chunked writes, partial-write failure semantics and native object refusals.",
+      "file": "tools/staged_read_stream_ab.py",
+      "scope": "main",
+      "current_id": "supplemental-json:tools/staged_read_stream_ab.py::main@243:12",
+      "current_source_blob": "59cbcf8ee2220916c4f305477fa00686d0b52edd"
+    },
+    {
+      "original_id": "supplemental-json:tools/staged_read_stream_ab.py::main@236:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "6959fa59c745042d8d5873c2a2c56cb1f0b08c74",
+      "file": "tools/staged_read_stream_ab.py",
+      "scope": "main",
+      "line": 236,
+      "col": 10,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/staged_read_stream_ab.py::main@244:10",
+      "current_source_blob": "59cbcf8ee2220916c4f305477fa00686d0b52edd"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@344:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 344,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@352:19",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@397:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 397,
+      "col": 27,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@405:27",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@400:35",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 400,
+      "col": 35,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@408:35",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@403:31",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 403,
+      "col": 31,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {}.",
+      "current_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@411:31",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    },
+    {
+      "original_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@406:19",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "5bc3f0ea502de2325c1274324b4bf5e168fc11ae",
+      "file": "tools/unit_journal_bench.py",
+      "scope": "cmd_host",
+      "line": 406,
+      "col": 19,
+      "owner_route": null,
+      "fixtures": [
+        "tests/fixtures/digest_1301/read-measurement/windows_source.json"
+      ],
+      "tests": [
+        "tests/test_digest_1301/read-measurement/test_windows.py::test_blocked_recipes_remain_literal"
+      ],
+      "reason": "No exact settled JSON recipe for {'indent': 1}.",
+      "current_id": "supplemental-json:tools/unit_journal_bench.py::cmd_host@414:19",
+      "current_source_blob": "6fc784c2dc2d068af49222c7eb490538e676a71a"
+    }
+  ],
+  "audit_boundaries": {
+    "population": "All primary hashlib/sorted-json and supplemental encoding calls in the 21 assigned files, reconciled with frozen research registry and current lexical traversal. Registry is provenance, NOT compatibility oracle. JSON parsing is outside digest-encoding population.",
+    "supplemental_limits": "No exhaustive claim for aliases/dynamic options, generated source, shell/deployment scripts, validators or algorithms outside this fixed Python footprint. Scanner unchanged.",
+    "fixtures": "Independent original source snippets/functions from research base; actual current consumer functions/publication blocks compared against originals. Adapters do not qualify GPU/fleet workloads.",
+    "missing_recipes": "Blocked rows remain eligible unfinished work, NOT justified retentions. Agreement S forbids shared-owner changes or ad hoc JsonProfile recipes.",
+    "baseline": "Integrator must reconcile current census and shrink completed scopes serially. No baseline edits in this leaf.",
+    "protected_contracts": "No deployment rosters, qualification bindings, runtime pins, numerical policies, defaults, stored identity bytes/widths changed. CPU contract evidence only."
+  }
+}
