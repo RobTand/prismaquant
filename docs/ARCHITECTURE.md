@@ -14279,6 +14279,11 @@ never read as a re-derived one. No format, default, wire, ship gate or serving
 lane changes, and a plan without the block behaves exactly as before. Gate:
 `tests/test_tessera_joint_encoder_reuse.py`, `tests/test_tessera_joint_aura.py`.
 
+The [#2896 arm-A recipe](experiments/accumulate_window_o4_2896.md)
+keeps this allowance distinct from current verification and describes current
+MTP regeneration, completed campaign intake, and same-final-plan preparation
+for the restored #1406 instrument. CPU checks are not numerical acceptance.
+
 Re-stamped (2026-09-16, `flash/issue-654-stage-settings-provenance-20260916`)
 for the **stage-settings guard's legacy-reuse admission** (§3.4;
 RobTand/prismaquant#654). Neither of the guard's unrecorded-stage branches
