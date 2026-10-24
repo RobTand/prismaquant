@@ -1,0 +1,22 @@
+def _package_digest(files):
+    """The complete-package hash every transition's ``source_proof`` computes."""
+    digest = hashlib.sha256()
+    # source_proof sorts Path objects component-wise, not POSIX strings:
+    # a/b.py precedes a.py. Preserve that order for directory and Git inputs.
+    for name, payload in sorted(files.items(), key=lambda item: Path(item[0])):
+        encoded = name.encode()
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def _read_tree(root):
+    files = {}
+    for path in sorted(Path(root).rglob("*")):
+        if (not path.is_file() or "__pycache__" in path.relative_to(root).parts
+                or path.suffix in {".pyc", ".pyo"}):
+            continue
+        files[path.relative_to(root).as_posix()] = path.read_bytes()
+    return files

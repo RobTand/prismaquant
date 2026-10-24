@@ -1,0 +1,65 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "excerpts": {
+    "regenerate_joint_quanta.consumers.original.txt": {
+      "source_file": "tools/regenerate_joint_quanta.py",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "line_ranges": [
+        [
+          129,
+          162
+        ],
+        [
+          342,
+          365
+        ],
+        [
+          696,
+          731
+        ],
+        [
+          734,
+          776
+        ]
+      ],
+      "sha256": "a8822d149ae41504932bfc287fe556a527a0ecf6e0bd663fffd31431a2fa1a44"
+    },
+    "stage_b_preparation_submission.consumers.original.txt": {
+      "source_file": "tools/stage_b_preparation_submission.py",
+      "source_blob": "f5da0e3cc9c0d72dc0643ae014c4803555df66cf",
+      "line_ranges": [
+        [
+          102,
+          146
+        ],
+        [
+          184,
+          229
+        ]
+      ],
+      "sha256": "c7a9d93c4d0d2150269e2d92736ffb285e510d449278c98f98a9eeb9702aa637"
+    },
+    "relocation.block.original.txt": {
+      "source_file": "tools/regenerate_joint_quanta.py",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "line_ranges": [
+        [
+          1071,
+          1097
+        ]
+      ],
+      "sha256": "e234943c54067aaefe94743c93e514cc658cedc1b57327eb215ecd5da9e2a9d8"
+    },
+    "publication.block.original.txt": {
+      "source_file": "tools/regenerate_joint_quanta.py",
+      "source_blob": "a1af41edc152ff89362d73ea55c9c4dafc2d27c1",
+      "line_ranges": [
+        [
+          1425,
+          1516
+        ]
+      ],
+      "sha256": "36d9af0a35c50c9f587fb6c85f4aa0336a30fb89e250f836a1aa0598dce679d3"
+    }
+  }
+}

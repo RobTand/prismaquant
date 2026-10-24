@@ -1,0 +1,18 @@
+{
+  "replacements": [{
+    "original_id": "hashlib:tools/check_readset_coverage.py::_load_json@51:30",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+    "owner_route": "prismaquant.digests.bytes_sha256hex",
+    "fixtures": ["tests/fixtures/digest_1301/joint-handoff/readset_original.py"],
+    "tests": ["tests/test_digest_1301/joint-handoff/test_readset.py::test_readset_hash_before_decode"]
+  }],
+  "retentions": [],
+  "unresolved": [{
+    "original_id": "sorted-json:tools/check_readset_coverage.py::main@132:11",
+    "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+    "source_blob": "fbf6b6b7d079ef780e79a5d0648195c823b6f666",
+    "reason": "Pending owner-recipes: sorted ASCII indent2 lax JSON with default=str has no exact finished owner profile. DIRECT_ASCII_INDENT2_LAX refuses fallback objects. This publication is eligible, not a justified retention.",
+    "tests": ["tests/test_digest_1301/joint-handoff/test_readset.py::test_readset_publication_and_refusal"]
+  }]
+}

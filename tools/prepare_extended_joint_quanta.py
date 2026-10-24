@@ -15,9 +15,10 @@ from __future__ import annotations
 import argparse
 import copy
 import gzip
-import hashlib
 import json
 from pathlib import Path
+
+from prismaquant.digests import bytes_sha256hex
 
 from prismaquant.joint_catalog_extension import (
     catalog_control_bindings, catalog_sources, create_extension, extension_campaign_identity,
@@ -37,7 +38,7 @@ SOURCE_LAYERS_PREFIX = 'model.language_model.layers.'
 
 def bind(path):
     path = Path(path).resolve()
-    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {'path': str(path), 'sha256': bytes_sha256hex(path.read_bytes())}
 
 
 #: What ``joint_cost_stage_a`` seals as ``run_identity.read_manifest_sha256``

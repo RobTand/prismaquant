@@ -1,0 +1,391 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "registry": "tests/fixtures/digest_parent_completion_1301.json",
+  "calls": [
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@3965:14",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "_dispatch",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "abe30e6a0cfb1d7443344bb86d6f207b3b6b368eafccc210906c076079af66cc"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4032:18",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "_dispatch",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "9a0f4c050563588b129c8b0c9df0019247bf308185dc3deb36064293ef68e5b1"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::_dispatch@4040:14",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "_dispatch",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "8b696697403e421ddd79d543f07f915ed383f16a7ce4a03fd924991058229b77"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage@3223:14",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "check_source_coverage",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "e3f532c80bc696a8dd28b3dd25b39cebe9c478869f585ce21cebc0302aaa4df0"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template@2814:15",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "handoff_template",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "8284a53e528bf7ca008bdec4ea541d93e3e8e5b1316f63fbcc70ba7df84acaba"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::handoff_template_id@2741:24",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "handoff_template_id",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "ebc0306a26909f8f3cf1ee96f5f7dbae650c0d73ee46ec5432397cb7ff7eb3b8"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_joint_quanta.py::quantum_argv@2343:48",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "quantum_argv",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "63712fe95784101bf5f47d6caa92bfb295785296135844bcdcbf475a182fb124"
+    },
+    {
+      "id": "sorted-json:tools/dispatch_stage_a_split.py::main@835:18",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "9f8d957c16d5f359c20f5764c1396ad5b38de8bb7f06295d75915347ca79d1c5"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_joint_quanta.py::_container_wrap@1850:28",
+      "file": "tools/dispatch_joint_quanta.py",
+      "scope": "_container_wrap",
+      "callee": "json.dumps",
+      "source_blob": "fed78c6fc41679bee8ba655d319970117045c603",
+      "syntax_sha256": "ce6786d296b3d003b2100e46234b9b78eb236599129eb107d286cbb31d047e76"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_stage_a_split.py::main@796:18",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "5d482a47a1a52d978ebb081e45b0682a1b77337db5fabfcfd02f583533c4ad2a"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_stage_a_split.py::main@811:18",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "5d482a47a1a52d978ebb081e45b0682a1b77337db5fabfcfd02f583533c4ad2a"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_stage_a_split.py::main@816:22",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "e130c716d56be254aa7e62ea78f66ddaad8ad7e3389786f97be9aeddb321883b"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_stage_a_split.py::main@831:22",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "main",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "11210e076219c819856e2b7215f94d65315d7e08fabb3c7cc094366f980095eb"
+    },
+    {
+      "id": "supplemental-json:tools/dispatch_stage_a_split.py::row_template@214:26",
+      "file": "tools/dispatch_stage_a_split.py",
+      "scope": "row_template",
+      "callee": "json.dumps",
+      "source_blob": "a7557cc31374258beaeed5e01aaece99f16d7670",
+      "syntax_sha256": "5f685e14075eda8d4aac6b9f9099defb073762f447c488a6c7dd1220df4ebab7"
+    }
+  ],
+  "snapshot_format": "Executable excerpts only; recipe-only functions are synthetic wrappers. Full source blob IDs remain historical identities, not fixture blob IDs.",
+  "excerpts": [
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 1850,
+      "source_end_line": 1850,
+      "fixture_start_line": 4,
+      "fixture_end_line": 4,
+      "added_indent": 4,
+      "text_sha256": "bb4f4fc7b6cc840d8cf5c4276f1727d7dd8cbc73c77164d243a730ef00c4bd43"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2343,
+      "source_end_line": 2344,
+      "fixture_start_line": 8,
+      "fixture_end_line": 9,
+      "added_indent": 4,
+      "text_sha256": "b1cb241dcadbd7b5c8db96088d0c882acd67b2526c56689ac365f1aadc063273"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2740,
+      "source_end_line": 2740,
+      "fixture_start_line": 12,
+      "fixture_end_line": 12,
+      "added_indent": 0,
+      "text_sha256": "053b0118a82505f6d3c20e0216330478caeb15ae459983a535e847b3d33cd64d"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2741,
+      "source_end_line": 2742,
+      "fixture_start_line": 13,
+      "fixture_end_line": 14,
+      "added_indent": 0,
+      "text_sha256": "81b34dbd2504230c46b165ffd388679c8384373dce89ff8e9851fe82f762775e"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2743,
+      "source_end_line": 2743,
+      "fixture_start_line": 15,
+      "fixture_end_line": 15,
+      "added_indent": 0,
+      "text_sha256": "c30c2900c9d2bda8fe6e512eef74067e0554afa7e83524e1e7da7f8c44ec218e"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2779,
+      "source_end_line": 2779,
+      "fixture_start_line": 20,
+      "fixture_end_line": 20,
+      "added_indent": 0,
+      "text_sha256": "21370f78261c549120fa7d5297d72a7be737aabf2fa2ab35e09acb1e73d57ce4"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2780,
+      "source_end_line": 2780,
+      "fixture_start_line": 21,
+      "fixture_end_line": 21,
+      "added_indent": 0,
+      "text_sha256": "7ac9688532c9c8be449f12682824131c369137a589f4df911ea0b36348cb74cf"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2781,
+      "source_end_line": 2781,
+      "fixture_start_line": 22,
+      "fixture_end_line": 22,
+      "added_indent": 0,
+      "text_sha256": "8c7fdccb729809872b9f511b656be0904d40dd937a949c39be61f06a418a3a46"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2782,
+      "source_end_line": 2782,
+      "fixture_start_line": 23,
+      "fixture_end_line": 23,
+      "added_indent": 0,
+      "text_sha256": "af705d522d346de4fe57ebdde82703f19c5aa9b2d13070077c0a02635cfee0d8"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2784,
+      "source_end_line": 2784,
+      "fixture_start_line": 24,
+      "fixture_end_line": 24,
+      "added_indent": 0,
+      "text_sha256": "083fbe20cdc77ca4ce695560a8ec624e6661d606c7d4feed72798c88ef823144"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2785,
+      "source_end_line": 2785,
+      "fixture_start_line": 25,
+      "fixture_end_line": 25,
+      "added_indent": 0,
+      "text_sha256": "f879dcb241e42bb4b108b1284ec250b3f7c5a612a3c32253f69d7fad204bc619"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2786,
+      "source_end_line": 2789,
+      "fixture_start_line": 26,
+      "fixture_end_line": 29,
+      "added_indent": 0,
+      "text_sha256": "13176a4c687c6db68c2245d9cf655aab740495d75836fd786b5fe757dee42e61"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2790,
+      "source_end_line": 2813,
+      "fixture_start_line": 30,
+      "fixture_end_line": 53,
+      "added_indent": 0,
+      "text_sha256": "fd4b4b8bb0cbdf2bddf4d20669ed56042628b9b5db065b54eab8ffaa66fcc556"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2814,
+      "source_end_line": 2814,
+      "fixture_start_line": 54,
+      "fixture_end_line": 54,
+      "added_indent": 0,
+      "text_sha256": "8b56da627cd70f821248457cf339e4cd96b5b3648aedc0c5065a37c052bf9d38"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2815,
+      "source_end_line": 2816,
+      "fixture_start_line": 55,
+      "fixture_end_line": 56,
+      "added_indent": 0,
+      "text_sha256": "cef7f4c817a1435aa6667c7aac85f3f321001c9ecc9ae0fcc1c0932a8044863b"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 2817,
+      "source_end_line": 2817,
+      "fixture_start_line": 57,
+      "fixture_end_line": 57,
+      "added_indent": 0,
+      "text_sha256": "9b2f22b2348d42550ef3d85f64625d3e418e1fc0ba4f2f536fc78c79f584f247"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 3223,
+      "source_end_line": 3224,
+      "fixture_start_line": 61,
+      "fixture_end_line": 62,
+      "added_indent": 4,
+      "text_sha256": "8ecca9542c1325c8946d99967bf653d69181e4923bc759e4de19027b749f6754"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 3965,
+      "source_end_line": 3994,
+      "fixture_start_line": 66,
+      "fixture_end_line": 95,
+      "added_indent": 4,
+      "text_sha256": "cb2f3b16b7067c7723b7ebe3b8e2343f2c229f69a62ccc7fcf207db5bf9ffc45"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 4032,
+      "source_end_line": 4035,
+      "fixture_start_line": 96,
+      "fixture_end_line": 99,
+      "added_indent": 4,
+      "text_sha256": "7ff80294635351bfb1a8b36690cf2e52fa17ca8878eed0aad3b0475947487d20"
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "fixture": "dispatch_joint_quanta.original.txt",
+      "source_start_line": 4040,
+      "source_end_line": 4041,
+      "fixture_start_line": 100,
+      "fixture_end_line": 101,
+      "added_indent": 4,
+      "text_sha256": "0746b650ea6624700b7ae9e068830617a6c61941b79bb217e42e21a877e451b2"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 214,
+      "source_end_line": 214,
+      "fixture_start_line": 4,
+      "fixture_end_line": 4,
+      "added_indent": 4,
+      "text_sha256": "7f7683e72b12e4bec5127bda3dd5b61ad631f81324e901e815d0529c3dca6806"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 501,
+      "source_end_line": 507,
+      "fixture_start_line": 6,
+      "fixture_end_line": 12,
+      "added_indent": 0,
+      "text_sha256": "b2627e124f6a3a80cdcd40645f0a66e5193f47a35a927dd0e90164599f0fff36"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 796,
+      "source_end_line": 797,
+      "fixture_start_line": 15,
+      "fixture_end_line": 16,
+      "added_indent": 4,
+      "text_sha256": "f1a77bbe35abd6fca71a351b8bfd22f998835f830ae84c24457fc3c310e9b20b"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 811,
+      "source_end_line": 812,
+      "fixture_start_line": 17,
+      "fixture_end_line": 18,
+      "added_indent": 4,
+      "text_sha256": "f1a77bbe35abd6fca71a351b8bfd22f998835f830ae84c24457fc3c310e9b20b"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 816,
+      "source_end_line": 816,
+      "fixture_start_line": 19,
+      "fixture_end_line": 19,
+      "added_indent": 4,
+      "text_sha256": "00fd0314266c6554c1cb6f9387fc684c51f41bc6ffd0e5b689a84145169b32ce"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 831,
+      "source_end_line": 831,
+      "fixture_start_line": 20,
+      "fixture_end_line": 20,
+      "added_indent": 4,
+      "text_sha256": "3363052eeea287d763925e7bcaf74e9a3cd22f65fb0ba46ae7b81bbae5f44da4"
+    },
+    {
+      "file": "tools/dispatch_stage_a_split.py",
+      "fixture": "dispatch_stage_a_split.original.txt",
+      "source_start_line": 835,
+      "source_end_line": 835,
+      "fixture_start_line": 21,
+      "fixture_end_line": 21,
+      "added_indent": 4,
+      "text_sha256": "e17eb8518d4835bcad92b5f89e962a5939f2304de99ecd27f59ec06b403a3286"
+    }
+  ]
+}

@@ -67,6 +67,8 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
+
 ROUND_SCHEMA = "prismaquant.stage_a.split_round.v1"
 FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v1"
 ROUND_NAME = "round.json"
@@ -832,7 +834,7 @@ def main(argv=None) -> int:
         else:
             document = load_round(args.round_dir)
             report = compare_digests(document, args.baseline)
-            print(json.dumps(report, indent=2, sort_keys=True))
+            print(DIRECT_ASCII_INDENT2_LAX.text(report))
             return 4 if report["mismatches"] else 0
     except SplitDispatchRefused as exc:
         print(f"dispatch_stage_a_split: refused: {exc}", file=sys.stderr)

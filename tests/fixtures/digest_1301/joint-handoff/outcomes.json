@@ -1,0 +1,69 @@
+{
+  "wire_hex": "6a6f696e742068616e646f666600ff0a",
+  "original_expressions": {
+    "hashlib:tools/prepare_extended_joint_quanta.py::bind@40:41": {
+      "expression": "hashlib.sha256(path.read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::_build_head_slices@770:22": {
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::_load_json@140:30": {
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::_load_production_cache@721:7": {
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::_prior_slice_manifest@360:7": {
+      "expression": "hashlib.sha256(raw).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::main@1086:41": {
+      "expression": "hashlib.sha256(\n                        seal_manifest_bytes(\n                            moved[\"slice_manifests\"][qid])).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::main@1460:15": {
+      "expression": "hashlib.sha256(Path(binding[\"path\"]).read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::main@1468:15": {
+      "expression": "hashlib.sha256(Path(slice_path).read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::main@1477:25": {
+      "expression": "hashlib.sha256(manifest_path.read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/regenerate_joint_quanta.py::main@1487:25": {
+      "expression": "hashlib.sha256(path.read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/stage_b_preparation_submission.py::prepare_reads@132:31": {
+      "expression": "hashlib.sha256(extension_path.read_bytes()).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/stage_b_preparation_submission.py::write_submission@210:36": {
+      "expression": "hashlib.sha256(manifest_bytes).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/stage_b_preparation_submission.py::write_submission@213:22": {
+      "expression": "hashlib.sha256(template_bytes).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    },
+    "hashlib:tools/stage_b_preparation_submission.py::write_submission@219:30": {
+      "expression": "hashlib.sha256(manifest_bytes).hexdigest()",
+      "expected": "7df926036bb01e14881a8d5efcf7bce265179ee1d20385c6de2ea67aa0529cf1"
+    }
+  },
+  "package": {
+    "files": {
+      "a.py": "78",
+      "a/b.py": "00ff",
+      "z": ""
+    },
+    "expected": "35323cca67b1cba51d51ea0996a7cfc3a6ea5348e76c2361ee0f7da42b53ef79"
+  }
+}

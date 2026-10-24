@@ -1,0 +1,16 @@
+{
+  "input": {
+    "z": "\u96ea",
+    "a": [
+      true,
+      -0.0,
+      null
+    ]
+  },
+  "compact_strict": "{\"a\":[true,-0.0,null],\"z\":\"\\u96ea\"}",
+  "compact_lax": "{\"a\":[true,-0.0,null],\"z\":\"\\u96ea\"}",
+  "indent2_lax": "{\n  \"a\": [\n    true,\n    -0.0,\n    null\n  ],\n  \"z\": \"\\u96ea\"\n}",
+  "spaced_lax": "{\"a\": [true, -0.0, null], \"z\": \"\\u96ea\"}",
+  "strict_nonfinite": "ValueError",
+  "file_newline": "one LF appended after indent2_lax"
+}

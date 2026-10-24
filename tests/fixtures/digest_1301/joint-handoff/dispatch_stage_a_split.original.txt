@@ -1,0 +1,22 @@
+# Frozen executable excerpts; synthetic wrappers isolate original JSON expressions.
+
+def row_template():
+    json.dumps(base_template)
+
+_BAND_SET = ("import json, sys; "
+             "from prismaquant.joint_adjoint_slices import band_set, stage_a_run_header, "
+             "stage_a_run_header_sha256; "
+             "bands = [json.load(open(p)) for p in sys.argv[1:]]; "
+             "indexed = band_set(bands); "
+             "print(json.dumps({'boundaries': sorted(indexed), 'run_header_sha256': "
+             "stage_a_run_header_sha256(stage_a_run_header(bands[0]))}))")
+
+def main():
+    json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
+                                  "rows": [row["name"] for row in document["rows"]]})
+    json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
+                                  "rows": [row["name"] for row in document["rows"]]})
+    json.dumps({"name": row["name"], "argv": row["argv"]})
+    json.dumps({"name": result["name"], "detach": result["detach"]})
+    json.dumps(report, indent=2, sort_keys=True)
+

@@ -1,0 +1,268 @@
+{
+  "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+  "purpose": "Assigned package consumer migrations; verbatim original function excerpts are independent compatibility oracles. Existing digests owners only. Unsorted JSON calls are eligible but unresolved owner API gaps, not justified retentions; publication mechanics remain caller-owned.",
+  "replacements": [
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::load_original@76:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_pins_and_source_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@180:13",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@197:27",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_forward_recovery_package.py::main@200:62",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::_pin@188:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_pins_and_source_refusals"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@202:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@221:24",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_seed_package.py::build@232:36",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_split_package.py::_describe@299:59",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_split_describe_and_chain_publication"
+      ]
+    },
+    {
+      "original_id": "hashlib:tools/build_stagea_split_package.py::load_round@131:7",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.bytes_sha256hex",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_load_round_checkpoint_digest"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@179:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@192:54",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@200:44",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_forward_recovery_package.py::main@203:10",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_SPACED_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::build@218:18",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::build@244:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_seed_package_publication"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_seed_package.py::manifest_wire@182:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "3c757d2facd27d6683e1bc9b58294db349028743",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_seed.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_manifest_wire_and_refusals"
+      ]
+    },
+    {
+      "original_id": "sorted-json:tools/build_stagea_split_package.py::build@350:37",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "1986de8fed13572e0ead2407544d398cded295c9",
+      "owner_route": "prismaquant.digests.DIRECT_ASCII_INDENT2_LAX.text",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_split.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_split_describe_and_chain_publication"
+      ]
+    }
+  ],
+  "counts": {"eligible": 21, "replaced": 18, "unresolved_owner_api_gaps": 3, "justified_retentions": 0},
+  "retentions": [],
+  "unresolved_owner_api_gaps": [
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::main@194:45",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_recovery_main_publication"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@133:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_unresolved_recovery_roundtrip"
+      ]
+    },
+    {
+      "original_id": "supplemental-json:tools/build_stagea_forward_recovery_package.py::recovery_manifest@85:26",
+      "source_commit": "6d8288adc94b3c4b624c143ed372fb6513f32784",
+      "source_blob": "f2baf29e237e769c2eafa73bc636087b8290c22f",
+      "owner_route": null,
+      "status": "eligible_unresolved_owner_api_gap",
+      "blocker": "Existing finished JSON profiles sort keys. No exact owner API preserves insertion order for the original json.dumps defaults (ASCII escaping, allow_nan=True), including JSON round trips and indent-2 newline publication. Sorting changes observable ordering and mixed-key refusal behavior; leave caller unchanged pending an exact owner API. Owner edits outside this slice.",
+      "fixtures": [
+        "tests/fixtures/digest_1301/joint-handoff/original_packages_forward_recovery.py"
+      ],
+      "tests": [
+        "tests/test_digest_1301/joint-handoff/test_packages.py::test_unresolved_recovery_roundtrip"
+      ]
+    }
+  ]
+}

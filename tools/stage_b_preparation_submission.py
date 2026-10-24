@@ -43,7 +43,6 @@ exist when the manifest is built.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -56,7 +55,7 @@ from prismaquant.joint_layer_quanta import seal_manifest_bytes  # noqa: E402
 from prismaquant.stage_b_prep_io import (  # noqa: E402
     build_preparation_template, head_phase_entries, preparation_payload_ceiling,
     preparation_read_entries, preparation_read_manifest)
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 SUBMISSION_SCHEMA = "prismaquant.stage_b_preparation_submission.v1"
 
@@ -129,7 +128,7 @@ def prepare_reads(args):
     if extension_path.exists():
         # A later band set binds the extension the first one wrote.
         extension = {"path": str(extension_path.resolve()),
-                     "sha256": hashlib.sha256(extension_path.read_bytes()).hexdigest()}
+                     "sha256": bytes_sha256hex(extension_path.read_bytes())}
         files.append((extension_path, extension["sha256"]))
     files += sorted(control_digests(inputs, plan, prepared, extension).items())
     files.append((prepared["production_cache"]["path"],
@@ -207,16 +206,16 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
         "schema": SUBMISSION_SCHEMA, "tool": args.tool,
         "metadata_root": str(root),
         "data_manifest": {"path": str(manifest_path),
-                          "sha256": hashlib.sha256(manifest_bytes).hexdigest()},
+                          "sha256": bytes_sha256hex(manifest_bytes)},
         "produced_output_template": {
             "path": str(template_path), "template_id": template["template_id"],
-            "sha256": hashlib.sha256(template_bytes).hexdigest()},
+            "sha256": bytes_sha256hex(template_bytes)},
         "reads": {"entries": manifest["entry_count"], "bytes": manifest["total_bytes"]},
         # PQ #1092: appended to the tool's command line, so the action reads
         # every declared input off the stage, checked against its digest,
         # and refuses rather than reading the pool.
         "strict_read_flags": ["--data-manifest-sha256",
-                              hashlib.sha256(manifest_bytes).hexdigest(),
+                              bytes_sha256hex(manifest_bytes),
                               "--allowed-tiers", "ram,ssd"],
         # --residency stage also gives the action PRISMABUILD_RESIDENCY_MAP,
         # which the produced-output binding needs for its queue root.

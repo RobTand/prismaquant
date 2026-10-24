@@ -1,0 +1,46 @@
+def write_submission(args, entries, annotations, quanta, indexes) -> dict:
+    out = Path(args.out).resolve()
+    root = Path(args.metadata_root).resolve()
+    if out == root or root in out.parents:
+        raise ValueError("the submission directory must sit outside the metadata "
+                         "root, which the produced-output template owns")
+    manifest = preparation_read_manifest(
+        entries, produced_by={"tool": "tools/stage_b_preparation_submission.py",
+                              "entry_point": args.tool},
+        annotations=annotations, mount_prefix=args.mount_prefix)
+    template = build_preparation_template(
+        metadata_root=root, tier=args.tier,
+        payload_max_bytes=preparation_payload_ceiling(quanta, indexes=indexes))
+    out.mkdir(parents=True, exist_ok=True)
+    manifest_bytes = seal_manifest_bytes(manifest)
+    template_bytes = (json.dumps(template, sort_keys=True, indent=1) + "\n").encode()
+    manifest_path = out / "read-manifest.json.gz"
+    template_path = out / "template.json"
+    for path, payload in ((manifest_path, manifest_bytes), (template_path, template_bytes)):
+        if path.exists() and path.read_bytes() != payload:
+            raise ValueError(f"{path} already holds other bytes; use a new directory")
+        path.write_bytes(payload)
+    submission = {
+        "schema": SUBMISSION_SCHEMA, "tool": args.tool,
+        "metadata_root": str(root),
+        "data_manifest": {"path": str(manifest_path),
+                          "sha256": hashlib.sha256(manifest_bytes).hexdigest()},
+        "produced_output_template": {
+            "path": str(template_path), "template_id": template["template_id"],
+            "sha256": hashlib.sha256(template_bytes).hexdigest()},
+        "reads": {"entries": manifest["entry_count"], "bytes": manifest["total_bytes"]},
+        # PQ #1092: appended to the tool's command line, so the action reads
+        # every declared input off the stage, checked against its digest,
+        # and refuses rather than reading the pool.
+        "strict_read_flags": ["--data-manifest-sha256",
+                              hashlib.sha256(manifest_bytes).hexdigest(),
+                              "--allowed-tiers", "ram,ssd"],
+        # --residency stage also gives the action PRISMABUILD_RESIDENCY_MAP,
+        # which the produced-output binding needs for its queue root.
+        "pbrun_options": ["--data-manifest", str(manifest_path),
+                          "--produced-output-template", str(template_path),
+                          "--residency", "stage", "--residency-ram", "auto"],
+    }
+    (out / "submission.json").write_bytes(
+        (json.dumps(submission, sort_keys=True, indent=1) + "\n").encode())
+    return submission
