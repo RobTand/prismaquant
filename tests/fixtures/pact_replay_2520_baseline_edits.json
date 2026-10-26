@@ -1,0 +1,46 @@
+{
+  "baseline_commit": "fc518e4897f88982b6ff49bf9293eea5d76ecd46",
+  "description": "Reverse only the reviewed post-import edits to reconstruct the accepted import. All reconstructed bytes must match IMPORT_PROVENANCE.json; other imported files are checked directly. No Git history is required by the test.",
+  "files": {
+    "experiments/pact_replay/multi_stream_replay.py": [
+      {
+        "current": "from contextlib import ExitStack\nfrom pathlib import Path\nfrom replay_progress import DEFAULT_STALL_SECONDS, ReplayProgress, require_stall_seconds, supervise\n\n\n",
+        "baseline": "from contextlib import ExitStack\nfrom pathlib import Path\n\n\n"
+      },
+      {
+        "current": "\nTEACHER_STOP = 45\n\n\n",
+        "baseline": "\nTEACHER_STOP = 45\nAPPROVED_DEADLINE_SECONDS = 3500\n\n\n"
+      },
+      {
+        "current": "    p.add_argument(\"--teacher-content-sha256\", required=True,\n        help=\"Declared SHA-256 of the teacher validation proof bytes\")\n    p.add_argument(\"--stall-seconds\", type=float, default=DEFAULT_STALL_SECONDS,\n        help=\"Maximum silence between completed steps, in seconds. No total duration limit.\")\n    p.add_argument(\"--window-layers\", type=int, default=None,\n        help=\"Committed window stride in layers. Defaults to one window for the whole replay.\")\n",
+        "baseline": "    p.add_argument(\"--teacher-content-sha256\", required=True,\n        help=\"Declared SHA-256 of the teacher validation proof bytes\")\n    p.add_argument(\"--deadline-seconds\", type=int, default=1700)\n    p.add_argument(\"--window-layers\", type=int, default=None,\n        help=\"Committed window stride in layers. Defaults to one window for the whole replay.\")\n"
+      },
+      {
+        "current": "    if {\"window_start\": args.window_start, \"window_stop\": args.window_stop} not in plan:\n        raise ValueError(\"The CLI window must sit on the planned window grid\")\n    require_stall_seconds(args.stall_seconds)\n    generations = {\"receipt_sha256\": hashlib.sha256(bytes(receipt_bytes)).hexdigest(),\n                   \"source_window\": [receipt_doc[\"layer_start\"], receipt_doc[\"layer_stop\"]],\n",
+        "baseline": "    if {\"window_start\": args.window_start, \"window_stop\": args.window_stop} not in plan:\n        raise ValueError(\"The CLI window must sit on the planned window grid\")\n    if not 0 < args.deadline_seconds <= APPROVED_DEADLINE_SECONDS:\n        raise ValueError(\"The replay needs a bounded deadline\")\n    generations = {\"receipt_sha256\": hashlib.sha256(bytes(receipt_bytes)).hexdigest(),\n                   \"source_window\": [receipt_doc[\"layer_start\"], receipt_doc[\"layer_stop\"]],\n"
+      },
+      {
+        "current": "\ndef main():\n    args = cli_parser().parse_args()\n    require_stall_seconds(args.stall_seconds)\n    if args.dry_run_cpu or args.prepare_readset:\n        return run_replay(args)\n    return supervise(lambda notify: run_replay(args, notify), args.stall_seconds)\n\n\ndef run_replay(args, notify=lambda record: None):\n    from stage1a_energy import setup, actual_cpu, available, guard\n    from band_replay import load_teacher, publish_stream_document\n    import time\n    from strict_leases import strict_input_leases\n",
+        "baseline": "\ndef main():\n    from stage1a_energy import setup, actual_cpu, available, guard, progress\n    from band_replay import load_teacher, publish_stream_document\n    args = cli_parser().parse_args()\n    import time\n    from strict_leases import strict_input_leases\n"
+      },
+      {
+        "current": "            raise ValueError(\"The GPU replay path needs its admitted rendered-resident byte budget\")\n        began = time.monotonic()\n        progress = ReplayProgress(\n            args.output_dir / (\"progress-%02d-%02d.jsonl\" % (window_start, window_stop)),\n            args.stall_seconds, notify=notify)\n\n        def check(label):\n            guard(label)\n            progress.check(label)\n\n        teacher = teacher_bindings(teacher_receipt, teacher_content)\n",
+        "baseline": "            raise ValueError(\"The GPU replay path needs its admitted rendered-resident byte budget\")\n        began = time.monotonic()\n\n        def check(label):\n            guard(label)\n            if time.monotonic() - began >= args.deadline_seconds:\n                raise TimeoutError(\"The band quantum reached its declared deadline\")\n\n        teacher = teacher_bindings(teacher_receipt, teacher_content)\n"
+      }
+    ],
+    "experiments/pact_replay/bounded_profile.py": [
+      {
+        "current": "\n_CAPTURE = None\n_METADATA_FIELDS = (\"capture_items\", \"started_unix\", \"ended_unix\", \"trace\")\n\n\ndef capture_metadata():\n    \"\"\"Return only the active capture's small, serializable summary fields.\"\"\"\n    if _CAPTURE is not None:\n        return {field: getattr(_CAPTURE, field) for field in _METADATA_FIELDS}\n\n\ndef accept_capture_metadata(metadata):\n    \"\"\"Restore a successful numerical worker's capture before publishing.\"\"\"\n    if _CAPTURE is not None and metadata is not None:\n        for field in _METADATA_FIELDS:\n            setattr(_CAPTURE, field, metadata[field])\n\n\nclass _Capture:\n    def __init__(self, output, expected_device):\n        self.output, self.expected_device = output, expected_device\n        self.capture_items = 0\n        self.started_unix = self.ended_unix = None\n",
+        "baseline": "\n_CAPTURE = None\n\n\nclass _Capture:\n    def __init__(self, output, activities):\n        self.output, self.activities = output, activities\n        self.capture_items = 0\n        self.started_unix = self.ended_unix = None\n"
+      },
+      {
+        "current": "    @contextmanager\n    def first_item(self):\n        # The supervisor must fork before Torch initializes CPU/CUDA workers.\n        import torch\n        if self.expected_device == \"cuda\" and not torch.cuda.is_available():\n            raise RuntimeError(\"The GPU profile requires a live CUDA device\")\n        activities = [torch.profiler.ProfilerActivity.CPU]\n        if self.expected_device == \"cuda\":\n            activities.append(torch.profiler.ProfilerActivity.CUDA)\n        self.capture_items = 1\n        profiler = torch.profiler.profile(activities=activities, record_shapes=True,\n            profile_memory=False, with_stack=False)\n        try:\n",
+        "baseline": "    @contextmanager\n    def first_item(self):\n        import torch\n        self.capture_items = 1\n        profiler = torch.profiler.profile(activities=self.activities, record_shapes=True,\n            profile_memory=False, with_stack=False)\n        try:\n"
+      },
+      {
+        "current": "def profile_run(output, entry, entry_args, expected_device):\n    \"\"\"Run an unchanged entry with one bounded diagnostic trace and no tables.\"\"\"\n    output = Path(output)\n    output.mkdir(parents=True, exist_ok=True)\n    capture = _Capture(output, expected_device)\n    global _CAPTURE\n    previous, previous_argv = _CAPTURE, sys.argv\n",
+        "baseline": "def profile_run(output, entry, entry_args, expected_device):\n    \"\"\"Run an unchanged entry with one bounded diagnostic trace and no tables.\"\"\"\n    import torch\n    if expected_device == \"cuda\" and not torch.cuda.is_available():\n        raise RuntimeError(\"The GPU profile requires a live CUDA device\")\n    activities = [torch.profiler.ProfilerActivity.CPU]\n    if expected_device == \"cuda\":\n        activities.append(torch.profiler.ProfilerActivity.CUDA)\n    output = Path(output)\n    output.mkdir(parents=True, exist_ok=True)\n    capture = _Capture(output, activities)\n    global _CAPTURE\n    previous, previous_argv = _CAPTURE, sys.argv\n"
+      }
+    ]
+  }
+}
