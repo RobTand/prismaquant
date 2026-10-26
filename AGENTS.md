@@ -1,5 +1,31 @@
 # PrismaQuant Agent Rules
 
+<!-- ticket-intake:start -->
+## New GitHub work
+
+Create new work through the intake gate as a native child of an open GitHub
+issue. Save the body in your task worktree or evidence directory, then run:
+
+```bash
+python3 /home/rob/paperclip-repos/prismabuild/tools/backlog_census/intake.py \
+  --repo RobTand/prismaquant --parent PARENT_NUMBER --priority P2 \
+  --title 'Ticket title' --body-file BODY_FILE
+```
+
+This is a read-only dry run. After it passes, add `--apply` to create the child.
+The command checks all three repos with the census duplicate matcher. It refuses
+likely duplicates and P0/P1 bodies without a nonempty Reproduction or Measurement
+section. Reuse the issue named by a duplicate refusal or revise the scope.
+Use existing labels only. Do not bypass the command with a direct issue write.
+
+The repo-local `to-tickets` skill preserves Matt Pocock's plan approval step and
+uses this gate to publish. Read `.agents/skills/to-tickets/SKILL.md`; Claude Code
+also discovers it through `.claude/skills/to-tickets`. These instructions require
+the reviewed prismabuild intake change to have landed before publication.
+OMP issuegraph remains stopped; its future hook is documented in prismabuild's
+`tools/backlog_census/INTAKE.md`.
+<!-- ticket-intake:end -->
+
 These rules are mandatory for coding agents working in this repository.
 Before implementing new functionality, read this file,
 `docs/design/design_guidelines.md`, and `docs/ARCHITECTURE.md`.
