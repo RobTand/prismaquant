@@ -1,0 +1,100 @@
+{
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "exit_code": 0,
+ "files": [
+  "tests/test_native_window_moe.py",
+  "tests/test_native_window_moe_method.py",
+  "tests/test_serving_moe_tp2.py"
+ ],
+ "finished_unix": 1791587564.3659375,
+ "identity": {
+  "contract_matches_pin": true,
+  "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "suite_source": {
+   "excluded_metadata": [],
+   "files_verified": 2005,
+   "schema": "tessera.suite_source.v1",
+   "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+   "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+   "verification": "verified"
+  },
+  "verified_at_candidate": true
+ },
+ "mode": "run",
+ "probe": {
+  "assertions_dropped": 0,
+  "assertions_recorded": 334,
+  "errors": [],
+  "native_libraries_by_worker": {
+   "gw0": {},
+   "gw1": {},
+   "main": {}
+  },
+  "native_library_sha256_seen": {},
+  "tests_recorded": 71,
+  "workers": [
+   "gw0",
+   "gw1"
+  ]
+ },
+ "probe_loaded_in_collection": true,
+ "probe_selftest": {
+  "float_assertion": {
+   "assertion": "measured < tolerance",
+   "evaluated": "0.125 < 0.25",
+   "line": 14
+  },
+  "ok": true,
+  "returncode": 0,
+  "stdout_tail": "bringing up nodes...\nbringing up nodes...\n\n....                                                                     [100%]\n4 passed in 0.25s\n",
+  "workers": [
+   "gw0",
+   "gw1"
+  ]
+ },
+ "roster_check": {
+  "collected": 71,
+  "duplicates": [],
+  "equal": true,
+  "expected": 71,
+  "missing": [],
+  "unexpected": []
+ },
+ "runtime": {
+  "cuda_available": true,
+  "device": {
+   "capability": [
+    12,
+    1
+   ],
+   "multi_processor_count": 48,
+   "name": "NVIDIA GB10",
+   "total_memory": 130594091008,
+   "uuid": "e76c7efc-c157-b1f4-1348-83e4eb5092f4"
+  },
+  "gid": 1000,
+  "machine": "aarch64",
+  "python": "3.12.3",
+  "tessera_environment": {},
+  "tessera_file": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/run-moe.ap8gp5um/tessera-source/src/tessera/__init__.py",
+  "torch": "2.13.0+cu130",
+  "torch_cuda": "13.0",
+  "triton": "3.7.1",
+  "uid": 1000,
+  "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904"
+ },
+ "schema": "pq1317.container.v1",
+ "started_unix": 1791587522.0742695,
+ "suite": "moe",
+ "test_tools": {
+  "installed": [
+   "pytest==8.4.2",
+   "pytest-xdist==3.8.0",
+   "execnet==2.1.1",
+   "pluggy==1.6.0",
+   "iniconfig==2.1.0"
+  ],
+  "pytest": "8.4.2",
+  "xdist": "3.8.0"
+ }
+}

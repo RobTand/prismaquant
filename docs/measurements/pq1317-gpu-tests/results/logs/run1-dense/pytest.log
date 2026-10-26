@@ -1,0 +1,90 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+cachedir: /mnt/shared/tessera-measurements/pq1317-gpu-tests/dense.Jhe79x2H/pytest-cache
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+rootdir: /mnt/shared/tessera-pins/fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb
+configfile: pyproject.toml
+created: 2/2 workers
+2 workers [65 items]
+
+.................................................................        [100%]
+=============================== warnings summary ===============================
+tests/test_serving_bf16_gemv.py: 14 warnings
+  /usr/local/lib/python3.12/dist-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /mnt/shared/tessera-measurements/pq1317-gpu-tests/dense.Jhe79x2H/junit.xml -
+
+tessera surface: CUDA -- torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10
+tessera surface: 0 test(s) skipped, 0 module(s) not collected
+tessera surface: 46 test(s) allocated on the device
+tessera surface: population written to /mnt/shared/tessera-measurements/pq1317-gpu-tests/dense.Jhe79x2H/surface.json sha256:8ce81b67bc2810459f6152a64b2af0d5ecb3db9ece3c3d13d0a6455b737efcc9
+============================= slowest 20 durations =============================
+65.20s call     tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[32]
+47.32s call     tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[16]
+41.95s call     tests/test_serving_bf16_gemv.py::test_streamed_prepares_folded_native_without_materialized_planes
+31.91s call     tests/test_serving_fp8_gemv.py::test_streamed_prepares_native_without_materialized_planes
+31.89s call     tests/test_serving_bf16_gemv.py::test_gemv_and_torch_agree_with_measured_differences
+2.38s call     tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[256]
+1.97s call     tests/test_serving_bf16_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim
+1.14s call     tests/test_serving_fp8_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim
+1.05s call     tests/test_serving_bf16_gemv.py::test_rung_outside_reference_gemv_range_uses_dense_native
+0.59s call     tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[1]
+0.55s call     tests/test_serving_bf16_gemv.py::test_streamed_apply_routes_by_m_and_rate_one
+0.46s call     tests/test_serving_bf16_gemv.py::test_rate1_columns_keep_dense_dispatch_across_decode_sizes
+0.45s call     tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_does_not_change_dense_compile_identity
+0.38s call     tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[2]
+0.35s call     tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[1]
+0.34s call     tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[4]
+0.34s call     tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[4]
+0.34s call     tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[8]
+0.31s call     tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[5]
+0.31s call     tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[4]
+================= 65 passed, 14 warnings in 120.13s (0:02:00) ==================
+TS611_SURFACE {
+  "schema": "tessera.test_surface.v3",
+  "role": "population",
+  "worker_id": null,
+  "xdist_workers": 2,
+  "commit": null,
+  "source_identity": {
+    "schema": "tessera.suite_source.v1",
+    "snapshot_commit": null,
+    "sha256": null,
+    "verification": "unknown",
+    "excluded_metadata": [],
+    "reason": "the processes that executed this population did not agree on its source: gw0 did not establish a verified source identity; gw1 did not establish a verified source identity",
+    "measurement_span": {
+      "entry_sha256": null,
+      "entry_snapshot_commit": null,
+      "entry_verification": "unknown",
+      "agrees": false
+    },
+    "workers": {
+      "gw0": "did not establish a verified source identity",
+      "gw1": "did not establish a verified source identity"
+    }
+  },
+  "cuda": true,
+  "device": "torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10",
+  "strict_cuda": true,
+  "counts": {
+    "passed": 65,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "skip_reasons": {},
+  "cuda_surface": {
+    "executed": 46,
+    "measured_by": "tests during whose call torch's CUDA allocator recorded a new allocation",
+    "is_a_floor": true,
+    "box_artifact_skips": {}
+  },
+  "not_collected": []
+}
+
+TS611_RC 0
