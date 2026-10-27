@@ -10,6 +10,7 @@ import argparse
 from functools import partial
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from tools.exl3_grouped_down_replay import (
     DEFAULT_MODULE, DEFAULT_REPEATS, DEFAULT_REQUIRED_ROWS,
@@ -37,7 +38,7 @@ def parse_args(argv=None):
                         help="only this MoE input row count can spend the one shot")
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS,
                         help="replays after the real call, 2..16 (default: %(default)s)")
-    parser.add_argument("--quantization")
+    parser.add_argument("--quantization", choices=("exl3",), default="exl3")
     for name in ("kv-cache-dtype", "expected-kv-cache-dtype"):
         parser.add_argument("--" + name, choices=("auto", "bfloat16", "fp8_ds_mla"),
                             required=True)
@@ -83,14 +84,26 @@ def parse_args(argv=None):
     return args
 
 
-def _cleanup_native_capture(model):
+def _install_native_capture(model, *, owner, tile_rows, logits_layout):
+    from experiments.measure_glm_tr3_vllm import install_capture
+
+    if hasattr(model, "_tr3_capture") or hasattr(model, "_tr3_diagnostic_capture_owner"):
+        raise ValueError("candidate already has a native capture owner")
+    model._tr3_diagnostic_capture_owner = owner
+    return install_capture(model, tile_rows=tile_rows, logits_layout=logits_layout)
+
+
+def _cleanup_native_capture(model, *, owner=None):
     """Remove only this scope's native hook, including partial installation."""
     from experiments.measure_glm_tr3_vllm import remove_capture
 
+    if owner is None or getattr(model, "_tr3_diagnostic_capture_owner", None) != owner:
+        return False
     if hasattr(model, "_tr3_capture_handle"):
-        return remove_capture(model)
-    if hasattr(model, "_tr3_capture"):
+        remove_capture(model)
+    elif hasattr(model, "_tr3_capture"):
         del model._tr3_capture
+    del model._tr3_diagnostic_capture_owner
     return True
 
 
@@ -125,6 +138,7 @@ def run(args):
     kwargs = native.scorer_engine_kwargs(args, model=model, topology=topology)
     llm = LLM(**kwargs)
     capture_attempted = False
+    capture_owner = uuid4().hex
     try:
         if native.refuse_if_spec_decode(llm=llm, context="EXL3 grouped-down diagnostic") is not False:
             raise ValueError("speculative decoding must be observed disabled")
@@ -133,8 +147,8 @@ def run(args):
                                   compilation=compilation)
         observed = native.observed_engine_configuration(llm, **observation_kwargs)
         capture_attempted = True
-        worker_runtime = llm.apply_model(partial(native.install_capture, tile_rows=args.tile_rows,
-                                                 logits_layout=args.logits_layout))
+        worker_runtime = llm.apply_model(partial(_install_native_capture, owner=capture_owner,
+                                                 tile_rows=args.tile_rows, logits_layout=args.logits_layout))
         worker_runtime.sort(key=lambda row: row["rank"])
         if ([row["rank"] for row in worker_runtime] != list(range(world_size))
                 or any(row["world_size"] != world_size for row in worker_runtime)):
@@ -210,6 +224,10 @@ def run(args):
             diagnostics_after=after, world_size=world_size, window_id=window_id,
             module_name=args.module, repeats=args.repeats, required_rows=args.required_rows)
         result["prompt_alignment"] = alignment
+        cleaned = llm.apply_model(partial(_cleanup_native_capture, owner=capture_owner))
+        if len(cleaned) != world_size or any(value is not True for value in cleaned):
+            raise ValueError("native capture cleanup lacks complete ownership receipts")
+        capture_attempted = False
         native.atomic_json_write(result, args.output)
         return result
     except Exception as exc:
@@ -227,7 +245,7 @@ def run(args):
         # Also run after partial capture installation or a failed RPC. Replay
         # cleanup has already run inside replay_request before native removal.
         if capture_attempted:
-            llm.apply_model(_cleanup_native_capture)
+            llm.apply_model(partial(_cleanup_native_capture, owner=capture_owner))
 
 
 def main(argv=None):

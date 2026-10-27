@@ -22,6 +22,28 @@ def test_cleanup_preserves_an_unowned_native_capture(monkeypatch):
     assert model._tr3_capture_handle is handle
 
 
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_failed_installation_cleans_only_its_own_partial_capture(monkeypatch, preexisting):
+    original = object()
+    model = SimpleNamespace(**({"_tr3_capture": original} if preexisting else {}))
+
+    def install(model, **kwargs):
+        model._tr3_capture = object()
+        raise RuntimeError("partial native install")
+
+    monkeypatch.setattr(native, "install_capture", install)
+    with pytest.raises(ValueError if preexisting else RuntimeError):
+        cli._install_native_capture(model, owner="this-run", tile_rows=32, logits_layout="legacy_single")
+    cli._cleanup_native_capture(model, owner="another-run")
+    assert hasattr(model, "_tr3_capture")
+    cli._cleanup_native_capture(model, owner="this-run")
+    if preexisting:
+        assert model._tr3_capture is original
+    else:
+        assert not hasattr(model, "_tr3_capture")
+        assert not hasattr(model, "_tr3_diagnostic_capture_owner")
+
+
 def test_cleanup_failure_cannot_leave_valid_diagnostic_evidence(monkeypatch, tmp_path):
     model = tmp_path / "model"
     model.mkdir()
@@ -30,12 +52,14 @@ def test_cleanup_failure_cannot_leave_valid_diagnostic_evidence(monkeypatch, tmp
         "--panel", "panel", "--teacher", "teacher", "--teacher-sha256", "a" * 64,
         "--serve-image", "example.invalid/image@sha256:" + "b" * 64,
         "--kv-cache-dtype", "auto", "--expected-kv-cache-dtype", "bfloat16",
+        "--tensor-parallel-size", "2",
         "--output", str(tmp_path / "diagnostic.json"),
     ])
     panel = {"windows": [{"window_id": "final-0000"}]}
     teacher = {"windows": [{}], "tokenizer_identity": {"tokenizer": "sealed"}}
     rows = [{"rank": rank, "world_size": 2} for rank in range(2)]
     publications = []
+    built = []
 
     class LLM:
         def __init__(self, **kwargs):
@@ -57,6 +81,10 @@ def test_cleanup_failure_cannot_leave_valid_diagnostic_evidence(monkeypatch, tmp
         generate()
         return rows
 
+    def build_report(**kwargs):
+        built.append(True)
+        return {"diagnostic_only": True, "evidence_valid": True}
+
     monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=LLM, SamplingParams=lambda **kw: kw))
     monkeypatch.setattr(native, "load_panel", lambda *a, **kw: (panel, [torch.zeros(1, 3, dtype=torch.long)]))
     monkeypatch.setattr(native, "load_teacher", lambda *a: teacher)
@@ -74,8 +102,9 @@ def test_cleanup_failure_cannot_leave_valid_diagnostic_evidence(monkeypatch, tmp
     monkeypatch.setattr(native, "verify_prompt_alignment", lambda *a: {"aligned": True})
     monkeypatch.setattr(native, "atomic_json_write", lambda result, path: publications.append(result))
     monkeypatch.setattr(driver, "replay_request", replay_request)
-    monkeypatch.setattr(driver, "build_report", lambda **kw: {"diagnostic_only": True, "evidence_valid": True})
+    monkeypatch.setattr(driver, "build_report", build_report)
     with pytest.raises(RuntimeError, match="cleanup failure"):
         cli.run(args)
+    assert built == [True], publications
     assert publications
     assert all(result["evidence_valid"] is False for result in publications)
