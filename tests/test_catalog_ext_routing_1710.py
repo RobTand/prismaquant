@@ -21,18 +21,7 @@ from prismaquant.digests import (
     indent2_json_file_bytes,
 )
 from prismaquant.joint_catalog_extension import catalog_stat_fence
-
-
-def _spy(monkeypatch, name):
-    calls = []
-    real = getattr(cext, name, None)
-
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-
-    monkeypatch.setattr(cext, name, stand_in, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def _bound(path):
@@ -41,7 +30,7 @@ def _bound(path):
 
 
 def test_fence_hashes_route_to_file_owner(monkeypatch, tmp_path):
-    file_calls = _spy(monkeypatch, "file_digest_sha256hex")
+    file_calls = record_unary_calls(monkeypatch, cext, "file_digest_sha256hex")
     wire = tmp_path / "wire.bin"
     wire.write_bytes(b"\x00\x01catalog-fence")
     blob_sha = hashlib.sha256(b"\x00\x01catalog-fence").hexdigest()
@@ -60,8 +49,8 @@ def test_fence_hashes_route_to_file_owner(monkeypatch, tmp_path):
 
 
 def test_create_extension_envelope_routes_to_owners(monkeypatch, tmp_path):
-    dumps_calls = _spy(monkeypatch, "indent2_json_file_bytes")
-    hash_calls = _spy(monkeypatch, "bytes_sha256hex")
+    dumps_calls = record_unary_calls(monkeypatch, cext, "indent2_json_file_bytes")
+    hash_calls = record_unary_calls(monkeypatch, cext, "bytes_sha256hex")
     monkeypatch.setattr(cext, "verify_catalog_pair", lambda inputs: {"stub": True})
     monkeypatch.setattr(cext, "_run_header",
                         lambda doc: {"run_identity": {"campaign_scope": {"x": 1}}})
