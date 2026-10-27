@@ -176,3 +176,17 @@ python -m pytest \
 Observed: **533 passed**, 14 torch/Python 3.14 deprecation warnings, exit 0.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"6483945c72e3948a98b81bb688ca7ea48e939b6745e17d1d6a4c9a86d7a3b10b","size":1383}},"operation":"337dfe7ae44e57a720a48e9a2ab342f4e4afa7912ecc4429b623f6b00a434120","receipt":"f980e2f74fa5e9c3a3d31fd6c6e010804edf2116146ddf78ab8e65473ae34ed2"}]
+
+## PRI-101 integration, 2026-10-27
+
+PRI-218 authorizes this source repair without restarting the active campaign.
+The delivery reuses #2976 at `1de5bf4b7246835ee331ead7b47f88d52f9db042`.
+Its merge-base with precursor #2599 is #2599's exact head,
+`fa59b9705fcd8c6f65d0ccc9bd50229bc7d09ac9`, so the precursor is fully inherited.
+Integration onto main `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` changes only
+conflicting changelog and architecture additions. All five D44 test files,
+controller and proof scripts, lifetime seed, and source-evidence bytes equal
+the preserved source. The task's `verify_preserved.py` repeats that comparison.
+Historical failing-before actions above remain historical evidence.
+Fresh integrated-head fleet checks and independent review are separate gates;
+this note does not claim either has passed.
