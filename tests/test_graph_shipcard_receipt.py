@@ -215,3 +215,11 @@ def test_observed_compilation_preserves_json_types(tmp_path, boundary_verifier, 
     problems = verify(card, model_dir=model, required=["native_export.graph"])
     assert any("compilation" in problem or "operator" in problem for problem in problems), problems
     assert boundary_verifier == []
+
+
+def test_compilation_operators_cannot_contradict_equality_arm(tmp_path, boundary_verifier):
+    model, card, record, _ = graph_card(tmp_path)
+    record["metrics"]["graph_observation"]["resolved"]["compilation_config"]["custom_ops"] = ["different"]
+    problems = verify(card, model_dir=model, required=["native_export.graph"])
+    assert any("operator" in problem for problem in problems), problems
+    assert boundary_verifier == []
