@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, SDK5 release-smoke fixture repair, PQ #2826.
+Source commit: `8e7dbf876be6a60916866872016f5400e79281d7` (tested fixture and smoke; this follow-up records documentation only).
+The SDK5 qualification section below separates CPU contract integration from historical retained evidence and native qualification.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
