@@ -928,9 +928,10 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                             "profile": str(root / f"{key}.pstats"),
                             "coverage": measure_env.get("COVERAGE_FILE"),
                         }
+                    done.write_text(json.dumps(state))
+                    if measure:
                         (root / f"{key}.child-measurement.json").write_text(
                             json.dumps(child_measurement))
-                    done.write_text(json.dumps(state))
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
     state = json.loads(done.read_text())
