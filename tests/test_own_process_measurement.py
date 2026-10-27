@@ -32,6 +32,7 @@ def test_measurement_retains_child_phases_and_profile(tmp_path, workers):
     assert metrics, "the parent omitted its isolated child's cost"
     executed = [row for row in metrics if row["executed_child"]]
     assert len(executed) == 1
+    assert all(row["child_returncode"] == 1 for row in metrics)
     assert {row["child_profile"] for row in metrics} == {
         executed[0]["child_profile"]}
     stats = pstats.Stats(executed[0]["child_profile"])
