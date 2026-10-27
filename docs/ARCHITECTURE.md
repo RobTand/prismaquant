@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, EXL3 diagnostic replay repair, Refs #2769 and #468.
+Source commit: `40393712aa76832f432272d1c50b5faf77c1b279`.
+The opt-in `experiments.diagnose_exl3_grouped_down_replay` driver reuses the
+native scorer's authenticated loaders, capture, configuration and alignment
+owners for one sealed window. Diagnostic reports bind complete runtime/source
+identities and reject malformed worker evidence. Probe schema `/3` snapshots
+arguments before the real call and starts each replay from the original
+accumulator input, which can contain thin-expert contributions. It checks the
+nine read-only inputs separately from served-output preservation. Valid evidence
+publishes after owned native capture cleanup. The ordinary scorer, qualification
+predicate, format menu, plugin pin, stage graph and shipping gates are unchanged.
+This is CPU-verifiable diagnostic engineering, not a native numerical repair.
+Historical full25 remains measured but incomparable while #468 is unresolved.
+See `docs/experiments/exl3_grouped_down_replay_driver.md`.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
