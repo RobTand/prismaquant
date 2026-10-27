@@ -68,6 +68,19 @@ def test_disabled_measurement_preserves_reports_without_artifacts(tmp_path):
     assert all("duration" not in row for row in reports)
 
 
+def test_collection_skip_preserves_reason_without_phase_duration(monkeypatch):
+    import conftest
+
+    monkeypatch.setenv("PQ_OWN_PROCESS_MEASURE", "1")
+    report = pytest.CollectReport(
+        nodeid="sample.py", outcome="skipped",
+        longrepr=("sample.py", 1, "Skipped: child collection evidence"), result=[])
+    record = conftest._own_process_record(report)
+    assert record["when"] == "collect" and record["outcome"] == "skipped"
+    assert record["reason"] == "child collection evidence"
+    assert "duration" not in record
+
+
 @pytest.mark.parametrize("workers", [0, 2], ids=["serial", "xdist"])
 def test_child_only_line_has_its_test_coverage_context(tmp_path, workers):
     coverage = pytest.importorskip("coverage")
