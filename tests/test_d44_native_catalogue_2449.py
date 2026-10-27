@@ -25,11 +25,10 @@ class CatalogueTests(unittest.TestCase):
             blob.write_bytes(f'retained {kind}'.encode())
             encode = self.root / f'{kind}-encode.json'
             held = self.root / f'{kind}-held.json'
-            leaf = name.split('.')[-1]
             self.tasks.append({'id': f'unit-{i}', 'output_id': f'unit-{i}', 'payload': {
                 'qname': name, 'reads': [
-                    {'path': f'/frozen/{leaf}.fit.pt', 'sha256': 'a' * 64},
-                    {'path': f'/frozen/{leaf}.heldout.pt', 'sha256': 'b' * 64},
+                    {'path': f'/frozen/{name}.fit.pt', 'sha256': 'a' * 64},
+                    {'path': f'/frozen/{name}.heldout.pt', 'sha256': 'b' * 64},
                     {'path': '/frozen/selection-subsample-20261007.json', 'sha256': 'c' * 64}]}})
             dimensions = [4, 8] if kind != 'down' else [8, 4]
             roles = {'fit': {'count': 10, 'sha256': 'a' * 64},
@@ -39,7 +38,7 @@ class CatalogueTests(unittest.TestCase):
                 'blob_path': str(blob), 'blob_sha256': digest(blob), 'blob_bytes': blob.stat().st_size,
                 'rendered_shape': dimensions, 'conditioning': conditioning, **roles}))
             held.write_text(json.dumps({'qname': name, 'dry_run': False,
-                'actual_source_shape': dimensions, 'conditioning': conditioning,
+                'actual_source_shape': dimensions,
                 **roles, 'replacement': {
                     'blob': str(blob), 'blob_sha256': digest(blob), 'bytes': blob.stat().st_size,
                     'receipt': str(encode), 'receipt_sha256': digest(encode)}}))

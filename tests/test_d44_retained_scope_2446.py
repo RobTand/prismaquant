@@ -27,7 +27,7 @@ SELECTION_SHA = 'c' * 64
 SELECTION_FILE = 'selection-subsample-20261007.json'
 
 
-def write_pair(root, kind, *, fit_sha=None, heldout_sha=None, selection=None):
+def write_pair(root, kind, *, fit_sha=None, heldout_sha=None, selection=None, held_conditioning=False):
     name = f'model.language_model.layers.40.mlp.experts.0.{kind}_proj'
     blob = root / f'{kind}.tessera'
     blob.write_bytes(f'retained {kind}'.encode())
@@ -45,7 +45,8 @@ def write_pair(root, kind, *, fit_sha=None, heldout_sha=None, selection=None):
         'blob_bytes': blob.stat().st_size, 'rendered_shape': dimensions,
         'conditioning': conditioning, 'fit': fit, 'heldout': heldout}))
     held_path.write_text(json.dumps({'qname': name, 'dry_run': False,
-        'actual_source_shape': dimensions, 'conditioning': conditioning,
+        'actual_source_shape': dimensions,
+        **({'conditioning': conditioning} if held_conditioning else {}),
         'fit': dict(fit), 'heldout': dict(heldout), 'replacement': {
             'blob': str(blob), 'blob_sha256': digest(blob),
             'bytes': blob.stat().st_size, 'receipt': str(encode_path),
@@ -59,14 +60,13 @@ def scope_task(name, task_id, *, fit_sha=None, heldout_sha=None,
                selection=None, selection_file=SELECTION_FILE,
                drop_reads=False, corrupt_digest=False,
                encode_conditioning=True, held_conditioning=True):
-    leaf = name.split('.')[-1]
     selection = SELECTION_SHA if selection is None else selection
     reads = []
     if not drop_reads:
         reads = [
-            {'path': f'/frozen/{leaf}.fit.pt',
+            {'path': f'/frozen/{name}.fit.pt',
              'sha256': ('short' if corrupt_digest else (FIT_SHA if fit_sha is None else fit_sha))},
-            {'path': f'/frozen/{leaf}.heldout.pt',
+            {'path': f'/frozen/{name}.heldout.pt',
              'sha256': HELDOUT_SHA if heldout_sha is None else heldout_sha},
             {'path': f'/frozen/{selection_file}', 'sha256': selection},
         ]
@@ -173,17 +173,20 @@ class RetainedScopeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'encode selection digest is missing'):
             wave.adopt_retained_units(request, manifest)
 
-    def test_missing_held_selection_refuses(self):
-        name, unit = write_pair(self.root, 'gate')
-        path = strip_conditioning(self.root, 'gate', 'held')
-        unit['held']['sha256'] = digest(path)
-        manifest = {'schema': 'd44.retained_units.v1', 'units': [unit]}
-        request = {'roster': {'tasks': [scope_task(name, 'unit-x')]}}
-        with self.assertRaisesRegex(ValueError, 'HELD selection digest is missing'):
-            wave.adopt_retained_units(request, manifest)
+    def test_historical_held_selection_binds_through_encode_receipt(self):
+        task = self.tasks[0]
+        unit = self.units[0]
+        encode = json.loads(Path(unit['encode']['path']).read_text())
+        held = json.loads(Path(unit['held']['path']).read_text())
+        self.assertNotIn('conditioning', held)
+        self.assertEqual(held['replacement']['receipt_sha256'], unit['encode']['sha256'])
+        expected = {'fit_sha256': FIT_SHA, 'heldout_sha256': HELDOUT_SHA,
+                    'selection_sha256': SELECTION_SHA}
+        with patch.object(wave, 'retained_task_scope', return_value=expected):
+            wave.check_retained_scope(unit['qname'], encode, held, task)
 
     def test_held_only_selection_still_refuses_mismatch(self):
-        name, unit = write_pair(self.root, 'gate')
+        name, unit = write_pair(self.root, 'gate', held_conditioning=True)
         encode_path = self.root / 'gate-encode.json'
         doc = json.loads(encode_path.read_text())
         doc['conditioning']['selection_sha256'] = '9' * 64
@@ -215,6 +218,27 @@ class RetainedScopeTests(unittest.TestCase):
             wave.check_retained_resume(catalog, dropped_file)
 
 
+@pytest.mark.parametrize('field, value', [
+    ('receipt_sha256', None), ('receipt_sha256', 'bad'),
+    ('receipt_sha256', '9' * 64), ('receipt', '/other/encode.json'),
+])
+def test_historical_held_requires_matching_encode_link(tmp_path, field, value):
+    name, unit = write_pair(tmp_path, 'gate')
+    held_path = Path(unit['held']['path'])
+    held = json.loads(held_path.read_text())
+    if value is None:
+        del held['replacement'][field]
+    else:
+        held['replacement'][field] = value
+    held_path.write_text(json.dumps(held))
+    unit['held']['sha256'] = digest(held_path)
+    request = {'roster': {'tasks': [scope_task(name, 'unit')]}}
+    before = json.dumps(request)
+    with pytest.raises(ValueError, match='Retained HELD replacement differs'):
+        wave.adopt_retained_units(request, {'schema': 'd44.retained_units.v1', 'units': [unit]})
+    assert json.dumps(request) == before
+
+
 @pytest.mark.parametrize('role, keyword', [('fit', 'fit_sha'), ('heldout', 'heldout_sha'),
                                           ('selection', 'selection')])
 @pytest.mark.parametrize('location', ['matching-frozen', 'encode', 'held'])
@@ -225,7 +249,7 @@ def test_nonhex_scope_digests_refuse_without_removing_work(tmp_path, monkeypatch
     # A matching pair of length-64 strings is not necessarily a SHA-256 identity.
     invalid = 'z' * 64
     kwargs = {keyword: invalid} if location == 'matching-frozen' else {}
-    name, unit = write_pair(tmp_path, 'gate', **kwargs)
+    name, unit = write_pair(tmp_path, 'gate', held_conditioning=True, **kwargs)
     task = scope_task(name, 'unit', **kwargs)
     if location != 'matching-frozen':
         path = Path(unit[location]['path'])
