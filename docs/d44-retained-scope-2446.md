@@ -7,11 +7,14 @@ lifetime seed, or native queue ownership.
 ## Refusals and owners
 
 - Fit, held-out and selection identities come from the current task's frozen
-  reads, not a new roster producer. Each role has one unambiguous frozen read.
+  reads, not a new roster producer. Tensor filenames use the full qname. Each
+  role has one unambiguous frozen read.
   Both authoritative and encode/HELD values must be lowercase hexadecimal
   SHA-256, not merely strings of length 64. Scope is checked before replacement
   and shape validation and before any task can be removed.
-- Both encode and HELD selection values must be present and match. A supplied
+- Encode selection must be present and match. Historical HELD files bind that
+  selection through the verified replacement receipt path and SHA-256. HELD
+  conditioning, when supplied, must also contain a matching selection. A supplied
   resume manifest must match the stored adopted population before native-tool
   loading or controller construction. Matching recovery leaves native admission
   custody intact; it does not generate replacement receipts for retained work.
@@ -190,3 +193,23 @@ the preserved source. The task's `verify_preserved.py` repeats that comparison.
 Historical failing-before actions above remain historical evidence.
 Fresh integrated-head fleet checks and independent review are separate gates;
 this note does not claim either has passed.
+
+## Retained-input compatibility repair, 2026-10-27
+
+Independent review of PR #3063 at `9923abf268c7d6d1935c616feaf21733d29c78ac`
+found that the fixtures shortened frozen tensor filenames and invented HELD
+conditioning. All three retained task records use full-qname tensor filenames.
+Their historical HELD files omit conditioning and bind the encode receipt by
+path and digest. The existing adoption gate verifies that relationship against
+the manifest's content-verified encode reference before any task is removed.
+The corrected selection comparison preserves that owner and validates optional
+HELD conditioning when present. Historical files, lifetime seed and source
+evidence are unchanged.
+
+Regressions at `b124c38006` precede the correction. PB action
+`8e8876fb25e616cdca87d4a6ac7b755653db60be4c1712e9f82da9380c4e5bd0`
+ran the two isolated regression methods on dl380g10 and ended failed/1:
+`2 failed in 1.57s`. The failures reproduce unresolved full-qname scope and
+missing HELD selection. The original review probe remains available as action
+`6b451f9398c2c3d072f89db56fe7b8a5bdafc9b95895214da6fbe39bd4aa9261`.
+These are CPU metadata checks, with no scientific or performance qualification.

@@ -517,9 +517,8 @@ def retained_task_scope(task):
     """
     payload = task.get('payload', {})
     qname = payload.get('qname', '')
-    leaf = qname.split('.')[-1]
-    fit = retained_read_digest(task, leaf + '.fit.pt')
-    heldout = retained_read_digest(task, leaf + '.heldout.pt')
+    fit = retained_read_digest(task, qname + '.fit.pt')
+    heldout = retained_read_digest(task, qname + '.heldout.pt')
     selections = [read.get('sha256') for read in payload.get('reads', [])
                   if Path(read.get('path', '')).name.startswith('selection-subsample-')
                   and Path(read.get('path', '')).suffix == '.json']
@@ -543,6 +542,9 @@ def check_retained_scope(name, encode, held, task):
             if actual != expected[key]:
                 raise ValueError(f'Retained {role} rows differ from the frozen task: {name}')
     for document, label in ((encode, 'encode'), (held, 'HELD')):
+        # Historical HELD binds selection through the verified replacement receipt.
+        if document is held and 'conditioning' not in held:
+            continue
         conditioning = document.get('conditioning')
         actual = conditioning.get('selection_sha256') if isinstance(conditioning, dict) else None
         if not is_sha256hex(actual):

@@ -239,6 +239,23 @@ def test_historical_held_requires_matching_encode_link(tmp_path, field, value):
     assert json.dumps(request) == before
 
 
+@pytest.mark.parametrize('conditioning', [
+    None, {}, {'selection_sha256': 'bad'}, {'selection_sha256': '9' * 64},
+])
+def test_supplied_held_selection_must_match_frozen_scope(tmp_path, conditioning):
+    name, unit = write_pair(tmp_path, 'gate')
+    held_path = Path(unit['held']['path'])
+    held = json.loads(held_path.read_text())
+    held['conditioning'] = conditioning
+    held_path.write_text(json.dumps(held))
+    unit['held']['sha256'] = digest(held_path)
+    request = {'roster': {'tasks': [scope_task(name, 'unit')]}}
+    before = json.dumps(request)
+    with pytest.raises(ValueError, match='selection'):
+        wave.adopt_retained_units(request, {'schema': 'd44.retained_units.v1', 'units': [unit]})
+    assert json.dumps(request) == before
+
+
 @pytest.mark.parametrize('role, keyword', [('fit', 'fit_sha'), ('heldout', 'heldout_sha'),
                                           ('selection', 'selection')])
 @pytest.mark.parametrize('location', ['matching-frozen', 'encode', 'held'])
