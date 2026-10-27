@@ -86,6 +86,33 @@ are not native-export slot records. The newer 2c phase can supply full-config
 rank traces; absence, rank omissions, old histogram-only traces and mismatches
 remain refusals. Never substitute body-only traces for priced MTP modules.
 
+## Graph producer records
+
+Graph evidence uses the same `--records-dir` interface. The original equality
+measurement producer supplies `native_export.graph.json` alongside its raw
+equality receipt. A later smoke must not attach an unrelated equality receipt
+because its model has the same `config.json`.
+
+The record binds the receipt's raw-byte digest, actual artifact identity before
+and after measurement, producer tool and commit, graph arm and action evidence,
+generation output, observed speculation, supplied compilation JSON, resolved
+compilation and operator settings, and every rank's image and transport.
+An NCCL environment request is not an observed transport.
+
+`serve_scope` names image, model-config digest, Tessera-source digest,
+compilation configuration, speculative-token count, maximum model length,
+maximum concurrency, tensor-parallel degree, and fabric. The verifier hashes
+the real artifact's `config.json`, then calls the lane's shared population,
+numerical-equality, and capture/replay verifier. Only source provenance uses the
+development seal policy. Byte integrity and the other scope comparisons always
+refuse on disagreement.
+
+The currently pinned Tessera verifier lacks the required shared population API.
+It therefore cannot qualify a graph slot through this path. A compatible
+metadata fixture establishes consumer behavior only. The runtime pin and
+independent allocation, export, serving, and publication gates still apply.
+Missing original producer records or real release evidence remain refusals.
+
 ## Uniform control
 
 The lane spec now names the existing external Tessera accountant and

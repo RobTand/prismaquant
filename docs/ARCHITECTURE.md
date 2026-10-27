@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, graph shipcard receipt verification, PRI-15 / #1586.
+Source baseline: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`; approved PRI-11
+spec revision `43adca93-5c6a-4e7b-bf5f-fe57569ecd43` governs this source slice.
+Graph records require producer-bound equality evidence through the existing
+slot replay and lane hook. The current Tessera pin lacks the compatible
+population verifier and remains refused for graph qualification. The pin,
+required graph slot, research-card refusal, and independent serving gates stay
+in force. CPU fixtures establish record handling, not a qualified release.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -29324,7 +29333,7 @@ and its metadata. Use `--score-positions all`; a final-position screen cannot cl
 | `offline.g3` | `python -m prismaquant.g3_v2 --config FILE --output JSON` | Paired teacher panel, bound candidate and explicit criteria |
 | `task_suite` | `python -m prismaquant.task_suite --config FILE --output JSON` | Current HF-loadable artifact, tokenizer, tasks, sampling and explicit criteria |
 | `native_export.eager` | Lane eager producer; native compressed-tensors uses `validate_native_export --shipcard` | Actual eager generation record |
-| `native_export.graph` | Lane graph producer; native compressed-tensors uses `validate_native_export --no-enforce-eager --shipcard` | Actual graph record under the lane contract |
+| `native_export.graph` | Original equality producer record via `release_receipts --records-dir`; native load/generate smoke remains diagnostic | Producer-bound equality receipt, actual artifact/config identity, and observed serve scope |
 | `ship_gate` | `validate_quantized_model --base-url URL --model-name NAME --artifact-dir DIR --shipcard CARD` | Numeric and boundary ledger from the bound live endpoint |
 | `gold.kl` | Runner-owned `measure_vllm_full_kl` student entry point | Stored teacher, metadata, all-position protocol and observed no-spec execution |
 | `gold.ppl` | Runner-owned `measure_vllm_wikitext_ppl` | Generic token payload and independent file hash |
@@ -29995,6 +30004,25 @@ re-derives that obligation from `quant_config.json`, so deleting or nulling the
 mutable slot cannot waive the exact physical-Ada, lane-v2, 32K/4-GiB, and
 full-graph receipt (`shipcard.RTX4090_REQUIRED_SLOTS`,
 `validate_rtx4090_fp8_cb.verify_rtx4090_shipcard_record`).
+
+Graph replay additionally requires an original producer record binding the
+equality receipt's raw bytes to the measured artifact, arm, action, generation,
+and observed serve configuration. Core `shipcard_slots` checks that binding,
+the real artifact's config bytes, supplied and resolved compilation settings,
+and image/transport observations for every rank. It resolves numerical
+verification through `single_lane_hook("graph_equality_verify")`; the Tessera
+lane calls the external shared population and numerical/replay rules. Core
+imports no Tessera serving code. Every field of the nine-field scope must match.
+Only Tessera source provenance uses `seal_check`; development mode cannot
+waive byte integrity or other scope mismatches.
+
+The installed pin lacks the compatible population API and remains refused for
+graph qualification. Fixtures against explicit compatible metadata are source
+checks, not evidence for a real release. Tessera producer records enter through
+the existing `release_receipts --records-dir` preflight. A later native smoke
+cannot create the missing equality-measurement link from a receipt alone.
+The required graph slot and research-card publication refusal remain in force.
+See `docs/operations/release_receipts.md` for record inputs and refusal behavior.
 
 The card reserves a fixed 256 KiB (`shipcard.SHIPCARD_RESERVED_BYTES`) and every rewrite pads
 with trailing JSON whitespace. That fixed size is load-bearing for CB: `shipcard.json` is

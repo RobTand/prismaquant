@@ -3,6 +3,8 @@ import json
 import os
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
 import torch
 from safetensors.torch import save_file
 

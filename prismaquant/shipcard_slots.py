@@ -141,6 +141,8 @@ def _no_spec_decode_problems(slot, record):
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
+    *,
+    model_dir: str | os.PathLike | None = None,
 ) -> list[str]:
     """Replay the smoke arm's own stamped metrics against the slot it closes.
 
@@ -202,7 +204,153 @@ def _verify_native_export_record(
             f"{slot}: max_new_tokens={max_new_tokens!r} is not a positive "
             "integer"
         )
+    if arm == "graph":
+        problems.extend(_verify_graph_receipt(record, model_dir=model_dir))
     return problems
+
+
+GRAPH_SCOPE_FIELDS = (
+    "image", "model_config_sha256", "tessera_src_sha256", "compilation_config",
+    "speculative_tokens", "max_model_len", "max_num_seqs", "tensor_parallel_size",
+    "fabric",
+)
+GRAPH_OBSERVATION_SCHEMA = "prismaquant.native_graph_observation/1"
+
+
+def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
+    """Bind the producer's observations before replaying the lane's equality rule."""
+    from .digests import bytes_sha256hex, canonical_json, file_sha256hex
+    from .shipcard import _strict_json_object
+
+    slot = "native_export.graph"
+    metrics = record["metrics"]
+    path = metrics.get("graph_receipt_path")
+    digest = metrics.get("graph_receipt_sha256")
+    if not isinstance(path, str) or not path:
+        return [f"{slot}: missing graph_receipt_path"]
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return [f"{slot}: missing or malformed graph_receipt_sha256"]
+    try:
+        with Path(path).open("rb") as handle:
+            raw = handle.read(128 * 1024 * 1024 + 1)
+        if len(raw) > 128 * 1024 * 1024:
+            raise ValueError("graph receipt exceeds 128 MiB")
+        if bytes_sha256hex(raw) != digest:
+            return [f"{slot}: graph_receipt_sha256 differs from the current receipt bytes"]
+        receipt = _strict_json_object(raw, where="graph receipt")
+    except (OSError, ValueError, TypeError) as exc:
+        return [f"{slot}: malformed or unreadable graph receipt: {exc}"]
+    scope = metrics.get("serve_scope")
+    if not isinstance(scope, Mapping):
+        return [f"{slot}: missing structured serve_scope"]
+    missing = [field for field in GRAPH_SCOPE_FIELDS if field not in scope]
+    if missing:
+        return [f"{slot}: serve_scope does not name {missing}"]
+    problems = []
+    for name in ("model_config_sha256", "tessera_src_sha256"):
+        if not isinstance(scope[name], str) or re.fullmatch(r"[0-9a-f]{64}", scope[name]) is None:
+            problems.append(f"{slot}: malformed serve_scope.{name}")
+    image = scope["image"]
+    if not isinstance(image, str) or re.fullmatch(r".+@sha256:[0-9a-f]{64}", image) is None:
+        problems.append(f"{slot}: serve_scope.image is not a content-addressed image")
+    if not isinstance(scope["compilation_config"], Mapping):
+        problems.append(f"{slot}: serve_scope.compilation_config is not an object")
+    for name in ("speculative_tokens", "max_model_len", "max_num_seqs", "tensor_parallel_size"):
+        if type(scope[name]) is not int or scope[name] < (0 if name == "speculative_tokens" else 1):
+            problems.append(f"{slot}: malformed serve_scope.{name}")
+    if problems:
+        return problems
+    if not isinstance(scope["fabric"], str) or scope["fabric"] not in ({"none"} if scope["tensor_parallel_size"] == 1 else {"socket", "roce"}):
+        problems.append(f"{slot}: serve_scope.fabric disagrees with tensor_parallel_size")
+    if type(record.get("spec_decode_detected")) is not bool or record["spec_decode_detected"] != (scope["speculative_tokens"] > 0):
+        problems.append(f"{slot}: missing or inconsistent speculation observation")
+    commit = record.get("git_commit")
+    if not isinstance(commit, str) or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
+        problems.append(f"{slot}: missing full producer git commit")
+    if not isinstance(record.get("tool"), str) or not record["tool"]:
+        problems.append(f"{slot}: missing producer tool identity")
+    if model_dir is None:
+        problems.append(f"{slot}: model_dir is required to verify the measured artifact config")
+    else:
+        try:
+            config_sha256 = file_sha256hex(Path(model_dir) / "config.json")
+            if config_sha256 != scope["model_config_sha256"]:
+                problems.append(f"{slot}: serve_scope.model_config_sha256 differs from the artifact config.json bytes")
+        except OSError as exc:
+            problems.append(f"{slot}: cannot read artifact config.json: {exc}")
+    observed = metrics.get("graph_observation")
+    if not isinstance(observed, Mapping) or observed.get("schema") != GRAPH_OBSERVATION_SCHEMA:
+        return problems + [f"{slot}: missing producer graph_observation linkage"]
+    for name in ("model_sha_before", "model_sha_after"):
+        if observed.get(name) != record.get("model_sha") or not record.get("model_sha"):
+            problems.append(f"{slot}: producer {name} differs from the measured artifact model_sha")
+    if observed.get("graph_receipt_sha256") != digest:
+        problems.append(f"{slot}: producer linkage names another graph_receipt_sha256")
+    resolved = observed.get("resolved")
+    try:
+        if canonical_json(observed.get("compilation_config"), where=slot) != canonical_json(scope["compilation_config"], where=slot):
+            problems.append(f"{slot}: producer compilation_config differs from serve_scope")
+        if not isinstance(resolved, Mapping) or not all(name in resolved for name in ("compilation_config", "custom_ops", "ir_op_priority")):
+            problems.append(f"{slot}: missing observed resolved compilation/operator settings")
+        elif not isinstance(resolved["compilation_config"], Mapping):
+            problems.append(f"{slot}: observed resolved compilation_config is not an object")
+        elif not isinstance(resolved["custom_ops"], list) or not all(isinstance(name, str) for name in resolved["custom_ops"]) or not isinstance(resolved["ir_op_priority"], (Mapping, list, str)):
+            problems.append(f"{slot}: malformed observed operator settings")
+        else:
+            canonical_json(resolved, where=slot)
+            if any(resolved["compilation_config"].get(name) != value for name, value in scope["compilation_config"].items()):
+                problems.append(f"{slot}: observed resolved compilation_config differs from supplied compilation_config")
+    except ValueError as exc:
+        problems.append(f"{slot}: invalid observed compilation/operator settings: {exc}")
+    ranks = observed.get("ranks")
+    if not isinstance(ranks, list) or len(ranks) != scope["tensor_parallel_size"]:
+        problems.append(f"{slot}: missing every-rank image/transport observations")
+    else:
+        seen = set()
+        for row in ranks:
+            if not isinstance(row, Mapping) or type(row.get("rank")) is not int or row["rank"] in seen:
+                problems.append(f"{slot}: malformed or duplicate rank observation")
+                continue
+            seen.add(row["rank"])
+            for name in ("image", "fabric"):
+                if row.get(name) != scope[name]:
+                    problems.append(f"{slot}: rank {row['rank']} observed {name} disagrees with serve_scope")
+        if len(seen) != scope["tensor_parallel_size"] or any(
+            rank < 0 or rank >= scope["tensor_parallel_size"] for rank in seen
+        ):
+            problems.append(f"{slot}: rank observations do not cover the tensor-parallel population")
+    generation = observed.get("generation")
+    if not isinstance(generation, Mapping) or not isinstance(generation.get("prompt"), str) or not isinstance(generation.get("outputs"), list) or not generation["outputs"] or not all(isinstance(value, str) for value in generation["outputs"]):
+        problems.append(f"{slot}: missing raw generation evidence from the producer")
+    elif sum(map(len, generation["outputs"])) != metrics.get("generated_chars"):
+        problems.append(f"{slot}: raw generation evidence differs from generated_chars")
+    arm_name, action = observed.get("equality_arm"), observed.get("equality_action")
+    arms = receipt.get("arms")
+    matched = [arm for arm in arms if isinstance(arm, Mapping) and arm.get("name") == arm_name] if isinstance(arms, list) else []
+    if not isinstance(arm_name, str) or not arm_name or not isinstance(action, str) or not action or len(matched) != 1 or matched[0].get("pb_action") != action:
+        problems.append(f"{slot}: missing or inconsistent producer equality arm/action linkage")
+    elif isinstance(resolved, Mapping):
+        recorded = matched[0].get("resolved")
+        if not isinstance(recorded, Mapping) or any(recorded.get(name) != resolved.get(name) for name in ("custom_ops", "ir_op_priority")):
+            problems.append(f"{slot}: observed operator settings differ from the equality arm")
+    if problems:
+        return problems
+    from .dev_mode import seal_check
+    from .lane_spec import single_lane_hook
+
+    try:
+        recorded_source = receipt["tessera"]["src_sha256"]
+        if not isinstance(recorded_source, str) or re.fullmatch(r"[0-9a-f]{64}", recorded_source) is None:
+            return [f"{slot}: malformed graph receipt source identity"]
+        seal_check("tessera_src_sha256", recorded_source, scope["tessera_src_sha256"], where=slot)
+        scope = {**scope, "tessera_src_sha256": recorded_source, "arm": arm_name}
+        hook = single_lane_hook("graph_equality_verify")
+        if hook is None:
+            return [f"{slot}: no lane provides graph equality verification"]
+        reason = hook(receipt, scope)
+    except Exception as exc:
+        return [f"{slot}: graph receipt refused: {type(exc).__name__}: {exc}"]
+    return [] if reason is None else [f"{slot}: {reason}"]
 
 
 def _verify_ship_gate_record(
@@ -1063,7 +1211,7 @@ def _gold_replay(slot, record, *, card=None, model_dir=None):
 
 
 def _native_replay(slot, record, **context):
-    return _verify_native_export_record(slot, record)
+    return _verify_native_export_record(slot, record, model_dir=context.get("model_dir"))
 
 
 def _ship_gate_replay(slot, record, **context):
