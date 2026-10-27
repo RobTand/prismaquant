@@ -2,7 +2,7 @@
 import pytest
 
 from prismaquant.glm_mtp_selection import select_mtp_rungs
-from prismaquant.joint_aura import identity_sha256
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from test_glm_mtp_selection import CONSTANTS, PARAMS, ROUTED, R832, SHARED, _payload
 
 
@@ -33,7 +33,7 @@ def test_ineligible_second_rung_cannot_hide_a_different_source_count():
     for field in ("source_weight", "rendered_weight"):
         operator[field]["shape"] = [32, 128]
         operator[field]["logical_bytes"] //= 2
-    row["joint_operator_identity_sha256"] = identity_sha256(operator)
+    row["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
     with pytest.raises(ValueError, match="params.*source.*shape"):
         select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS,
                          eligible=lambda _unit, rung: rung != R832)

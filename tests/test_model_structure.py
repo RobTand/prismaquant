@@ -342,9 +342,9 @@ def test_qwen3_moe_graph_marks_packed_experts_without_multimodal_rewrite():
 
 
 def test_probe_packed_expert_detection_respects_profile_spec():
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     experts = _PackedExperts()

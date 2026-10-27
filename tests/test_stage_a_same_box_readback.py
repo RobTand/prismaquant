@@ -161,7 +161,7 @@ def _run_chain(storage):
     production, so the final plane is taken from the roll itself).
     """
 
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     batches = []
     for batch in range(N_BATCHES):

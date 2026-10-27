@@ -2,8 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+from pathlib import Path
 import pickle
+import subprocess
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -134,3 +139,71 @@ def test_snapshot_hashes_exact_parsed_bytes_and_is_reproducible(tmp_path):
     plan.write_text(plan.read_text() + "\n")
     with pytest.raises(SparseRateDatasetError, match="identity differs"):
         build_snapshot(plan, census, tmp_path / "one")
+
+
+@pytest.mark.parametrize("entrypoint", ["script", "module"])
+def test_snapshot_dotted_layer_owner_preserves_parsed_results(tmp_path, monkeypatch, entrypoint):
+    """#2779 / #1303: exercise outputs and delegation, not regex cache identity."""
+    from prismaquant import qnames
+
+    owner = qnames.DOTTED_LAYER_QNAME
+    searched = []
+
+    def search(name):
+        searched.append(name)
+        return owner.search(name)
+
+    # Patch before a fresh import so both import styles can use the owner.
+    monkeypatch.setattr(qnames, "DOTTED_LAYER_QNAME", SimpleNamespace(search=search))
+    root = Path(__file__).resolve().parents[1]
+    script = root / "experiments" / "sparse_rate_dataset.py"
+    spec = importlib.util.spec_from_file_location("_sparse_rate_qname_2779", script)
+    consumer = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, consumer)
+    spec.loader.exec_module(consumer)
+    searched.clear()
+
+    cases = [
+        ("model.layers.7.mlp.down_proj", 7, "dense", "down_proj"),
+        ("model.layers.7.mlp.experts.2.gate_proj", 7, "expert", "gate_proj"),
+        ("layers.7.mlp.down_proj", None, None, None),
+        ("model.layers.7", None, None, None),
+        ("model.layers.3.layers.19.mlp.down_proj", 3, "dense", "down_proj"),
+        ("model.layers.bad.layers.19.mlp.down_proj", 19, "dense", "down_proj"),
+        ("model.layers.٧.mlp.experts.2.up_proj", 7, "expert", "up_proj"),
+        ("model.embed_tokens", None, None, None),
+        # Keep this consumer's substring-based expert classification.
+        ("model.layers.7.mlp.experts.shared.down_proj", 7, "expert", "down_proj"),
+    ]
+    for index, (qname, layer, role, structure) in enumerate(cases):
+        case_dir = tmp_path / str(index)
+        plan, census = _write_fixture(case_dir, [
+            (qname, {"F_R832": _cell("F", 832, 0.4, 100, 1.5)}),
+        ])
+        out = case_dir / "out"
+        if layer is None:
+            with pytest.raises(consumer.SparseRateDatasetError, match="qname has no layer") as exc:
+                consumer.build_snapshot(plan, census, out)
+            assert qname in str(exc.value)
+            assert not (out / consumer.DATASET_NAME).exists()
+        else:
+            result = consumer.build_snapshot(plan, census, out)
+            assert result["status"] == "written"
+            with np.load(out / consumer.DATASET_NAME, allow_pickle=False) as snapshot:
+                assert snapshot["qnames"].tolist() == [qname]
+                assert snapshot["layers"].tolist() == [layer]
+                assert snapshot["roles"].tolist() == [role]
+                assert snapshot["structures"].tolist() == [structure]
+                assert snapshot["values"].tolist() == [[0.4]]
+
+    # -E prevents a runner's PYTHONPATH from masking direct-script import bugs.
+    args = [str(script)] if entrypoint == "script" else ["-m", "experiments.sparse_rate_dataset"]
+    help_result = subprocess.run(
+        [sys.executable, "-E", *args, "--help"], cwd=root,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert help_result.returncode == 0, help_result.stdout + help_result.stderr
+    assert "--plan" in help_result.stdout
+    assert "--census" in help_result.stdout
+    # Parsed behavior alone already passes with the duplicate local grammar.
+    assert searched == [case[0] for case in cases], "snapshot bypassed the dotted-layer owner"

@@ -50,7 +50,7 @@ PRODUCED_OUTPUT_TEMPLATE_SCHEMA = "prismaquant.prismabuild.produced_output_templ
 #: The read phase the preparation's manifest declares.
 PREPARATION_READ_PHASE = "stage-b-preparation"
 #: PrismaBuild's own per-manifest bound (``prismabuild.core
-#: DATA_MANIFEST_MAX_BYTES``), restated as ``experiments/glm_data_manifests``
+#: DATA_MANIFEST_MAX_BYTES``), restated as ``campaign_data_manifests``
 #: restates it: this module runs where PrismaBuild is not importable.
 DATA_MANIFEST_MAX_BYTES = 64 * 1024 * 1024
 #: Files the preparation writes besides one set per quantum: the catalog

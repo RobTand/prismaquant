@@ -2,7 +2,7 @@
 """Quality benchmark for the v22/v23 MiniMax-M2.7 artifact.
 
 Runs:
-  1. Perplexity on a held-out wikitext-2 sample (no spec-decode per
+  1. Perplexity on the embedded illustrative text (no spec-decode per
      `validator_spec_decode_caveat` memory — echo+logprobs returns the
      DRAFT model's NLL with spec-decode on).
   2. Sample generations on agentic / math / code prompts to verify
@@ -14,16 +14,21 @@ served by launch-minimax-v21-vllm-serve.sh.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import sys
 import time
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from prismaquant.validate_quantized_model import scored_echo_logprobs
+
 VLLM = "http://localhost:8000/v1"
 MODEL = "minimax-m2.7-prismaquant"
 
 
-def perplexity_on_text(text: str, max_tokens: int = 1024) -> float:
+def perplexity_on_text(text: str, max_tokens: int = 1024) -> tuple[float, int]:
     """Tokenize via vLLM's echo-back loglikelihood mode."""
     r = requests.post(
         f"{VLLM}/completions",
@@ -41,14 +46,13 @@ def perplexity_on_text(text: str, max_tokens: int = 1024) -> float:
     out = r.json()
     if not out.get("choices"):
         raise RuntimeError(f"empty choices: {out}")
-    lps = out["choices"][0]["logprobs"]["token_logprobs"]
-    # First token has no logprob (None); skip.
-    nlls = [-lp for lp in lps if lp is not None]
-    if not nlls:
-        raise RuntimeError("no logprobs returned")
-    avg_nll = sum(nlls) / len(nlls)
+    scored = scored_echo_logprobs(
+        out["choices"][0]["logprobs"]["token_logprobs"],
+        where="perplexity response",
+    )
+    avg_nll = -sum(scored) / len(scored)
     import math
-    return math.exp(avg_nll), len(nlls)
+    return math.exp(avg_nll), len(scored)
 
 
 def sample_generations(prompts: list[str], max_tokens: int = 256) -> list[str]:
@@ -93,20 +97,28 @@ def main() -> int:
 
     print("\n[1] Perplexity on wikitext-style sample ...")
     t0 = time.time()
-    ppl, n_tok = perplexity_on_text(SMOKE_TEXTS[0])
+    try:
+        ppl, n_tok = perplexity_on_text(SMOKE_TEXTS[0])
+    except Exception as e:
+        print(f"[bench] FAILED perplexity response: {e!r}")
+        return 1
     print(f"  ppl={ppl:.3f} on {n_tok} tokens ({time.time()-t0:.1f}s)")
 
     print("\n[2] Sample generations:")
-    samples = sample_generations(
-        [PROMPT_AGENTIC, PROMPT_MATH, PROMPT_CODE],
-        max_tokens=256,
-    )
-    for label, text in zip(["AGENTIC", "MATH", "CODE"], samples):
-        print(f"\n--- {label} ---")
-        print(text.strip()[:600])
-        print("---")
+    try:
+        samples = sample_generations(
+            [PROMPT_AGENTIC, PROMPT_MATH, PROMPT_CODE],
+            max_tokens=256,
+        )
+        for label, text in zip(["AGENTIC", "MATH", "CODE"], samples):
+            print(f"\n--- {label} ---")
+            print(text.strip()[:600])
+            print("---")
+    except Exception as e:
+        print(f"[bench] FAILED generation response: {e!r}")
+        return 1
 
-    # Summary line for ship/no-ship gate
+    # This smoke report applies no quality acceptance threshold.
     print(f"\n[summary] ppl={ppl:.3f}  generations={len(samples)} OK")
     return 0
 

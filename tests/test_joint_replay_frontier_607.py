@@ -35,13 +35,15 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant.campaign_data_manifests import ReadsetRefused
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 if str(ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(ROOT / "tests"))
 
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 import test_glm_joint_data_manifest_at_submit as campaign_fixture  # noqa: E402
 
 
@@ -187,7 +189,7 @@ def test_a_resumed_read_set_omits_the_replayed_units_from_the_walk(
 def test_a_journal_bound_to_another_checkpoint_is_refused(scratch, shared_mount):
     fixture, _ = _workspace_with_sealed_checkpoint(scratch)
     _plant_journal(fixture, {U1}, checkpoint_sha256="d" * 64)
-    with pytest.raises(SystemExit, match="campaign checkpoint"):
+    with pytest.raises(ReadsetRefused, match="campaign checkpoint"):
         _prepare(fixture["plan"], RESUME_ARGV)
 
 
@@ -195,7 +197,7 @@ def test_a_journal_naming_a_foreign_unit_is_refused(scratch, shared_mount):
     fixture, checkpoint_sha256 = _workspace_with_sealed_checkpoint(scratch)
     _plant_journal(fixture, {U1}, checkpoint_sha256=checkpoint_sha256,
                    roster=[*fixture["names"], "model.layers.9.mlp.gate_proj"])
-    with pytest.raises(SystemExit, match="roster"):
+    with pytest.raises(ReadsetRefused, match="roster"):
         _prepare(fixture["plan"], RESUME_ARGV)
 
 

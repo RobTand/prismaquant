@@ -447,7 +447,7 @@ def test_no_candidate_row_resident_charge_is_expressible(tmp_path):
 
 
 def test_the_gate_returns_no_admission_token(tmp_path):
-    """The loader sets `producer_admitted` only because this raised nothing;
+    """The loader sets `fixed_resources_admitted` only because this raised nothing;
     there is no success value for a caller to read, mistake for a proof, or
     carry past the gate."""
     import ast

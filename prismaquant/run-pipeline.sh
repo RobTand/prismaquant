@@ -89,7 +89,7 @@ fi
 : "${TARGET_DISK_GB:=}"
 : "${ARTIFACT_OVERHEAD_RESERVE_BYTES:=}"
 # Calibration defaults. 4x256 was the historical minimum for correctness
-# validation; 32x1024 (N=32, T=1024 = 32768 tokens/sample, 32 samples)
+# validation; 32x1024 (32 samples of 1024 tokens, 32768 tokens total)
 # produces ~7% lower PPL on the resulting quantized artifact at a
 # linear time cost in probe wall-time. Override for faster iteration.
 : "${NSAMPLES:=32}"
@@ -225,9 +225,8 @@ PIPELINE_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # 2026-08-20: "package all models using 1gb file sizes"; it was 5 GiB before).
 # This mirrors export_native_compressed's own --shard-bytes default so the
 # pipeline and a hand-run export agree. NOTE the scope: only the
-# compressed-tensors lane shards its output. The CB lane's streaming exporter
-# writes a single model.safetensors and has no shard-size concept, so it is
-# NOT covered by this default.
+# compressed-tensors lane shards its output. The retired CB lane's streaming
+# exporter wrote a single model.safetensors and was outside this default.
 : "${EXPORT_SHARD_BYTES:=1073741824}"
 # TARGET_PROFILE is deliberately UNSET by default (re-vet R11 / debt D4). A
 # hardcoded `:=vllm_packed_moe` here won `resolve_target_profile`'s explicit-
@@ -756,25 +755,7 @@ else
 fi
 : "${VALIDATED_FRONTIER_NSAMPLES:=$NSAMPLES}"
 : "${VALIDATED_FRONTIER_SEQLEN:=$SEQLEN}"
-# Held-out selection (review criticals C3/C5): the frontier-selecting KL
-# must be measured on text disjoint from probe/cost/render calibration
-# (house rule: "held-out split is disjoint from cost generation"). The
-# loader is prefix-stable, so skipping the first NSAMPLES windows makes
-# the validation windows token-disjoint by construction. Default ON —
-# the prior in-sample wiring was a bug, not a behavior. Set
-# VALIDATED_FRONTIER_SKIP_CALIB=0 only to reproduce historical runs.
-: "${VALIDATED_FRONTIER_SKIP_CALIB:=$NSAMPLES}"
-# Optional fully separate validation corpus (overrides skip-first
-# disjointness with corpus-level disjointness when provided).
 : "${VALIDATED_FRONTIER_DATASET:=$DATASET}"
-# The effective skip-first: corpus-level disjointness (a separate validation
-# dataset) supersedes prefix-skip disjointness. Computed once so the stage
-# settings hash and the CLI cannot disagree.
-if [[ "$VALIDATED_FRONTIER_DATASET" == "$DATASET" ]]; then
-  VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$VALIDATED_FRONTIER_SKIP_CALIB"
-else
-  VALIDATED_FRONTIER_CALIB_SKIP_FIRST=0
-fi
 # M26: final selection scores full-sequence KL (the gold-metric scope, §5),
 # not the last_token triage screen. Selection is still re-validated on the
 # served metric before ship, but aligning the selection scope with the gold
@@ -849,6 +830,32 @@ fi
 # measured end-to-end, FP8 kept in the menu (real-KL rejects it, no bans).
 : "${AURA_EXPERT_NSAMPLES:=16}"
 : "${AURA_EXPERT_SEQLEN:=512}"
+# Held-out calibration boundary. Measure the source positions of every fit draw.
+FRONTIER_CALIBRATION_ARGS=(--calibration-draw "$NSAMPLES" "$SEQLEN" 42)
+case "$COST_MODE" in
+  aura)
+    FRONTIER_CALIBRATION_ARGS+=(
+      --calibration-draw "$AURA_COST_NSAMPLES" "$AURA_COST_SEQLEN" "$AURA_COST_CALIB_SEED"
+      --calibration-draw "$AURA_EXPERT_NSAMPLES" "$AURA_EXPERT_SEQLEN" 42
+    )
+    ;;
+  production-render-score|production-render)
+    FRONTIER_CALIBRATION_ARGS+=(--calibration-draw "$PRODUCTION_RENDER_COST_NSAMPLES"
+      "$PRODUCTION_RENDER_COST_SEQLEN" "$PRODUCTION_RENDER_COST_SEED")
+    ;;
+esac
+VALIDATED_FRONTIER_CALIB_SKIP_FIRST="$(python3 -m prismaquant.pipeline \
+  --held-out-calibration-skip "${FRONTIER_CALIBRATION_ARGS[@]}" \
+  --setting "MODEL_PATH=$MODEL_PATH" \
+  --setting "DATASET=$DATASET" \
+  --setting "VALIDATED_FRONTIER_NSAMPLES=$VALIDATED_FRONTIER_NSAMPLES" \
+  --setting "VALIDATED_FRONTIER_CALIB_REPEATS=$VALIDATED_FRONTIER_CALIB_REPEATS" \
+  --setting "VALIDATED_FRONTIER_DATASET=$VALIDATED_FRONTIER_DATASET" \
+  --setting "VALIDATED_FRONTIER_SEQLEN=$VALIDATED_FRONTIER_SEQLEN" \
+  --setting "VALIDATED_FRONTIER_SKIP_CALIB=${VALIDATED_FRONTIER_SKIP_CALIB:-}" \
+  --setting "SELECTION_MODE=$SELECTION_MODE")"
+# Explicit zero remains the historical in-sample reproduction override.
+VALIDATED_FRONTIER_SKIP_CALIB="$VALIDATED_FRONTIER_CALIB_SKIP_FIRST"
 # Imatrix (column-weight) harvest. CB_COL_WEIGHTS is named for the lane that
 # first needed it; the harvest is what the GGUF lane and every imatrix-weighted
 # cost cache read, so it stays. `CB_EXPERT_EMPIRICAL` went with the Gridbook
@@ -866,15 +873,11 @@ fi
 : "${CB_COL_WEIGHTS:=${WORK_DIR}/artifacts/cb_col_weights.pkl}"
 # Activation-fair pricing (ultraplan P5a,
 # docs/audits/ultraplan_perf_2026-08-01.md §6). The allocator's cost
-# precedence prices the W4A4-vs-W8A8 activation contract ONLY on the measured
-# output_mse branch, and the two levers above are exactly what removes that
-# branch from most rows of a production run: CB_EXPERT_SAMPLE /
-# PRISMAQUANT_EXPERT_COST_SAMPLE make measure_quant_cost stamp
-# output_mse_measured=False on every packed-expert row, and CB_LADDER_INTERP=1
-# fills interpolated rungs weight-only. On those rows NVFP4-CB is credited
-# with its cheaper index stream and charged none of its A-side cost. The
-# allocator now calibrates one per-format-family correction per run from the
-# measured rows that DO exist and applies it to the weight-only ones.
+# precedence prices activation error on measured output_mse rows. The
+# historical codebook example used expert sampling and ladder interpolation
+# to produce weight-only rows; those retired CB knobs above no longer drive
+# computation. The allocator calibrates a per-format-family correction from
+# available measured rows and applies it to weight-only rows.
 # 1 (default) = calibrate wherever the inputs exist; 0 = reproduce a pre-0.5.3
 # artifact's pricing bit-for-bit. It is NOT a knob to tune — the run refuses
 # outright rather than hand the DP a half-corrected (mixed-scale) menu.
@@ -932,6 +935,10 @@ export PRISMAQUANT_ACTIVATION_FAIR_PRICING="${ACTIVATION_FAIR_PRICING}"
 : "${SERVE_PEAK_SCRATCH_BYTES:=0}"
 if [[ -z "$SERVE_DISPATCH_TABLE" ]] && [[ -n "$SLO_PREFILL_P95_TTFT_MS$SLO_DECODE_P95_ITL_MS$SLO_DECODE_P05_TPS" ]]; then
   echo "[pipeline] ERROR: a latency SLO was set but SERVE_DISPATCH_TABLE is empty. Latency constraints are priced from MEASURED rows; there is no built-in cost model to fall back on, and inventing one is exactly what the constrained-Pareto axis exists to prevent (ultraplan_perf_2026-08-01 §6, P5c). Point SERVE_DISPATCH_TABLE at a measured table for your own hardware; the retired codebook lane's example table is at archive/gridbook_lane_2026-09-02/ and was PROPOSAL DATA." >&2
+  exit 2
+fi
+if [[ -z "$SERVE_DISPATCH_TABLE" ]] && [[ -n "$SERVE_DEVICE_BUDGET_BYTES" ]]; then
+  echo "[pipeline] ERROR: SERVE_DEVICE_BUDGET_BYTES was set but SERVE_DISPATCH_TABLE is empty. Supply a measured dispatch table and an explicit SERVE_WORKLOAD_MIX so the requested memory budget can be evaluated." >&2
   exit 2
 fi
 
@@ -1145,6 +1152,9 @@ RENDER_ENV_SETTINGS=(
 STAGE_SETTINGS_PATH="${WORK_DIR}/artifacts/stage_settings.json"
 STAGE_SETTINGS_ENV=(
   "MODEL_PATH=$MODEL_PATH"
+  "DRAW_DIGEST="
+  "MEASUREMENT_DIGEST="
+  "MEASUREMENT_CACHE_DIGEST="
   "DATASET=$DATASET"
   "NSAMPLES=$NSAMPLES"
   "SEQLEN=$SEQLEN"
@@ -1171,6 +1181,7 @@ STAGE_SETTINGS_ENV=(
   "AURA_COST_SEQLEN=$AURA_COST_SEQLEN"
   "AURA_COST_CALIB_SEED=$AURA_COST_CALIB_SEED"
   "AURA_COST_DTYPE=$AURA_COST_DTYPE"
+  "AURA_COST_PROBE_MICROBATCH=$AURA_COST_PROBE_MICROBATCH"
   "AURA_COST_STREAMING=$AURA_COST_STREAMING"
   "AURA_COST_CHECKPOINT_DIR=$AURA_COST_CHECKPOINT_DIR"
   "AURA_EXPERT_NSAMPLES=$AURA_EXPERT_NSAMPLES"
@@ -1276,6 +1287,22 @@ COSTPROV
 cost_table_reusable() {
   local path="$1" stamped
   [[ -f "$path" ]] || return 1
+  if ! python3 - "$path" "$MODEL_PATH" <<'COSTSOURCE'
+import pickle
+import sys
+from prismaquant.prepriced_cost import validate_native_cost_source_for_model
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        payload = pickle.load(handle)
+    validate_native_cost_source_for_model(payload, model=sys.argv[2], where=sys.argv[1])
+except Exception as exc:
+    print(f"[pipeline] native source admission: {exc}; REBUILDING", file=sys.stderr)
+    sys.exit(1)
+COSTSOURCE
+  then
+    return 1
+  fi
   stamped="$(cost_table_cost_mode "$path")"
   if [[ -z "$stamped" ]]; then
     echo "[pipeline] WARNING: $path carries no provenance['cost_mode'] (predates the R2 stamp); reusing it UNVERIFIED under COST_MODE=${COST_MODE} -- its mode is unknown, this run does not stamp the current mode onto it, and no verified provenance is recorded for it"
@@ -1458,14 +1485,16 @@ if [[ -n "$PREPRICED_COST_REPORT" ]]; then
   echo "[pipeline] [2/4] using validated prepriced input: $COST_PATH (cost builders skipped)"
 else
 require_stage_settings "${BASE_COST_PATH}" base-cost
-# Under COST_MODE=local the baseline IS the allocator's cost table, so it is
-# also gated on the stamped cost_mode. Under the other modes cost_baseline.pkl
-# is mode-agnostic (the same measured RTN error feeds every estimator) and is
-# reused across mode changes on purpose.
+# Every baseline passes source admission. In local mode it is also the
+# allocator's table, so its stored estimator must match COST_MODE. A separate
+# baseline retains its stored estimator and can be reused across mode changes.
 BASE_COST_REUSABLE=1
 if [[ ! -f "${BASE_COST_PATH}" ]]; then
   BASE_COST_REUSABLE=0
-elif [[ "$BASE_COST_PATH" == "$COST_PATH" ]] && ! cost_table_reusable "$BASE_COST_PATH"; then
+elif ! (
+  [[ "$BASE_COST_PATH" == "$COST_PATH" ]] || COST_MODE="$(cost_table_cost_mode "$BASE_COST_PATH")"
+  cost_table_reusable "$BASE_COST_PATH"
+); then
   BASE_COST_REUSABLE=0
 fi
 if [[ "$BASE_COST_REUSABLE" == "0" ]]; then
@@ -1681,7 +1710,14 @@ PY
   # real-KL rejects it, no bans),
   # plus sidecar (MTP/visual) row backfill from the baseline cost. Backfilled
   # rows carry the baseline estimator and are recorded in provenance.
-  require_stage_settings "$COST_PATH" aura-hybrid-cost
+  AURA_RAW_DIGEST="$(python3 - "$AURA_COST_RAW" <<'PYDIGEST'
+import sys
+from prismaquant.digests import file_sha256hex
+print(file_sha256hex(sys.argv[1]))
+PYDIGEST
+)"
+  require_stage_settings "$COST_PATH" aura-hybrid-cost \
+    "AURA_RAW_DIGEST=$AURA_RAW_DIGEST"
   if ! cost_table_reusable "$COST_PATH"; then
     OMITTED_EXPERTS="$(python3 - "$AURA_COST_RAW" <<'PY'
 import pickle
@@ -1967,7 +2003,15 @@ PY
         VAK_LABEL_SAFE="${VAK_LABEL//[^A-Za-z0-9._-]/_}"
         VAK_PART="${VAK_PART_DIR}/vak_${VAK_LABEL_SAFE}.json"
         VAK_PART_FILES+=("$VAK_PART")
-        require_stage_settings "$VAK_PART" frontier-kl-point
+        VAK_REQUEST_DIGEST="$(python3 - "${WORK_DIR}/artifacts/layer_config.json" \
+          "${VAK_SPEC#*=}" "$VALIDATED_FRONTIER_DATASET" <<'PYDIGEST'
+import sys
+from prismaquant.pipeline import frontier_request_digest
+print(frontier_request_digest(*sys.argv[1:]))
+PYDIGEST
+)"
+        require_stage_settings "$VAK_PART" frontier-kl-point \
+          "FRONTIER_REQUEST_DIGEST=$VAK_REQUEST_DIGEST"
         if [[ -f "$VAK_PART" ]]; then
           echo "[pipeline] [4/4] ${VAK_LABEL}: per-point KL exists, skipping"
           continue
@@ -2023,6 +2067,11 @@ PY
       --output-assignment "${WORK_DIR}/artifacts/layer_config_validated_assignment.json" \
       --output-summary "${WORK_DIR}/artifacts/validated_frontier_selection.json" \
       2>&1 | tee "${WORK_DIR}/logs/validated_frontier_select.log"
+
+    python3 -m prismaquant.pipeline --assignment-kl "$VALIDATION_JSON" \
+      --assignment-path "${WORK_DIR}/artifacts/layer_config.json" \
+      --measurement-cache "$PROD_CACHE_RAW" \
+      --assignment-kl-mode bind --stage-settings "$STAGE_SETTINGS_PATH" >/dev/null
 
     if [[ "$PRODUCTION_RECACHE" != "0" && "$PRODUCTION_RECACHE" != "false" && "$PRODUCTION_RECACHE" != "False" ]]; then
       SELECTED_DIGEST="$(python3 - "${WORK_DIR}/artifacts/layer_config.json" <<'PY'
@@ -2163,9 +2212,9 @@ fi
 # AURA's one structural assumption is that per-Linear KL contributions ADD.
 # This stage turns that assumption into a per-artifact NUMBER —
 #   residual = measured_end_KL(assignment) - sum_i predicted_dloss_i
-# with an honest stderr (exact per-probe when the cost rows carry
-# x2_per_probe, else the independence lower bound) — instead of a two-model
-# memory. It is a REPORT: it never fails the run, and it never changes an
+# with per-probe stderr when the cost rows carry x2_per_probe, otherwise
+# an estimate that assumes independence. Unmeasured covariance can have
+# either sign, so the latter is not a lower bound. It is a REPORT: it never fails the run, and it never changes an
 # allocation.
 #
 # WHY IT IS HERE AND NOT AT [2d]. The residual needs a concrete assignment,
@@ -2174,23 +2223,12 @@ fi
 # first point where layer_config.json is final under both selection modes.
 #
 # AURA_ADDITIVITY_GATE:
-#   measure (DEFAULT, ruled 2026-07-30) — report from a measured KL this run
-#                    already produced when there is one (validated-surrogate's
-#                    frontier JSON, free), and otherwise run ONE bounded KL
-#                    measurement of the final assignment against the SAME
-#                    format-menu dW cache AURA costed on (AURA_COST_NSAMPLES x
-#                    AURA_COST_SEQLEN). Robert's ruling on the R2 residue: the
-#                    wiring's weak spot was that under SELECTION_MODE=surrogate
-#                    an artifact carried a *prediction* and no residual, so
-#                    AURA's one structural assumption stayed a two-model memory
-#                    instead of a per-artifact number. Every AURA-default run
-#                    now performs the eval and every artifact carries a real
-#                    residual. It is still a REPORT — non-blocking, and it never
-#                    changes an allocation.
-#   auto           — the pre-ruling behaviour: report only from a measurement
-#                    the run already made; otherwise record the predicted sum
-#                    with measured_kl null and a status saying why. Zero added
-#                    GPU.
+#   measure (DEFAULT) — reuse a KL bound to the final assignment and AURA draw,
+#                    or measure that draw with the format-menu cache AURA used.
+#                    This in-sample diagnostic compares realized KL with the
+#                    additive prediction. It does not select an assignment.
+#   auto           — reuse a bound measurement on the same draw, or report only
+#                    the predicted sum when no matching measurement exists.
 #   0              — off.
 # -----------------------------------------------------------------------
 : "${AURA_ADDITIVITY_GATE:=measure}"
@@ -2200,41 +2238,28 @@ if [[ "$COST_MODE" == "aura" && "$AURA_ADDITIVITY_GATE" != "0" \
   AURA_MEASURED_KL=""
   AURA_MEASURED_KL_STDERR="0"
   AURA_MEASURED_SOURCE="none"
-  AURA_FRONTIER_JSON="${WORK_DIR}/artifacts/validated_frontier_kl.json"
-  if [[ -f "$AURA_FRONTIER_JSON" ]]; then
-    read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(
-      python3 - "$AURA_FRONTIER_JSON" "${WORK_DIR}/artifacts/validated_frontier_selection.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-results = json.loads(Path(sys.argv[1]).read_text()).get("results", [])
-label = None
-sel = Path(sys.argv[2])
-if sel.is_file():
-    payload = json.loads(sel.read_text())
-    label = (payload.get("selected") or {}).get("label") or payload.get("label")
-row = None
-for item in results:
-    if label is not None and item.get("label") == label:
-        row = item
-        break
-if row is None and results:
-    row = min(results, key=lambda r: float(r.get("kl_mean", r.get("kl", 1e9))))
-if row is None:
-    print("")
-else:
-    kl = row.get("kl_mean", row.get("kl"))
-    print(f"{float(kl)} {float(row.get('kl_stderr', 0.0) or 0.0)}")
-PY
-    )"
-    [[ -n "$AURA_MEASURED_KL" ]] && AURA_MEASURED_SOURCE="validated_frontier_kl.json"
-  fi
+  AURA_DRAW_DIGEST="$(python3 -m prismaquant.pipeline --calibration-hash \
+    "$MODEL_PATH" "$DATASET" "$AURA_COST_NSAMPLES" "$AURA_COST_SEQLEN" \
+    "$AURA_COST_CALIB_SEED" || true)"
+  aura_assignment_kl() {
+    python3 -m prismaquant.pipeline --assignment-kl "$1" \
+      --assignment-kl-mode "$2" --draw-digest "$AURA_DRAW_DIGEST" \
+      --measurement-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \
+      --assignment-path "${WORK_DIR}/artifacts/layer_config.json" \
+      --stage-settings "$STAGE_SETTINGS_PATH"
+  }
+  for AURA_KL_RECORD in "${WORK_DIR}/artifacts/validated_frontier_kl.json" \
+                        "${WORK_DIR}/artifacts/aura_additivity_kl.json"; do
+    read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(aura_assignment_kl "$AURA_KL_RECORD" reuse)"
+    [[ -z "$AURA_MEASURED_KL" ]] || {
+      AURA_MEASURED_SOURCE="${AURA_KL_RECORD##*/}"
+      break
+    }
+  done
   if [[ -z "$AURA_MEASURED_KL" && "$AURA_ADDITIVITY_GATE" == "measure" ]]; then
     AURA_ADDITIVITY_KL_JSON="${WORK_DIR}/artifacts/aura_additivity_kl.json"
-    if [[ ! -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
-      echo "[pipeline] [3c] measuring end-KL for the additivity report (AURA_ADDITIVITY_GATE=measure) ..."
-      python3 -m prismaquant.validate_assignments_kl \
+    echo "[pipeline] [3c] measuring end-KL for the additivity report (AURA_ADDITIVITY_GATE=measure) ..."
+    if python3 -m prismaquant.validate_assignments_kl \
         --model "$MODEL_PATH" \
         --probe "$PROBE_PATH" \
         --costs "$COST_PATH" \
@@ -2245,6 +2270,7 @@ PY
         --n-calib-samples "$AURA_COST_NSAMPLES" \
         --calib-seqlen "$AURA_COST_SEQLEN" \
         --calib-seed "$AURA_COST_CALIB_SEED" \
+        --measurement-purpose additivity \
         --kl-scope full_sequence \
         --assignment-materialization inplace \
         --production-weight-cache "$PRODUCTION_RENDER_COST_CACHE_PATH" \
@@ -2252,24 +2278,8 @@ PY
         --work-dir "${WORK_DIR}/work/aura_additivity" \
         --dtype bf16 --device "$DEVICE" \
         --output "$AURA_ADDITIVITY_KL_JSON" \
-        2>&1 | tee "${WORK_DIR}/logs/aura_additivity_kl.log" || true
-    fi
-    if [[ -f "$AURA_ADDITIVITY_KL_JSON" ]]; then
-      read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(
-        python3 - "$AURA_ADDITIVITY_KL_JSON" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-results = json.loads(Path(sys.argv[1]).read_text()).get("results", [])
-if not results:
-    print("")
-else:
-    row = results[0]
-    print(f"{float(row.get('kl_mean', row.get('kl', 0.0)))} "
-          f"{float(row.get('kl_stderr', 0.0) or 0.0)}")
-PY
-      )"
+        2>&1 | tee "${WORK_DIR}/logs/aura_additivity_kl.log"; then
+      read -r AURA_MEASURED_KL AURA_MEASURED_KL_STDERR <<<"$(aura_assignment_kl "$AURA_ADDITIVITY_KL_JSON" bind)"
       [[ -n "$AURA_MEASURED_KL" ]] && AURA_MEASURED_SOURCE="aura_additivity_kl.json"
     fi
   fi
@@ -2309,9 +2319,9 @@ with open(sys.argv[3], "w") as fh:
 print(json.dumps(result, indent=1))
 PY
   fi
-  # Stamp the trust-region number into the cost table's provenance so every
-  # artifact derived from it carries it (the R2 provenance contract).
-  if [[ -f "$AURA_ADDITIVITY_JSON" ]]; then
+  # Stamp the trust-region number into run-owned cost provenance (R2).
+  # External costs keep the additivity report under WORK_DIR only.
+  if [[ -f "$AURA_ADDITIVITY_JSON" && -z "$PREPRICED_COST_REPORT" ]]; then
     python3 - "$COST_PATH" "$AURA_ADDITIVITY_JSON" "$AURA_MEASURED_SOURCE" <<'PY' || \
       echo "[pipeline] [3c] WARNING: could not stamp additivity provenance (non-blocking)"
 import json

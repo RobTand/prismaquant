@@ -11,19 +11,20 @@ Rows here are synthetic but complete joint-AURA entries; these tests make no
 serving-quality claim.
 """
 from __future__ import annotations
-
 import json
 import pickle
 import sys
 
 import pytest
 
+from prismaquant import joint_aura_rows
+
 torch = pytest.importorskip("torch")
 
 from prismaquant import format_registry as fr  # noqa: E402
 from prismaquant import joint_aura as joint  # noqa: E402
 from prismaquant import mtp_rung_selection as canon  # noqa: E402
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
 from prismaquant.glm_mtp import mtp_objective_identity, with_mtp_objective  # noqa: E402
 from test_rung_allowability import allowability_cli_args, publication  # noqa: E402
 
@@ -59,7 +60,7 @@ def _probe(*, objective=True, seed_base=7000):
     source_model = {
         "schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic",
         "resolved_commit": None, **source_content,
-        "content_sha256": joint.identity_sha256(source_content),
+        "content_sha256": joint_aura_rows.joint_identity_sha256(source_content),
     }
     probe = {
         "schema": "prismaquant.joint_aura.probes.v2", "seed_base": seed_base,
@@ -77,15 +78,15 @@ def _probe(*, objective=True, seed_base=7000):
 def _row(name, fmt, signed, probe):
     operator = {
         "schema": "prismaquant.joint_aura.operator.v2", "qname": name,
-        "format": fmt, "probe_identity_sha256": joint.identity_sha256(probe),
-        "source_weight": {"content_sha256": joint.identity_sha256({"source": name}),
+        "format": fmt, "probe_identity_sha256": joint_aura_rows.joint_identity_sha256(probe),
+        "source_weight": {"content_sha256": joint_aura_rows.joint_identity_sha256({"source": name}),
                           "shape": [64, 128], "dtype": "torch.bfloat16", "logical_bytes": 2 * PARAMS},
-        "rendered_weight": {"content_sha256": joint.identity_sha256({"render": name, "format": fmt}),
+        "rendered_weight": {"content_sha256": joint_aura_rows.joint_identity_sha256({"render": name, "format": fmt}),
                             "shape": [64, 128], "dtype": "torch.float32", "logical_bytes": 4 * PARAMS},
         "activation": joint.activation_identity(fr.get_format("FP8_E4M3"), {}, name),
         "arithmetic": probe["arithmetic"],
     }
-    return joint.make_joint_aura_entry(
+    return joint_aura_rows.make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,
         signed_components=[dict(weight=float(x), activation=0.0, mixed=0.0, total=float(x))
                            for x in signed])
@@ -224,6 +225,41 @@ def test_a_body_probe_identity_is_refused():
     with pytest.raises(ValueError, match="MTP objective"):
         select_mtp_rungs(_payload(probe=_probe(objective=False)), byte_budget=10**12,
                          constants=CONSTANTS)
+
+
+@pytest.mark.parametrize("payload_schema", ["prismaquant.glm_mtp_cost.v1", None],
+                         ids=["mtp-envelope", "generic-envelope"])
+def test_body_admission_refuses_mtp_objective_with_body_provenance(payload_schema):
+    """A homogeneous MTP table cannot become body pricing by relabelling it."""
+    from prismaquant.cost_currency import CostCurrencyError, require_run_currency
+    from prismaquant.glm_mtp import MTP_OBJECTIVE_SCHEMA
+    from prismaquant.joint_aura_rows import JOINT_AURA_COST_CURRENCY
+
+    provenance = {"cost_mode": "aura", "joint_activation": True,
+                  "cost_currency": JOINT_AURA_COST_CURRENCY}
+    payload = _payload()
+    body = _payload(probe=_probe(objective=False))
+    for table in (payload, body):
+        table["provenance"] = dict(provenance)
+        if payload_schema is None:
+            table.pop("schema")
+        else:
+            table["schema"] = payload_schema
+
+    # Same envelope, layer, formats and provenance: only the probe objective
+    # differs. Rejecting an MTP envelope or layer number is not the rule.
+    assert require_run_currency(body)["joint_aura_rows"] == sum(
+        map(len, body["costs"].values()))
+    identities = set()
+    for rows in payload["costs"].values():
+        for row in rows.values():
+            assert joint_aura_rows.validate_joint_aura_entry(row)
+            assert row["probe_identity"]["objective"]["schema"] == MTP_OBJECTIVE_SCHEMA
+            identities.add(row["probe_identity_sha256"])
+    assert len(identities) == 1  # No mixed-identity wall can satisfy this refusal.
+
+    with pytest.raises(CostCurrencyError):
+        require_run_currency(payload)
 
 
 def test_mixed_probe_identities_are_refused():
@@ -371,7 +407,7 @@ def test_the_merged_payload_loads_as_a_cost_file(tmp_path):
     whole = _payload()
     path = tmp_path / "merged.pkl"
     path.write_bytes(pickle.dumps(merge_mtp_costs([_part(whole, {R1024}), _part(whole, {R832})])))
-    assert load_mtp_cost(path)["costs"] == whole["costs"]
+    assert load_mtp_cost(path).payload["costs"] == whole["costs"]
 
 
 @pytest.mark.parametrize("field", ["mtp_layer", "groups", "params", "source_dtype"])
@@ -444,10 +480,10 @@ def test_invalid_second_source_probe_refuses_and_releases_first():
     bad_probe = _probe()
     bad_row = _row(ROUTED[-1], R832, [0.03] * 4, bad_probe)
     bad_probe["source_model"]["content_sha256"] = "f" * 64
-    bad_row["probe_identity_sha256"] = joint.identity_sha256(bad_probe)
+    bad_row["probe_identity_sha256"] = joint_aura_rows.joint_identity_sha256(bad_probe)
     bad_row["joint_operator_identity"]["probe_identity_sha256"] = bad_row[
         "probe_identity_sha256"]
-    bad_row["joint_operator_identity_sha256"] = joint.identity_sha256(
+    bad_row["joint_operator_identity_sha256"] = joint_aura_rows.joint_identity_sha256(
         bad_row["joint_operator_identity"])
     payload["costs"][ROUTED[-1]][R832] = bad_row
     with pytest.raises(RuntimeError, match="content_sha256"):

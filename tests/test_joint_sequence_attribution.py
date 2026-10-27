@@ -8,13 +8,14 @@ production collector and the checkpoint resume boundary. No model-quality,
 estimator or serving claim is made; probe-sampling scope is unchanged.
 """
 from __future__ import annotations
-
 import copy
 import math
 
 import pytest
 import torch
 
+from prismaquant import joint_aura_rows
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 from prismaquant import joint_aura as joint
 
@@ -42,7 +43,7 @@ def _sidecar(blocks, components_per_probe, totals, *, gate_relative=1e-3,
              arithmetic_scope="test_per_invocation_contractions",
              sequence_length=4, selected_tokens_per_row=4, n_sequences=None,
              calibration_sha256="c" * 64, with_leaveout=None):
-    return joint.sequence_attribution_sidecar(
+    return joint_aura_rows.sequence_attribution_sidecar(
         blocks=blocks, components_per_probe=components_per_probe,
         authoritative_totals=totals, gate_relative=gate_relative,
         arithmetic_scope=arithmetic_scope, sequence_length=sequence_length,
@@ -60,7 +61,7 @@ def _row_with_sidecar(sidecar, *, signed=(3.0, -1.0), authority_components=None)
                      for key in ("weight", "activation", "mixed")}
             parts["weight"] += total - math.fsum(parts.values())
             authority_components.append({**parts, "total": total})
-    row = joint.make_joint_aura_entry(
+    row = joint_aura_rows.make_joint_aura_entry(
         operator_identity=row["joint_operator_identity"],
         probe_identity=row["probe_identity"],
         signed_components=copy.deepcopy(authority_components),
@@ -74,7 +75,7 @@ def _row_with_sidecar(sidecar, *, signed=(3.0, -1.0), authority_components=None)
 def test_row_without_uncertainty_scope_stays_legacy_conditional():
     row = _row(UNIT_A, [2.0, -3.0])
     del row["uncertainty_scope"]
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 @pytest.mark.parametrize("scope", [
@@ -85,7 +86,7 @@ def test_foreign_uncertainty_scope_is_refused(scope):
     row = _row(UNIT_A, [2.0, -3.0])
     row["uncertainty_scope"] = scope
     with pytest.raises(ValueError, match="uncertainty_scope"):
-        joint.validate_joint_aura_entry(row)
+        joint_aura_rows.validate_joint_aura_entry(row)
 
 
 # ---- publisher oracle ------------------------------------------------------
@@ -103,7 +104,7 @@ def test_sidecar_exact_reconstruction_concentrates_and_reconciles():
               components[1][0]["total"] + components[1][1]["total"]]
     sidecar = _sidecar(blocks, components, totals)
     row = _row_with_sidecar(sidecar, signed=tuple(totals))
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
     published = row["sequence_attribution"]
     assert published["scope"] == "per_sequence"
     assert published["reconciliation"]["residual_per_probe"] == [0.0, 0.0]
@@ -132,7 +133,7 @@ def test_sidecar_residual_stays_separate_from_the_price():
     totals = [3.0, 3.0]  # authority differs from the reconstructed 2.0
     sidecar = _sidecar(blocks, components, totals, gate_relative=0.5)
     row = _row_with_sidecar(sidecar, signed=tuple(totals))
-    assert joint.validate_joint_aura_entry(row)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
     published = row["sequence_attribution"]
     # residual = reconstruction minus authoritative total
     assert published["reconciliation"]["residual_per_probe"] == [-1.0, -1.0]
@@ -215,14 +216,14 @@ def test_sidecar_cohort_summary_binds_whole_blocks_and_selected_tokens():
     totals = [10.0, 10.0]
     sidecar = _sidecar(blocks, components, totals, sequence_length=4,
                        selected_tokens_per_row=4)
-    cohort = joint.sequence_cohort_summary(
+    cohort = joint_aura_rows.sequence_cohort_summary(
         sidecar, first_block_index=0, block_count=1)
     assert cohort["restricted_price"] == pytest.approx(0.5 * 1.0 ** 2)
     assert cohort["renormalized_scale"] == pytest.approx(4.0)
     assert cohort["renormalized_full_draw_estimate"] == pytest.approx(2.0)
     assert cohort["selected_tokens_per_row"] == 4
     with pytest.raises(ValueError):
-        joint.sequence_cohort_summary(sidecar, first_block_index=3,
+        joint_aura_rows.sequence_cohort_summary(sidecar, first_block_index=3,
                                       block_count=2)
 
 
@@ -269,7 +270,7 @@ def test_malformed_sidecar_is_refused(mutation):
                        [1.75, 1.25])
     mutation(sidecar)
     with pytest.raises(ValueError):
-        joint.make_joint_aura_entry(
+        joint_aura_rows.make_joint_aura_entry(
             operator_identity=_row(UNIT_A, [1.75, 1.25])["joint_operator_identity"],
             probe_identity=_row(UNIT_A, [1.75, 1.25])["probe_identity"],
             signed_components=[{"weight": 1.75, "activation": 0.0, "mixed": 0.0,
@@ -367,7 +368,7 @@ def test_streamed_production_rows_carry_sidecar_and_authoritative_bitwise():
         sequence_attribution=dict(_ATTR))
     for name, rows in on["costs"].items():
         for fmt, row in rows.items():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in aura._ZERO_COST_FORMATS:
                 # A passthrough row's price is exact by rule; it publishes no
                 # sidecar and claims none.
@@ -394,7 +395,7 @@ def test_streamed_single_sequence_blocks_publish_per_sequence_scope():
         sequence_attribution=dict(_ATTR))
     for name, rows in payload["costs"].items():
         for fmt, row in rows.items():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
             if fmt in aura._ZERO_COST_FORMATS:
                 assert "sequence_attribution" not in row
                 continue
@@ -416,10 +417,144 @@ def test_streamed_attribution_config_must_be_well_formed():
             sequence_attribution={"candidates": ["model.layers.0.missing@FP8_DYNAMIC"]})
 
 
+# ---- requested-attribution publication/restore completeness (#2793) --------
+
+
+def _requested_price_fixture(*, selection="all", zero_cost=False):
+    # Reuse the measured-unit fixture: restore must reach the attribution
+    # boundary, not fail on identity or legacy/joint sample alignment first.
+    from prismaquant.joint_price_step import (
+        JointResumeContract, ProbeResumePolicy, RequiredAttribution,
+    )
+    from test_joint_price_step import FORMAT, _completed, _step
+
+    if zero_cost:
+        completed, _ = _step()
+        for probe in range(completed.measurements.n_probes):
+            completed.consume_probe(
+                probe, {(UNIT_A, FORMAT): _comps(0.0, 0.0, 0.0)},
+                {UNIT_A: {"g_trace": 0.0}})
+        state = completed.complete_unit(UNIT_A)
+    else:
+        completed, state = _completed()
+    restored, _ = _step()
+    keys = None if selection == "all" else (
+        {(UNIT_A, FORMAT)} if selection == "selected" else set())
+    requirement = None if selection == "disabled" else RequiredAttribution(
+        keys=keys, refusal=lambda name, fmt: ValueError(
+            f"sequence_attribution required for {name}@{fmt}"))
+    for price in (completed, restored):
+        price.resume_contract = JointResumeContract(
+            ProbeResumePolicy.EXACT, attribution=requirement)
+        if zero_cost:
+            price.zero_cost_formats = (FORMAT,)
+    return completed, restored, state, FORMAT
+
+
+def _price_sidecar(row, sizes):
+    first = 0
+    specs = []
+    for size in sizes:
+        specs.append((first, size))
+        first += size
+    # The first block carries the authority; other whole blocks carry zero.
+    # The existing builder remains the oracle for prices and descriptive SE.
+    components = [[dict(authority)] + [_comps(0.0, 0.0, 0.0)
+                                       for _ in sizes[1:]]
+                  for authority in row["signed_components_per_probe"]]
+    return _sidecar(_blocks(*specs), components, row["signed_per_probe"],
+                    n_sequences=first)
+
+
+def _exercise_price_boundary(boundary, completed, restored, state, fmt, sidecar):
+    if boundary == "restore":
+        row = state["joint_aura_rows"][fmt]
+        if sidecar == "absent":
+            row.pop("sequence_attribution", None)
+        else:
+            row["sequence_attribution"] = copy.deepcopy(sidecar)
+        restored.restore_unit(UNIT_A, state)
+        return restored.rows[UNIT_A][fmt]
+    completed.prepare_rows(
+        [UNIT_A], sidecar=lambda name, candidate, components: (
+            None if sidecar == "absent" else copy.deepcopy(sidecar)))
+    return completed.rows[UNIT_A][fmt]
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("selection", ["all", "selected"])
+@pytest.mark.parametrize("sidecar", [None, "absent", {}],
+                         ids=["null", "absent", "invalid-mapping"])
+def test_requested_attribution_rejects_missing_or_null_sidecar(
+        boundary, selection, sidecar):
+    completed, restored, state, fmt = _requested_price_fixture(selection=selection)
+    with pytest.raises((ValueError, RuntimeError), match="attribution"):
+        _exercise_price_boundary(
+            boundary, completed, restored, state, fmt, sidecar)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("selection,zero_cost", [
+    ("disabled", False), ("unselected", False), ("all", True),
+])
+def test_requested_attribution_preserves_legacy_exemptions(
+        boundary, selection, zero_cost):
+    completed, restored, state, fmt = _requested_price_fixture(
+        selection=selection, zero_cost=zero_cost)
+    row = _exercise_price_boundary(
+        boundary, completed, restored, state, fmt, "absent")
+    assert "sequence_attribution" not in row
+    assert joint_aura_rows.validate_joint_aura_entry(row)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("sizes", [(1, 1), (2, 2)],
+                         ids=["per-sequence", "equal-coarse-blocks"])
+@pytest.mark.parametrize("damage", ["section", "prices", "standard-error"])
+def test_requested_attribution_rejects_deleted_eligible_leaveout(
+        boundary, sizes, damage):
+    completed, restored, state, fmt = _requested_price_fixture()
+    sidecar = _price_sidecar(state["joint_aura_rows"][fmt], sizes)
+    assert sidecar["leaveout"]["jackknife_standard_error"] > 0.0
+    if damage == "section":
+        del sidecar["leaveout"]
+    elif damage == "prices":
+        del sidecar["leaveout"]["price_per_block"]
+    else:
+        del sidecar["leaveout"]["jackknife_standard_error"]
+    with pytest.raises((ValueError, RuntimeError), match="attribution|leaveout"):
+        _exercise_price_boundary(
+            boundary, completed, restored, state, fmt, sidecar)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("sizes", [(1, 1), (2, 2), (2,), (1, 2)],
+                         ids=["per-sequence", "equal-coarse-blocks",
+                              "one-block", "unequal-blocks"])
+def test_requested_attribution_accepts_complete_geometry_without_repricing(
+        boundary, sizes):
+    completed, restored, state, fmt = _requested_price_fixture()
+    original = copy.deepcopy(state["joint_aura_rows"][fmt])
+    sidecar = _price_sidecar(original, sizes)
+    eligible = len(sizes) >= 2 and len(set(sizes)) == 1
+    assert ("leaveout" in sidecar) == eligible
+    row = _exercise_price_boundary(
+        boundary, completed, restored, state, fmt, sidecar)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
+    assert row["sequence_attribution"] == sidecar
+    if eligible:
+        leaveout = row["sequence_attribution"]["leaveout"]
+        assert leaveout["uncertainty_scope"] == LEAVEOUT_SCOPE
+        assert "no generalization claim" in leaveout["assumption"]
+    # Sidecar validation may never reprice or relabel the authoritative row.
+    assert {key: value for key, value in row.items()
+            if key != "sequence_attribution"} == original
+
+
 # ---- checkpoint resume boundary -------------------------------------------
 
 def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _context, runner, cache = _streamed_fixture()
     aura.compute_aura_cost_streamed(
         runner, _TWO_SEQ, ["FP8_DYNAMIC", "NVFP4A16", "BF16"], n_probes=3,
@@ -442,11 +577,11 @@ def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeyp
         sequence_attribution=dict(_ATTR), checkpoint_dir=tmp_path, resume=True)
     for rows in again["costs"].values():
         for row in rows.values():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 def test_checkpoint_resume_attribution_on_plain_rows_refuses(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     _, _context, runner, cache = _streamed_fixture()
     aura.compute_aura_cost_streamed(
         runner, _TWO_SEQ, ["FP8_DYNAMIC", "NVFP4A16", "BF16"], n_probes=3,
@@ -491,9 +626,9 @@ def test_sidecar_geometry_must_match_priced_calibration_shape():
     probe = {**row["probe_identity"], "calibration_shape": [3, 4],
              "token_scope": "all"}
     operator = {**row["joint_operator_identity"],
-                "probe_identity_sha256": joint.identity_sha256(probe)}
+                "probe_identity_sha256": joint_aura_rows.joint_identity_sha256(probe)}
     with pytest.raises(ValueError, match="calibration|geometry"):
-        joint.make_joint_aura_entry(
+        joint_aura_rows.make_joint_aura_entry(
             operator_identity=operator, probe_identity=probe,
             signed_components=row["signed_components_per_probe"],
             sequence_attribution=sidecar)

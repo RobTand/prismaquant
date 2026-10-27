@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -192,6 +193,39 @@ def _argv(records_dir, output_root, receipt=None, extra=()):
 
 
 # -- the exact pbrun argv shape (§5.2, pinned: drift breaks placement) ----------
+
+
+@pytest.mark.parametrize("mode", ["0", "1"])
+def test_dispatch_refuses_edited_record_before_publishing(tmp_path, records_dir, monkeypatch, mode):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+    path = records_dir / "layer-000.json"
+    record = json.loads(path.read_text())
+    record["campaign"]["plan_path"] = "/edited-plan"
+    path.write_text(json.dumps(record))
+    gateway = FakeGateway()
+    assert main(_argv(records_dir, tmp_path / "out"), _gateway=gateway) == 3
+    assert gateway.submitted == []
+
+
+@pytest.mark.parametrize("defect", ["edited", "schema", "campaign", "receipt"])
+def test_load_records_names_the_offending_file_among_valid_records(records_dir, defect):
+    from dispatch_joint_quanta import load_records
+    from prismaquant.joint_campaign_ledger import seal_quantum_record
+
+    path = records_dir / "layer-001.json"
+    record = json.loads(path.read_text())
+    if defect in {"edited", "campaign"}:
+        record["campaign"]["plan_path"] = "/other-plan"
+    elif defect == "schema":
+        record["schema"] = "foreign"
+    else:
+        record["adjoint"]["receipt_sha256"] = "f" * 64
+    if defect != "edited":
+        record = seal_quantum_record(record)
+    path.write_text(json.dumps(record))
+    with pytest.raises(DispatchRefused) as refused:
+        load_records(records_dir)
+    assert str(refused.value).startswith(f"{path}: ")
 
 
 def test_quantum_argv_matches_the_pinned_submission_shape(tmp_path, campaign):
@@ -731,28 +765,35 @@ def test_stage_a_refuses_a_spec_that_opts_out_of_the_host_window(tmp_path, campa
         stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
 
 
-#: Run in a child process: it imports the published PrismaBuild tree, which
-#: this process may already have imported from another generation.
+#: Run in a child process to exercise the installed PrismaBuild package,
+#: isolated from any modules loaded by other tests in this process.
 _PLACEMENT_PROBE = r"""
-import importlib.util, json, sys
+import json, sys
 from pathlib import Path
-published, variables, queue_root = Path(sys.argv[1]), json.loads(sys.argv[2]), Path(sys.argv[3])
-spec = importlib.util.spec_from_file_location("published_pbrun", published / "tools" / "pbrun.py")
-pbrun = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(pbrun)
-from prismabuild import pool
-terms = pbrun.local_disk_terms(variables, transport="pool")
-queue = pool.PoolQueue(queue_root)
-queue.ensure_layout()
+from prismabuild.client import PoolQueue
+from prismabuild.local_scratch import scratch_terms
+from prismabuild.produced_spool import host_window_terms
+
+variables, queue_root = json.loads(sys.argv[1]), Path(sys.argv[2])
+# These internal demand helpers are test-only integration points. Use the
+# dispatcher's sealed environment unchanged, including the spool opt-in.
+terms = scratch_terms(variables)
+for kind, amount in host_window_terms(variables).items():
+    terms[kind] = terms.get(kind, 0) + amount
+queue = PoolQueue(queue_root)
+checkout = queue_root.parent / "checkout"
+checkout.mkdir()
+cas = queue_root.parent / "cas"
+cas.mkdir()
 resources = {"cpu": 1, "mem_gb": 1, **terms}
 for key in ("a" * 64, "b" * 64):
-    queue.publish(action_key=key, cas_root="/cas",
-                  worker_script=str(published / "tools" / "prismabuild_worker.py"),
-                  checkout_root=str(queue_root.parent / "checkout"), resources=resources)
+    queue.publish(action_key=key, cas_root=cas,
+                  worker_script=checkout / "worker.py",
+                  checkout_root=checkout, resources=resources)
 capacity = {"cpu": 4, "mem_gb": 8, "spool_gb": max(2 * terms.get("spool_gb", 0) - 1, 0)}
 first = queue.claim(owner="first", capacity=capacity)
 second = queue.claim(owner="second", capacity=capacity)
-print(json.dumps({"pbrun": pbrun.__file__, "pool": pool.__file__, "terms": terms,
+print(json.dumps({"terms": terms,
                   "first": None if first is None else first["resources"],
                   "second": None if second is None else second["resources"],
                   "available": queue.ledger().available()}))
@@ -761,28 +802,21 @@ print(json.dumps({"pbrun": pbrun.__file__, "pool": pool.__file__, "terms": terms
 
 def test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed(
         tmp_path, campaign):
-    """PQ #1120 acceptance, on PrismaBuild's own published code: the sealed
+    """PQ #1120 acceptance, on the installed PrismaBuild package: the sealed
     environment of a Stage A row derives a ``spool_gb`` demand of its window
-    in whole GiB (pbrun ``local_disk_terms``), and a box whose spool budget
+    in whole GiB, and a box whose spool budget
     holds one such window but not two claims one row and refuses the other.
     """
     import subprocess
-    published = Path("/mnt/shared/prismabuild-fleet/repo")
-    if not (published / "tools" / "pbrun.py").is_file():
-        pytest.skip(f"published PrismaBuild not visible at {published}")
     argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
     variables = dict(env.split("=", 1) for env in _envelope_envs(argv))
     run = subprocess.run(
-        [sys.executable, "-c", _PLACEMENT_PROBE, str(published),
+        [sys.executable, "-c", _PLACEMENT_PROBE,
          json.dumps(variables), str(tmp_path / "pb-queue")],
         capture_output=True, text=True, timeout=300,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(published / "src"),
-             "HOME": str(tmp_path)})
+        env={"PATH": os.defpath, "HOME": str(tmp_path)})
     assert run.returncode == 0, run.stderr
     result = json.loads(run.stdout.strip().splitlines()[-1])
-    for module in ("pbrun", "pool"):
-        assert Path(result[module]).resolve().is_relative_to(
-            published.resolve()), result
     need = -(-SPOOL_WINDOW_BYTES // (1 << 30))
     assert result["terms"] == {"spool_gb": need}
     assert result["first"]["spool_gb"] == need
@@ -1468,9 +1502,6 @@ def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, ca
     uncharged: prof-1 (PQ #1348) held ``spool_gb=218`` for a 185.38 GiB
     spill and a 32 GiB cotangent, beside an uncharged 32 GiB spool."""
     import subprocess
-    published = Path("/mnt/shared/prismabuild-fleet/repo")
-    if not (published / "tools" / "pbrun.py").is_file():
-        pytest.skip(f"published PrismaBuild not visible at {published}")
     cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
     spool = '/home/rob/pb-spool/fixture'
     ceilings = {_COTANGENT[1]: 32 << 30, _SPILL[1]: 199_051_640_832,
@@ -1481,18 +1512,18 @@ def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, ca
     argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill, spool))()
     variables = dict(item.split('=', 1) for item in _outer_env(argv))
     run = subprocess.run(
-        [sys.executable, "-c", _PLACEMENT_PROBE, str(published),
+        [sys.executable, "-c", _PLACEMENT_PROBE,
          json.dumps(variables), str(tmp_path / "pb-queue")],
         capture_output=True, text=True, timeout=300,
-        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(published / "src"),
-             "HOME": str(tmp_path)})
+        env={"PATH": os.defpath, "HOME": str(tmp_path)})
     assert run.returncode == 0, run.stderr
     result = json.loads(run.stdout.strip().splitlines()[-1])
-    assert Path(result["pbrun"]).resolve().is_relative_to(published.resolve()), result
     need = sum(-(-value // (1 << 30)) for value in ceilings.values())
     assert need == 186 + 32 + 32
     assert result["terms"] == {"spool_gb": need}
     assert result["first"]["spool_gb"] == need
+    assert result["second"] is None, result
+    assert result["available"]["spool_gb"] == need - 1
 
 
 def test_a_row_without_scratch_seals_todays_request(tmp_path, campaign, monkeypatch):

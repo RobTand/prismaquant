@@ -194,10 +194,8 @@ def _topk_all_positions(
 
 
 def _build_payload(args: argparse.Namespace) -> dict:
-    from prismaquant.cost_streaming import (
-        build_streamed_causal_lm,
-        validate_cached_streamed_model_identity,
-    )
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import validate_cached_streamed_model_identity
     from prismaquant.gpu_guard import require_cuda_hot_path
     from prismaquant.model_profiles import detect_profile
 

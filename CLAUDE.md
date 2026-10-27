@@ -3,6 +3,10 @@
 This file is the durable, code-validated brief for working on PrismaQuant with
 Robert Tand.
 
+**GGUF is deprecated as of 2026-10-17.** Rob directed us to preserve its code
+without further fixes or enhancements. GGUF examples and measurements below
+remain historical reference. See `AGENTS.md` for the current support policy.
+
 > **Prime directive — read every other doc incredulously.** This repo accretes
 > handovers, results docs, READMEs, and a paper. They go stale *fast* and
 > sometimes invert. A claim is true only if (a) it lives in current code/tests,
@@ -249,11 +253,11 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
 9. **Serving reality gates every format — per lane, and per artifact.** A
    format is production-eligible only when its lane's **pinned runtime**
    (vanilla vLLM for `compressed-tensors`, llama.cpp/vLLM-GGUF for GGUF, and
-   the pinned Tessera release for the Tessera wire, served by Tessera's own vLLM
-   plugin `tessera.serving` and admitted only through
-   `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`, which is
-   PENDING, so that lane admits nothing yet — the sanctioned **three**, per
-   `AGENTS.md`)
+   the exactly pinned Tessera commit and packaged contract for the Tessera wire,
+   served by Tessera's own vLLM plugin `tessera.serving` and admitted through
+   `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json` within each
+   matched cell's scope and the independent export and serving gates, the
+   sanctioned **three** per `AGENTS.md`)
    loads it on real shapes, generates correctly eager **and** graph-mode,
    doesn't break MTP/spec-decode (or is gated away), and routes it to a
    **native** kernel for the declared target platform — tensor cores on the
@@ -334,10 +338,11 @@ within 1–2%. The decision-unit *framing* from CLADO is kept
     unrecognized sweep is not verified, never a pass. It sees neither the
     activation representation (#567) nor whether a kernel is native on the
     target: the kernel each scheme selected is recorded and not judged,
-    because vLLM publishes no table to judge it against. The test may not
-    import the serving runtime (`AGENTS.md` principle 5 forbids vendoring it); the
-    attestation travels as data — a contract file on one lane, a sweep record
-    on the other. **Corollary for prose:** a
+    because vLLM publishes no table to judge it against. Metadata checks use
+    producer APIs and contract/receipt data without loading the serving stack.
+    Serving integration checks may import Tessera in their declared runtime
+    under `AGENTS.md` principle 5; importability supplies no qualification.
+    **Corollary for prose:** a
     recorded blocker or capability claim inherits the scope of the artifact it
     was measured on — record the scope or do not record the claim. *Two of our
     own spec files disagreed about one runtime; the runtime was never
@@ -486,24 +491,23 @@ production-render-staged) **fail fast with `exit 2`** pointing at their archive.
 
 `COST_MODE` is a **spelling** over two axes since 2026-07-30 (re-vet R3):
 `COST_RENDER ∈ {inline, cached-menu}` × `COST_OBJECTIVE ∈ {weight-recon,
-render-score, aura-adjoint}`. The CB/GGUF lanes are no longer pinned to
-`COST_MODE=local` — that gate named a *render* property to block an *objective*;
-it is now a render-faithfulness assertion, and `col_weights` on the production
-render path (CB Milestone C) lets a cached-menu render be the exporter's
-imatrix-weighted render. Non-`local` objectives on CB are reachable but
-**opt-in and not recommended** until a served CB A/B exists.
+render-score, aura-adjoint}`. The GGUF lane checks render faithfulness rather
+than requiring `COST_MODE=local`. For an imatrix-weighted format family, the
+pipeline harvests the exporter's imatrix and passes `--col-weights` to the
+cached-menu render. The former CB lane's implementation is historical context
+at `archive/gridbook_lane_2026-09-02/`; that lane is retired.
 
 **Subsystem owners (the files that matter):**
 
 | Concern | Files |
 |---|---|
-| Orchestrate / contract | `run-pipeline.sh` (exec) · `pipeline.py` (declarative spec + owner validation, not executor) · `__init__.py` (transformers-5.x polyfills) |
+| Orchestrate / contract | `run-pipeline.sh` (exec) · `pipeline.py` (declarative spec + owner validation, not executor) · `__init__.py` (lazy public exports) |
 | Allocate | `allocator.py` (CLI, Pareto sweep, log-error kneedle, `--bit-attribution-json/csv`) · `allocator_solver.py` (numpy multi-choice knapsack DP, union-find serving-unit promotion, `predicted_dloss`) · `allocator_candidates.py` (legality gate + cost-source precedence + passthrough integrity) · `decision_units.py` |
 | Probe / cost | `incremental_probe.py` + `sensitivity_probe.py` + `kl_fisher.py` (Fisher probe) · `incremental_measure_quant_cost.py` + `measure_quant_cost.py` · `production_render_cost.py` (default cost) · `aura_cost.py` + `expert_empirical_cost.py` (`COST_MODE=aura`, MoE hybrid) · `kl_measurement.py` (whole-assignment KL + per-sequence tail) · `perturbed_x_cache.py` (activation cache / model loading — **not** a cost stage). The L3 propagated stack is walled at `archive/l3_propagated_2026-07-30/` |
 | Formats | `format_registry.py` (FormatSpec + RTN `quantize_dequantize`/`activation_quantize_dequantize`, codebook bucketize, E8M0 snap, `torch.compile` hot path) · `mx_formats.py` · `fp8_dynamic.py` |
-| The one cache + render | `production_weight_cache.py` (`ProductionWeightCache` + `render_production_weight`) · `build_production_cache.py` · `production_recache.py` · `render_score.py` (output-MSE render scorer + gate + mechanism registry/topo-order) · `layer_state_cache.py` |
-| Streaming (huge models) | `layer_streaming.py` (LRU + pressure shrink + FP8 block dequant + per-expert→packed bridge) · `streaming_model.py` · `weight_session.py` (stage/revert/commit live-model format flips) · `source_prefetch.py` (fail-fast residency gate) · `autoscale.py` |
-| Export | `export_native_compressed.py` (~7300 lines: NVFP4/MX/FP8 packing, unified codecs, `build_quantization_config` config_groups+ignore, packed-MoE split, FP8_SOURCE verbatim copy, BF16-upgrade audit) · `export_batched_gptq.py`. (`block_output_match.py` walled 2026-07-30 — `archive/block_output_match_2026-07-30/`; it was unreachable on the shipping recipe.) |
+| The one cache + render | `production_weight_cache.py` (`ProductionWeightCache` + `render_production_weight`) · `build_production_cache.py` · `production_recache.py` · `render_score.py` (output-MSE render scorer + gate + mechanism registry/topo-order) · `native_render_codec.py` (render arithmetic) |
+| Streaming (huge models) | `layer_streaming.py` (LRU + pressure shrink + FP8 block dequant + per-expert→packed bridge) · `streaming_model.py` · `source_prefetch.py` (fail-fast residency gate) · `autoscale.py` |
+| Export | `export_native_compressed.py` (native export assembly, `build_quantization_config` config_groups+ignore, packed-MoE split, FP8_SOURCE verbatim copy, BF16-upgrade audit) · `native_render_codec.py` (render and packing arithmetic) · `export_batched_gptq.py`. (`block_output_match.py` walled 2026-07-30 — `archive/block_output_match_2026-07-30/`; it was unreachable on the shipping recipe.) |
 | Validate / select | `validate_assignments_kl.py` · `select_validated_frontier.py` (kneedle + surrogate-vs-KL Spearman + worst-rank-inversion) · `validation_harness.py` · `validate_native_export.py` · `validate_quantized_model.py` · `shipcard.py` (the refusal contract) · `lane_spec.py` + `lane_specs/*.json` (per-lane serve command / endpoint / gate set / KL evaluator — gates ADVISORY) · `gguf_kl_evaluator.py` (llama-perplexity behind the `validate_assignments_kl` interface) |
 | Profiles (plug-in) | `model_profiles/`: `base.py` (auto-derives fused/packed/naming from the vLLM class), `structure.py` (declarative `ModelStructureSpec` JSON + `build_model_graph`), `registry.py` (`detect_profile`/`register_profile`), `vllm_registry.py`, + per-arch (`qwen3*`, `gemma4`, `lfm2_moe`, `minimax_m2`, `deepseek_v4`). Serving constraints live in the top-level `serving_profiles.py` + `serving_profile_specs/*.json` |
 | Misc | MTP synthesis (transformers v5 drops it) now lives on the profile: `model_profiles/base.py` `mtp_source_prefix`/`read_mtp_source_state_dict`/`load_mtp_state_dict` + `model_profiles/qwen3_5.py::MtpModule` (top-level `mtp_module.py` deleted 2026-07-30) · `layer_config.py` (single canonical recipe parser) · `schemas.py` |

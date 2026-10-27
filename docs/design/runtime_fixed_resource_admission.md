@@ -54,7 +54,8 @@ The existing direct route is:
    `select_validated_frontier.py` currently supports measured KL and byte-budget
    selection; it has no direct served-prefill axis. Its metadata-preserving
    extension is separate ongoing work. Do not relabel
-   `speed_quality_frontier`'s predicted loss/speed hints as served measurements.
+   the retired `speed_quality_frontier` prototype's predicted loss/speed
+   hints as served measurements.
    A direct comparison can select among the measured six without establishing
    an admitted runtime-v2 model or global runtime-optimal allocation.
 

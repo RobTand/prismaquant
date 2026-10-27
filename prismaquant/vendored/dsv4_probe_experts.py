@@ -14,7 +14,7 @@ with three vanilla `nn.Linear` projections (`gate_proj`, `up_proj`,
 math. Memory is identical (same parameter count, no aliasing).
 
 Only used at probe time; vLLM serving uses the packed format from
-PR #40860 directly. `register_deepseek_v4()` swaps in this class
+PR #40860 directly. `register_deepseek_v4()` selects this constructor
 unconditionally — having per-expert structure during probe is what
 makes Fisher and expert-saliency scoring work.
 """
@@ -104,17 +104,14 @@ class DeepseekV4Experts_PerExpert(nn.ModuleList):
 
 
 def enable_per_expert_experts() -> None:
-    """Swap `DeepseekV4Experts` for the per-expert variant in the
-    vendored modeling module. Idempotent — calling more than once is
-    a no-op once the swap has happened.
+    """Select the per-expert constructor for vendored sparse blocks.
 
-    Must run BEFORE any `DeepseekV4SparseMoeBlock` is instantiated so
-    that the `self.experts = DeepseekV4Experts(config)` line at
-    SparseMoeBlock.__init__ picks up the swapped class. This is
-    invoked from `register_deepseek_v4()`.
+    Idempotent, and invoked by `register_deepseek_v4()` before any block
+    is constructed. The packed class keeps its identity for HF's packed
+    initialization dispatch; the adapter's Linear leaves initialize normally.
     """
     import transformers.models.deepseek_v4.modeling_deepseek_v4 as _m
     if getattr(_m, "_prismaquant_per_expert_swapped", False):
         return
-    _m.DeepseekV4Experts = DeepseekV4Experts_PerExpert
+    _m.DeepseekV4SparseMoeBlock.experts_type = DeepseekV4Experts_PerExpert
     _m._prismaquant_per_expert_swapped = True

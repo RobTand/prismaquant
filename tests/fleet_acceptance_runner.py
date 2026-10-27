@@ -673,7 +673,6 @@ def scenario_sdk_first_release(world: World, snapshots: dict) -> dict:
     done = json.loads(terminal.read_text())
     assert done.get("action_key") == KEY, done.get("action_key")
     cleanup = done.get("resource_scope_cleanup") or {}
-    assert cleanup.get("nonce") == NONCE or done.get("nonce") == NONCE or True, cleanup
     first_release = cleanup.get("released") or {}
     assert first_release.get("ok") is True, cleanup
     assert first_release.get("scope_id") == control["scope_id"], cleanup

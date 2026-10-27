@@ -5,11 +5,16 @@ every GLM re-run from main. ``--allow-pinned`` lifts named pins for one campaign
 allocator's grammar), ``--pinned-roster-only`` keeps only what it lifts, and the census
 records the lift so a run under another lift refuses it. Unset, nothing changes.
 """
+
 import argparse
 import json
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
 from prismaquant import tessera_campaign as tc
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 
@@ -103,7 +108,9 @@ def _census(tmp_path, args, roster, name="census.json"):
 
 
 def _args(**kw):
-    return argparse.Namespace(model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1, **kw)
+    unset = dict(allow_pinned=None, pinned_roster_only=False, calibration_input_receipt=None)
+    return argparse.Namespace(model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1,
+                              **{**unset, **kw})
 
 
 def test_census_records_the_lift_and_refuses_another(tmp_path, profile):
@@ -114,22 +121,27 @@ def test_census_records_the_lift_and_refuses_another(tmp_path, profile):
     assert block["schema"] == tc.PINNED_ROSTER_SCHEMA
     assert block["pinned_roster_only"] is True
     assert block["lifted"] == sorted(roster.lifted)
-    assert tc.load_calibration_census(path, args=lifted)["counts"] == {"u": 3}
+    assert tc.load_calibration_census(path, request=lifted)["counts"] == {"u": 3}
     for other in (_args(), _args(allow_pinned=ATTENTION, pinned_roster_only=False),
                   _args(allow_pinned="self_attn.o_proj", pinned_roster_only=True)):
         with pytest.raises(RuntimeError, match="must be the same scope"):
-            tc.load_calibration_census(path, args=other)
+            tc.load_calibration_census(path, request=other)
 
 
 def test_a_body_census_carries_no_block_and_refuses_a_lifted_run(tmp_path, profile):
     roster = tc.campaign_roster(_names()["all"], profile)
     path, payload = _census(tmp_path, _args(), roster)
     assert "pinned_roster" not in payload
-    tc.load_calibration_census(path, args=_args())
-    tc.load_calibration_census(path, args=argparse.Namespace(  # a caller with no such flags
-        model="m", nsamples=4, seqlen=8, seed=0, layer_stride=1))
+    tc.load_calibration_census(path, request=_args())
+    for missing in ("allow_pinned", "pinned_roster_only"):
+        # A request that cannot state its roster fails loudly; it is never
+        # read as an unlifted one.
+        partial = _args()
+        delattr(partial, missing)
+        with pytest.raises(AttributeError, match=missing):
+            tc.load_calibration_census(path, request=partial)
     with pytest.raises(RuntimeError, match="must be the same scope"):
-        tc.load_calibration_census(path, args=_args(allow_pinned=ATTENTION, pinned_roster_only=True))
+        tc.load_calibration_census(path, request=_args(allow_pinned=ATTENTION, pinned_roster_only=True))
 
 
 def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):
@@ -142,7 +154,7 @@ def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):
         def tensor_identity(tensor):
             return {"id": tensor}
 
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(tc.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr("prismaquant.production_weight_cache._production_cache_source_sha256",
                         lambda: "package")
@@ -151,9 +163,9 @@ def test_unset_flags_leave_the_checkpoint_identity_unchanged(monkeypatch):
                 seed_checkpoint=None, seed_wire_dir=None)
 
     def identity(**extra):
-        return tc._campaign_checkpoint_identity(
+        return tc.campaign_checkpoint_identity(
             weights={"a": "wa"}, acts={"a": None}, hessians={"a": None}, menus={"a": []},
-            args=argparse.Namespace(**base, **extra), calibration_identity={"text_sha256": "t"},
+            settings=dict(**base, **extra), calibration_identity={"text_sha256": "t"},
             serving_scope=None, static_scales={}, static_scale_policy="policy")
 
     before = identity()
@@ -210,7 +222,7 @@ def test_real_router_uses_the_existing_dense_capture_without_a_model_change():
     x = torch.arange(8).reshape(2, 4).bfloat16()
     original_weight = router.weight.detach().clone()
     before = router(x)
-    rows, hessian, counts, maxima = tc._collect_activations(
+    rows, hessian, counts, maxima = calibration_forward.capture_activation_statistics(
         model, [name], [x], 2, "cpu", want_hessian=True, forward_batch=router)
     assert torch.equal(rows[name], x.float())
     assert torch.equal(hessian[name], x.float().t() @ x.float())
@@ -221,31 +233,50 @@ def test_real_router_uses_the_existing_dense_capture_without_a_model_change():
     assert torch.equal(router.weight, original_weight)
 
 
-def test_direct_consumer_prices_charge_the_final_buffer_once(profile):
-    from prismaquant.tessera_formats import get_tessera_family
-    family = get_tessera_family("TESSERA_E4M3_K1")
-    prefix = P + "3.self_attn."
-    assert tc._direct_consumer_memory_bytes(prefix + "indexer.weights_proj", family, (32, 64), profile=profile) == 32 * 64 * 4
-    assert tc._direct_consumer_memory_bytes(prefix + "indexer.wk", family, (64, 64), profile=profile) == 0
-    assert tc._direct_consumer_memory_bytes(prefix + "kv_b_proj", family, (128, 64), profile=profile) == 128 * 64 * 2
+@pytest.mark.parametrize("leaf,shape,extra_bytes", [
+    ("indexer.weights_proj", (32, 64), 32 * 64 * 4),
+    ("indexer.wk", (64, 64), 0),
+    ("kv_b_proj", (128, 64), 128 * 64 * 2),
+])
+def test_direct_consumer_prices_charge_the_final_buffer_once(
+        monkeypatch, tmp_path, profile, leaf, shape, extra_bytes):
+    import torch
+    from types import SimpleNamespace
+    from prismaquant import tessera_render
+    from prismaquant.format_registry import get_format
+    from tessera import projection
+
+    name = P + "3.self_attn." + leaf
+    fmt = "TESSERA_E4M3_K1_R1024"
+    source = torch.zeros(shape, dtype=torch.bfloat16)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit",
+                        lambda *_args, **_kwargs: (source, b"wire"))
+    monkeypatch.setattr(projection, "direct_consumer_weight",
+                        lambda *_args, **_kwargs: source)
+    anchor = cell_measurement.measure_cell(qname=name, weight=source,
+        activations=torch.ones(2, shape[1]), format_name=fmt,
+        cache=SimpleNamespace(weights={}, cache_dir=None), wire_dir=tmp_path,
+        hessian_required=False, structure="dense", profile=profile)
+    assert anchor.memory_bytes == get_format(fmt).memory_bytes_for_shape(shape) + extra_bytes
+    assert anchor.wire_bytes == len(b"wire")
 
 
 def test_t8_head_screen_does_not_quantize_its_fp32_input(profile):
     import torch
     from prismaquant.production_weight_cache import _local_forward_render_score
     prefix = P + "3.self_attn.indexer."
-    head = tc._prepare_anchor(qname=prefix + "weights_proj", format_name="TESSERA_E4M3_K1_R1024",
+    head = cell_measurement.CellRecipe.prepare(qname=prefix + "weights_proj", format_name="TESSERA_E4M3_K1_R1024",
         activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense",
         profile=profile)
-    key = tc._prepare_anchor(qname=prefix + "wk", format_name="TESSERA_E4M3_K1_R1024",
+    key = cell_measurement.CellRecipe.prepare(qname=prefix + "wk", format_name="TESSERA_E4M3_K1_R1024",
         activation_kwargs_for=None, hessian_required=False, static_input_scale=None, structure="dense",
         profile=profile)
     x = torch.linspace(0.013, 1.073, 32).reshape(1, 32)
     weight = torch.eye(32)
     head_score = _local_forward_render_score(reference_weight=weight, rendered_weight=weight,
-        activations=x, activation_quantize=head["activation_qdq"], activation_max_abs=None)
+        activations=x, activation_quantize=head.activation_qdq, activation_max_abs=None)
     key_score = _local_forward_render_score(reference_weight=weight, rendered_weight=weight,
-        activations=x, activation_quantize=key["activation_qdq"], activation_max_abs=None)
+        activations=x, activation_quantize=key.activation_qdq, activation_max_abs=None)
     assert head_score == (0.0, "output_mse", False, False)
     assert key_score[0] > 0 and key_score[2] is True
 
@@ -268,11 +299,16 @@ def test_explicit_fp32_cache_keeps_the_direct_head_values():
 @pytest.mark.parametrize("format_name, route_family", [
     ("TESSERA_E4M3_K1_R1024", "TESSERA_FP8"),
     ("TESSERA_BF16_K1_R1792", "TESSERA_BF16")])
-def test_head_wire_decoder_cache_and_screen_agree(tmp_path, profile, format_name, route_family):
+@pytest.mark.parametrize("leaf,module,role,contract,dtype_name", [
+    ("indexer.weights_proj", "indexer.wk_weights_proj", "weights_proj", "a32", "float32"),
+    ("kv_b_proj", "kv_b_proj", "kv_b_proj", "a16", "bfloat16"),
+])
+def test_direct_wire_decoder_cache_and_screen_agree(
+        tmp_path, profile, format_name, route_family, leaf, module, role, contract, dtype_name):
     import torch
     from prismaquant.production_weight_cache import ProductionWeightCache, _local_forward_render_score
-    from tessera.serving.projection_routes import direct_consumer_weight
-    name = P + "3.self_attn.indexer.weights_proj"
+    from tessera.projection import direct_consumer_weight
+    name = P + "3.self_attn." + leaf
     source = torch.randn(32, 32, generator=torch.Generator().manual_seed(17)).bfloat16()
     original = source.clone()
     inputs = torch.randn(2, 32, generator=torch.Generator().manual_seed(19)).bfloat16()
@@ -280,18 +316,17 @@ def test_head_wire_decoder_cache_and_screen_agree(tmp_path, profile, format_name
     cache_dir.mkdir()
     wire_dir.mkdir()
     cache = ProductionWeightCache(weights={}, levers={}, cache_dir=str(cache_dir), metadata={})
-    anchor = tc._measure_anchor(qname=name, weight=source, activations=inputs, format_name=format_name,
+    anchor = cell_measurement.measure_cell(qname=name, weight=source, activations=inputs, format_name=format_name,
         cache=cache, wire_dir=wire_dir, hessian_required=False, structure="dense", profile=profile)
     blob = next(wire_dir.glob("*.tessera")).read_bytes()
-    decoded = direct_consumer_weight(blob, P + "3.self_attn.indexer.wk_weights_proj",
-                                    "weights_proj", route_family)
+    decoded = direct_consumer_weight(blob, P + "3.self_attn." + module, role, route_family)
     retained = torch.load(cache_dir / cache.weights[(name, format_name)], weights_only=True)
-    assert decoded.dtype == retained.dtype == torch.float32
+    assert decoded.dtype == retained.dtype == getattr(torch, dtype_name)
     assert torch.equal(decoded, retained)
     score = _local_forward_render_score(reference_weight=source, rendered_weight=retained,
         activations=inputs, activation_quantize=lambda x: x, activation_max_abs=None)
     assert anchor.dloss == score[0]
-    assert anchor.activation_contract == "a32" and anchor.activation_quantized is False
+    assert anchor.activation_contract == contract and anchor.activation_quantized is False
     assert anchor.wire_bytes == len(blob)
     assert torch.equal(source, original)
 
@@ -299,14 +334,16 @@ def test_head_wire_decoder_cache_and_screen_agree(tmp_path, profile, format_name
 def test_direct_consumer_contract_refuses_a_missing_profile():
     for leaf in ("kv_b_proj", "indexer.weights_proj"):
         name = P + "3.self_attn." + leaf
-        with pytest.raises(tc.ActivationScaleContractError, match="profile"):
-            tc._direct_consumer_activation_contract(name, profile=None)
+        with pytest.raises(ActivationScaleContractError, match="profile"):
+            cell_measurement.CellRecipe.prepare(qname=name, format_name="TESSERA_E4M3_K1_R1024",
+                activation_kwargs_for=None, hessian_required=False, static_input_scale=None)
 
 
-def test_unrelated_names_keep_a_missing_profile_meaning_no_contract():
-    assert tc._direct_consumer_activation_contract(P + "3.self_attn.q_proj", profile=None) is None
-    assert tc._direct_consumer_activation_contract(P + "3.self_attn.indexer.wk", profile=None) is None
-    assert tc._direct_consumer_activation_contract("lm_head", profile=None) is None
+@pytest.mark.parametrize("name", [P + "3.self_attn.q_proj", P + "3.self_attn.indexer.wk", "lm_head"])
+def test_unrelated_names_keep_a_missing_profile_meaning_no_contract(name):
+    recipe = cell_measurement.CellRecipe.prepare(qname=name, format_name="TESSERA_E4M3_K1_R1024",
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None)
+    assert recipe.direct_contract is None
 
 
 def test_measure_anchor_direct_leaf_without_profile_refuses_before_encode(tmp_path):
@@ -319,8 +356,8 @@ def test_measure_anchor_direct_leaf_without_profile_refuses_before_encode(tmp_pa
     cache_dir.mkdir()
     wire_dir.mkdir()
     cache = ProductionWeightCache(weights={}, levers={}, cache_dir=str(cache_dir), metadata={})
-    with pytest.raises(tc.ActivationScaleContractError, match="profile"):
-        tc._measure_anchor(qname=name, weight=weight, activations=inputs,
+    with pytest.raises(ActivationScaleContractError, match="profile"):
+        cell_measurement.measure_cell(qname=name, weight=weight, activations=inputs,
             format_name="TESSERA_E4M3_K1_R1024", cache=cache, wire_dir=wire_dir,
             hessian_required=False, structure="dense")
     assert list(wire_dir.glob("*.tessera")) == []

@@ -55,8 +55,15 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from multiprocessing import get_context
+from pathlib import Path
 
 import numpy as np
+
+# Support direct-script execution from an uninstalled checkout as well as -m.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.qnames import DOTTED_LAYER_QNAME
 
 BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
 WORKSPACE = f"{BASE}/first-proof-anchor-preparation-05/workspace"
@@ -67,7 +74,7 @@ CURRENCY = "output_mse_under_route_activation_contract"
 BYTE_TARGET = 155_668_854_528
 TOTAL_QUANTIZABLE_PARAMS = 305_915_756_544
 DENSE_TOKENS = 262_144
-LAYER_RE = re.compile(r"\.layers\.(\d+)\.")
+LAYER_RE = DOTTED_LAYER_QNAME
 EXPERT_RE = re.compile(r"\.experts\.(\d+)\.(\w+)$")
 DENSE_PROJ_RE = re.compile(r"^(.*)\.(\w+)$")
 
@@ -352,13 +359,14 @@ def lambda_star(items, budget):
 
 
 # --------------------------------------------------------------------------
-# Sampling: reuse the campaign's own draw + Horvitz-Thompson estimator
+# Sampling: reuse the campaign's own draw + Horvitz-Thompson estimator, which
+# live in its table owner
 # --------------------------------------------------------------------------
 
 def _load_campaign_sampling():
     try:
-        from prismaquant import tessera_campaign as tc  # noqa
-        return tc, "prismaquant.tessera_campaign"
+        from prismaquant import tessera_campaign_table as tc  # noqa
+        return tc, "prismaquant.tessera_campaign_table"
     except Exception as exc:  # pragma: no cover - PB run has the real one
         return None, f"local_fallback ({type(exc).__name__}: {exc})"
 
@@ -368,7 +376,7 @@ TC, SAMPLING_SOURCE = _load_campaign_sampling()
 
 def _local_draw(weights, n, *, seed, stack):
     """Fallback mirror of draw_stack_sample (randomized systematic PPS with a
-    take-all stratum).  Used only when the campaign module cannot import."""
+    take-all stratum).  Used only when the campaign table cannot import."""
     names = sorted(weights)
     sizes = {k: float(weights[k]) for k in names}
     frame = [k for k in names if sizes[k] > 0]

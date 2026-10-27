@@ -1,7 +1,8 @@
 """Hard serving constraints as a second selection axis — ultraplan P5c.
 
-``docs/lanes/nvfp4-cb/format-speed-policy.md`` §1 specifies the production
-selection problem and, until this module, deferred it:
+The historical Gridbook policy, retained under
+``archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/format-speed-policy.md``,
+defined the selection problem that this module evaluates:
 
     minimize    predicted_quality_loss(a)
     subject to  exact_whole_artifact_bytes(a) <= B
@@ -334,14 +335,26 @@ class ServeConstraintContext:
         )
 
     def validate(self) -> None:
-        """Refuse an incoherent activation up front, by name.
+        """Refuse invalid physical reserves or incoherent activation up front.
 
         Fail-closed on the combinations that would otherwise silently evaluate
         nothing: an SLO with no table or mix to price it, or a constrained
         phase the mix never weights.
         """
+        for flag, value in (
+            ("--serve-kv-bytes", self.slos.kv_bytes),
+            ("--serve-peak-scratch-bytes", self.slos.peak_scratch_bytes),
+        ):
+            if value < 0:
+                raise ServeConstraintError(f"{flag} must be nonnegative")
         if not self.slos.any_set:
             return
+        if self.slos.device_budget_bytes is not None and not self.active:
+            raise ServeConstraintError(
+                "--serve-device-budget-bytes requires --serve-dispatch-table "
+                "and --serve-workload-mix to evaluate the explicit device "
+                "budget; refusing to leave the constraint unevaluated"
+            )
         if self.slos.any_latency:
             if self.table is None:
                 raise ServeConstraintError(
@@ -473,21 +486,10 @@ def lane_key_for(lane: Any, arena_m: int | None) -> str:
 
     ``lane`` is a ``serving_profiles.ResolvedServingLane`` or ``None``.
 
-    This is the audit's "the allocator should see that trade" point made
-    mechanical, and it is why P5b had to land first. A rung whose fused lane
-    the pinned Gridbook version does NOT instantiate is priced with its
-    FALLBACK route's row — never the fused lane's — even though both rungs
-    carry the same format-family name. Gridbook 0.7.0 backs FP8-CB fused
-    mid-M for K in {28,32,36,40,44,48} while production permits every
-    K28..K48, so on the published 27B K36..K47 ladder this distinction is
-    load-bearing for five of eight rungs — permanently, since gridbook K1.2
-    resolved to a ``k % 4 == 0`` format+TMA law rather than to five missing
-    kernel instantiations.
-
-    The M range matters too: the fused lane is declared for 9 <= M <= 128, so
-    an arena measured at M = 1400 takes the fallback row even for a backed
-    rung. An arena that does not say what M it was measured at cannot claim
-    the fused lane at all.
+    A route without declared fused backing uses the fallback row. A backed
+    route uses the fused row only inside its declared M range. Missing arena
+    M or range evidence also selects fallback. These fields describe the
+    resolved route; the retired Gridbook lane supplies no current admission.
     """
     if lane is None:
         return "native"
@@ -903,7 +905,12 @@ def evaluate_measured_assignment(
             (row.peak_scratch_bytes for row in selected), default=0)
         kv = fixed_resources.kv_bytes + slos.kv_bytes
         if fixed_resource_scope is None:
-            device = resident + activation + scratch + kv + slos.peak_scratch_bytes
+            from .measured_runtime_prices import device_placement_bytes
+            device = device_placement_bytes(
+                resident, scratch, activation,
+                fixed_device_bytes=kv + slos.peak_scratch_bytes,
+                non_step_transient_peak_bytes=getattr(
+                    fixed_resources, "non_step_transient_peak_bytes", None))
         else:
             if slos.device_budget_bytes is not None:
                 raise ServeConstraintError(

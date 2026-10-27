@@ -20,6 +20,7 @@ import hashlib
 
 import pytest
 
+from prismaquant import joint_campaign_ledger as ledger
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 
@@ -195,4 +196,4 @@ def test_band_refusals_at_the_producer():
     record["identity_sha256"] = jl.canonical_sha256(
         {k: v for k, v in record.items() if k != "identity_sha256"})
     with pytest.raises(ValueError, match="whole stage-A receipt"):
-        jl.check_quantum_for_campaign(record, record["campaign"])
+        ledger.require_quantum_campaign(record, record["campaign"])

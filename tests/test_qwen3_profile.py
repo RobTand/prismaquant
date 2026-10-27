@@ -61,13 +61,8 @@ def test_detects_real_checkpoint_config():
     # (archive/gridbook_lane_2026-09-02/); `tessera` joined it the next day,
     # the addition half of the same decision.
     #
-    # Note what this config is: a ROUTED-MoE Qwen3 resolving to the profile
-    # that declares the Tessera lane. Declaring the lane is not permission to
-    # build one for this checkpoint -- the packaged contract declares
-    # structures ["dense"] and carries no routed_moe cell, so
-    # `prismaquant.tessera_export_lane` refuses this shape by reading that
-    # table (tests/test_tessera_export_lane.py). Lane membership is a
-    # vocabulary fact; buildability is a gate.
+    # This routed-MoE profile declares the Tessera lane. Export admission
+    # still requires a matching cell in the pinned packaged contract.
     assert resolved.supported_export_lanes() == (
         "compressed-tensors", "tessera")
 

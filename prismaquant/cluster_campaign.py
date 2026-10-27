@@ -63,6 +63,7 @@ else:
 CAMPAIGN_MANIFEST_SCHEMA_V2 = "prismaquant.cluster_campaign.manifest.v2"
 CAMPAIGN_STATE_SCHEMA_V2 = "prismaquant.cluster_campaign.state.v2"
 WORKER_REQUEST_SCHEMA_V2 = "prismaquant.cluster_campaign.worker_request.v2"
+WORKER_LOCK_SCHEMA = "prismaquant.cluster_campaign.worker_lock.v1"
 SEALED_STAGE_RECEIPT_SCHEMA_V1 = (
     "prismaquant.cluster_campaign.sealed_stage_receipt.v1"
 )
@@ -1060,29 +1061,49 @@ def _worker_lock(path: Path, work_root: Path, *, timeout_seconds: int) -> int:
                 os.close(fd)
                 raise TimeoutError(f"timed out acquiring worker lock: {path}")
             time.sleep(0.05)
+    try:
+        retained = os.pread(fd, 65537, 0)
+        if retained:
+            record = _decode_strict_json(retained.decode("utf-8"), where="worker lock")
+            fields = {"schema", "status", "stage_id", "owner_token", "pid", "pid_start_ticks"}
+            if (not isinstance(record, dict) or set(record) != fields
+                    or record["schema"] != WORKER_LOCK_SCHEMA
+                    or record["status"] != "running"
+                    or type(record["pid"]) is not int or record["pid"] < 1
+                    or type(record["pid_start_ticks"]) is not int
+                    or record["pid_start_ticks"] < 0
+                    or not isinstance(record["owner_token"], str)
+                    or _SHA256_RE.fullmatch(record["owner_token"]) is None
+                    or not _OwnedProcessGroup(record["pid"], record["pid_start_ticks"],
+                                              record["owner_token"]).stopped()):
+                raise CampaignContractError(
+                    f"worker lock retains an unresolved process group; refusing probe or retry: {path}")
+            _write_worker_lock(fd, None)
+    except BaseException:
+        os.close(fd)
+        raise
     return fd
 
 
-def _terminate_child_process_group(process: subprocess.Popen[Any]) -> None:
-    if process.poll() is not None:
-        return
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        process.wait(timeout=_RECOVERY_KILL_GRACE_SECONDS)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    try:
-        process.wait(timeout=_RECOVERY_KILL_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        pass
+def _write_worker_lock(fd: int, record: Mapping[str, object] | None) -> None:
+    data = b"" if record is None else _canonical_bytes(record) + b"\n"
+    size = len(data)
+    os.lseek(fd, 0, os.SEEK_SET)
+    while data:
+        written = os.write(fd, data)
+        if written == 0:
+            raise OSError("worker lock write made no progress")
+        data = data[written:]
+    os.ftruncate(fd, size)
+    os.fsync(fd)
+
+
+def _terminate_child_process_group(process: subprocess.Popen[Any], *, owner_token: str) -> None:
+    snapshot = _proc_snapshot(process.pid)
+    group = _OwnedProcessGroup(process.pid, None if snapshot is None else snapshot[0], owner_token)
+    if not group.terminate():
+        raise CampaignContractError("owned process group teardown is unresolved")
+    process.wait(timeout=_RECOVERY_KILL_GRACE_SECONDS)
 
 
 def execute_worker_request(value: Mapping[str, object]) -> int:
@@ -1101,12 +1122,14 @@ def execute_worker_request(value: Mapping[str, object]) -> int:
         print(f"[cluster-worker] {exc}", file=sys.stderr, flush=True)
         return EXIT_STAGE_FAILED
     process: subprocess.Popen[Any] | None = None
+    group: _OwnedProcessGroup | None = None
+    lock_record: dict[str, object] | None = None
+    group_stopped = False
+    teardown_attempted = False
     previous_handlers: dict[int, Any] = {}
 
     def handle_signal(signum, _frame) -> None:
         del signum
-        if process is not None:
-            _terminate_child_process_group(process)
         raise KeyboardInterrupt
 
     try:
@@ -1147,6 +1170,10 @@ def execute_worker_request(value: Mapping[str, object]) -> int:
             f"[cluster-worker] {request['stage_id']}: exec argv={request['argv']!r}",
             flush=True,
         )
+        lock_record = {"schema": WORKER_LOCK_SCHEMA, "status": "launching",
+                       "stage_id": request["stage_id"], "owner_token": request["owner_token"],
+                       "pid": None, "pid_start_ticks": None}
+        _write_worker_lock(lock_fd, lock_record)
         process = subprocess.Popen(
             list(request["argv"]),  # type: ignore[arg-type]
             cwd=str(cwd),
@@ -1158,6 +1185,12 @@ def execute_worker_request(value: Mapping[str, object]) -> int:
             # duplicate argv while an orphaned child is still materializing.
             pass_fds=(lock_fd,),
         )
+        snapshot = _proc_snapshot(process.pid, strict=True)
+        group = _OwnedProcessGroup(process.pid, None if snapshot is None else snapshot[0],
+                                   str(request["owner_token"]))
+        lock_record.update(status="running", pid=process.pid,
+                           pid_start_ticks=None if snapshot is None else snapshot[0])
+        _write_worker_lock(lock_fd, lock_record)
         try:
             returncode = process.wait(timeout=int(request["timeout_seconds"]))
         except subprocess.TimeoutExpired:
@@ -1166,8 +1199,11 @@ def execute_worker_request(value: Mapping[str, object]) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-            _terminate_child_process_group(process)
             return EXIT_STAGE_FAILED
+        group_stopped = group.terminate()
+        teardown_attempted = True
+        if not group_stopped:
+            raise CampaignContractError("stage process group teardown is unresolved")
         if returncode != 0:
             print(
                 f"[cluster-worker] {request['stage_id']}: argv exited {returncode}",
@@ -1195,10 +1231,31 @@ def execute_worker_request(value: Mapping[str, object]) -> int:
     except KeyboardInterrupt:
         return EXIT_STAGE_FAILED
     finally:
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        os.close(lock_fd)
+        try:
+            for signum in previous_handlers:
+                signal.signal(signum, signal.SIG_IGN)
+            if process is not None and not group_stopped and not teardown_attempted:
+                if group is None:
+                    group = _OwnedProcessGroup(process.pid, None, str(request["owner_token"]))
+                group_stopped = group.terminate()
+            if process is not None and group_stopped:
+                process.wait(timeout=_RECOVERY_KILL_GRACE_SECONDS)
+            if lock_record is not None:
+                if process is None or group_stopped:
+                    _write_worker_lock(lock_fd, None)
+                else:
+                    lock_record["status"] = "quarantined"
+                    _write_worker_lock(lock_fd, lock_record)
+                    raise CampaignContractError(
+                        f"stage process group teardown is unresolved; worker lock quarantined: {lock_path}")
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+            # Closing only our reference preserves any inherited lock if teardown
+            # failed. The durable refusal also survives the final descriptor closing.
+            if process is None or group_stopped:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
 
 def _worker_request(
@@ -1279,8 +1336,8 @@ def _helper_argv(host: Mapping[str, object]) -> list[str]:
     ]
 
 
-def _proc_snapshot(pid: int, *, strict: bool = False) -> tuple[int, str] | None:
-    """Read start time/state; strict checks distinguish missing from unreadable."""
+def _proc_fields(pid: int, *, strict: bool = False) -> list[str] | None:
+    """Read Linux process identity, group and state from one stat observation."""
     stat_path = Path(f"/proc/{int(pid)}/stat")
     try:
         text = stat_path.read_text(encoding="utf-8")
@@ -1300,14 +1357,20 @@ def _proc_snapshot(pid: int, *, strict: bool = False) -> tuple[int, str] | None:
         if strict:
             raise ValueError("incomplete process stat")
         return None
-    state = fields[0]
     try:
-        ticks = int(fields[19])
+        for index in (2, 3, 19):
+            int(fields[index])
     except ValueError:
         if strict:
             raise
         return None
-    return ticks, state
+    return fields
+
+
+def _proc_snapshot(pid: int, *, strict: bool = False) -> tuple[int, str] | None:
+    """Read start time/state; strict checks distinguish missing from unreadable."""
+    fields = _proc_fields(pid, strict=strict)
+    return None if fields is None else (int(fields[19]), fields[0])
 
 
 def _proc_owner_observation(pid: int, owner_token: str) -> str:
@@ -1395,40 +1458,107 @@ def _owned_process_state(pid: int, ticks: int, owner_token: str) -> str:
     return "mismatch"
 
 
+class _OwnedProcessGroup:
+    """Keep group completion separate from leader exit and pin every signal target."""
+
+    def __init__(self, pid: int, ticks: int | None, owner_token: str) -> None:
+        self.pid, self.ticks, self.owner_token = pid, ticks, owner_token
+        self._known: set[tuple[int, int]] = set()
+
+    def _members(self) -> list[tuple[int, int]]:
+        if self.ticks is not None and _owned_process_state(
+                self.pid, self.ticks, self.owner_token) == "mismatch":
+            raise CampaignContractError("recorded process group leader ownership changed")
+        members = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            pid = int(entry.name)
+            fields = _proc_fields(pid, strict=True)
+            if fields is None or int(fields[2]) != self.pid:
+                continue
+            if fields[0] == "Z":
+                if any(task.name != entry.name for task in (entry / "task").iterdir()):
+                    raise CampaignContractError("zombie group member still has task threads")
+                continue
+            ticks = int(fields[19])
+            if int(fields[3]) != self.pid:
+                raise CampaignContractError("recorded process group session changed")
+            if pid == self.pid and self.ticks is not None and ticks != self.ticks:
+                raise CampaignContractError("recorded process group leader PID was reused")
+            known = (pid, ticks) in self._known or (pid == self.pid and ticks == self.ticks)
+            if known:
+                state = _owned_process_state(pid, ticks, self.owner_token)
+            else:
+                observation = _proc_owner_observation(pid, self.owner_token)
+                if observation == "owned":
+                    state = "owned"
+                else:
+                    current = _proc_snapshot(pid, strict=True)
+                    state = "gone" if current is None or current == (ticks, "Z") else "mismatch"
+            if state == "gone":
+                continue
+            if state != "owned":
+                raise CampaignContractError("process group member ownership is unresolved")
+            self._known.add((pid, ticks))
+            members.append((pid, ticks))
+        return members
+
+    def stopped(self) -> bool:
+        try:
+            return not self._members() and not self._members()
+        except (OSError, ValueError):
+            return False
+
+    def _signal(self, pid: int, ticks: int, signum: int) -> None:
+        # A PID can exit and be reused between observation and signalling. A
+        # pidfd targets the observed task even if its numeric PID is recycled.
+        fd = os.pidfd_open(pid)
+        try:
+            fields = _proc_fields(pid, strict=True)
+            if fields is None or fields[0] == "Z":
+                return
+            if int(fields[19]) != ticks or int(fields[2]) != self.pid:
+                raise CampaignContractError("process group member identity changed before signal")
+            if _owned_process_state(pid, ticks, self.owner_token) != "owned":
+                raise CampaignContractError("process group member ownership changed before signal")
+            signal.pidfd_send_signal(fd, signum)
+        finally:
+            os.close(fd)
+
+    def terminate(self) -> bool:
+        if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+            return self.stopped()
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            deadline = time.monotonic() + _RECOVERY_KILL_GRACE_SECONDS
+            sent: set[tuple[int, int]] = set()
+            while True:
+                try:
+                    members = self._members()
+                    if not members and not self._members():
+                        return True
+                    for pid, ticks in members:
+                        if (pid, ticks) not in sent:
+                            try:
+                                self._signal(pid, ticks, signum)
+                            except ProcessLookupError:
+                                pass
+                            sent.add((pid, ticks))
+                except (OSError, ValueError):
+                    # An exiting task may temporarily have unreadable identity.
+                    # Keep the ownership unresolved until the bounded wait ends.
+                    pass
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.05)
+        return self.stopped()
+
+
 def _terminate_recorded_owned_process(pid: int, ticks: int, owner_token: str) -> bool:
-    """Stop the recorded process; report whether it is definitely not running.
-
-    That is the question the callers ask, and an already-ended process answers
-    it as completely as a kill does -- which is why `ProcessLookupError` from
-    the signal below already returns True.  Reading the same fact one moment
-    earlier used to return False instead, and the caller turns False into
-    `process was not killed`, a terminal stage failure.  Only an ownership that
-    was never established leaves the question open, and only that refuses: a
-    recycled pid, or an environment read in full that carries somebody else's
-    token.  A read that merely failed is not that -- see `_owned_process_state`.
-    """
-
-    state = _owned_process_state(pid, ticks, owner_token)
-    if state == "gone":
-        return True
-    if state != "owned":
+    """Stop the entire recorded group, including survivors of an exited leader."""
+    if _owned_process_state(pid, ticks, owner_token) == "mismatch":
         return False
-    try:
-        os.killpg(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return True
-    deadline = time.monotonic() + _RECOVERY_KILL_GRACE_SECONDS
-    while time.monotonic() < deadline:
-        if _owned_process_state(pid, ticks, owner_token) == "gone":
-            return True
-        time.sleep(0.05)
-    if _owned_process_state(pid, ticks, owner_token) != "owned":
-        return False
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    return True
+    return _OwnedProcessGroup(pid, ticks, owner_token).terminate()
 
 
 def _attempt_log_path(state_path: Path, stage_id: str, attempt: int) -> Path:
@@ -1536,7 +1666,7 @@ def _start_attempt(
         # This is a child we just created, so it is safe to stop even though the
         # durable PID/start-time tuple could not be captured.  Never leave an
         # unrecorded helper blocked on its stdin pipe.
-        _terminate_child_process_group(process)
+        _terminate_child_process_group(process, owner_token=owner)
         return _finish_attempt(
             state,
             manifest,
@@ -1640,7 +1770,7 @@ def _probe_stage_receipts(
                 )
                 del stdout
             except subprocess.TimeoutExpired:
-                _terminate_child_process_group(process)
+                _terminate_child_process_group(process, owner_token=probe_owner)
                 return EXIT_STAGE_FAILED
             return int(process.returncode)
     except OSError:
@@ -1694,7 +1824,7 @@ def _recover_running_stages(
                     detail="recorded PID ownership is ambiguous; process was not killed",
                 )
                 continue
-            if process_state == "owned":
+            if process_state in {"owned", "gone"}:
                 killed = _terminate_recorded_owned_process(
                     int(pid), int(ticks), owner
                 )
@@ -1706,10 +1836,10 @@ def _recover_running_stages(
                         stage,
                         success=False,
                         terminal=True,
-                        detail="timed-out process ownership changed; process was not killed",
+                        detail="recorded process group teardown is unresolved; refusing probe or retry",
                     )
                     continue
-                detail = "timed-out recorded owned helper was terminated during recovery"
+                detail = "recorded owned helper group stopped during recovery"
         else:
             detail = "coordinator stopped before helper ownership was recorded"
 
@@ -1858,7 +1988,7 @@ def _stop_active_after_terminal_failure(
         launch = active.pop(stage_id)
         stage = stage_specs[stage_id]
         host = hosts[str(stage["host_id"])]
-        _terminate_child_process_group(launch.process)
+        _terminate_child_process_group(launch.process, owner_token=launch.owner_token)
         attempt = state["stages"][stage_id]["attempts"][-1]  # type: ignore[index]
         probe_code = _probe_stage_receipts(
             manifest,
@@ -1982,6 +2112,7 @@ def run_campaign_v2(
                 for stage_id, launch in sorted(active.items()):
                     returncode = launch.process.poll()
                     if returncode is not None:
+                        _terminate_child_process_group(launch.process, owner_token=launch.owner_token)
                         completed.append((stage_id, int(returncode), False))
                         continue
                     attempt = state["stages"][stage_id]["attempts"][-1]  # type: ignore[index]
@@ -1995,7 +2126,7 @@ def run_campaign_v2(
                         # it cannot have been recycled.  Stop the exact helper
                         # group; the worker's signal handler stops its stage
                         # child group before releasing the host-local lock.
-                        _terminate_child_process_group(launch.process)
+                        _terminate_child_process_group(launch.process, owner_token=launch.owner_token)
                         returncode = launch.process.poll()
                         completed.append(
                             (

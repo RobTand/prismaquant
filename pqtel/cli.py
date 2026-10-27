@@ -175,6 +175,7 @@ def verb_gc(argv):
         return 2
     cutoff = time.time() - days * 86400
     removed, kept, freed = [], 0, 0
+    failed = False
     try:
         names = sorted(os.listdir(CSV_DIR))
     except OSError as exc:
@@ -189,13 +190,15 @@ def verb_gc(argv):
         except OSError:
             continue
         if st.st_mtime < cutoff:
-            freed += st.st_size
-            removed.append(name)
             if not dry:
                 try:
                     os.unlink(path)
                 except OSError as exc:
                     print("  could not remove %s: %s" % (name, exc))
+                    failed = True
+                    continue
+            freed += st.st_size
+            removed.append(name)
         else:
             kept += 1
     print("gc: retention %d days, free disk %.1f%%%s" % (
@@ -204,7 +207,7 @@ def verb_gc(argv):
         print("  %s %s" % ("would remove" if dry else "removed", name))
     print("  %d removed, %d kept, %.1f MB freed" % (
         len(removed), kept, freed / 1e6))
-    return 0
+    return 2 if failed else 0
 
 
 def verb_record(argv):

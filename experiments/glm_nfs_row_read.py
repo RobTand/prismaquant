@@ -157,7 +157,7 @@ def main() -> int:
     print(f"[nfs-read] {res['mb_per_s']:.1f} MB/s "
           f"({res['gbit_per_s']:.2f} Gbit/s) wall={res['wall_s']:.1f}s", flush=True)
     if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w") as fh:
             json.dump(res, fh, indent=1)
     print("=== RESULT_JSON_BEGIN ===", flush=True)

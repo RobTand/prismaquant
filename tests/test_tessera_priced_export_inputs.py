@@ -60,8 +60,8 @@ def _assignment(tmp_path, *, formats, hessian_block="modern-supplied",
     if blocks[hessian_block] is not None:
         meta["tessera_hessian"] = blocks[hessian_block]
     if scales is not None:
-        from prismaquant.tessera_campaign import (
-            _format_executes_static_activation_contract as executes,
+        from prismaquant.tessera_cell_measurement import (
+            executes_static_activation_contract as executes,
         )
 
         units = ({name: SCALE for name, fmt in formats.items()

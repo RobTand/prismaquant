@@ -712,6 +712,42 @@ def test_strict_pwc_stage_serves_pinned_with_digest_binding(tmp_path, monkeypatc
     assert _pins_live(tmp_path, consumer) == []
 
 
+@pytest.mark.parametrize("error_type", [MemoryError, OSError])
+def test_strict_pwc_releases_pin_when_buffer_allocation_fails(tmp_path, monkeypatch, error_type):
+    from prismaquant import io_engine
+    from prismaquant.staged_lease import LeaseWindow
+
+    cache, key, path, _tensor = _pwc(tmp_path)
+    cache.require_file_load_sha256(
+        {key: hashlib.sha256(path.read_bytes()).hexdigest()},
+        max_file_bytes=path.stat().st_size,
+    )
+    staged = _stage_whole(_stage_root(tmp_path), path)
+    _resolver, consumer, _mover = _leased_fixture(
+        tmp_path, monkeypatch, {'p': (path, staged, None)})
+    descriptors = []
+    original_open = LeaseWindow.open
+
+    def record_open(self, key):
+        fd, serving = original_open(self, key)
+        descriptors.append(fd)
+        return fd, serving
+
+    def refuse_allocation(self, size):
+        assert _pins_live(tmp_path, consumer)
+        raise error_type("buffer allocation failed")
+
+    monkeypatch.setattr(LeaseWindow, "open", record_open)
+    monkeypatch.setattr(io_engine.SealedBuffer, "__init__", refuse_allocation)
+    with pytest.raises(error_type, match="buffer allocation failed"):
+        cache.prefetch([key], max_workers=1)
+    assert len(descriptors) == 1
+    assert _pins_live(tmp_path, consumer) == []
+    assert _resolver.report()["bytes_from_pool"] == 0
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
+
+
 def test_strict_pwc_missing_digest_refuses(tmp_path, monkeypatch):
     cache, key, path, _ = _pwc(tmp_path)
     cache.enable_file_load_receipts(max_file_bytes=path.stat().st_size)
@@ -2750,7 +2786,7 @@ def _read_exact(refs):
 
 
 def _lease_deltas(before):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     return {name: count - before[name] for name, count in exact_lease_counters().items()}
 
 
@@ -2787,7 +2823,7 @@ def _ram_fixture(tmp_path, monkeypatch, refs, *, ram_offered, ram_published):
 
 
 def test_an_exact_window_takes_one_lease_for_all_its_entries(tmp_path, monkeypatch):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 4)
     root = _stage_root(tmp_path)
     resolver, consumer, _mover = _leased_fixture(
@@ -2826,7 +2862,7 @@ def test_an_exact_window_takes_one_lease_for_all_its_entries(tmp_path, monkeypat
 
 def test_ram_entries_share_a_ram_window_and_the_rest_an_ssd_window(
         tmp_path, monkeypatch):
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 3)
     resolver, consumer, rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0, 1])
@@ -2850,7 +2886,7 @@ def test_an_unpublished_ram_tier_folds_the_window_into_one_ssd_lease(
     """No RAM mover published anything at the announced epoch: every entry
     records the RAM fallback, exactly as the single-entry leg does, and the
     whole window leases once on SSD."""
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 3)
     resolver, consumer, rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1, 2], ram_published=[])
@@ -2875,7 +2911,7 @@ def test_a_partial_ram_cover_rereads_the_window_one_entry_at_a_time(
     the pair as a coverage gap (integrity) where each entry alone answers
     precisely, so the window falls back: the published entry serves from
     RAM and the other falls to SSD, as they did before #997."""
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     refs, tensors = _exact_entries(tmp_path, 2)
     resolver, consumer, _rl = _ram_fixture(
         tmp_path, monkeypatch, refs, ram_offered=[0, 1], ram_published=[0])
@@ -2959,7 +2995,7 @@ def _sizes(refs):
 
 
 def exact_lease_counters_snapshot():
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     return exact_lease_counters()
 
 
@@ -3114,7 +3150,7 @@ def test_a_checkpoint_plane_streams_in_windows_with_one_lease_each(tmp_path, mon
     from the pool, the charges never exceed the budget and all come back,
     and no pin outlives the load.
     """
-    from prismaquant.perturbed_x_cache import exact_lease_counters
+    from prismaquant.staged_lease import exact_lease_counters
     record, tensors = _write_plane_checkpoint(tmp_path)
     resolver, consumer, _paths = _stage_checkpoint_entries(tmp_path, monkeypatch, record)
     calls = _count_sdk_calls(monkeypatch, _pb()[0])

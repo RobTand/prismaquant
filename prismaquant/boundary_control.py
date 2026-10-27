@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import copy
 import math
+from pathlib import Path
 import re
 
 from prismaquant import validate_quantized_model as vqm
-from .digests import DIRECT_UTF8_STRICT
+from .digests import DIRECT_UTF8_STRICT, file_sha256hex
 
 SCHEMA = "prismaquant.boundary_control/1"
 DECLARED_STACK_SCHEMA = "prismaquant.boundary_control/2"
@@ -22,8 +23,25 @@ SCORER = "prismaquant.boundary_close_count/1"
 DECISION_SCHEMA = "prismaquant.boundary_decision/1"
 NO_NEW_FAILURES_POLICY = "prismaquant.no_new_boundary_failures/1"
 
+PRODUCER_SOURCE_PATHS = (
+    "prismaquant/boundary_control.py",
+    "prismaquant/validate_quantized_model.py",
+    "prismaquant/shipcard.py",
+    "prismaquant/shipcard_slots.py",
+    "tools/measure_boundary_control.py",
+    "tools/serve_fingerprint.py",
+    "tools/prismaquant_source_bootstrap.py",
+    "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
+)
+
 
 digest = DIRECT_UTF8_STRICT.sha256
+
+
+def producer_source_hashes(repo_root):
+    """Bind both boundary measurement and its current slot-policy owner."""
+    root = Path(repo_root)
+    return {path: file_sha256hex(root / path) for path in PRODUCER_SOURCE_PATHS}
 
 
 def artifact_content_id(content):

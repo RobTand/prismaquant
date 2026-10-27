@@ -23,13 +23,13 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 import dispatch_joint_quanta as dispatch  # noqa: E402
+from prismaquant.joint_quantum_row import PROGRESS_GRACE_FLAG
 from dispatch_joint_quanta import (  # noqa: E402
     EXIT_PRECONDITION_REFUSED,
     HEAD_PROGRESS_GRACE_S,
     LINK_READERS_SCOPE,
     LOAD_PHASE_FLOOR_ONE_READER,
     LOAD_PHASE_FLOOR_SCHEMA,
-    PROGRESS_GRACE_FLAG,
     DispatchRefused,
     link_readers,
     load_phase_grace,
@@ -85,15 +85,48 @@ def test_the_layer_044_gate_derives_846_seconds_from_the_one_reader_floor():
          ("chain-043", 900)])
 
 
-def test_the_bound_cites_the_reader_deadline_lines():
-    """The stamp's file:line references are the reader's one deadline."""
-    for ref in ("prismaquant/joint_adjoint_checkpoints.py:1989",
-                "prismaquant/joint_quantum_handoff.py:1052"):
-        assert ref in dispatch.LOAD_PHASE_BOUND
-        path, line = ref.rsplit(":", 1)
-        text = (ROOT / path).read_text().splitlines()[int(line) - 1]
-        assert text.strip() == (
-            "deadline = time.monotonic() + staged_range_wait_s()"), ref
+@pytest.mark.parametrize("loader", ["checkpoint", "handoff"])
+def test_real_loaders_share_one_deadline_across_their_verified_reads(tmp_path, monkeypatch, loader):
+    from prismaquant import joint_adjoint_checkpoints as checkpoints
+    from prismaquant import joint_quantum_handoff as handoffs
+    from prismaquant import residency_shard_reader as reader
+    from test_referenced_adjoint_checkpoint import _referenced
+    from tests.test_band_serial_dispatch import _campaign, _emit, _slice
+
+    owner = None
+    if loader == "checkpoint":
+        space, owner, _references, record = _referenced(tmp_path)
+        load = lambda: checkpoints.load_adjoint_checkpoint(space, record)
+    else:
+        bound, _receipt = _campaign(tmp_path)
+        published = _emit(bound[3])
+        consumer = bound[2]
+        source = _slice(consumer)
+        handoff = handoffs.load_quantum_handoff(
+            published["path"], published["sha256"], record=consumer,
+            adjoint_slice=source, kda_capture_kernel=None)
+        load = lambda: handoffs.load_handoff_inputs(
+            handoff, source["checkpoint"], n_probes=handoff["n_probes"], n_batches=handoff["n_batches"])
+    wait_calls, deadlines = [], []
+    def wait_budget():
+        wait_calls.append(17.5)
+        return 17.5
+    await_entry = checkpoints._await_checkpoint_entry
+    def record_wait(entry, *, deadline):
+        deadlines.append(deadline)
+        return await_entry(entry, deadline=deadline)
+    monkeypatch.setattr(reader, "staged_range_wait_s", wait_budget)
+    monkeypatch.setattr(checkpoints, "_await_checkpoint_entry", record_wait)
+    try:
+        plane, _shared, _pass = load()
+        assert plane
+        assert wait_calls == [17.5]
+        assert len(deadlines) >= 2
+        assert deadlines[0] is not None
+        assert set(deadlines) == {deadlines[0]}
+    finally:
+        if owner is not None:
+            owner.__exit__(None, None, None)
 
 
 @pytest.mark.parametrize("rows,declared", [(5, None), (1, 3)])

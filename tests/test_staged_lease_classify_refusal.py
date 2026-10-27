@@ -1,4 +1,4 @@
-"""The public refusal classifier keeps its three outcomes (PQ #2616)."""
+"""The public classifier preserves availability and fail-closed integrity outcomes."""
 from prismaquant.staged_lease import _classify as legacy
 from prismaquant.staged_lease import classify_refusal
 

@@ -245,7 +245,7 @@ def test_the_default_window_starts_no_thread(tmp_path, closing):
 
 def test_the_inline_override_keeps_a_wide_window_on_the_calling_thread(
         tmp_path, monkeypatch, closing):
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     monkeypatch.setenv(StreamedBoundaryArtifacts.PRODUCED_STAGER_ENV, "inline")
     storage, _publication, _q, _env, _pb = _owner(
@@ -577,7 +577,7 @@ def test_a_drop_callback_that_fails_on_the_death_path_is_preserved():
 def test_the_owner_hears_a_dead_stager_and_runs_its_own_calls(
         tmp_path, monkeypatch, closing):
     """The death is release-error debt and the owner's next call raises."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     boom = RuntimeError("stager bookkeeping died")
     real_done = StreamedBoundaryArtifacts._produced_stager_done

@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from experiments import pb905_checkpoint_export as exp
-from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 from prismaquant.perturbed_x_cache import EntryReadScratch, write_exact_activation_cache_entry
 from prismaquant.joint_adjoint_checkpoints import exact_entry_record
 

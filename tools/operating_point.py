@@ -100,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--r2-gate", type=float, default=0.99,
                     help="below this R^2 the fit is not a valid interpolator")
     args = ap.parse_args(argv)
+    if any(not math.isfinite(target) or target <= 0 for target in args.kl_target):
+        ap.error("--kl-target must be finite and positive")
 
     pts = (_collect_selection(args.selection) if args.selection
            else _collect_csv(args.csv))
@@ -122,8 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nfit: log10(KL) = {alpha:+.4f} {beta:+.4f}*bpp   R^2 = {r2:.4f}")
     if r2 >= args.r2_gate:
         print(f"SCALE-FREE REGIME (R^2 >= {args.r2_gate}): constant relative "
-              f"return, x{10 ** (-beta):.3f} KL per +1 bpp "
-              f"(x{10 ** (-beta * 0.5):.3f} per +0.5). No interior optimum "
+              f"return, KL reduction factor {10 ** (-beta):.3f} per +1 bpp "
+              f"({10 ** (-beta * 0.5):.3f} per +0.5). No interior optimum "
               "exists on this curve; a knee reported on it is an axis "
               "artifact. Pick the operating point from an external anchor "
               "(see docs/design/operating_point_selection.md).")
@@ -137,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         a2, b2, r22 = _fit([b for b, _ in kms],
                            [math.log10(km) for _, km in kms])
         print(f"tail (kl_max) slope: {b2:+.4f}/bpp "
-              f"(x{10 ** (-b2):.3f} per +1 bpp, R^2 {r22:.3f}) -- "
+              f"(KL reduction factor {10 ** (-b2):.3f} per +1 bpp, R^2 {r22:.3f}) -- "
               f"{'tracks the mean' if abs(b2 - beta) < 0.05 else 'DIVERGES from the mean: the tail has its own regime; principle 4 applies'}")
 
     for klt in args.kl_target:

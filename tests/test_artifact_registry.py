@@ -28,8 +28,23 @@ def _record(
         ppl_wikitext=ppl_wikitext,
         ppl_mmlu_acc=ppl_mmlu_acc,
         end_kl=end_kl,
-        eval_meta={"n_wikitext_tokens": 2048},
-        created_at="2026-05-01T00:00:00+00:00",
+        eval_meta={
+            "model_sha": "a" * 64,
+            "model_identity_scope": "local_content",
+            "eval_split": "test",
+            "metric_era": "2026-06-12-test-split",
+            "wikitext_split": "test",
+            "n_wikitext_tokens": 2048,
+            "n_mmlu_questions": 200,
+            "calib_seqlen": 512,
+            "calib_n_samples": 8,
+            "calib_split": "test",
+            "calib_seed": 42,
+            "wikitext_max_window_tokens": 2048,
+            "device": "cpu",
+            "dtype": "fp32",
+        },
+        created_at="2026-10-17T00:00:00+00:00",
     )
 
 

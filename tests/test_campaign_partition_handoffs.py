@@ -1,4 +1,8 @@
 """Partition handoffs use real reference/journal owners, without GPU claims."""
+
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 from types import SimpleNamespace
 
 import pytest
@@ -22,9 +26,9 @@ def test_partition_reference_union_uses_priced_subset_not_full_group(handoff, mo
     # separately exercised against real carried producer records.
     for index, name in enumerate(names):
         payloads[name]["provenance"]["unit_selection"] = {
-            "schema": campaign.UNITS_SCHEMA_V3,
+            "schema": campaign_selection.UNITS_SCHEMA_V3,
             "groups": [{"key": "s:fixture", "members": names,
-                "partition": {"schema": campaign.EXPERT_PARTITION_SCHEMA,
+                "partition": {"schema": campaign_selection.EXPERT_PARTITION_SCHEMA,
                     "experts_per_row": 1, "index": index, "count": len(names),
                     "rate_q256": 768, "members": [name]}}]}
     monkeypatch.setattr(torch, "load", lambda *a, **k: pytest.fail("eager reference H read"))
@@ -48,7 +52,7 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
         def tensor_identity(value):
             return {"id": value}
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api", lambda: Api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: Api)
     monkeypatch.setattr(campaign.th, "encoder_recipe", lambda: {"recipe": 1})
     monkeypatch.setattr("prismaquant.production_weight_cache._production_cache_source_sha256",
                         lambda: "package")
@@ -56,11 +60,11 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
     formats = ["TESSERA_E4M3_K1_R768", "TESSERA_E4M3_K1_R1024"]
     args = SimpleNamespace(model="fixture", units="whole.json", rate_band="768,768",
                            max_rounds=1, family_restriction=None, source_scope=None)
-    common = dict(args=args, calibration_identity={"text_sha256": "same-draw"},
+    common = dict(settings=vars(args), calibration_identity={"text_sha256": "same-draw"},
                   serving_scope=None, static_scales={}, static_scale_policy="same-policy")
 
     def identity(priced):
-        return campaign._campaign_checkpoint_identity(
+        return campaign.campaign_checkpoint_identity(
             weights={name: "weight:" + name for name in priced},
             acts={name: None for name in priced}, hessians={name: None for name in priced},
             menus={name: [SimpleNamespace(format_name=fmt) for fmt in formats] for name in priced},
@@ -81,7 +85,7 @@ def test_partition_journal_union_matches_actual_whole_unit_identity(tmp_path, mo
                                identity_sha256=digest, state=states[name])
         row_dirs[f"row{index}"] = str(row)
     destination = tmp_path / "merged" / "cost.anchors.json"
-    merged = dispatch.merge_checkpoint(row_dirs, destination)
+    merged = campaign_table.merge_checkpoint(row_dirs, destination)
     assert merged["identity"] == journal.canonical_json(whole, where="whole identity")
     assert merged["identity_sha256"] == journal.canonical_json_sha256(whole, where="whole identity")
     _, _, resumed = journal.prepare_journal(

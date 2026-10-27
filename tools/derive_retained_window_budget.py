@@ -59,8 +59,8 @@ def main(argv=None):
                              'physical_limit_bytes less max_gpu_bytes, the same split the '
                              'aggregate capture guard holds.')
     parser.add_argument('--render-size-cache', type=Path,
-                        help='read/write the per-key candidate file sizes here, so a '
-                             'rerun does not restat every prepared render')
+                        help='refresh this optional JSON output with the current '
+                             'selected candidate file sizes')
     args = parser.parse_args(argv)
 
     import torch  # noqa: F401  (the format registry and meta modules need it)
@@ -112,10 +112,6 @@ def main(argv=None):
     cache = pickle.loads(cache_path.read_bytes())
 
     sizes, started = {}, time.time()
-    if args.render_size_cache is not None and args.render_size_cache.is_file():
-        sizes = {tuple(json.loads(key)): value for key, value
-                 in json.loads(args.render_size_cache.read_text()).items()}
-    stats_taken = 0
     for name, measured in formats_by_name.items():
         for fmt in measured:
             key = cache.resolve_key(name, fmt)
@@ -123,7 +119,6 @@ def main(argv=None):
                 raise SystemExit(f'prepared PWC has no candidate entry for {name}@{fmt}')
             if key not in sizes:
                 sizes[key] = cache.estimate_nbytes([key])
-                stats_taken += 1
     measured_seconds = time.time() - started
     if args.render_size_cache is not None:
         args.render_size_cache.write_text(json.dumps(
@@ -167,7 +162,7 @@ def main(argv=None):
         'census': {'path': str(args.census.resolve()), 'sha256': _sha256(args.census)},
         'production_cache_sha256': prepared['production_cache']['sha256'],
         'candidate_files_measured': len(sizes),
-        'candidate_files_stated_now': stats_taken,
+        'candidate_files_stated_now': len(sizes),
         'measure_seconds': round(measured_seconds, 3),
         'tool': 'tools/derive_retained_window_budget.py',
     }

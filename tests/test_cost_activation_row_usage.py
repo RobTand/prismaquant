@@ -109,9 +109,8 @@ def test_row_cap_env_is_respected(monkeypatch):
     assert got["lin1"]["INT8_W8A16"]["n_activation_rows"] == 3
 
 
-def test_uniform_rows_are_unchanged_by_the_bucketing():
-    """Layers whose Linears all share a row count (DSv4-Flash 0-2, all 64)
-    must be bit-unchanged: one bucket, one BMM, the old code path's shape."""
+def test_uniform_rows_retain_their_reported_activation_count():
+    """All six equal-size inputs retain their 64-row usage metadata."""
     got = _measure({f"lin{i}": 64 for i in range(6)})
     assert {v["INT8_W8A16"]["n_activation_rows"] for v in got.values()} == {64}
 

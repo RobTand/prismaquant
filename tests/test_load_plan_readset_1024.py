@@ -148,8 +148,7 @@ def test_plan_load_never_stats_the_boundary_directory(tmp_path, monkeypatch):
 
 
 def test_boundary_policy_check_refuses_what_normalize_refuses():
-    from prismaquant.cost_streaming import (
-        check_boundary_storage, normalize_boundary_storage)
+    from prismaquant.streamed_boundary_artifacts import check_boundary_storage, normalize_boundary_storage
 
     good = {"schema": "prismaquant.aura.boundary_storage.v1", "directory": "rel/dir",
             "max_resident_bytes": 1, "max_auxiliary_bytes": 1,

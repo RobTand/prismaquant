@@ -1,14 +1,11 @@
 """Profile the produced-group reference lookup at Stage A scale.
 
-Evidence tool, not a test. ``cost_streaming._produced_group_for`` walks
-every bound group and asks ``reference in group["references"]``, so a late
-window is O(groups x entries_per_group). At the production panel that is
-~100k rotated cotangent entries, and the question this answers is whether
-that walk is actually on the hot path or merely looks quadratic.
-
-Profiles the SAME call twice -- once with the linear walk, once with a
-reference->group index -- and prints both, so the delta is the claim
-rather than the shape of the loop. Prints JSON on the last line.
+Profiles the current ``StreamedBoundaryArtifacts._produced_group_for`` and an
+inline reference-to-group dictionary control over synthetic references. The
+current owner may already use an index. Their ratio is not a before/after
+speedup; that comparison requires separate receipts from both source versions.
+This tool does not measure the surrounding production read path. Prints JSON
+on the last line.
 """
 from __future__ import annotations
 
@@ -68,8 +65,7 @@ def main() -> int:
     ap.add_argument("--windows", type=int, default=20)
     args = ap.parse_args()
 
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": "/dev/null/unused",

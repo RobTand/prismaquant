@@ -304,8 +304,9 @@ would repeat the mistake the platform already rejects (principle 1).
 
 ### 5a. Implementation status — the SELECTOR half landed 2026-08-14
 
-`prismaquant/speed_quality_frontier.py` implements the *selection* half of the
-above. The λ-sweep **candidate generator** is deliberately **not** implemented;
+The selection prototype described below was removed on 2026-10-14. Its
+implementation remains in Git history. It implemented the *selection* half
+of the proposal. The λ-sweep **candidate generator** is deliberately **not** implemented;
 it is a modified unary cost fed to the existing DP, and it should be written
 when there is a measured `time(ℓ,f)` table to sweep against.
 
@@ -437,7 +438,8 @@ blindness already documented in [[aura_expert_routeflip_floor_confirmed]].
   the global maximum back in), and `CostComponents.quantizes_activations` is
   carried as data so a consumer can tell "this format leaves activations alone,
   `None` is correct" from "this format quantizes them and we failed to price it,
-  `None` is a hole" — `speed_quality_frontier` counts and prints the latter.
+  `None` is a hole". The retired `speed_quality_frontier` prototype counted
+  and printed the latter; current consumers must keep that distinction.
   **Still research-tier**: the measured plugin variance remains preferred and
   takes precedence, and none of this changes a default or a shipped artifact.
 - **The remaining modelling gap is the grid *shape*, not the grid *scale*.**

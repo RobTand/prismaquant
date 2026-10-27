@@ -64,10 +64,10 @@ def main() -> int:
     body_raw = body_path.read_bytes()
     if hashlib.sha256(body_raw).hexdigest() != args.expect_body_sha256:
         parser.error("body layer config differs from expected bytes")
-    cost_raw = cost_path.read_bytes()
-    if hashlib.sha256(cost_raw).hexdigest() != args.expect_cost_sha256:
-        parser.error("MTP cost differs from expected bytes")
-    del cost_raw
+    try:
+        cost = load_mtp_cost(cost_path, expected_sha256=args.expect_cost_sha256)
+    except ValueError as error:
+        parser.error(str(error))
     body = json.loads(body_raw)
     if (not isinstance(body, dict) or
             not isinstance(body.get("__prismaquant__"), dict) or
@@ -78,7 +78,7 @@ def main() -> int:
         parser.error("body target profile differs from MTP serving target")
     fixed = json.loads(Path(args.fixed_formats).read_bytes())
     constants = json.loads(Path(args.mtp_serve_constants).read_bytes())
-    payload = load_mtp_cost(cost_path)
+    payload = cost.payload
     if not isinstance(fixed, dict) or set(fixed) != set(payload["groups"]):
         parser.error("fixed formats must cover every MTP group exactly")
     profile = detect_profile(args.model)
@@ -180,7 +180,7 @@ def main() -> int:
                               "mtp_source_bf16_bytes": mtp_source_bytes,
                               "mtp_selected_wire_and_source_bytes": selected_bytes,
                           }}}
-    result = backfill_mtp_selection_wires(result, cost_path)
+    result = backfill_mtp_selection_wires(result, cost)
     if any(result[name] != value for name, value in body.items()
            if name != "__prismaquant__"):
         raise ValueError("MTP selection changed a body format")
@@ -189,7 +189,7 @@ def main() -> int:
         parser.error("output already exists; refusing overwrite")
     print(json.dumps({"output": str(output), "sha256": hashlib.sha256(raw).hexdigest(),
                       "body_sha256": args.expect_body_sha256,
-                      "mtp_cost_sha256": args.expect_cost_sha256,
+                      "mtp_cost_sha256": cost.sha256,
                       "selected_mtp_wires": len(result["__prismaquant__"]["mtp_selection"][
                           "mtp_expert_wires"]),
                       "rung": record["rung"], "resident_bytes": record["resident_bytes"],

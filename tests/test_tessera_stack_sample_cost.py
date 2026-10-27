@@ -24,6 +24,8 @@ These tests pin three things:
   invent a topology it was not given).
 """
 from __future__ import annotations
+from prismaquant import priced_cell
+from prismaquant import tessera_campaign_table as campaign
 
 import argparse
 import json
@@ -41,15 +43,11 @@ MODULE = "model.layers.18.feed_forward.experts"
 IMAGE = "example/runtime@sha256:" + "b" * 64
 
 
-def _campaign():
-    return pytest.importorskip("prismaquant.tessera_campaign")
-
-
 def _fixture():
     return json.loads(FIXTURE.read_text())
 
 
-def _anchor(campaign, qname, family, fmt, q256, dloss, **over):
+def _anchor(qname, family, fmt, q256, dloss, **over):
     values = dict(
         qname=qname, family=family, format_name=fmt, body_rate_q256=q256,
         dloss=float(dloss), dloss_stderr=0.0, memory_bytes=1024,
@@ -82,7 +80,7 @@ def _profile():
     return Lfm2MoeProfile()
 
 
-def _sample(campaign, probe_row, *, qname=f"{STEM}.gate_up_proj",
+def _sample(probe_row, *, qname=f"{STEM}.gate_up_proj",
             sampled=None, pi=None, seed=7, design="pps_wor"):
     experts = range(probe_row["num_experts"]) if sampled is None else sampled
     experts = list(experts)
@@ -92,7 +90,7 @@ def _sample(campaign, probe_row, *, qname=f"{STEM}.gate_up_proj",
         inclusion_prob=probs, seed=seed, design=design)
 
 
-def _payload(campaign, anchors, samples, *, menus=None):
+def _payload(anchors, samples, *, menus=None):
     return campaign.campaign_cost_payload(
         anchors, menus or {}, loo={},
         provenance={"provenance": {"hessian": {"supplied": True}}},
@@ -110,7 +108,6 @@ def test_horvitz_thompson_is_unbiased_for_the_stack_total():
     so the check is on the ESTIMATOR, not on one lucky draw: the mean over many
     independent draws must sit inside the standard error of that mean.
     """
-    campaign = _campaign()
     rng = random.Random(20260906)
     n_experts, n_draw = 32, 8
     h = [rng.lognormvariate(0.0, 1.0) for _ in range(n_experts)]
@@ -149,7 +146,7 @@ def test_horvitz_thompson_is_unbiased_for_the_stack_total():
     drawn = sorted(set(drawn) | {e for e in range(n_experts) if pi[e] < 1.0})
     probe = _packed_probe_row(n_experts, h, packed_param="down_proj",
                               out_features=4)
-    sample = _sample(campaign, probe, qname=f"{STEM}.down_proj",
+    sample = _sample(probe, qname=f"{STEM}.down_proj",
                      sampled=drawn, pi={e: pi[e] for e in drawn})
     contributions = {e: h[e] * mse[e] for e in drawn}
     total, stderr, m = campaign._horvitz_thompson_stack(sample, contributions)
@@ -160,38 +157,35 @@ def test_horvitz_thompson_is_unbiased_for_the_stack_total():
 
 
 def test_a_census_has_a_true_zero_sampling_error_and_one_draw_refuses():
-    campaign = _campaign()
     probe = _packed_probe_row(4, [1.0, 2.0, 3.0, 4.0], packed_param="down_proj")
-    census = _sample(campaign, probe, qname=f"{STEM}.down_proj")
+    census = _sample(probe, qname=f"{STEM}.down_proj")
     total, stderr, m = campaign._horvitz_thompson_stack(
         census, {0: 1.0, 1: 2.0, 2: 3.0, 3: 4.0})
     assert (total, stderr, m) == (10.0, 0.0, 0)
-    one = _sample(campaign, probe, qname=f"{STEM}.down_proj",
+    one = _sample(probe, qname=f"{STEM}.down_proj",
                   sampled=[0, 1], pi={0: 1.0, 1: 0.5})
     with pytest.raises(campaign.StackSampleError, match="non-certainty draw"):
         campaign._horvitz_thompson_stack(one, {0: 1.0, 1: 2.0})
 
 
 def test_zero_inclusion_probability_is_only_legal_for_a_zero_weight_expert():
-    campaign = _campaign()
     probe = _packed_probe_row(3, [1.0, 0.0, 2.0], packed_param="down_proj")
-    ok = _sample(campaign, probe, qname=f"{STEM}.down_proj",
+    ok = _sample(probe, qname=f"{STEM}.down_proj",
                  sampled=[0, 1, 2], pi={0: 1.0, 1: 0.0, 2: 1.0})
-    campaign._validate_stack_sample(ok)
-    bad = _sample(campaign, probe, qname=f"{STEM}.down_proj",
+    campaign.validate_stack_sample(ok)
+    bad = _sample(probe, qname=f"{STEM}.down_proj",
                   sampled=[0, 1, 2], pi={0: 0.0, 1: 0.0, 2: 1.0})
     with pytest.raises(campaign.StackSampleError, match="cannot be drawn"):
-        campaign._validate_stack_sample(bad)
+        campaign.validate_stack_sample(bad)
 
 
 def test_weights_that_do_not_sum_to_the_probe_h_trace_refuse():
     """The currency assumes sum_e h_e == h_trace; a drifted vector is refused."""
-    campaign = _campaign()
     probe = _packed_probe_row(4, [1.0, 2.0, 3.0, 4.0], packed_param="down_proj")
     probe["h_trace"] = 11.0  # not 10.0
-    sample = _sample(campaign, probe, qname=f"{STEM}.down_proj")
+    sample = _sample(probe, qname=f"{STEM}.down_proj")
     with pytest.raises(campaign.StackSampleError, match="does not equal"):
-        campaign._validate_stack_sample(sample)
+        campaign.validate_stack_sample(sample)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +201,6 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
     that, multiplied by the PROBE row's ``h_trace``, reproduces the sum of
     those members' ``predicted_dloss``.
     """
-    campaign = _campaign()
     from prismaquant.allocator_solver import predicted_dloss
 
     h = [3.0, 1.0, 4.0, 2.0]
@@ -218,10 +211,10 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
     for (expert, role), value in mse.items():
         q = f"{STEM}.{expert}.{role}"
         anchors[q] = {"TESSERA_E2M1_K1": [
-            _anchor(campaign, q, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
+            _anchor(q, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
                     256, value)]}
-    sample = _sample(campaign, probe)
-    payload = _payload(campaign, anchors, {sample.packed_qname: sample})
+    sample = _sample(probe)
+    payload = _payload(anchors, {sample.packed_qname: sample})
 
     row = payload["costs"][f"{STEM}.gate_up_proj"]["TESSERA_E2M1_K1_R256"]
     expanded = math.fsum(predicted_dloss(h[e] / 2.0, mse[(e, role)])
@@ -243,23 +236,22 @@ def test_stack_row_prices_exactly_what_the_expanded_experts_would():
 
 def test_the_allocator_takes_the_output_mse_branch_for_a_stack_row():
     """Pricing must go through ``_prices_from_output_mse``, not weight-only."""
-    campaign = _campaign()
     from prismaquant import allocator_candidates as ac
     from prismaquant.allocator_solver import predicted_dloss
 
     h = [3.0, 1.0, 4.0, 2.0]
     anchors = {
         f"{STEM}.{e}.{role}": {"TESSERA_E2M1_K1": [
-            _anchor(campaign, f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
+            _anchor(f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
                     "TESSERA_E2M1_K1_R256", 256, 0.01 * (e + 1))]}
         for e in range(4) for role in ("w1", "w3")}
     probe = _packed_probe_row(4, h)
-    sample = _sample(campaign, probe)
-    payload = _payload(campaign, anchors, {sample.packed_qname: sample})
+    sample = _sample(probe)
+    payload = _payload(anchors, {sample.packed_qname: sample})
     row = payload["costs"][f"{STEM}.gate_up_proj"]["TESSERA_E2M1_K1_R256"]
 
-    assert ac._prices_from_output_mse(probe, row) is True
-    assert ac.cost_entry_predicted_dloss(probe, row) == pytest.approx(
+    assert priced_cell._prices_from_output_mse(probe, row) is True
+    assert priced_cell.cost_entry_predicted_dloss(probe, row) == pytest.approx(
         predicted_dloss(probe["h_trace"], row["output_mse"]), rel=1e-12)
 
 
@@ -268,20 +260,19 @@ def test_the_allocator_takes_the_output_mse_branch_for_a_stack_row():
 # ---------------------------------------------------------------------------
 
 def test_measured_members_are_not_also_cost_keys():
-    campaign = _campaign()
     h = [1.0, 2.0, 3.0, 4.0]
     anchors = {
         f"{STEM}.{e}.{role}": {"TESSERA_E2M1_K1": [
-            _anchor(campaign, f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
+            _anchor(f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
                     "TESSERA_E2M1_K1_R256", 256, 0.02)]}
         for e in range(4) for role in ("w1", "w3")}
     # A dense unit measured in the same campaign still gets its own key.
     dense = "model.layers.18.self_attn.o_proj"
     anchors[dense] = {"TESSERA_E2M1_K1": [
-        _anchor(campaign, dense, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
+        _anchor(dense, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
                 256, 0.5)]}
-    sample = _sample(campaign, _packed_probe_row(4, h))
-    payload = _payload(campaign, anchors, {sample.packed_qname: sample})
+    sample = _sample(_packed_probe_row(4, h))
+    payload = _payload(anchors, {sample.packed_qname: sample})
     assert set(payload["costs"]) == {f"{STEM}.gate_up_proj", dense}
     block = payload["costs"][f"{STEM}.gate_up_proj"][
         "TESSERA_E2M1_K1_R256"]["sampled_experts"]
@@ -292,34 +283,32 @@ def test_measured_members_are_not_also_cost_keys():
 
 
 def test_a_stack_measured_whole_may_not_also_be_estimated_from_a_sample():
-    campaign = _campaign()
     packed = f"{STEM}.gate_up_proj"
     anchors = {
         packed: {"TESSERA_E2M1_K1": [
-            _anchor(campaign, packed, "TESSERA_E2M1_K1",
+            _anchor(packed, "TESSERA_E2M1_K1",
                     "TESSERA_E2M1_K1_R256", 256, 0.02)]},
         f"{STEM}.0.w1": {"TESSERA_E2M1_K1": [
-            _anchor(campaign, f"{STEM}.0.w1", "TESSERA_E2M1_K1",
+            _anchor(f"{STEM}.0.w1", "TESSERA_E2M1_K1",
                     "TESSERA_E2M1_K1_R256", 256, 0.02)]},
     }
-    sample = _sample(campaign, _packed_probe_row(1, [1.0]), sampled=[0])
+    sample = _sample(_packed_probe_row(1, [1.0]), sampled=[0])
     with pytest.raises(campaign.StackSampleError, match="measured whole"):
-        _payload(campaign, anchors, {packed: sample})
+        _payload(anchors, {packed: sample})
 
 
 def test_members_measured_under_different_contracts_do_not_average():
-    campaign = _campaign()
     anchors = {}
     for e in range(2):
         for role in ("w1", "w3"):
             q = f"{STEM}.{e}.{role}"
             contract = "bfloat16" if e == 0 else "nvfp4_static"
             anchors[q] = {"TESSERA_E2M1_K1": [
-                _anchor(campaign, q, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
+                _anchor(q, "TESSERA_E2M1_K1", "TESSERA_E2M1_K1_R256",
                         256, 0.02, activation_contract=contract)]}
-    sample = _sample(campaign, _packed_probe_row(2, [1.0, 1.0]))
+    sample = _sample(_packed_probe_row(2, [1.0, 1.0]))
     with pytest.raises(campaign.StackSampleError, match="activation_contract"):
-        _payload(campaign, anchors, {sample.packed_qname: sample})
+        _payload(anchors, {sample.packed_qname: sample})
 
 
 def test_both_packed_parameters_promote_into_one_serving_unit():
@@ -345,7 +334,6 @@ def test_stack_rows_resolve_routed_moe_with_no_fallback():
     """The whole point of #290: the explicit scope resolves every unit."""
     from prismaquant import tessera_serving_scope as scope
 
-    campaign = _campaign()
     stats = {
         f"{STEM}.gate_up_proj": _packed_probe_row(4, [1.0, 2.0, 3.0, 4.0]),
         f"{STEM}.down_proj": _packed_probe_row(
@@ -364,11 +352,11 @@ def test_stack_rows_resolve_routed_moe_with_no_fallback():
     # carries its own structure rather than depending on a probe re-read.
     anchors = {
         f"{STEM}.{e}.{role}": {"TESSERA_E2M1_K1": [
-            _anchor(campaign, f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
+            _anchor(f"{STEM}.{e}.{role}", "TESSERA_E2M1_K1",
                     "TESSERA_E2M1_K1_R256", 256, 0.02)]}
         for e in range(4) for role in ("w1", "w3")}
-    sample = _sample(campaign, stats[f"{STEM}.gate_up_proj"])
-    payload = _payload(campaign, anchors, {sample.packed_qname: sample})
+    sample = _sample(stats[f"{STEM}.gate_up_proj"])
+    payload = _payload(anchors, {sample.packed_qname: sample})
     row = payload["costs"][f"{STEM}.gate_up_proj"]["TESSERA_E2M1_K1_R256"]
     assert scope.unit_structure_from_stats(
         f"{STEM}.gate_up_proj", row, _profile()) == "routed_moe"
@@ -408,7 +396,6 @@ def _fixture_anchors(campaign, data, packed_param, roles):
 
 def test_lfm_layer18_census_matches_the_per_expert_expansion():
     """On the real campaign-01 anchors, a 32-expert census is exact."""
-    campaign = _campaign()
     from prismaquant.allocator_solver import predicted_dloss
 
     data = _fixture()
@@ -420,7 +407,7 @@ def test_lfm_layer18_census_matches_the_per_expert_expansion():
         packed_qname, probe, _profile(),
         sampled_experts=range(32), inclusion_prob={e: 1.0 for e in range(32)},
         seed=1, design="census")
-    payload = _payload(campaign, anchors, {packed_qname: sample})
+    payload = _payload(anchors, {packed_qname: sample})
     rows = payload["costs"][packed_qname]
     assert rows, "the fixture's shared rungs must produce stack rows"
 
@@ -442,7 +429,6 @@ def test_lfm_layer18_census_matches_the_per_expert_expansion():
 
 def test_lfm_layer18_sample_brackets_the_census_it_estimates():
     """A PPS sample of the real stack lands within a few SE of the truth."""
-    campaign = _campaign()
     data = _fixture()
     packed_qname = f"{STEM}.down_proj"
     probe = data["packed_probe_rows"][packed_qname]
@@ -467,7 +453,7 @@ def test_lfm_layer18_sample_brackets_the_census_it_estimates():
     sample = campaign.stack_sample_from_probe(
         packed_qname, probe, _profile(), sampled_experts=drawn,
         inclusion_prob={e: pi[e] for e in drawn}, seed=4711)
-    row = _payload(campaign, anchors, {packed_qname: sample})[
+    row = _payload(anchors, {packed_qname: sample})[
         "costs"][packed_qname][fmt]
 
     per_expert = {q: next(a for a in v if a["format_name"] == fmt)["dloss"]

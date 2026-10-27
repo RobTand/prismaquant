@@ -1,0 +1,75 @@
+{
+  "activation_contract": "e2m1_group16_ue4m3_static",
+  "audit_regions": {
+    "e2m1_terminal": [
+      896
+    ]
+  },
+  "calibration_identity": {
+    "attention_implementation": "eager",
+    "capture_manifest": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "capture_manifest_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+    "census": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-r1024-02/workspace/census.json",
+    "census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+    "hessian": "require",
+    "max_act_rows": 512,
+    "nsamples": 512,
+    "seed": 0,
+    "seqlen": 512,
+    "streaming": "selected-tensors-v1",
+    "tp_degree": 1
+  },
+  "currency": "output_mse_under_route_activation_contract",
+  "curve_id": "l20_shared_down_e2m1_terminal_r896",
+  "family": "TESSERA_E2M1_K2",
+  "legal_rates": [
+    896
+  ],
+  "measurement_kind": "measured",
+  "measurement_plan": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.measurement-plan.json",
+    "sha256": "9b0fed0fd1666d125a19ca3f7002370c4f847db42402c75432371890203b3cbe"
+  },
+  "qname": "model.language_model.layers.20.mlp.shared_experts.down_proj",
+  "rates": [
+    896
+  ],
+  "receipts": [
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e2m1_terminal_r896.curve.rate-896.json",
+      "rate": 896,
+      "sha256": "98b026479c6bc2f3ca3b9bcdfda647ae18e5d1d60ee9850fb2a89b0b3d30b80f",
+      "value": 1.6379603039240465e-05
+    }
+  ],
+  "recipe_identity": {
+    "activation_contract": "e2m1_group16_ue4m3_static",
+    "body": "tcq",
+    "grid": "E2M1",
+    "scale_plane": "lut16",
+    "terminal": true
+  },
+  "schema": "prismaquant.complete_rate_curve.v1",
+  "source_identity": {
+    "campaign_source": {
+      "base_commit": "352d0fda21",
+      "campaign_module_sha256": "93785e0915ecd7e7e5fdb053f23c3c0182c71566700043b19d1a729790a57266"
+    },
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "producer": {
+      "commit": "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+      "pin": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/identity-reseal-20260911/rollout-inputs/pins-059ee574f8-d403cc5a31.json",
+      "pin_sha256": "4513ee7cf77a258868dce29ae3149b5ee94630852820f86417498cb7c34ed753",
+      "source_sha256": "0833671bbddbc3fb7186bdbed0a905ef248c23ffdf1aeee0c083322680d20f6b"
+    },
+    "weight_identity": {
+      "schema": "prismaquant.streaming_initialization.v1",
+      "source_map_sha256": "ad7900d15f9a45dc52407ee1e983562e5c067198c13d81595ef642090cc94669",
+      "state_sha256": "e0f48d644e8d72e9935bb130b135a12740f3d0a59dd2a52ff78769b5d97f0cf5"
+    }
+  },
+  "values": [
+    1.6379603039240465e-05
+  ]
+}

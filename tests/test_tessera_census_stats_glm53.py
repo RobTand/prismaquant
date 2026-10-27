@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant.allocator_candidates import _has_measured_output_mse
+from prismaquant.priced_cell import _has_measured_output_mse
 from prismaquant.model_profiles.structure import load_structure_spec
 from prismaquant.schemas import validate_probe_payload
 from prismaquant.tessera_census_stats import (

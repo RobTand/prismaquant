@@ -378,7 +378,7 @@ class GraphObserver:
 
 
 def metadata_gate(runner, tokens, storage):
-    from prismaquant.cost_streaming import StreamedForwardBoundaries, _state_tensors
+    from prismaquant.streamed_boundary_artifacts import StreamedForwardBoundaries, _state_tensors
     batches, weak = [], []
     storage.watch_auxiliary(batches, [])
     with torch.no_grad():
@@ -536,7 +536,8 @@ def main(argv=None):
 
 def run_native(args, plan, source, profile, tokens, shards, result):
     from prismaquant.autoscale import require_bounded_capture_environment
-    from prismaquant.cost_streaming import build_streamed_causal_lm, StreamedBoundaryArtifacts
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.memory_management import CaptureMemoryGuard
     from transformers.models.glm5_next import modeling_glm5_next
     require_bounded_capture_environment(os.environ)

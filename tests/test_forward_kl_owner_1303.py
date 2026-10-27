@@ -6,13 +6,14 @@ The tiny fork runner supplies deterministic boundaries without source/GPU IO.
 """
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 import torch
 
 from prismaquant import expert_empirical_cost as ec
 from prismaquant.kl_fisher import forward_kl_per_token
+from prismaquant.streaming_model import StreamingContext
 
 
 def _raw(value):
@@ -117,6 +118,7 @@ def test_forked_expert_consumer_routes_each_window_and_keeps_token_mean(monkeypa
         install=lambda layer, **kwargs: events.append(("install", layer)),
         unload=lambda layer: events.append(("unload", layer)),
     )
+    context.walk_layers = MethodType(StreamingContext.walk_layers, context)
     batch = SimpleNamespace(activations_cpu=[baseline, baseline])
     runner = SimpleNamespace(
         model=torch.nn.Module(), device=torch.device("cpu"), num_layers=1,
