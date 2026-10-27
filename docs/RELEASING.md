@@ -97,10 +97,10 @@ rather than package behaviour — the pinned recipe defaults in
 `run-pipeline.sh`, doc staleness, paper claims, calibration-anchor source docs
 — and several tests read prismaquant's own `.py` files as source text from a
 repo-relative path. Those cannot pass from outside a checkout by construction,
-and making them pass would mean weakening them. CI runs the full suite from the
-checkout on every push and pull request, which is the right home for repo
-invariants; the release job's job is to prove the *artifact* is complete and
-usable. (Three tests that drive repo-root `tools/` scripts now skip cleanly
+and making them pass would mean weakening them. Main and manual CI runs cover
+the full checkout suite. Pull requests use the required composed PrismaBuild
+`pb-tests` gate. The release job proves the *artifact* is complete and usable.
+(Three tests that drive repo-root `tools/` scripts now skip cleanly
 outside a checkout instead of failing collection.)
 
 ## After a publish

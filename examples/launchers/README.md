@@ -1,12 +1,9 @@
 # Launcher Map
 
-This directory keeps only launchers that are still useful as current examples:
+Selected examples in this directory:
 
 - `launch-qwen3p6-35b-a3b-prismascout-probe-cost.sh`
 - `launch-qwen3p6-35b-a3b-prismascout-knee.sh`
-- `launch-minimax.sh`
-- `launch-minimax-allocate-export.sh`
-- `launch-dsv4.sh`
 - `launch-vllm-serve.sh`
 - `bench-quality.py`
 - `bench-throughput.py`
