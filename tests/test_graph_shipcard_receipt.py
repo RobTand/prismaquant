@@ -191,3 +191,20 @@ def test_malformed_observed_settings_return_refusal(tmp_path, boundary_verifier,
     problems = verify(card, model_dir=model, required=["native_export.graph"])
     assert any("compilation" in problem or "operator" in problem for problem in problems), problems
     assert boundary_verifier == []
+
+
+@pytest.mark.parametrize("part", ["compilation_config", "resolved"])
+def test_observed_compilation_preserves_json_types(tmp_path, boundary_verifier, part):
+    from tests.graph_receipt_fixtures import replace_receipt
+
+    model, card, record, receipt = graph_card(tmp_path)
+    observed = record["metrics"]["graph_observation"]
+    record["metrics"]["serve_scope"]["compilation_config"]["mode"] = 1
+    observed["compilation_config"]["mode"] = 1
+    observed["resolved"]["compilation_config"]["mode"] = 1
+    replace_receipt(record, receipt)
+    target = observed["compilation_config"] if part == "compilation_config" else observed["resolved"]["compilation_config"]
+    target["mode"] = True
+    problems = verify(card, model_dir=model, required=["native_export.graph"])
+    assert any("compilation" in problem for problem in problems), problems
+    assert boundary_verifier == []
