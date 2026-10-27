@@ -199,27 +199,36 @@ def digest_sites(root: Path = ROOT) -> list[str]:
     for path in _files(root):
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for call, scope, aliases in _iter_scoped_calls(tree):
-            callee = _resolved_callee(call.func, aliases)
-            if callee is None:
-                continue
-            if callee.startswith("hashlib."):
-                sites.add(f"hashlib:{rel}::{scope}")
-            elif callee in ("json.dumps", "json.JSONEncoder") and any(
-                    keyword.arg == "sort_keys"
-                    and isinstance(keyword.value, ast.Constant)
-                    and keyword.value.value is True
-                    for keyword in call.keywords):
-                sites.add(f"sorted-json:{rel}::{scope}")
+        sites.update(_digest_sites(rel, tree))
     return sorted(sites)
 
 
-def scan(root: Path = ROOT) -> dict:
+def _digest_sites(rel: str, tree: ast.Module) -> set[str]:
+    sites = set()
+    for call, scope, aliases in _iter_scoped_calls(tree):
+        callee = _resolved_callee(call.func, aliases)
+        if callee is None:
+            continue
+        if callee.startswith("hashlib."):
+            sites.add(f"hashlib:{rel}::{scope}")
+        elif callee in ("json.dumps", "json.JSONEncoder") and any(
+                keyword.arg == "sort_keys"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in call.keywords):
+            sites.add(f"sorted-json:{rel}::{scope}")
+    return sites
+
+
+def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool) -> dict:
     fingerprints = []
+    functions = {}
+    sites = set()
     names: dict[str, set[str]] = defaultdict(set)
-    for path in _files(root):
+    for path in paths:
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        sites.update(_digest_sites(rel, tree))
         for top in tree.body:
             if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef)) and not top.name.startswith("__") and top.name not in ENTRY_POINTS:
                 names[top.name].add(rel)
@@ -228,6 +237,12 @@ def scan(root: Path = ROOT) -> dict:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     qual = scope + [child.name]
+                    location = f"{rel}:{child.lineno}" if include_same_file else rel
+                    identity = f"{location}::{'.'.join(qual)}"
+                    if not isinstance(child, ast.ClassDef):
+                        functions[identity] = {
+                            "line": child.lineno, "end_line": child.end_lineno,
+                        }
                     if not isinstance(child, ast.ClassDef) and child.end_lineno - child.lineno >= MIN_LINES:
                         body = child.body
                         if (body and isinstance(body[0], ast.Expr)
@@ -236,7 +251,7 @@ def scan(root: Path = ROOT) -> dict:
                             body = body[1:]
                         shingles = _shingles([t for stmt in body for t in _tokens(stmt)])
                         if len(shingles) >= MIN_SHINGLES:
-                            fingerprints.append((f"{rel}::{'.'.join(qual)}", shingles))
+                            fingerprints.append((identity, shingles))
                     walk(child, qual)
                 else:
                     walk(child, scope)
@@ -256,7 +271,7 @@ def scan(root: Path = ROOT) -> dict:
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
                 a, b = fingerprints[members[i]], fingerprints[members[j]]
-                if a[0].split("::")[0] == b[0].split("::")[0]:
+                if not include_same_file and a[0].split("::")[0] == b[0].split("::")[0]:
                     continue
                 if len(a[1] & b[1]) / len(a[1] | b[1]) >= THRESHOLD:
                     pairs.add(tuple(sorted((a[0], b[0]))))
@@ -264,9 +279,16 @@ def scan(root: Path = ROOT) -> dict:
         "near_duplicates": sorted([list(p) for p in pairs]),
         "same_name_helpers": {n: sorted(m) for n, m in sorted(names.items()) if len(m) > 1},
         # The ratcheted set: every primitive digest site outside the owners.
-        "primitive_digest_sites": [s for s in digest_sites(root)
+        "primitive_digest_sites": [s for s in sorted(sites)
                                    if s.split(":", 1)[1].split("::", 1)[0] not in DIGEST_OWNERS],
+        "functions": dict(sorted(functions.items())),
     }
+
+
+def scan(root: Path = ROOT) -> dict:
+    live = _scan_paths(root, list(_files(root)), include_same_file=False)
+    del live["functions"]
+    return live
 
 
 def main() -> int:
