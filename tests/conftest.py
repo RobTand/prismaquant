@@ -26,6 +26,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -667,6 +668,7 @@ def pytest_terminal_summary(terminalreporter):
 OWN_PROCESS_MARK = "own_process"
 #: Set in a child session only: the file the child appends its reports to.
 OWN_PROCESS_REPORT_ENV = "PQ_OWN_PROCESS_REPORT"
+OWN_PROCESS_MEASURE_ENV = "PQ_OWN_PROCESS_MEASURE"
 #: PrismaBuild's per-test bound plugin, by the name ``-p`` loads it under.
 PRISMABUILD_TEST_BOUND_PLUGIN = "prismabuild.pytest_test_bound"
 #: The per-test bound in seconds, which ``pbtest`` exports to every shard and
@@ -834,8 +836,49 @@ def _own_process_bound_args(config) -> list[str]:
     return argv
 
 
+def _own_process_measure_args(config, root, key):
+    launcher = ["-m", "cProfile", "-o", str(root / f"{key}.pstats"),
+                "-m", "pytest"]
+    argv, env = [], {}
+    sources = getattr(config.option, "cov_source", [])
+    if sources != [] and not getattr(config.option, "no_cov", False):
+        argv = ["-p", "pytest_cov", "--cov-reset", "--cov-report=",
+                "--cov-fail-under=0"]
+        argv += [f"--cov={source}" for source in (sources or [""])]
+        argv += ["--cov-config=" + str(config.option.cov_config)]
+        if config.option.cov_branch:
+            argv.append("--cov-branch")
+        if config.option.cov_context:
+            argv.append("--cov-context=" + config.option.cov_context)
+        env["COVERAGE_FILE"] = str(root / f"{key}.coverage")
+    return launcher, argv, env
+
+
+def _write_own_process_measurement(root, key, nodeids, state, records,
+                                   started, lock_wait, executed_child):
+    phases = {phase: sum(row["duration"] for row in records
+                        if row["when"] == phase)
+              for phase in ("setup", "call", "teardown")}
+    child = json.loads((root / f"{key}.child-measurement.json").read_text())
+    record = {
+        "schema": "prismaquant.own_process_measurement.v1",
+        "nodeids": nodeids, "parent_pid": os.getpid(),
+        "executed_child": executed_child, "lock_wait_s": lock_wait,
+        "parent_elapsed_s": time.perf_counter() - started,
+        "child_elapsed_s": child["elapsed_s"], "child_phase_s": phases,
+        "child_unattributed_s": child["elapsed_s"] - sum(phases.values()),
+        "child_profile": child["profile"], "child_coverage": child["coverage"],
+        "child_returncode": state["returncode"], "child_error": state["error"],
+    }
+    (root / f"{key}.{os.getpid()}.measurement.json").write_text(
+        json.dumps(record))
+
+
 def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     """Run ``nodeids`` in one child pytest, once per session, and read it."""
+    measure = os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1"
+    started = time.perf_counter() if measure else None
+    executed_child = False
     key = hashlib.sha256("\n".join(nodeids).encode()).hexdigest()[:16]
     root = _own_process_root(config)
     root.mkdir(parents=True, exist_ok=True)
@@ -843,23 +886,33 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     done = root / f"{key}.done.json"
     log = root / f"{key}.log"
     with open(root / f"{key}.lock", "a+") as lock:
+        waiting = time.perf_counter() if measure else None
         fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_wait = time.perf_counter() - waiting if measure else None
         try:
             if not done.exists():
+                executed_child = True
                 reports.unlink(missing_ok=True)
                 env = {name: value for name, value in os.environ.items()
                        if not name.startswith("PYTEST_XDIST_")
                        and name not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
                 env[OWN_PROCESS_REPORT_ENV] = str(reports)
-                argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
+                launcher, measure_args = ["-m", "pytest"], []
+                if measure:
+                    launcher, measure_args, measure_env = _own_process_measure_args(
+                        config, root, key)
+                    env.update(measure_env)
+                argv = [sys.executable, *launcher, "-q", "--no-header",
                         "-p", "no:cacheprovider",
                         "--rootdir", str(config.rootpath),
                         "--basetemp", str(root / f"{key}.tmp")]
                 if config.inipath is not None:
                     argv += ["-c", str(config.inipath)]
                 argv += _own_process_bound_args(config)
+                argv += measure_args
                 argv += list(nodeids)
                 returncode, error = None, None
+                child_started = time.perf_counter() if measure else None
                 try:
                     with open(log, "wb") as out:
                         returncode = subprocess.run(
@@ -869,14 +922,25 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                     error = f"{type(exc).__name__}: {exc}"
                     raise
                 finally:
-                    done.write_text(json.dumps(
-                        {"returncode": returncode, "error": error}))
+                    state = {"returncode": returncode, "error": error}
+                    if measure:
+                        child_measurement = {
+                            "elapsed_s": time.perf_counter() - child_started,
+                            "profile": str(root / f"{key}.pstats"),
+                            "coverage": measure_env.get("COVERAGE_FILE"),
+                        }
+                        (root / f"{key}.child-measurement.json").write_text(
+                            json.dumps(child_measurement))
+                    done.write_text(json.dumps(state))
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
     state = json.loads(done.read_text())
     lines = reports.read_text().splitlines() if reports.exists() else []
-    outcomes, collection = _fold_own_process_reports(
-        [json.loads(line) for line in lines], log=log)
+    records = [json.loads(line) for line in lines]
+    if measure:
+        _write_own_process_measurement(root, key, nodeids, state, records,
+                                       started, lock_wait, executed_child)
+    outcomes, collection = _fold_own_process_reports(records, log=log)
     reported_failure = any(item["outcome"] == "failed" for item in outcomes.values())
     collection_failure = any(item["outcome"] == "failed" for item in collection)
     collection_skip = (not outcomes and collection
@@ -1035,10 +1099,13 @@ def _own_process_record(report) -> dict:
                   and len(longrepr) == 3 else str(longrepr or ""))
         if reason.startswith("Skipped: "):
             reason = reason[len("Skipped: "):]
-    return {"nodeid": report.nodeid, "when": getattr(report, "when", "collect"),
+    record = {"nodeid": report.nodeid, "when": getattr(report, "when", "collect"),
             "outcome": report.outcome,
             "longrepr": report.longreprtext if report.failed else "",
             "reason": reason, "wasxfail": getattr(report, "wasxfail", None)}
+    if os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1":
+        record["duration"] = report.duration
+    return record
 
 
 def _append_own_process_record(report) -> None:

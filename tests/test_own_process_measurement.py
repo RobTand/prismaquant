@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import ast
+from concurrent.futures import ThreadPoolExecutor
 import json
 import pstats
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,21 +60,26 @@ def test_disabled_measurement_preserves_reports_without_artifacts(tmp_path):
     _check_mapped_outcomes(outcomes, output)
     root = tmp_path / "base" / "own-process"
     assert not list(root.glob("*.measurement.json"))
+    assert not list(root.glob("*.child-measurement.json"))
     assert not list(root.glob("*.pstats"))
     reports = [json.loads(line) for path in root.glob("*.jsonl")
                for line in path.read_text().splitlines()]
     assert all("duration" not in row for row in reports)
 
 
-def test_child_only_line_has_its_test_coverage_context(tmp_path):
+@pytest.mark.parametrize("workers", [0, 2], ids=["serial", "xdist"])
+def test_child_only_line_has_its_test_coverage_context(tmp_path, workers):
     coverage = pytest.importorskip("coverage")
     pytest.importorskip("pytest_cov")
+    if workers:
+        pytest.importorskip("xdist")
+    parent = tmp_path / "parent.coverage"
     proc, output, outcomes, _out = _session(
         tmp_path, "sample_isolated.py", "sample_shared.py",
-        extra=("--cov=tests.own_process_samples.sample_isolated",
-               "--cov-context=test", "--cov-report="),
+        extra=(("-n", str(workers)) if workers else ()) + (
+            f"--cov={SAMPLES}", "--cov-context=test", "--cov-report="),
         environ={"PQ_OWN_PROCESS_MEASURE": "1",
-                 "COVERAGE_FILE": str(tmp_path / "parent.coverage")})
+                 "COVERAGE_FILE": str(parent)})
     assert proc.returncode == 1, output
     _check_mapped_outcomes(outcomes, output)
     files = list((tmp_path / "base" / "own-process").glob("*.coverage"))
@@ -85,3 +92,62 @@ def test_child_only_line_has_its_test_coverage_context(tmp_path):
                     and node.name == "test_passes")
     contexts = data.contexts_by_lineno(str(sample.resolve()))
     assert f"{ISOLATED}::test_passes|run" in contexts[function.body[0].lineno]
+    combined = coverage.Coverage(data_file=str(tmp_path / "combined.coverage"))
+    combined.combine(data_paths=[str(parent), str(files[0])], keep=True, strict=True)
+    combined.save()
+    assert f"{ISOLATED}::test_passes|run" in combined.get_data().contexts_by_lineno(
+        str(sample.resolve()))[function.body[0].lineno]
+    assert parent.is_file() and files[0].is_file()
+
+
+@pytest.mark.parametrize("sources,disabled,expected", [
+    (["prismaquant", "tools"], False, ["--cov=prismaquant", "--cov=tools"]),
+    (None, False, ["--cov="]),
+    ([], False, []),
+    (["prismaquant"], True, []),
+])
+def test_child_coverage_arguments_preserve_selection(tmp_path, sources, disabled,
+                                                    expected):
+    import conftest
+
+    option = SimpleNamespace(cov_source=sources, no_cov=disabled,
+                             cov_config="custom.coveragerc", cov_branch=True,
+                             cov_context="test")
+    launcher, args, env = conftest._own_process_measure_args(
+        SimpleNamespace(option=option), tmp_path, "child")
+    assert launcher == ["-m", "cProfile", "-o", str(tmp_path / "child.pstats"),
+                        "-m", "pytest"]
+    assert [arg for arg in args if arg.startswith("--cov=")] == expected
+    if expected:
+        assert args[:2] == ["-p", "pytest_cov"]
+        assert "--cov-config=custom.coveragerc" in args
+        assert "--cov-branch" in args and "--cov-context=test" in args
+        assert "--cov-report=" in args and "--cov-fail-under=0" in args
+        assert env == {"COVERAGE_FILE": str(tmp_path / "child.coverage")}
+    else:
+        assert args == [] and env == {}
+
+
+def test_concurrent_sessions_keep_independent_artifacts(tmp_path):
+    roots = [tmp_path / name for name in ("one", "two")]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sessions = []
+        for root in roots:
+            root.mkdir()
+            sessions.append(pool.submit(
+                _session, root, "sample_isolated.py", "sample_shared.py",
+                environ={"PQ_OWN_PROCESS_MEASURE": "1"}))
+        for session in sessions:
+            proc, output, outcomes, _ = session.result()
+            assert proc.returncode == 1, output
+            _check_mapped_outcomes(outcomes, output)
+    profiles = []
+    for root in roots:
+        rows = list((root / "base" / "own-process").glob("*.measurement.json"))
+        assert len(rows) == 1
+        record = json.loads(rows[0].read_text())
+        assert record["executed_child"] is True
+        profile = record["child_profile"]
+        assert any(name == "test_passes" for _, _, name in pstats.Stats(profile).stats)
+        profiles.append(profile)
+    assert profiles[0] != profiles[1]
