@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
 As of: 2026-10-26, retained GGUF status correction.
-Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `pc/PRI-226`).
+Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `prismaquant-1295-pri226-publication`).
 Section 1.1 records the 2026-10-17 GGUF deprecation in AGENTS.md.
 This corrects prose only; retained GGUF code and serving gates are unchanged.
 
