@@ -118,7 +118,7 @@ def run(args):
     if token_identity != teacher["tokenizer_identity"]:
         raise ValueError("candidate tokenizer files differ from teacher")
     candidate_identity = native.cached_checkpoint_identity(model, args.candidate_digest_cache)
-    producer = native.producer_identity()
+    producer = driver.producer_identity()
     topology = gold_engine_kwargs(args)
     world_size = topology["tensor_parallel_size"]
     compilation = native.declared_compilation(args)
@@ -192,7 +192,7 @@ def run(args):
         if native.cached_checkpoint_identity(model, args.candidate_digest_cache) != candidate_identity:
             raise ValueError("candidate checkpoint changed during diagnostic")
         if (native.tokenizer_identity(model) != token_identity
-                or native.producer_identity() != producer
+                or driver.producer_identity() != producer
                 or native.bound_json(args.teacher, args.teacher_sha256) != teacher):
             raise ValueError("teacher/tokenizer/producer changed during diagnostic")
         native.load_panel(args.panel, arrays_root=args.arrays_root)

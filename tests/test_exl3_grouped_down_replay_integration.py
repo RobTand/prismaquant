@@ -238,6 +238,8 @@ def _report_args(driver, monkeypatch, tmp_path, varying=False):
         finally:
             driver.remove_replay(model)
     runtime = json.loads((ROOT / "tests/fixtures/glm_tr3_runtime/qualified-runtime.json").read_text())["runtime_binding"]
+    monkeypatch.setattr(served, "producer_identity", lambda: {"gold_source": {"schema": "test-native-producer"}})
+    runtime["producer_identity"] = driver.producer_identity()
     return dict(reports=reports, runtime_binding=runtime,
                 diagnostics_before=[_route(rank, 3) for rank in range(2)],
                 diagnostics_after=[_route(rank, 4) for rank in range(2)],
@@ -314,7 +316,7 @@ def test_report_rejects_incomplete_unattributable_or_mutated_evidence(monkeypatc
         replay["replays"][0]["finite"]["all_finite"] = False
         replay["replays"][0]["vs_original"]["fp32_max_abs_delta"] = float("nan")
     elif defect == "original-nonfinite":
-        replay["original"]["finite"]["all_finite"] = False
+        replay["original_out_before"]["fp32_finite"]["all_finite"] = False
     elif defect == "missing-input-hash":
         for side in ("inputs_before", "inputs_after"):
             del replay[side]["h2"]["sha256"]
@@ -472,3 +474,76 @@ def test_malformed_worker_evidence_returns_invalid_strict_json(monkeypatch, tmp_
     assert result["invalid_reasons"], defect
     assert result["diagnostic_only"] is True
     json.dumps(result, allow_nan=False)
+
+
+def test_producer_identity_covers_native_owner_and_diagnostic_sources(monkeypatch):
+    driver = _driver()
+    native = {"gold_source": {"schema": "test-native-producer"}}
+    monkeypatch.setattr(served, "producer_identity", lambda: native)
+    observed = driver.producer_identity()
+    assert observed["gold_source"] == native["gold_source"]
+    assert observed["diagnostic_source_files"] == {
+        name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        for name in ("experiments/diagnose_exl3_grouped_down_replay.py",
+                     "experiments/exl3_replay_cli.py", "tools/exl3_grouped_down_replay.py")}
+
+
+@pytest.mark.parametrize("defect", [
+    "candidate-roster-mutation", "candidate-content-mutation", "capture-missing-rank",
+    "capture-wrong-world", "capture-missing-source", "capture-empty-attention",
+    "worker-missing-rank", "worker-missing-config", "worker-missing-layout-source",
+    "request-prefix-caching", "request-nonfinite-memory", "coordinator-prefix-caching",
+    "missing-initial-destination", "wrong-replay-destination-seed",
+])
+def test_report_validates_bound_checkpoint_runtime_and_replay_seed(monkeypatch, tmp_path, defect):
+    driver = _driver()
+    kwargs = _report_args(driver, monkeypatch, tmp_path)
+    runtime = kwargs["runtime_binding"]
+    if defect == "candidate-roster-mutation":
+        runtime["candidate_identity"]["shards"][0]["sha256"] = "a" * 64
+    elif defect == "candidate-content-mutation":
+        runtime["candidate_identity"]["content_sha256"] = "a" * 64
+    elif defect == "capture-missing-rank":
+        runtime["worker_runtime"].pop()
+    elif defect == "capture-wrong-world":
+        runtime["worker_runtime"][0]["world_size"] = 99
+    elif defect == "capture-missing-source":
+        del runtime["worker_runtime"][0]["source_files"]["model"]
+    elif defect == "capture-empty-attention":
+        runtime["worker_runtime"][0]["attention_runtime"] = []
+    elif defect == "worker-missing-rank":
+        runtime["observed_worker_configuration"].pop()
+    elif defect == "worker-missing-config":
+        del runtime["observed_worker_configuration"][0]["configuration"]["cache_config"]
+    elif defect == "worker-missing-layout-source":
+        del runtime["observed_worker_configuration"][0]["prompt_layout_source"]["prompt_worker_source_sha256"]
+    elif defect == "request-prefix-caching":
+        runtime["engine_kwargs"]["enable_prefix_caching"] = True
+    elif defect == "request-nonfinite-memory":
+        runtime["engine_kwargs"]["gpu_memory_utilization"] = float("nan")
+    elif defect == "coordinator-prefix-caching":
+        runtime["observed_engine_configuration"]["cache_config"]["enable_prefix_caching"] = True
+    elif defect == "missing-initial-destination":
+        del kwargs["reports"][0]["replay"]["replay_initial_out_sha256"]
+    elif defect == "wrong-replay-destination-seed":
+        kwargs["reports"][0]["replay"]["replays"][0]["initial_out_sha256"] = "a" * 64
+    result = driver.build_report(**kwargs)
+    assert result["evidence_valid"] is False, defect
+    assert result["invalid_reasons"], defect
+    json.dumps(result, allow_nan=False)
+
+
+def test_report_accepts_recorded_compilation_through_native_contract(monkeypatch, tmp_path):
+    driver = _driver()
+    kwargs = _report_args(driver, monkeypatch, tmp_path)
+    runtime = kwargs["runtime_binding"]
+    compilation = {"mode": "NONE", "cudagraph_mode": "PIECEWISE", "cudagraph_capture_sizes": [1]}
+    runtime["execution_mode"] = "compiled"
+    runtime["engine_kwargs"].update(enforce_eager=False, compilation_config=compilation)
+    configurations = [runtime["observed_engine_configuration"]] + [
+        row["configuration"] for row in runtime["observed_worker_configuration"]]
+    for config in configurations:
+        config["model_config"]["enforce_eager"] = False
+        config["compilation_config"] = compilation
+    result = driver.build_report(**kwargs)
+    assert result["evidence_valid"] is True, result["invalid_reasons"]
