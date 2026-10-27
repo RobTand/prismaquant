@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import ast
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import json
+from pathlib import Path
 import pstats
 from types import SimpleNamespace
 
@@ -12,6 +14,57 @@ import pytest
 from tests.test_own_process_isolation import (
     ISOLATED, SAMPLES, _check_mapped_outcomes, _child_imports, _session,
 )
+
+
+@pytest.mark.parametrize("returncode", [0, 7], ids=["passed", "unexpected-exit"])
+def test_diagnostic_write_failure_does_not_relaunch_finished_child(
+        tmp_path, monkeypatch, returncode):
+    import conftest
+
+    monkeypatch.setenv("PQ_OWN_PROCESS_MEASURE", "1")
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+    root = tmp_path / "own-process"
+    launches, failures, terminals = [], [], []
+    original_write = Path.write_text
+    nodeids = ("sample.py::test_passes",)
+
+    def write(path, content, *args, **kwargs):
+        if path.name.endswith(".child-measurement.json") and not failures:
+            failures.append(path)
+            raise OSError(errno.ENOSPC, "injected diagnostic write failure")
+        return original_write(path, content, *args, **kwargs)
+
+    def child(argv, **kwargs):
+        launches.append(argv)
+        rows = [{"nodeid": nodeids[0], "when": phase, "outcome": "passed",
+                 "duration": 0.0} for phase in ("setup", "call", "teardown")]
+        Path(kwargs["env"]["PQ_OWN_PROCESS_REPORT"]).write_text(
+            "".join(json.dumps(row) + "\n" for row in rows))
+        return SimpleNamespace(returncode=returncode)
+
+    config = SimpleNamespace(
+        _tmp_path_factory=SimpleNamespace(getbasetemp=lambda: tmp_path),
+        option=SimpleNamespace(), rootpath=tmp_path, inipath=None)
+    monkeypatch.setattr(Path, "write_text", write)
+    monkeypatch.setattr(conftest.subprocess, "run", child)
+    errors = []
+    for _ in range(2):
+        try:
+            conftest._run_own_process(config, nodeids)
+        except OSError as exc:
+            errors.append(exc)
+        terminals.append([json.loads(path.read_text())
+                          for path in root.glob("*.done.json")])
+
+    assert len(failures) == 1 and errors[0].errno == errno.ENOSPC
+    assert len(launches) == 1, "missing diagnostics relaunched a completed child"
+    state = {"returncode": returncode, "error": None}
+    assert terminals == [[state], [state]]
+    monkeypatch.delenv("PQ_OWN_PROCESS_MEASURE")
+    result = conftest._run_own_process(config, nodeids)
+    assert len(launches) == 1 and result["state"] == state
+    assert result["outcomes"][nodeids[0]]["outcome"] == (
+        "passed" if returncode == 0 else "failed")
 
 
 @pytest.mark.parametrize("workers", [0, 2], ids=["serial", "xdist"])
