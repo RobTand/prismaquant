@@ -26,6 +26,12 @@ line. This scanner compares structure and names instead:
 ``--write-baseline`` rewrites the baseline after a consolidation removes
 entries.
 
+``--coverage-report PATH`` instead audits every Git-tracked path. It lists
+non-Python and excluded paths, analyzes the remaining Python files, and
+includes same-file pairs. These are candidates for semantic reading, not
+proof of equivalent behavior or complete semantic coverage. The default
+gate's population, exclusions and baseline remain unchanged.
+
 A pair that must stay two implementations is recorded in the baseline's
 ``must_differ`` list with its reason (PQ #1302): for example, an independent
 reference oracle, or a sealed module whose bytes are bound into receipts.
@@ -38,6 +44,7 @@ import ast
 import hashlib
 import json
 import random
+import subprocess
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -291,10 +298,61 @@ def scan(root: Path = ROOT) -> dict:
     return live
 
 
+def coverage_report(root: Path = ROOT) -> dict:
+    """Account for tracked paths and report expanded structural candidates.
+
+    Git metadata and readable, valid Python are required. Failure refuses
+    the report instead of silently dropping paths. Exclusions are the
+    existing scanner's, not new exemptions. Deprecated GGUF may appear as
+    read-only evidence; its preservation policy still applies.
+    """
+    tracked = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", "--cached", "-z"])
+    files = []
+    paths = []
+    for rel in sorted(set(tracked.decode("utf-8").split("\0")) - {""}):
+        path = root / rel
+        excluded = sorted(EXCLUDED_PARTS.intersection(path.relative_to(root).parts))
+        row = {"path": rel, "in_default_gate": not excluded and rel.endswith(".py")
+               and path.relative_to(root).parts[0] in SCANNED}
+        if excluded:
+            row.update(analysis="excluded", excluded_parts=excluded)
+        elif path.suffix != ".py":
+            row["analysis"] = "not_python"
+        else:
+            if path.is_symlink():
+                raise ValueError(f"refusing tracked Python symlink: {rel}")
+            row["analysis"] = "python"
+            paths.append(path)
+        files.append(row)
+    candidates = _scan_paths(root, paths, include_same_file=True)
+    functions = candidates.pop("functions")
+    return {
+        "schema": "prismaquant.duplication_coverage.v1",
+        "source_commit": subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip(),
+        "tracked_dirty": bool(subprocess.check_output(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no", "-z"])),
+        "files": files,
+        "functions": functions,
+        "candidates": candidates,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--write-baseline", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write-baseline", action="store_true")
+    mode.add_argument("--coverage-report", type=Path)
     args = parser.parse_args()
+    if args.coverage_report:
+        report = coverage_report(ROOT)
+        args.coverage_report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
+                                        encoding="utf-8")
+        print(f"tracked paths: {len(report['files'])}; "
+              f"Python paths analyzed: {sum(row['analysis'] == 'python' for row in report['files'])}; "
+              f"candidate pairs: {len(report['candidates']['near_duplicates'])}")
+        return 0
     live = scan()
     old = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
     pairs = {tuple(p) for p in live["near_duplicates"]}
