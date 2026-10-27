@@ -394,10 +394,15 @@ def install(model, ext, state, *, module_name=DEFAULT_MODULE,
         replay.inside = False
         return output
 
-    handles = [target.register_forward_pre_hook(enter),
-               target.register_forward_hook(leave)]
-
-    original = ext.exl3_fat_moe_down
+    handles = []
+    try:
+        handles.append(target.register_forward_pre_hook(enter))
+        handles.append(target.register_forward_hook(leave))
+        original = ext.exl3_fat_moe_down
+    except BaseException:
+        for handle in handles:
+            handle.remove()
+        raise
 
     def wrapped(*args):
         result = original(*args)
@@ -405,10 +410,14 @@ def install(model, ext, state, *, module_name=DEFAULT_MODULE,
             replay.run(original, args)
         return result
 
-    ext.exl3_fat_moe_down = wrapped
     model._tr3_grouped_down_replay = replay
     model._tr3_grouped_down_handles = handles
     model._tr3_grouped_down_original = original
+    try:
+        ext.exl3_fat_moe_down = wrapped
+    except BaseException:
+        uninstall(model, ext)
+        raise
     return {"module": module_name, "repeats": repeats,
             "required_rows": required_rows, "schema": REPLAY_SCHEMA}
 

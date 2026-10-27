@@ -200,16 +200,32 @@ def test_the_shot_is_spent_only_once_across_repeated_windows():
     replay_mod.uninstall(model, ext)
 
 
-def test_the_real_capture_arms_this_hook_when_it_is_available():
-    """The stand-in above encodes the contract; this checks the contract was
-    read off the real class and not off the stand-in."""
-    scorer = Path("/home/rob/tmp/pq-tr3-repeatability/experiments/glm_tr3_full_vocab.py")
-    if not scorer.is_file():
-        pytest.skip(f"the scorer is not on this host: {scorer}")
-    source = scorer.read_text()
-    assert "self.window_id = None" in source
-    assert "self.window_id, self.teacher = window_id, teacher" in source
-    assert "def armed" not in source, "the owner grew an armed property; re-read it"
+def test_the_real_capture_arms_this_hook_checkout_locally():
+    """Exercise the actual owner's arm/finish contract, without external files.
+
+    Do not spend the one shot: the final false result must establish disarming,
+    not merely that an earlier replay already fired.
+    """
+    from experiments.glm_tr3_full_vocab import PromptLogitsCapture
+
+    state = PromptLogitsCapture(rank=0, world_size=1, rows=ROWS - 1,
+                                vocab_size=5, require_cuda=False)
+    probe = replay_mod.GroupedDownReplay(state, repeats=2, required_rows=ROWS)
+    probe.inside = True
+    out = torch.zeros(ROWS, N)
+    assert state.window_id is None
+    assert not probe.should_fire(out)
+    teacher = torch.zeros(ROWS - 1, 5)
+    state.arm(0, "w0", teacher)
+    assert probe.should_fire(out)
+    state(None, (), teacher.clone())
+    state(None, (), torch.zeros(1, 5))
+    report = state.finish("w0")
+    assert report["window_id"] == "w0"
+    assert len(report["values"]) == ROWS - 1
+    assert state.window_id is None
+    assert not probe.should_fire(out)
+    assert not probe.fired
 
 
 # --------------------------------------------------------------------------
