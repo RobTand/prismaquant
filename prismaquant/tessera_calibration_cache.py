@@ -902,8 +902,8 @@ class CaptureSourceAuthentication:
     def _verify_held_content(self, name, state):
         """Reread held bytes once and refuse on digest mismatch (PQ #2010).
 
-        Only the owner close calls this, once per file, so the extra read
-        cost is bounded by the admission cost whatever the lease count.
+        Only the owner close calls this, once per file, so the extra bytes
+        read are bounded by the admission bytes whatever the lease count.
         Lease exits and JSON reads keep the cheap stat fence only. The
         admission digest comes from the read that consumes the file
         (:meth:`_authenticate`), so no separate read happens at admission.
