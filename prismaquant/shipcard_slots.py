@@ -219,7 +219,7 @@ GRAPH_OBSERVATION_SCHEMA = "prismaquant.native_graph_observation/1"
 
 def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
     """Bind the producer's observations before replaying the lane's equality rule."""
-    from .digests import bytes_sha256hex, canonical_json, file_sha256hex
+    from .digests import bytes_sha256hex, canonical_json, canonical_json_bytes, file_sha256hex
     from .shipcard import _strict_json_object
 
     slot = "native_export.graph"
@@ -288,7 +288,7 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
         problems.append(f"{slot}: producer linkage names another graph_receipt_sha256")
     resolved = observed.get("resolved")
     try:
-        if canonical_json(observed.get("compilation_config"), where=slot) != canonical_json(scope["compilation_config"], where=slot):
+        if canonical_json_bytes(observed.get("compilation_config"), where=slot) != canonical_json_bytes(scope["compilation_config"], where=slot):
             problems.append(f"{slot}: producer compilation_config differs from serve_scope")
         if not isinstance(resolved, Mapping) or not all(name in resolved for name in ("compilation_config", "custom_ops", "ir_op_priority")):
             problems.append(f"{slot}: missing observed resolved compilation/operator settings")
@@ -298,7 +298,10 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
             problems.append(f"{slot}: malformed observed operator settings")
         else:
             canonical_json(resolved, where=slot)
-            if any(resolved["compilation_config"].get(name) != value for name, value in scope["compilation_config"].items()):
+            if any(name not in resolved["compilation_config"] or
+                   canonical_json_bytes(resolved["compilation_config"][name], where=slot) !=
+                   canonical_json_bytes(value, where=slot)
+                   for name, value in scope["compilation_config"].items()):
                 problems.append(f"{slot}: observed resolved compilation_config differs from supplied compilation_config")
     except ValueError as exc:
         problems.append(f"{slot}: invalid observed compilation/operator settings: {exc}")
@@ -324,6 +327,8 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
         problems.append(f"{slot}: missing raw generation evidence from the producer")
     elif sum(map(len, generation["outputs"])) != metrics.get("generated_chars"):
         problems.append(f"{slot}: raw generation evidence differs from generated_chars")
+    if problems:
+        return problems
     arm_name, action = observed.get("equality_arm"), observed.get("equality_action")
     arms = receipt.get("arms")
     matched = [arm for arm in arms if isinstance(arm, Mapping) and arm.get("name") == arm_name] if isinstance(arms, list) else []
@@ -331,7 +336,11 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
         problems.append(f"{slot}: missing or inconsistent producer equality arm/action linkage")
     elif isinstance(resolved, Mapping):
         recorded = matched[0].get("resolved")
-        if not isinstance(recorded, Mapping) or any(recorded.get(name) != resolved.get(name) for name in ("custom_ops", "ir_op_priority")):
+        if not isinstance(recorded, Mapping) or any(
+            canonical_json_bytes(recorded.get(name), where=slot) !=
+            canonical_json_bytes(resolved.get(name), where=slot)
+            for name in ("custom_ops", "ir_op_priority")
+        ):
             problems.append(f"{slot}: observed operator settings differ from the equality arm")
     if problems:
         return problems

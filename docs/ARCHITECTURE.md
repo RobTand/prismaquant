@@ -30015,6 +30015,8 @@ lane calls the external shared population and numerical/replay rules. Core
 imports no Tessera serving code. Every field of the nine-field scope must match.
 Only Tessera source provenance uses `seal_check`; development mode cannot
 waive byte integrity or other scope mismatches.
+Compilation and operator observations compare canonical JSON bytes, so a
+boolean cannot stand in for a numeric setting.
 
 The installed pin lacks the compatible population API and remains refused for
 graph qualification. Fixtures against explicit compatible metadata are source
