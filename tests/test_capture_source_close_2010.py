@@ -103,19 +103,19 @@ def _assert_final_advice(held, trace):
 def _adopt_shards(owner, source, monkeypatch):
     # Reuse the existing proof fixture pattern, leaving the real stat/roster
     # adoption predicates in place. No source payload is read or copied.
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity
     paths = sorted(source.root.glob('*.safetensors'))
     checkpoint = cc.json.loads((source.root / 'model.safetensors.index.json').read_text())['weight_map']
-    cached = {'fingerprints': [cost_streaming.stat_fingerprint(str(path.resolve()), path.stat())
+    cached = {'fingerprints': [streamed_model_identity.stat_fingerprint(str(path.resolve()), path.stat())
                                for path in paths]}
     identity = dict(checkpoint_weight_map=checkpoint,
         shards=[dict(path=str(path.resolve()), sha256=source.canonical['source_files'][path.name])
                 for path in paths])
     proof = source.root.parent / 'identity-proof.json'
     proof.write_text('{}')
-    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+    monkeypatch.setattr(streamed_model_identity, '_read_streamed_model_identity_cache',
         lambda *args, **kwargs: (cached, identity))
-    monkeypatch.setattr(cost_streaming, '_local_checkpoint_shards',
+    monkeypatch.setattr(streamed_model_identity, '_local_checkpoint_shards',
         lambda root: (checkpoint, paths))
     owner.adopt_streamed_identity_cache(proof)
 
