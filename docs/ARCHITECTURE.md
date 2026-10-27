@@ -3694,6 +3694,18 @@ The SDK refuses a result without a native producer context in both modes.
 Tests: `tests/test_original_source_admission.py` and
 `tests/test_held_producer_sdk5_smoke_2152.py`.
 
+Re-stamped 2026-10-27 (PQ #2826): this release smoke authenticates a private
+CPU native-carrier fixture under `tmp_path`, using the installed SDK5 reader
+with `require_native_producer_context=True`, the standard-capture binder and
+the real consumer join. Certified matching identity reaches the helper-tree
+seal; foreign nonce and scope identities refuse, while D32 dev controls join
+and stamp. It proves contract integration only. Historical retained-producer
+evidence recovery and PB #1485 native qualification remain separate.
+The current x86 CPU interpreter is
+`/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python`; it carries the
+reviewed SDK5 and current Tessera development pins. The October 9 task-suite
+layer above predates the current Tessera pin and refuses in pbtest preflight.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready
