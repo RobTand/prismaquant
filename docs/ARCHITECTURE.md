@@ -8,6 +8,10 @@ slot replay and lane hook. The current Tessera pin lacks the compatible
 population verifier and remains refused for graph qualification. The pin,
 required graph slot, research-card refusal, and independent serving gates stay
 in force. CPU fixtures establish record handling, not a qualified release.
+Native compressed-tensors graph smoke takes explicit receipt and compilation
+inputs plus TP/concurrency controls, retaining its actual engine observations
+separately from original equality-producer linkage. Missing rank transport
+evidence refuses. No native loader or dispatcher is added for Tessera.
 
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).

@@ -113,6 +113,25 @@ metadata fixture establishes consumer behavior only. The runtime pin and
 independent allocation, export, serving, and publication gates still apply.
 Missing original producer records or real release evidence remain refusals.
 
+The compressed-tensors smoke accepts `--graph-receipt`, an explicit
+`--compilation-config` JSON object, `--tensor-parallel-size`, and
+`--max-num-seqs`. It requires the artifact's existing canonical shipcard so
+the current content and stat fences can bind the observed artifact without
+another full-weight read. It records its nine-field `serve_scope` and a
+separate `graph_smoke_observation` with actual resolved settings, per-rank
+observations, artifact identities, and generated text. These later smoke
+observations cannot fill the original `graph_observation` producer linkage.
+Above one rank, the current native worker observer refuses because it cannot
+observe the actual NCCL transport. Changing `NCCL_IB_DISABLE` cannot supply it.
+
+To replay the synthetic numerical tests with separately reviewed metadata,
+seal a `git archive` containing that external Tessera commit's `src/tessera`
+and `pyproject.toml`. Run `tools/check_graph_receipt_metadata.py` through
+PrismaBuild with `--archive`, `--sha256`, and `--commit`, declaring the archive
+with `pbrun --requires-files`. The tool verifies the archive bytes, Git commit,
+import origin, and shared population API before running the numerical tests.
+This test dependency does not adopt that commit as the production runtime pin.
+
 ## Uniform control
 
 The lane spec now names the existing external Tessera accountant and
