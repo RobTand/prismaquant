@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Adopt the failed October 5 confirming-arm CPU result note as standalone #2776
+  at `docs/results/pq2281-confirming-arm.md`. Preserve paired reconstruction,
+  the approximately 42% comparison and custody limits. Parent #2281 remains
+  unresolved. This publication introduces no new measurement or GPU submission.
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
   Bounded local reads retain digest-valid symlink behavior, independent of memo state.
