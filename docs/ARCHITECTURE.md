@@ -4,6 +4,9 @@ As of: 2026-10-26, retained GGUF status correction.
 Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `prismaquant-1295-pri226-publication`).
 Section 1.1 records the 2026-10-17 GGUF deprecation in AGENTS.md.
 This corrects prose only; retained GGUF code and serving gates are unchanged.
+As of: 2026-10-27, SDK5 release-smoke fixture repair, PQ #2826.
+Source commit: `8e7dbf876be6a60916866872016f5400e79281d7` (tested fixture and smoke; this follow-up records documentation only).
+The SDK5 qualification section below separates CPU contract integration from historical retained evidence and native qualification.
 
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
@@ -3698,6 +3701,18 @@ The SDK refuses a result without a native producer context in both modes.
 `tests/test_no_new_seals.py` counts the two kinds of join in each function.
 Tests: `tests/test_original_source_admission.py` and
 `tests/test_held_producer_sdk5_smoke_2152.py`.
+
+Re-stamped 2026-10-27 (PQ #2826): this release smoke authenticates a private
+CPU native-carrier fixture under `tmp_path`, using the installed SDK5 reader
+with `require_native_producer_context=True`, the standard-capture binder and
+the real consumer join. Certified matching identity reaches the helper-tree
+seal; foreign nonce and scope identities refuse, while D32 dev controls join
+and stamp. It proves contract integration only. Historical retained-producer
+evidence recovery and PB #1485 native qualification remain separate.
+The current x86 CPU interpreter is
+`/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python`; it carries the
+reviewed SDK5 and current Tessera development pins. The October 9 task-suite
+layer above predates the current Tessera pin and refuses in pbtest preflight.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
