@@ -71,3 +71,47 @@ For each migrated call, integrate the independent original fixture and actual
 consumer result, then update shared census and baseline records serially.
 Do not treat an expression match or an absent primitive as that evidence.
 The independent #2544 audit must verify complete coverage before #1301 closes.
+
+## Retained source observations and validation
+
+The 2026-10-27 UTC fleet run observed 378 primitive calls in 294 scopes,
+including 277 scopes outside the two digest owners, plus 300 supplemental
+JSON calls. It found 201 source-identical observations, 372 expression-only
+matches, 42 ambiguous observations and 63 new or changed expressions.
+Eighty historical call IDs were not observed. These are source observations;
+none is a migration or retention verdict.
+
+The implementation and tests are those committed at `90947646f9d79e37805b9bd95481ecf4deb880d7`.
+This validation appendix was added afterwards. The source bundles were read
+back and compared with the delivered files. Terminal log hashes, receipt
+bindings and result payload hashes were checked. Full worker attestation was
+not verified.
+
+| Coverage | PrismaBuild action | Outcome |
+| --- | --- | --- |
+| Before implementation | `ebfc53c67fd20f43e5e6f30268623f09f5d7d791553b5320672f74f8898d46f4` | Eight expected missing-command failures |
+| Reconciliation mutations and CLI | `9037022363f9cbf93cad947d09f2cc49b65616f4889defb6a9d4ef9b82af1df9` | 12 passed |
+| Existing value profiles | `b22572ac84d0cb0b41950bbb628aa3a2031f0a80c08ecf9dd1e4144996d41521` | 89 passed |
+| Existing file profiles | `85d04954b7854d365eb46093e11ac812550beef2340fa8ba822bd019a64d82c5` | 45 passed |
+| Duplication gate | `5903718e360c6168702908e95a08506366659ea22f8f2fa92f437e8d87cdf7e9` | Seven passed |
+| Actual source report, regeneration check and compile checks | `fdbb7b1fea95bbd527f15906bb2299c92dfcc499899b0fe585b035b0b555bb1c` | Passed on dl380g10 |
+
+The four passing test shards ran under transient unit `pb-pri225-green-v2`:
+
+```sh
+python3 /mnt/shared/prismabuild-fleet/repo/tools/fleet/pbtest.py \
+  --checkout /home/rob/paperclip-worktrees/prismaquant/PRI-225 \
+  --python /home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python \
+  --cpus-per-shard 1 --threads-per-shard 1 --mem-gb 4 --timeout-s 300 \
+  --json /mnt/shared/paperclip-runs/PRI-225/green-v2.json \
+  tests/test_digest_census_reconciliation.py tests/test_digest_profiles_1301.py \
+  tests/test_digest_profiles_1301_files.py tests/test_duplication_baseline.py
+```
+
+The report and evidence remain under `/mnt/shared/paperclip-runs/PRI-225/`:
+`current-source-v1.json`, `green-v2.json`, `green-endings.json`,
+`verified-evidence.json` and `claim-verification.jsonl`. The verification record
+contains exact terminal log paths and source-bundle identities. Earlier
+`red.json` and `red-pq.json` runs refused before pytest because those
+interpreters lacked the pinned PrismaBuild distribution. They do not count
+as regression evidence. No GPU, serving or performance result is claimed.
