@@ -290,11 +290,11 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
     try:
         if canonical_json_bytes(observed.get("compilation_config"), where=slot) != canonical_json_bytes(scope["compilation_config"], where=slot):
             problems.append(f"{slot}: producer compilation_config differs from serve_scope")
-        if not isinstance(resolved, Mapping) or not all(name in resolved for name in ("compilation_config", "custom_ops", "ir_op_priority")):
+        if not isinstance(resolved, Mapping) or set(resolved) != {"compilation_config", "ir_op_priority"}:
             problems.append(f"{slot}: missing observed resolved compilation/operator settings")
         elif not isinstance(resolved["compilation_config"], Mapping):
             problems.append(f"{slot}: observed resolved compilation_config is not an object")
-        elif not isinstance(resolved["custom_ops"], list) or not all(isinstance(name, str) for name in resolved["custom_ops"]) or not isinstance(resolved["ir_op_priority"], (Mapping, list, str)):
+        elif not isinstance(resolved["compilation_config"].get("custom_ops"), list) or not all(isinstance(name, str) for name in resolved["compilation_config"]["custom_ops"]) or not isinstance(resolved["ir_op_priority"], (Mapping, list, str)):
             problems.append(f"{slot}: malformed observed operator settings")
         else:
             canonical_json(resolved, where=slot)
@@ -336,10 +336,12 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
         problems.append(f"{slot}: missing or inconsistent producer equality arm/action linkage")
     elif isinstance(resolved, Mapping):
         recorded = matched[0].get("resolved")
+        operators = {"custom_ops": resolved["compilation_config"]["custom_ops"],
+                     "ir_op_priority": resolved["ir_op_priority"]}
         if not isinstance(recorded, Mapping) or any(
             canonical_json_bytes(recorded.get(name), where=slot) !=
-            canonical_json_bytes(resolved.get(name), where=slot)
-            for name in ("custom_ops", "ir_op_priority")
+            canonical_json_bytes(value, where=slot)
+            for name, value in operators.items()
         ):
             problems.append(f"{slot}: observed operator settings differ from the equality arm")
     if problems:

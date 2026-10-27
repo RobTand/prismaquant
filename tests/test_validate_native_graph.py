@@ -95,7 +95,7 @@ def test_graph_native_observes_actual_engine_without_original_equality_link(nati
     assert metrics["graph_receipt_sha256"] == bytes_sha256hex(
         Path(args.graph_receipt).read_bytes())
     assert metrics["graph_smoke_observation"]["ranks"] == ranks
-    assert metrics["graph_smoke_observation"]["resolved"]["custom_ops"] == ["all"]
+    assert metrics["graph_smoke_observation"]["resolved"]["compilation_config"]["custom_ops"] == ["all"]
     assert "graph_observation" not in metrics
     native._record_arm(args, model, None, result)
     problems = verify(load_shipcard(model / "shipcard.json"), model_dir=model,

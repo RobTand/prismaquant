@@ -30021,6 +30021,9 @@ Only Tessera source provenance uses `seal_check`; development mode cannot
 waive byte integrity or other scope mismatches.
 Compilation and operator observations compare canonical JSON bytes, so a
 boolean cannot stand in for a numeric setting.
+The resolved observation carries the full compilation configuration and
+`ir_op_priority`. Its `custom_ops` list belongs to that compilation
+configuration alone and is compared with the equality arm's operator evidence.
 
 The installed pin lacks the compatible population API and remains refused for
 graph qualification. Fixtures against explicit compatible metadata are source

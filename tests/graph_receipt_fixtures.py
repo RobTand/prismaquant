@@ -23,15 +23,16 @@ def graph_fixture(model, *, owner=None, tensor_parallel_size=2, model_sha=None):
         "max_num_seqs": 4, "tensor_parallel_size": tensor_parallel_size,
         "fabric": "none" if tensor_parallel_size == 1 else "socket",
     }
-    resolved = {"compilation_config": dict(scope["compilation_config"]),
-                "custom_ops": ["all"], "ir_op_priority": {}}
+    resolved = {"compilation_config": {**scope["compilation_config"], "custom_ops": ["all"]},
+                "ir_op_priority": {}}
     choices = owner.CHOICES_PER_PASS if owner is not None else 48
     graph = {
         "name": "fixture-graph", "pb_action": "fixture-equality-action",
         **{key: scope[key] for key in (
             "compilation_config", "speculative_tokens", "max_model_len",
             "max_num_seqs", "tensor_parallel_size")},
-        "resolved": {key: resolved[key] for key in ("custom_ops", "ir_op_priority")},
+        "resolved": {"custom_ops": resolved["compilation_config"]["custom_ops"],
+                     "ir_op_priority": resolved["ir_op_priority"]},
         "graph": {"managers": {"full": {
             "captured_sizes": [1, 2], "replayed_sizes": {"1": 1, "2": 1}}},
             "classes": {"captured": {"full": {"2048": {}}},

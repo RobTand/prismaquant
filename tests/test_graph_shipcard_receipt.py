@@ -178,7 +178,7 @@ def test_malformed_scope_returns_refusal(tmp_path, boundary_verifier, field, val
     assert boundary_verifier == []
 
 
-@pytest.mark.parametrize("damage", ["nonfinite_compilation", "nonfinite_operators", "null_operators", "unresolved_input"])
+@pytest.mark.parametrize("damage", ["nonfinite_compilation", "nonfinite_operators", "null_operators", "duplicate_operators", "unresolved_input"])
 def test_malformed_observed_settings_return_refusal(tmp_path, boundary_verifier, damage):
     model, card, record, _ = graph_card(tmp_path)
     observed = record["metrics"]["graph_observation"]
@@ -187,7 +187,9 @@ def test_malformed_observed_settings_return_refusal(tmp_path, boundary_verifier,
     elif damage == "nonfinite_operators":
         observed["resolved"]["ir_op_priority"] = {"operation": float("nan")}
     elif damage == "null_operators":
-        observed["resolved"]["custom_ops"] = None
+        observed["resolved"]["compilation_config"]["custom_ops"] = None
+    elif damage == "duplicate_operators":
+        observed["resolved"]["custom_ops"] = ["different"]
     else:
         observed["resolved"]["compilation_config"] = {"mode": "NONE"}
     problems = verify(card, model_dir=model, required=["native_export.graph"])

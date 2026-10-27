@@ -398,8 +398,7 @@ def _graph_serve_scope(llm, model_dir: Path, supplied: dict, *, image: str,
     if any(name not in compilation or canonical_json_bytes(compilation[name], where="observed compilation") != canonical_json_bytes(value, where="supplied compilation")
            for name, value in supplied.items()):
         raise ValueError("observed resolved compilation_config differs from the supplied input")
-    resolved = {"compilation_config": compilation,
-                "custom_ops": compilation["custom_ops"], "ir_op_priority": priority}
+    resolved = {"compilation_config": compilation, "ir_op_priority": priority}
     apply_model = getattr(llm, "apply_model", None)
     if not callable(apply_model):
         raise ValueError("cannot observe graph smoke ranks through LLM.apply_model")
