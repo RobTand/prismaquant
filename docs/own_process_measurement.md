@@ -40,6 +40,9 @@ durations from `child_elapsed_s` gives `child_unattributed_s`. That residual
 includes startup, collection, reporting, and exit. It does not isolate any
 one of them.
 
+Collection reports retain their outcomes and reasons without a phase
+duration. Pytest's `CollectReport` has no `duration` field.
+
 Count each shared child once. Do not add parent elapsed time to child phase
 time or sum worker elapsed times as suite wall time. Child profile and
 coverage paths name expected artifacts. A crash can leave them absent or
@@ -99,3 +102,25 @@ by these tests.
 Keep diagnostic instrumentation separate from the uninstrumented wall-time
 baseline. This instrumentation supplies no suite speedup or root #1929
 acceptance result.
+
+## Retained verification failures
+
+The enabled-measurement run at `b7f49eb73a4aee9eb794076fa48b77982ec8833e`,
+action `9d88321c298eab9c04498df295ba11c83d989e23a0efd69f8d8b843ba62acdac`,
+reported `3 failed, 29 passed, 2 skipped`. Its terminal controls caught the
+standard cProfile command suppressing pytest's exit status. The focused
+serial and xdist regression at `6f9d8c9ffb`, action
+`aa4ce430ecf89c0a77f289d3db8dca9f7410b774acbb767585f85d659f263276`,
+reported `2 failed, 8 deselected` on the recorded child exit assertion.
+
+After the private launcher repair, the enabled controls at
+`a75e90b3f915929f0c5b8e95a1fe08c7ad830402`, action
+`aa840fadd284ff7229e66882c40ea46235bf6f62cda45ea6ac725c65244d9e9f`,
+reported `1 failed, 31 passed, 2 skipped`. The remaining failure was an
+attempt to read `CollectReport.duration`. The focused collection regression
+at `3f529e178f`, action
+`b0cf41454e5d41e8f652b206d6ed7f037bb9228bb327c50f70c2684e32b15528`,
+reported `1 failed, 10 deselected` with that `AttributeError`.
+
+These are correctness runs. Their times do not establish a performance
+comparison. Final verification of both repairs remains required.

@@ -1102,7 +1102,8 @@ def _own_process_record(report) -> dict:
             "outcome": report.outcome,
             "longrepr": report.longreprtext if report.failed else "",
             "reason": reason, "wasxfail": getattr(report, "wasxfail", None)}
-    if os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1":
+    if (os.environ.get(OWN_PROCESS_MEASURE_ENV) == "1"
+            and isinstance(report, pytest.TestReport)):
         record["duration"] = report.duration
     return record
 
