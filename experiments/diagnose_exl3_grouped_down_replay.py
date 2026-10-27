@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 from experiments import measure_glm_tr3_vllm as served
 from tools import exl3_grouped_down_replay as probe
@@ -23,7 +24,8 @@ def _file_identity(path):
 
 
 def install_replay(model, *, module_name=probe.DEFAULT_MODULE,
-                   repeats=probe.DEFAULT_REPEATS, required_rows=probe.DEFAULT_REQUIRED_ROWS):
+                   repeats=probe.DEFAULT_REPEATS, required_rows=probe.DEFAULT_REQUIRED_ROWS,
+                   owner=None):
     if not 2 <= repeats <= 16 or required_rows < 1:
         raise ValueError("positive rows and 2..16 repeats required")
     state = getattr(model, "_tr3_capture", None)
@@ -35,6 +37,7 @@ def install_replay(model, *, module_name=probe.DEFAULT_MODULE,
         raise ValueError("replay already installed")
     ext = cache[0]
     model._tr3_replay_extension = ext
+    model._tr3_replay_owner = owner
     model._tr3_replay_identity = {
         "source": _file_identity(getattr(module, "__file__", None)),
         "extension": _file_identity(getattr(ext, "__file__", None)),
@@ -43,15 +46,17 @@ def install_replay(model, *, module_name=probe.DEFAULT_MODULE,
         return probe.install(model, ext, state, module_name=module_name,
                              repeats=repeats, required_rows=required_rows)
     except BaseException:
-        remove_replay(model)
+        remove_replay(model, owner=owner)
         raise
 
 
-def remove_replay(model):
+def remove_replay(model, *, owner=None):
+    if getattr(model, "_tr3_replay_owner", None) != owner:
+        return
     ext = getattr(model, "_tr3_replay_extension", None)
     if ext is not None:
         probe.uninstall(model, ext)
-    for attr in ("_tr3_replay_extension", "_tr3_replay_identity"):
+    for attr in ("_tr3_replay_extension", "_tr3_replay_identity", "_tr3_replay_owner"):
         if hasattr(model, attr):
             delattr(model, attr)
 
@@ -68,15 +73,16 @@ def finish_replay_capture(model, *, window_id):
 
 def replay_request(llm, *, window_id, arm_kwargs, generate, module_name,
                    repeats, required_rows):
+    owner = uuid4().hex
     try:
         llm.apply_model(functools.partial(install_replay, module_name=module_name,
-                                        repeats=repeats, required_rows=required_rows))
+                                        repeats=repeats, required_rows=required_rows, owner=owner))
         llm.apply_model(functools.partial(served.arm_capture, **arm_kwargs))
         generate()
         return llm.apply_model(functools.partial(finish_replay_capture, window_id=window_id))
     finally:
         # Also runs if only a subset of workers installed successfully.
-        llm.apply_model(remove_replay)
+        llm.apply_model(functools.partial(remove_replay, owner=owner))
 
 
 def _digest(value):
