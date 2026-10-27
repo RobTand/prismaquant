@@ -1,0 +1,36 @@
+{
+  "schema": "d50.cpu_api_inputs/1",
+  "seed": 17,
+  "limit": 2,
+  "sample_ids": [0, 1],
+  "num_fewshot": 0,
+  "max_length": 512,
+  "generation_max_tokens": 8,
+  "documents": [
+    {"question": "The capital of France is", "answer": "Paris", "choices": ["Paris", "London"], "gold": 0},
+    {"question": "Water freezes at zero degrees on the", "answer": "Celsius scale", "choices": ["Celsius scale", "Fahrenheit scale"], "gold": 0}
+  ],
+  "generation": {
+    "task": "d50_cpu_facts_generation",
+    "dataset_path": "json",
+    "test_split": "test",
+    "output_type": "generate_until",
+    "doc_to_text": "{{question}}",
+    "doc_to_target": "{{answer}}",
+    "num_fewshot": 0,
+    "generation_kwargs": {"until": ["\n"], "max_gen_toks": 8, "temperature": 0},
+    "metric_list": [{"metric": "exact_match", "aggregation": "mean", "higher_is_better": true}]
+  },
+  "scoring": {
+    "task": "d50_cpu_facts_scoring",
+    "dataset_path": "json",
+    "test_split": "test",
+    "output_type": "multiple_choice",
+    "doc_to_text": "{{question}}",
+    "doc_to_choice": "choices",
+    "doc_to_target": "gold",
+    "num_fewshot": 0,
+    "metric_list": [{"metric": "acc", "aggregation": "mean", "higher_is_better": true}]
+  },
+  "claim_scope": "Real CPU API capability only. No quality threshold or Tessera claim."
+}

@@ -1,0 +1,694 @@
+[
+  {
+    "server": "llama_cpp",
+    "method": "GET",
+    "url": "http://127.0.0.1:48247/v1/models",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0000.request.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "device": 63,
+      "inode": 18776215
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:34:40 GMT",
+      "server": "uvicorn",
+      "content-length": "106",
+      "content-type": "application/json",
+      "openai-processing-ms": "14",
+      "x-request-id": "e709dbbf735c43b590a36cef05007491",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0000.response.bin",
+      "bytes": 106,
+      "sha256": "632ad52713e978ebd1b5c941db0860f512f6830b97c4df270b161a9d74d82b00",
+      "device": 63,
+      "inode": 18776216
+    },
+    "response_json": {
+      "object": "list",
+      "data": [
+        {
+          "id": "d50-smollm2-135m-f16",
+          "object": "model",
+          "owned_by": "me",
+          "permissions": []
+        }
+      ]
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "165",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0001.request.bin",
+      "bytes": 165,
+      "sha256": "2a75c82b5baf186b4191a7e67d00223e38bf1acebb3bfddc76d135007f789fcf",
+      "device": 63,
+      "inode": 18776220
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:34:51 GMT",
+      "server": "uvicorn",
+      "content-length": "285",
+      "content-type": "application/json",
+      "openai-processing-ms": "232",
+      "x-request-id": "38d5f55398c44b488516e26b57ef1773",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0001.response.bin",
+      "bytes": 285,
+      "sha256": "6cead1e1c2432b94542cf562cb5d31376a66cec1f8aa79bb09feefb7d1a78ba3",
+      "device": 63,
+      "inode": 18776221
+    },
+    "request_json": {
+      "prompt": "Water freezes at zero degrees on the",
+      "model": "d50-smollm2-135m-f16",
+      "max_tokens": 8,
+      "temperature": 0.0,
+      "stop": [
+        "\n",
+        "<|endoftext|>"
+      ],
+      "seed": 17
+    },
+    "response_json": {
+      "id": "cmpl-9286b766-8a1a-4b07-9282-a704b2147a23",
+      "object": "text_completion",
+      "created": 1791434092,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": " Celsius scale.",
+          "index": 0,
+          "logprobs": null,
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 8,
+        "completion_tokens": 4,
+        "total_tokens": 12
+      }
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "153",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0002.request.bin",
+      "bytes": 153,
+      "sha256": "39c04b6d7b428053b9f7a7cac3e612ea118aa45dea4906f5c5f8a7ac8a7ce4be",
+      "device": 63,
+      "inode": 18776222
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:34:51 GMT",
+      "server": "uvicorn",
+      "content-length": "305",
+      "content-type": "application/json",
+      "openai-processing-ms": "329",
+      "x-request-id": "af53e21bad124b1ca5eb0851c4e127a4",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0002.response.bin",
+      "bytes": 305,
+      "sha256": "312515c5b2170bf5689c37f3a3c52662a511d94989c4290414004f39a87863ef",
+      "device": 63,
+      "inode": 18776223
+    },
+    "request_json": {
+      "prompt": "The capital of France is",
+      "model": "d50-smollm2-135m-f16",
+      "max_tokens": 8,
+      "temperature": 0.0,
+      "stop": [
+        "\n",
+        "<|endoftext|>"
+      ],
+      "seed": 17
+    },
+    "response_json": {
+      "id": "cmpl-d928efb5-7f6f-4608-b7f8-4f79808731be",
+      "object": "text_completion",
+      "created": 1791434092,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": " Paris. It is the largest city in",
+          "index": 0,
+          "logprobs": null,
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 6,
+        "completion_tokens": 8,
+        "total_tokens": 14
+      }
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "173",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0003.request.bin",
+      "bytes": 173,
+      "sha256": "db683a73291b1c436e325dec92da39e84fd80366c4ef52a4aac4942f9c7f8644",
+      "device": 63,
+      "inode": 18776224
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:35:00 GMT",
+      "server": "uvicorn",
+      "content-length": "1029",
+      "content-type": "application/json",
+      "openai-processing-ms": "690",
+      "x-request-id": "fc44a0e957604f4a8369564c179567ac",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0003.response.bin",
+      "bytes": 1029,
+      "sha256": "9f40ee875c873f9521a386af79c7744d1cd59f74e3b1163bcb69044213eb352e",
+      "device": 63,
+      "inode": 18776225
+    },
+    "request_json": {
+      "model": "d50-smollm2-135m-f16",
+      "prompt": "Water freezes at zero degrees on the Celsius scale",
+      "temperature": 0,
+      "max_tokens": 1,
+      "logprobs": 1,
+      "seed": 17,
+      "echo": true
+    },
+    "response_json": {
+      "id": "cmpl-bb842025-167d-4397-bb0f-a46761405d58",
+      "object": "text_completion",
+      "created": 1791434101,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": "Water freezes at zero degrees on the Celsius scale.",
+          "index": 0,
+          "logprobs": {
+            "text_offset": [
+              0,
+              5,
+              13,
+              16,
+              21,
+              29,
+              32,
+              36,
+              44,
+              50
+            ],
+            "token_logprobs": [
+              null,
+              -7.893498420715332,
+              -0.6574609279632568,
+              -5.012032508850098,
+              -0.4922732710838318,
+              -7.073498249053955,
+              -1.0194976329803467,
+              -1.6886718273162842,
+              -0.23386676609516144,
+              -1.015122652053833
+            ],
+            "tokens": [
+              "Water",
+              " freezes",
+              " at",
+              " zero",
+              " degrees",
+              " on",
+              " the",
+              " Celsius",
+              " scale",
+              "."
+            ],
+            "top_logprobs": [
+              null,
+              {
+                " is": -2.8988983631134033,
+                " freezes": -7.893498420715332
+              },
+              {
+                " at": -0.6574609279632568
+              },
+              {
+                " ": -1.0431220531463623,
+                " zero": -5.012032508850098
+              },
+              {
+                " degrees": -0.4922732710838318
+              },
+              {
+                " Celsius": -0.7449764013290405,
+                " on": -7.073498249053955
+              },
+              {
+                " the": -1.0194976329803467
+              },
+              {
+                " Celsius": -1.6886718273162842
+              },
+              {
+                " scale": -0.23386676609516144
+              },
+              {
+                ".": -1.015122652053833
+              }
+            ]
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "total_tokens": 11
+      }
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "176",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0004.request.bin",
+      "bytes": 176,
+      "sha256": "970037b2b6d8148b88dcd2abc4b25997ed6e0de3c46b547082214425661f1279",
+      "device": 63,
+      "inode": 18776226
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:35:02 GMT",
+      "server": "uvicorn",
+      "content-length": "1067",
+      "content-type": "application/json",
+      "openai-processing-ms": "683",
+      "x-request-id": "ab06e2efdfae4bb6ac931444b000e9d4",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0004.response.bin",
+      "bytes": 1067,
+      "sha256": "68f0dcf28dd48bb211f2603c25f96a9aa0f2a456b1c6f28bb2579ea84e6be627",
+      "device": 63,
+      "inode": 18776227
+    },
+    "request_json": {
+      "model": "d50-smollm2-135m-f16",
+      "prompt": "Water freezes at zero degrees on the Fahrenheit scale",
+      "temperature": 0,
+      "max_tokens": 1,
+      "logprobs": 1,
+      "seed": 17,
+      "echo": true
+    },
+    "response_json": {
+      "id": "cmpl-507ad516-1565-4ebb-b2c5-ff072703ea14",
+      "object": "text_completion",
+      "created": 1791434102,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": "Water freezes at zero degrees on the Fahrenheit scale.",
+          "index": 0,
+          "logprobs": {
+            "text_offset": [
+              0,
+              5,
+              13,
+              16,
+              21,
+              29,
+              32,
+              36,
+              47,
+              53
+            ],
+            "token_logprobs": [
+              null,
+              -7.893498420715332,
+              -0.6574609279632568,
+              -5.012032508850098,
+              -0.4922732710838318,
+              -7.073498249053955,
+              -1.0194976329803467,
+              -2.194514036178589,
+              -0.11497083306312561,
+              -1.011944055557251
+            ],
+            "tokens": [
+              "Water",
+              " freezes",
+              " at",
+              " zero",
+              " degrees",
+              " on",
+              " the",
+              " Fahrenheit",
+              " scale",
+              "."
+            ],
+            "top_logprobs": [
+              null,
+              {
+                " is": -2.8988983631134033,
+                " freezes": -7.893498420715332
+              },
+              {
+                " at": -0.6574609279632568
+              },
+              {
+                " ": -1.0431220531463623,
+                " zero": -5.012032508850098
+              },
+              {
+                " degrees": -0.4922732710838318
+              },
+              {
+                " Celsius": -0.7449764013290405,
+                " on": -7.073498249053955
+              },
+              {
+                " the": -1.0194976329803467
+              },
+              {
+                " Celsius": -1.6886718273162842,
+                " Fahrenheit": -2.194514036178589
+              },
+              {
+                " scale": -0.11497083306312561
+              },
+              {
+                ".": -1.011944055557251
+              }
+            ]
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "total_tokens": 11
+      }
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "154",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0005.request.bin",
+      "bytes": 154,
+      "sha256": "fd5538b6d3d4a91394e0cdbee8b656fd1c57122ba2fe1c55ad7a49ff7ec05ac1",
+      "device": 63,
+      "inode": 18776228
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:35:02 GMT",
+      "server": "uvicorn",
+      "content-length": "838",
+      "content-type": "application/json",
+      "openai-processing-ms": "492",
+      "x-request-id": "92fd913aeade45199b3b117e0c384e94",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0005.response.bin",
+      "bytes": 838,
+      "sha256": "ac4d8514961245f8f801232f12ceb53fde1bdb0f0ec10d69dbc2f706b44b8981",
+      "device": 63,
+      "inode": 18776229
+    },
+    "request_json": {
+      "model": "d50-smollm2-135m-f16",
+      "prompt": "The capital of France is London",
+      "temperature": 0,
+      "max_tokens": 1,
+      "logprobs": 1,
+      "seed": 17,
+      "echo": true
+    },
+    "response_json": {
+      "id": "cmpl-93c25764-2b92-484c-b119-b0d860aa477f",
+      "object": "text_completion",
+      "created": 1791434102,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": "The capital of France is London.",
+          "index": 0,
+          "logprobs": {
+            "text_offset": [
+              0,
+              3,
+              11,
+              14,
+              21,
+              24,
+              31
+            ],
+            "token_logprobs": [
+              null,
+              -9.6348876953125,
+              -0.44134947657585144,
+              -5.5243330001831055,
+              -1.1363184452056885,
+              -8.170122146606445,
+              -0.913417637348175
+            ],
+            "tokens": [
+              "The",
+              " capital",
+              " of",
+              " France",
+              " is",
+              " London",
+              "."
+            ],
+            "top_logprobs": [
+              null,
+              {
+                " ": -4.406179428100586,
+                " capital": -9.6348876953125
+              },
+              {
+                " of": -0.44134947657585144
+              },
+              {
+                " the": -1.4409301280975342,
+                " France": -5.5243330001831055
+              },
+              {
+                ",": -1.133251428604126,
+                " is": -1.1363184452056885
+              },
+              {
+                " Paris": -1.5276103019714355,
+                " London": -8.170122146606445
+              },
+              {
+                ".": -0.913417637348175
+              }
+            ]
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 1,
+        "total_tokens": 8
+      }
+    }
+  },
+  {
+    "server": "llama_cpp",
+    "method": "POST",
+    "url": "http://127.0.0.1:48247/v1/completions",
+    "request_headers": {
+      "User-Agent": "python-requests/2.34.2",
+      "Accept-Encoding": "gzip, deflate, zstd",
+      "Accept": "*/*",
+      "Connection": "keep-alive",
+      "Authorization": "Bearer ",
+      "Content-Length": "153",
+      "Content-Type": "application/json"
+    },
+    "request": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0006.request.bin",
+      "bytes": 153,
+      "sha256": "658d9409d8a3f0507c8cd05786f1ed11e0cd45318d441aa5ea30f65c05534230",
+      "device": 63,
+      "inode": 18776230
+    },
+    "response_headers": {
+      "date": "Thu, 08 Oct 2026 04:35:03 GMT",
+      "server": "uvicorn",
+      "content-length": "808",
+      "content-type": "application/json",
+      "openai-processing-ms": "449",
+      "x-request-id": "7cbaeeb00c5b41e8b9ba5c9467616b22",
+      "vary": "Origin"
+    },
+    "http_status": 200,
+    "response": {
+      "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0006.response.bin",
+      "bytes": 808,
+      "sha256": "5953214ff5b0177ff1b80d4ed4bd2e712f4354b40e0801e9bc813239fb13ccf8",
+      "device": 63,
+      "inode": 18776231
+    },
+    "request_json": {
+      "model": "d50-smollm2-135m-f16",
+      "prompt": "The capital of France is Paris",
+      "temperature": 0,
+      "max_tokens": 1,
+      "logprobs": 1,
+      "seed": 17,
+      "echo": true
+    },
+    "response_json": {
+      "id": "cmpl-101309b0-7e18-4cdf-b296-b53093d579ce",
+      "object": "text_completion",
+      "created": 1791434103,
+      "model": "d50-smollm2-135m-f16",
+      "choices": [
+        {
+          "text": "The capital of France is Paris.",
+          "index": 0,
+          "logprobs": {
+            "text_offset": [
+              0,
+              3,
+              11,
+              14,
+              21,
+              24,
+              30
+            ],
+            "token_logprobs": [
+              null,
+              -9.6348876953125,
+              -0.44134947657585144,
+              -5.5243330001831055,
+              -1.1363184452056885,
+              -1.5276103019714355,
+              -0.839868426322937
+            ],
+            "tokens": [
+              "The",
+              " capital",
+              " of",
+              " France",
+              " is",
+              " Paris",
+              "."
+            ],
+            "top_logprobs": [
+              null,
+              {
+                " ": -4.406179428100586,
+                " capital": -9.6348876953125
+              },
+              {
+                " of": -0.44134947657585144
+              },
+              {
+                " the": -1.4409301280975342,
+                " France": -5.5243330001831055
+              },
+              {
+                ",": -1.133251428604126,
+                " is": -1.1363184452056885
+              },
+              {
+                " Paris": -1.5276103019714355
+              },
+              {
+                ".": -0.839868426322937
+              }
+            ]
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 7,
+        "completion_tokens": 1,
+        "total_tokens": 8
+      }
+    }
+  }
+]

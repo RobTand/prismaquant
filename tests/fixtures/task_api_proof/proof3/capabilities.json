@@ -1,0 +1,378 @@
+{
+  "schema": "d50.cpu_api_capabilities/1",
+  "scope": "Real CPU API proof. No Tessera or GPU quality claim.",
+  "source": {
+    "accepted_base": "2ea7000848a128f4dfd4abef894302001166a5cb",
+    "snapshot_head": "e8b99455876a72f6127d5dd0b0d5f9898fec36dd"
+  },
+  "devices": {
+    "torch": "2.11.0+cpu",
+    "cuda_available": false,
+    "cuda_device_count": 0,
+    "CUDA_VISIBLE_DEVICES": ""
+  },
+  "skips": [],
+  "versions": {
+    "lm-eval": "0.4.12",
+    "transformers": "5.18.0",
+    "llama-cpp-python": "0.3.36",
+    "fastapi": "0.142.4",
+    "uvicorn": "0.54.0",
+    "openai": "3.26.0",
+    "numpy": "2.5.3",
+    "datasets": "5.1.0"
+  },
+  "inputs": {
+    "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/task-inputs.json",
+    "bytes": 1304,
+    "sha256": "71724909c52d245241e389b69a71355b13776b79fc91214a0467a30b40b893b2",
+    "device": 63,
+    "inode": 18751445
+  },
+  "data": {
+    "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/task-data.jsonl",
+    "bytes": 244,
+    "sha256": "88eb702f4f1a1589fbb682357ccd1ce0068c4cdfa12bd4b06690215706ee8161",
+    "device": 63,
+    "inode": 18751446
+  },
+  "servers": {
+    "llama_cpp": {
+      "endpoint": "http://127.0.0.1:48247/v1/completions",
+      "server_argv": [
+        "/home/rob/venvs/pb-cpu/bin/python",
+        "-m",
+        "llama_cpp.server",
+        "--model",
+        "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf",
+        "--model_alias",
+        "d50-smollm2-135m-f16",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "48247",
+        "--n_gpu_layers",
+        "0",
+        "--n_ctx",
+        "512",
+        "--n_threads",
+        "1",
+        "--n_threads_batch",
+        "1",
+        "--logits_all",
+        "true",
+        "--seed",
+        "17",
+        "--cache",
+        "false",
+        "--kv_overrides",
+        "tokenizer.ggml.add_bos_token=bool:true"
+      ],
+      "launch_argv": [
+        "/usr/bin/strace",
+        "-f",
+        "-e",
+        "trace=openat",
+        "-o",
+        "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/model-opens.strace",
+        "--",
+        "/home/rob/venvs/pb-cpu/bin/python",
+        "-m",
+        "llama_cpp.server",
+        "--model",
+        "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf",
+        "--model_alias",
+        "d50-smollm2-135m-f16",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "48247",
+        "--n_gpu_layers",
+        "0",
+        "--n_ctx",
+        "512",
+        "--n_threads",
+        "1",
+        "--n_threads_batch",
+        "1",
+        "--logits_all",
+        "true",
+        "--seed",
+        "17",
+        "--cache",
+        "false",
+        "--kv_overrides",
+        "tokenizer.ggml.add_bos_token=bool:true"
+      ],
+      "model_alias": "d50-smollm2-135m-f16",
+      "model_content": {
+        "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf",
+        "bytes": 270885440,
+        "sha256": "2f55e73c8e2c72d97efb61ba129b8262aed637dd6ea8f213f04696c908e215c7",
+        "device": 63,
+        "inode": 18735082
+      },
+      "tokenizer_content": [
+        {
+          "path": "/tmp/d50-smollm2-135m-20261007/tokenizer.json",
+          "bytes": 2104556,
+          "sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+          "device": 51,
+          "inode": 10128606
+        },
+        {
+          "path": "/tmp/d50-smollm2-135m-20261007/tokenizer_config.json",
+          "bytes": 3658,
+          "sha256": "4bb9af56a342753d39374f4016a16574cab299fe088e896f425ce3c433f61424",
+          "device": 51,
+          "inode": 10128599
+        },
+        {
+          "path": "/tmp/d50-smollm2-135m-20261007/special_tokens_map.json",
+          "bytes": 831,
+          "sha256": "e786b595b9a23148bf1630df78d9037a048ea671e48bfd3549a1e3c233742bb3",
+          "device": 51,
+          "inode": 10128607
+        }
+      ],
+      "startup_image": null,
+      "native_threads": 1,
+      "process_group": 1281747,
+      "owned_processes_at_ready": [
+        {
+          "pid": 1281747,
+          "state": "S",
+          "start_ticks": "12708647",
+          "cmdline": "/usr/bin/strace -f -e trace=openat -o /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/model-opens.strace -- /home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+          "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+          "model_maps": []
+        },
+        {
+          "pid": 1281749,
+          "state": "S",
+          "start_ticks": "12708648",
+          "cmdline": "/home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+          "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+          "model_maps": [
+            "7b1cfc6dc000-7b1d0c780000 r--s 001b3000 00:3f 18735082                   /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf"
+          ]
+        }
+      ],
+      "owned_listening_sockets": [
+        {
+          "socket_inode": "89131945",
+          "owned": true
+        }
+      ],
+      "client_args": {
+        "model": "d50-smollm2-135m-f16",
+        "base_url": "http://127.0.0.1:48247/v1/completions",
+        "tokenizer": "/tmp/d50-smollm2-135m-20261007",
+        "tokenizer_backend": "huggingface",
+        "tokenized_requests": false,
+        "batch_size": 1,
+        "num_concurrent": 1,
+        "max_length": 512,
+        "max_gen_toks": 8,
+        "seed": 17,
+        "max_retries": 1,
+        "timeout": 120,
+        "add_bos_token": false
+      },
+      "generation": {
+        "status": "completed",
+        "result": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/generation.result.json",
+        "results": {
+          "d50_cpu_facts_generation": {
+            "name": "d50_cpu_facts_generation",
+            "alias": "d50_cpu_facts_generation",
+            "sample_len": 2,
+            "exact_match,none": 0.0,
+            "exact_match_stderr,none": "N/A"
+          }
+        },
+        "n_samples": {
+          "d50_cpu_facts_generation": {
+            "original": 2,
+            "effective": 2
+          }
+        },
+        "n_shot": {
+          "d50_cpu_facts_generation": 0
+        },
+        "versions": {
+          "d50_cpu_facts_generation": 1
+        }
+      },
+      "scoring": {
+        "status": "completed",
+        "result": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/scoring.result.json",
+        "results": {
+          "d50_cpu_facts_scoring": {
+            "name": "d50_cpu_facts_scoring",
+            "alias": "d50_cpu_facts_scoring",
+            "sample_len": 2,
+            "acc,none": 1.0,
+            "acc_stderr,none": "N/A"
+          }
+        },
+        "n_samples": {
+          "d50_cpu_facts_scoring": {
+            "original": 2,
+            "effective": 2
+          }
+        },
+        "n_shot": {
+          "d50_cpu_facts_scoring": 0
+        },
+        "versions": {
+          "d50_cpu_facts_scoring": 1
+        }
+      },
+      "scoring_alignment": [
+        {
+          "http_response_sha256": "9f40ee875c873f9521a386af79c7744d1cd59f74e3b1163bcb69044213eb352e",
+          "prompt_tokens": 9,
+          "context_tokens": 7,
+          "continuation_tokens": 2,
+          "echo_tokens_with_final_generated": 10,
+          "token_text_matches": true,
+          "selected_logprobs": [
+            -1.6886718273162842,
+            -0.23386676609516144
+          ],
+          "sum_logprobs": -1.9225385934114456
+        },
+        {
+          "http_response_sha256": "68f0dcf28dd48bb211f2603c25f96a9aa0f2a456b1c6f28bb2579ea84e6be627",
+          "prompt_tokens": 9,
+          "context_tokens": 7,
+          "continuation_tokens": 2,
+          "echo_tokens_with_final_generated": 10,
+          "token_text_matches": true,
+          "selected_logprobs": [
+            -2.194514036178589,
+            -0.11497083306312561
+          ],
+          "sum_logprobs": -2.3094848692417145
+        },
+        {
+          "http_response_sha256": "ac4d8514961245f8f801232f12ceb53fde1bdb0f0ec10d69dbc2f706b44b8981",
+          "prompt_tokens": 6,
+          "context_tokens": 5,
+          "continuation_tokens": 1,
+          "echo_tokens_with_final_generated": 7,
+          "token_text_matches": true,
+          "selected_logprobs": [
+            -8.170122146606445
+          ],
+          "sum_logprobs": -8.170122146606445
+        },
+        {
+          "http_response_sha256": "5953214ff5b0177ff1b80d4ed4bd2e712f4354b40e0801e9bc813239fb13ccf8",
+          "prompt_tokens": 6,
+          "context_tokens": 5,
+          "continuation_tokens": 1,
+          "echo_tokens_with_final_generated": 7,
+          "token_text_matches": true,
+          "selected_logprobs": [
+            -1.5276103019714355
+          ],
+          "sum_logprobs": -1.5276103019714355
+        }
+      ],
+      "supports_generation": true,
+      "supports_echo_logprobs": true,
+      "owned_processes_after_tasks": [
+        {
+          "pid": 1281747,
+          "state": "S",
+          "start_ticks": "12708647",
+          "cmdline": "/usr/bin/strace -f -e trace=openat -o /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/model-opens.strace -- /home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+          "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+          "model_maps": []
+        },
+        {
+          "pid": 1281749,
+          "state": "S",
+          "start_ticks": "12708648",
+          "cmdline": "/home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+          "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+          "model_maps": [
+            "7b1cfc6dc000-7b1d0c780000 r--s 001b3000 00:3f 18735082                   /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf"
+          ]
+        }
+      ],
+      "model_content_after": {
+        "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf",
+        "bytes": 270885440,
+        "sha256": "2f55e73c8e2c72d97efb61ba129b8262aed637dd6ea8f213f04696c908e215c7",
+        "device": 63,
+        "inode": 18735082
+      },
+      "actual_weight_opens": [
+        "1281749 openat(AT_FDCWD, \"/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf\", O_RDONLY) = 6",
+        "1281749 openat(AT_FDCWD, \"/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf\", O_RDONLY) = 6"
+      ],
+      "cleanup": {
+        "before_stop": [
+          {
+            "pid": 1281747,
+            "state": "S",
+            "start_ticks": "12708647",
+            "cmdline": "/usr/bin/strace -f -e trace=openat -o /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/model-opens.strace -- /home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+            "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+            "model_maps": []
+          },
+          {
+            "pid": 1281749,
+            "state": "S",
+            "start_ticks": "12708648",
+            "cmdline": "/home/rob/venvs/pb-cpu/bin/python -m llama_cpp.server --model /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf --model_alias d50-smollm2-135m-f16 --host 127.0.0.1 --port 48247 --n_gpu_layers 0 --n_ctx 512 --n_threads 1 --n_threads_batch 1 --logits_all true --seed 17 --cache false --kv_overrides tokenizer.ggml.add_bos_token=bool:true ",
+            "cgroup": "0::/prismabuild.slice/prismabuild-job8c16d82092f293dc5c1722e746a55f00.slice/payload\n",
+            "model_maps": [
+              "7b1cfc6dc000-7b1d0c780000 r--s 001b3000 00:3f 18735082                   /mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/model/smollm2-135m-f16.gguf"
+            ]
+          }
+        ],
+        "scope": "Only this server process group.",
+        "remaining_processes": [],
+        "launcher_exit": -15,
+        "endpoint_closed": true,
+        "stdout": {
+          "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/server.stdout",
+          "bytes": 463,
+          "sha256": "c6c1b60e912e1c91ed12db8bc6fab1a17a3e3e04e84d0e54bcf2e47b5ccb1e5b",
+          "device": 63,
+          "inode": 18777256
+        },
+        "stderr": {
+          "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/server.stderr",
+          "bytes": 217607,
+          "sha256": "5e814c2993cb943c21eb8d19267e719cdd0dd7e95e019a031789ff2603b799fb",
+          "device": 63,
+          "inode": 18777257
+        },
+        "model_open_trace": {
+          "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/model-opens.strace",
+          "bytes": 134123,
+          "sha256": "b143de0fc7a26e4523b87e93966d456ff42aa2b99fa97d9f50e273399db76d42",
+          "device": 63,
+          "inode": 18765287
+        }
+      }
+    }
+  },
+  "scratch_cleanup": {
+    "path": "/tmp/d50-cpu-api-proof3-20261008",
+    "exists": false
+  },
+  "transcript": {
+    "path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/transcript.json",
+    "bytes": 20186,
+    "sha256": "e50ba5709a37d886bdec1067662ededc7420f3496a3a7c9514f4dc49eadfdd80",
+    "device": 63,
+    "inode": 18776217
+  },
+  "proof_exit": 0
+}

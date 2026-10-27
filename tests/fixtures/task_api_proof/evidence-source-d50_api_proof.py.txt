@@ -1,0 +1,300 @@
+import hashlib
+import importlib.metadata
+import json
+import math
+import os
+from pathlib import Path
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+import traceback
+
+root = Path('/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008')
+run = root / 'proof3'
+run.mkdir(exist_ok=False)
+scratch = Path('/tmp/d50-cpu-api-proof3-20261008')
+scratch.mkdir(exist_ok=False)
+layer = '/tmp/d50-cpu-api-server-20261008/server1'
+sys.path.insert(0, layer)
+os.environ['PYTHONPATH'] = layer + ':' + os.environ.get('PYTHONPATH', '')
+os.environ['HF_DATASETS_CACHE'] = str(scratch / 'datasets')
+os.environ['HF_HUB_OFFLINE'] = '1'
+os.environ['TRANSFORMERS_OFFLINE'] = '1'
+api_layer = Path('/tmp/d50-cpu-api-server-20261008/api1')
+sys.path.insert(0, str(api_layer))
+os.environ['PYTHONPATH'] = str(api_layer) + ':' + os.environ['PYTHONPATH']
+import requests
+import torch
+from lm_eval import simple_evaluate
+from lm_eval.models.openai_completions import LocalCompletionsAPI
+
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+inputs_path = Path('d50-api-tasks.json')
+inputs = json.loads(inputs_path.read_text())
+if not (root / 'task-inputs.json').exists():
+    shutil.copyfile(inputs_path, root / 'task-inputs.json')
+data_path = root / 'task-data.jsonl'
+if not data_path.exists():
+    data_path.write_text(''.join(json.dumps(doc, ensure_ascii=False) + '\n' for doc in inputs['documents']))
+hf_model = Path('/tmp/d50-smollm2-135m-20261007')
+gguf = root / 'model/smollm2-135m-f16.gguf'
+
+
+def file_record(path):
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for block in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(block)
+    st = path.stat()
+    return {'path': str(path), 'bytes': st.st_size, 'sha256': h.hexdigest(), 'device': st.st_dev, 'inode': st.st_ino}
+
+
+def dump(path, value):
+    def encode(value):
+        if hasattr(value, 'tolist'):
+            return value.tolist()
+        if hasattr(value, 'item'):
+            return value.item()
+        raise TypeError(type(value).__name__)
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False, default=encode) + '\n')
+
+
+wire = []
+server_name = None
+original_send = requests.sessions.Session.send
+
+
+def traced_send(session, request, **kwargs):
+    response = original_send(session, request, **kwargs)
+    body = request.body or b''
+    if isinstance(body, str):
+        body = body.encode('utf-8')
+    index = len(wire)
+    prefix = run / f'{server_name}.http.{index:04d}'
+    request_path = Path(str(prefix) + '.request.bin')
+    response_path = Path(str(prefix) + '.response.bin')
+    request_path.write_bytes(body)
+    response_path.write_bytes(response.content)
+    entry = {'server': server_name, 'method': request.method, 'url': request.url, 'request_headers': dict(request.headers), 'request': file_record(request_path), 'response_headers': dict(response.headers), 'http_status': response.status_code, 'response': file_record(response_path)}
+    try:
+        entry['request_json'] = json.loads(body)
+    except (ValueError, TypeError):
+        pass
+    try:
+        entry['response_json'] = response.json()
+    except ValueError:
+        pass
+    wire.append(entry)
+    dump(run / 'transcript.json', wire)
+    return response
+
+
+requests.sessions.Session.send = traced_send
+
+
+def group_members(pgid):
+    result = []
+    for path in Path('/proc').iterdir():
+        if not path.name.isdigit():
+            continue
+        pid = int(path.name)
+        try:
+            if os.getpgid(pid) != pgid:
+                continue
+            stat = (path / 'stat').read_text()
+            fields = stat[stat.rfind(')') + 2:].split()
+            result.append({'pid': pid, 'state': fields[0], 'start_ticks': fields[19], 'cmdline': (path / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace'), 'cgroup': (path / 'cgroup').read_text(), 'model_maps': [line for line in (path / 'maps').read_text().splitlines() if '.gguf' in line or 'model.safetensors' in line]})
+        except (ProcessLookupError, FileNotFoundError):
+            continue
+    return result
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
+def endpoint_owned(port, members):
+    sockets = set()
+    for member in members:
+        for fd in Path(f"/proc/{member['pid']}/fd").iterdir():
+            try:
+                target = os.readlink(fd)
+                if target.startswith('socket:['):
+                    sockets.add(target[8:-1])
+            except FileNotFoundError:
+                pass
+    listening = []
+    for line in Path('/proc/net/tcp').read_text().splitlines()[1:]:
+        fields = line.split()
+        if int(fields[1].split(':')[1], 16) == port and fields[3] == '0A':
+            listening.append({'socket_inode': fields[9], 'owned': fields[9] in sockets})
+    if not listening or not all(row['owned'] for row in listening):
+        raise RuntimeError('The endpoint does not belong to the server process group.')
+    return listening
+
+
+def evaluate(lm, kind, directory):
+    config = dict(inputs[kind])
+    config['dataset_kwargs'] = {'data_files': {'test': str(data_path)}}
+    config['metadata'] = {'version': 1, 'scope': 'CPU API proof only'}
+    kwargs = {'tasks': [config], 'num_fewshot': inputs['num_fewshot'], 'limit': inputs['limit'], 'batch_size': 1, 'random_seed': inputs['seed'], 'numpy_random_seed': inputs['seed'], 'torch_random_seed': inputs['seed'], 'fewshot_random_seed': inputs['seed'], 'bootstrap_iters': 0, 'log_samples': True, 'apply_chat_template': False, 'cache_requests': False}
+    dump(directory / f'{kind}.config.json', kwargs)
+    result = simple_evaluate(model=lm, **kwargs)
+    dump(directory / f'{kind}.result.json', result)
+    return {'status': 'completed', 'result': str(directory / f'{kind}.result.json'), 'results': result['results'], 'n_samples': result['n-samples'], 'n_shot': result['n-shot'], 'versions': result['versions']}
+
+
+def check_scoring(lm, name):
+    rows = []
+    for entry in wire:
+        if entry['server'] != name or not entry.get('request_json', {}).get('echo'):
+            continue
+        prompt = entry['request_json']['prompt']
+        ids = lm.tok_encode(prompt)
+        choice = entry['response_json']['choices'][0]
+        probs = choice['logprobs']
+        tokens = probs['tokens']
+        values = probs['token_logprobs']
+        tops = probs['top_logprobs']
+        expected = [lm.tokenizer.decode([token]) for token in ids]
+        if len(tokens) != len(ids) + 1 or len(values) != len(tokens) or len(tops) != len(tokens):
+            raise RuntimeError('The echo token positions do not match the client tokenizer.')
+        if tokens[:-1] != expected:
+            raise RuntimeError('The echo token text does not match the client tokenizer.')
+        context = next(doc['question'] for doc in inputs['documents'] if prompt.startswith(doc['question']))
+        context_ids, continuation_ids = lm._encode_pair(context, prompt[len(context):])
+        selected = values[len(context_ids):-1]
+        if not continuation_ids or len(selected) != len(continuation_ids):
+            raise RuntimeError('The continuation probability slice is empty or has the wrong length.')
+        if not all(value is not None and math.isfinite(value) for value in selected):
+            raise RuntimeError('The continuation probability slice has invalid values.')
+        rows.append({'http_response_sha256': entry['response']['sha256'], 'prompt_tokens': len(ids), 'context_tokens': len(context_ids), 'continuation_tokens': len(continuation_ids), 'echo_tokens_with_final_generated': len(tokens), 'token_text_matches': True, 'selected_logprobs': selected, 'sum_logprobs': sum(selected)})
+    if len(rows) != inputs['limit'] * 2:
+        raise RuntimeError('The scoring population has the wrong request count.')
+    return rows
+
+
+results = {'schema': 'd50.cpu_api_capabilities/1', 'scope': 'Real CPU API proof. No Tessera or GPU quality claim.', 'source': {'accepted_base': '2ea7000848a128f4dfd4abef894302001166a5cb', 'snapshot_head': subprocess.check_output(['git', '-C', str(Path.cwd()), 'rev-parse', 'HEAD'], text=True).strip()}, 'devices': {'torch': torch.__version__, 'cuda_available': torch.cuda.is_available(), 'cuda_device_count': torch.cuda.device_count(), 'CUDA_VISIBLE_DEVICES': os.environ.get('CUDA_VISIBLE_DEVICES')}, 'skips': [], 'versions': {pkg: importlib.metadata.version(pkg) for pkg in ['lm-eval', 'transformers', 'llama-cpp-python', 'fastapi', 'uvicorn', 'openai', 'numpy', 'datasets']}, 'inputs': file_record(root / 'task-inputs.json'), 'data': file_record(data_path), 'servers': {}}
+exit_code = 0
+try:
+    for name in ['llama_cpp']:
+        server_name = name
+        directory = run / name
+        directory.mkdir()
+        port = free_port()
+        url = f'http://127.0.0.1:{port}/v1/completions'
+        if name == 'transformers':
+            argv = [sys.executable, '-c', 'from transformers.cli.transformers import main; main()', 'serve', str(hf_model), '--device', 'cpu', '--dtype', 'float32', '--host', '127.0.0.1', '--port', str(port), '--default-seed', str(inputs['seed']), '--log-level', 'info']
+            alias = str(hf_model)
+            weights = hf_model / 'model.safetensors'
+        else:
+            argv = [sys.executable, '-m', 'llama_cpp.server', '--model', str(gguf), '--model_alias', 'd50-smollm2-135m-f16', '--host', '127.0.0.1', '--port', str(port), '--n_gpu_layers', '0', '--n_ctx', str(inputs['max_length']), '--n_threads', '1', '--n_threads_batch', '1', '--logits_all', 'true', '--seed', str(inputs['seed']), '--cache', 'false', '--kv_overrides', 'tokenizer.ggml.add_bos_token=bool:true']
+            alias = 'd50-smollm2-135m-f16'
+            weights = gguf
+        trace_path = directory / 'model-opens.strace'
+        launch = ['/usr/bin/strace', '-f', '-e', 'trace=openat', '-o', str(trace_path), '--'] + argv
+        evidence = {'endpoint': url, 'server_argv': argv, 'launch_argv': launch, 'model_alias': alias, 'model_content': file_record(weights), 'tokenizer_content': [file_record(hf_model / file) for file in ['tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json']], 'startup_image': None, 'native_threads': 1}
+        results['servers'][name] = evidence
+        stdout = (directory / 'server.stdout').open('wb')
+        stderr = (directory / 'server.stderr').open('wb')
+        proc = subprocess.Popen(launch, stdout=stdout, stderr=stderr, env=dict(os.environ), start_new_session=True)
+        pgid = proc.pid
+        evidence['process_group'] = pgid
+        try:
+            deadline = time.monotonic() + 180
+            while True:
+                if proc.poll() is not None:
+                    raise RuntimeError(f'{name} exited during startup with {proc.returncode}')
+                try:
+                    response = requests.get(url.rsplit('/', 1)[0] + '/models', timeout=1)
+                    if response.status_code == 200:
+                        break
+                except requests.RequestException:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f'{name} did not start')
+                time.sleep(0.2)
+            evidence['owned_processes_at_ready'] = group_members(pgid)
+            evidence['owned_listening_sockets'] = endpoint_owned(port, evidence['owned_processes_at_ready'])
+            client = {'model': alias, 'base_url': url, 'tokenizer': str(hf_model), 'tokenizer_backend': 'huggingface', 'tokenized_requests': False, 'batch_size': 1, 'num_concurrent': 1, 'max_length': inputs['max_length'], 'max_gen_toks': inputs['generation_max_tokens'], 'seed': inputs['seed'], 'max_retries': 1, 'timeout': 120, 'add_bos_token': False}
+            evidence['client_args'] = client
+            dump(directory / 'client.json', client)
+            lm = LocalCompletionsAPI(**client)
+            evidence['generation'] = evaluate(lm, 'generation', directory)
+            before = len(wire)
+            try:
+                evidence['scoring'] = evaluate(lm, 'scoring', directory)
+            except Exception as exc:
+                failure = {'status': 'unsupported', 'exception_type': type(exc).__name__, 'message': str(exc), 'traceback': traceback.format_exc()}
+                dump(directory / 'scoring.failure.json', failure)
+                evidence['scoring'] = failure
+                if name != 'transformers':
+                    raise
+                scoring_wire = [row for row in wire[before:] if row.get('request_json', {}).get('echo')]
+                if not scoring_wire or not all(row['http_status'] == 200 and row['response_json']['choices'][0].get('logprobs') is None for row in scoring_wire):
+                    raise RuntimeError('The unsupported scoring evidence has the wrong response.')
+                evidence['supports_generation'] = True
+                evidence['supports_echo_logprobs'] = False
+                evidence['unsupported_effect'] = 'The server returns generation without prompt logprobs. The public scoring parser fails.'
+            else:
+                if name == 'transformers':
+                    raise RuntimeError('Transformers unexpectedly completed the scoring task.')
+                evidence['scoring_alignment'] = check_scoring(lm, name)
+                evidence['supports_generation'] = True
+                evidence['supports_echo_logprobs'] = True
+            evidence['owned_processes_after_tasks'] = group_members(pgid)
+            evidence['model_content_after'] = file_record(weights)
+            if evidence['model_content_after']['sha256'] != evidence['model_content']['sha256']:
+                raise RuntimeError('The owned model bytes changed during the proof.')
+            opened = [line for line in trace_path.read_text().splitlines() if str(weights) in line and '= -1' not in line]
+            if not opened:
+                raise RuntimeError('The server trace does not show the actual weight file open.')
+            evidence['actual_weight_opens'] = opened
+        finally:
+            before_stop = group_members(pgid)
+            evidence['cleanup'] = {'before_stop': before_stop, 'scope': 'Only this server process group.'}
+            if before_stop:
+                os.killpg(pgid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGKILL)
+                proc.wait(timeout=10)
+            remaining = group_members(pgid)
+            if remaining:
+                os.killpg(pgid, signal.SIGKILL)
+                deadline = time.monotonic() + 10
+                while remaining and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                    remaining = group_members(pgid)
+            evidence['cleanup']['remaining_processes'] = remaining
+            evidence['cleanup']['launcher_exit'] = proc.returncode
+            with socket.socket() as probe:
+                probe.settimeout(1)
+                evidence['cleanup']['endpoint_closed'] = probe.connect_ex(('127.0.0.1', port)) != 0
+            stdout.close()
+            stderr.close()
+            evidence['cleanup']['stdout'] = file_record(directory / 'server.stdout')
+            evidence['cleanup']['stderr'] = file_record(directory / 'server.stderr')
+            evidence['cleanup']['model_open_trace'] = file_record(trace_path)
+            dump(run / 'capabilities.json', results)
+            if remaining or not evidence['cleanup']['endpoint_closed']:
+                raise RuntimeError('The owned server cleanup is incomplete.')
+except Exception as exc:
+    exit_code = 1
+    results['failure'] = {'exception_type': type(exc).__name__, 'message': str(exc), 'traceback': traceback.format_exc()}
+finally:
+    requests.sessions.Session.send = original_send
+    shutil.rmtree(scratch)
+    results['scratch_cleanup'] = {'path': str(scratch), 'exists': scratch.exists()}
+    results['transcript'] = file_record(run / 'transcript.json') if (run / 'transcript.json').exists() else None
+    results['proof_exit'] = exit_code
+    dump(run / 'capabilities.json', results)
+    print(json.dumps({'proof_exit': exit_code, 'capabilities': str(run / 'capabilities.json'), 'servers': {name: {key: item.get(key) for key in ['supports_generation', 'supports_echo_logprobs']} for name, item in results['servers'].items()}, 'failure': results.get('failure')}), flush=True)
+raise SystemExit(exit_code)

@@ -1,0 +1,15 @@
+{
+  "model": "d50-smollm2-135m-f16",
+  "base_url": "http://127.0.0.1:48247/v1/completions",
+  "tokenizer": "/tmp/d50-smollm2-135m-20261007",
+  "tokenizer_backend": "huggingface",
+  "tokenized_requests": false,
+  "batch_size": 1,
+  "num_concurrent": 1,
+  "max_length": 512,
+  "max_gen_toks": 8,
+  "seed": 17,
+  "max_retries": 1,
+  "timeout": 120,
+  "add_bos_token": false
+}
