@@ -66,7 +66,7 @@ def test_report_accounts_for_tracked_paths_and_finds_omitted_candidates(reposito
     }
     assert rows["prismaquant/a.py"]["in_default_gate"] is True
     pairs = report["candidates"]["near_duplicates"]
-    assert ["tests/helpers.py:1::left", "tests/helpers.py:10::right"] in pairs
+    assert sorted(["tests/helpers.py:1::left", "tests/helpers.py:10::right"]) in pairs
     assert ["experiments/check.py:1::first", "launch.py:1::launch"] in pairs
     assert report["functions"]["tests/helpers.py:1::left"] == {"line": 1, "end_line": 8}
     assert report["candidates"]["same_name_helpers"]["first"] == [
@@ -124,7 +124,7 @@ def test_report_keeps_repeated_qualified_names_distinct(repository):
     path.write_text("def repeated(items):\n" + BODY + "\ndef repeated(items):\n" + BODY,
                     encoding="utf-8")
     report = inventory.coverage_report(root)
-    assert ["tests/helpers.py:1::repeated", "tests/helpers.py:10::repeated"] in report["candidates"]["near_duplicates"]
+    assert sorted(["tests/helpers.py:1::repeated", "tests/helpers.py:10::repeated"]) in report["candidates"]["near_duplicates"]
     assert report["functions"]["tests/helpers.py:1::repeated"] == {"line": 1, "end_line": 8}
     assert report["functions"]["tests/helpers.py:10::repeated"] == {"line": 10, "end_line": 17}
 
