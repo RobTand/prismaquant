@@ -122,6 +122,23 @@ def test_worker_lifecycle_uses_live_capture_cache_and_restores_entrypoint(monkey
     driver.remove_replay(model)  # idempotent cleanup after partial failures
 
 
+def test_duplicate_replay_request_preserves_the_existing_observer(monkeypatch, tmp_path):
+    driver = _driver()
+    model, ext = _model(tmp_path)
+    _loaded(monkeypatch, ext)
+    driver.install_replay(model, **OPTIONS)
+    previous_wrapper = ext.exl3_fat_moe_down
+    previous_replay = model._tr3_grouped_down_replay
+    try:
+        with pytest.raises(ValueError, match="already installed"):
+            driver.replay_request(_LLM([model]), window_id="w0", arm_kwargs={},
+                                  generate=lambda: pytest.fail("duplicate request ran"), **OPTIONS)
+        assert ext.exl3_fat_moe_down is previous_wrapper
+        assert model._tr3_grouped_down_replay is previous_replay
+    finally:
+        driver.remove_replay(model)
+
+
 @pytest.mark.parametrize("missing", ["module", "cache", "capture", "boundary"])
 def test_installation_refuses_missing_live_prerequisites_without_loading(monkeypatch, tmp_path, missing):
     driver = _driver()
