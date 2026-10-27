@@ -116,8 +116,8 @@ def test_child_coverage_arguments_preserve_selection(tmp_path, sources, disabled
                              cov_context="test")
     launcher, args, env = conftest._own_process_measure_args(
         SimpleNamespace(option=option), tmp_path, "child")
-    assert launcher == ["-m", "cProfile", "-o", str(tmp_path / "child.pstats"),
-                        "-m", "pytest"]
+    assert launcher == ["-m", "tests._own_process_profile",
+                        str(tmp_path / "child.pstats")]
     assert [arg for arg in args if arg.startswith("--cov=")] == expected
     if expected:
         assert args[:2] == ["-p", "pytest_cov"]

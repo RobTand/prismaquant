@@ -11,6 +11,11 @@ from pytest's actual child reports. It preserves the chosen node IDs, group
 lock, per-test bounds, and terminal-exit handling. It does not submit nested
 PrismaBuild actions or drive pytest hooks itself.
 
+The private child launcher uses `cProfile.Profile.runcall` and writes its
+profile in `finally`. Pytest's `SystemExit` propagates unchanged. The standard
+`python -m cProfile` command catches `SystemExit` and would turn pytest failure,
+usage-error, and no-tests exit codes into success.
+
 Files live under `<basetemp>/own-process/`. The key is the existing hash of
 the selected child node IDs.
 

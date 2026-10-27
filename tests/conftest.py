@@ -837,8 +837,7 @@ def _own_process_bound_args(config) -> list[str]:
 
 
 def _own_process_measure_args(config, root, key):
-    launcher = ["-m", "cProfile", "-o", str(root / f"{key}.pstats"),
-                "-m", "pytest"]
+    launcher = ["-m", "tests._own_process_profile", str(root / f"{key}.pstats")]
     argv, env = [], {}
     sources = getattr(config.option, "cov_source", [])
     if sources != [] and not getattr(config.option, "no_cov", False):
