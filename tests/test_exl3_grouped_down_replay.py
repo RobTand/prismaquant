@@ -228,6 +228,40 @@ def test_the_real_capture_arms_this_hook_checkout_locally():
     assert not probe.fired
 
 
+def test_replays_preserve_the_original_accumulator_input():
+    model, ext, _, args = _make(lambda *args: args[3].add_(1), repeats=2,
+                                required_rows=ROWS)
+    args[3].fill_(7)
+    initial_hash = replay_mod.describe(args[3], name="out")["sha256"]
+    model(torch.zeros(1))
+    record = replay_mod.uninstall(model, ext)
+    assert args[3].eq(8).all()
+    assert all(entry["vs_original"]["identical_fp32"] for entry in record["replays"])
+    assert all(entry["vs_original"]["identical_bf16"] for entry in record["replays"])
+    assert record["inputs_before"]["out"]["sha256"] == initial_hash
+    assert record["replay_initial_out_sha256"] == initial_hash
+    assert all(entry["initial_out_sha256"] == initial_hash for entry in record["replays"])
+    assert record["inputs_stable"] is True
+    assert record["original_out_unchanged_after_replays"] is True
+
+
+def test_input_mutation_by_the_original_call_is_observed():
+    calls = 0
+
+    def mutate_original(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            args[0].add_(1)
+        args[3].add_(1)
+
+    model, ext, _, _ = _make(mutate_original, repeats=2, required_rows=ROWS)
+    model(torch.zeros(1))
+    record = replay_mod.uninstall(model, ext)
+    assert record["inputs_stable"] is False
+    assert record["same_input_inference_supported"] is False
+
+
 # --------------------------------------------------------------------------
 # Coverage of the arguments.  All ten, whole, before and after.
 # --------------------------------------------------------------------------
