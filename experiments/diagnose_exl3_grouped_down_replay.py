@@ -33,7 +33,8 @@ def install_replay(model, *, module_name=probe.DEFAULT_MODULE,
     cache = getattr(module, "_FAT_MOE_EXT_CACHE", None)
     if state is None or not cache or cache[0] is None:
         raise ValueError("requires native capture and already-loaded EXL3 extension")
-    if getattr(model, "_tr3_replay_extension", None) is not None:
+    if (getattr(model, "_tr3_replay_extension", None) is not None
+            or getattr(model, "_tr3_grouped_down_replay", None) is not None):
         raise ValueError("replay already installed")
     ext = cache[0]
     model._tr3_replay_extension = ext
