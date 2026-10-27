@@ -122,21 +122,35 @@ def test_worker_lifecycle_uses_live_capture_cache_and_restores_entrypoint(monkey
     driver.remove_replay(model)  # idempotent cleanup after partial failures
 
 
-def test_duplicate_replay_request_preserves_the_existing_observer(monkeypatch, tmp_path):
+@pytest.mark.parametrize("installer", ["public_probe", "driver"])
+def test_duplicate_replay_request_preserves_the_existing_observer(monkeypatch, tmp_path, installer):
     driver = _driver()
     model, ext = _model(tmp_path)
     _loaded(monkeypatch, ext)
-    driver.install_replay(model, **OPTIONS)
+    if installer == "public_probe":
+        driver.probe.install(model, ext, model._tr3_capture, **OPTIONS)
+    else:
+        driver.install_replay(model, **OPTIONS)
     previous_wrapper = ext.exl3_fat_moe_down
     previous_replay = model._tr3_grouped_down_replay
+    previous_pre_hooks = dict(model.mlp._forward_pre_hooks)
+    previous_post_hooks = dict(model.mlp._forward_hooks)
     try:
-        with pytest.raises(ValueError, match="already installed"):
+        with pytest.raises(ValueError, match="already"):
             driver.replay_request(_LLM([model]), window_id="w0", arm_kwargs={},
                                   generate=lambda: pytest.fail("duplicate request ran"), **OPTIONS)
-        assert ext.exl3_fat_moe_down is previous_wrapper
-        assert model._tr3_grouped_down_replay is previous_replay
+        preserved = {
+            "extension_wrapper": ext.exl3_fat_moe_down is previous_wrapper,
+            "observer": getattr(model, "_tr3_grouped_down_replay", None) is previous_replay,
+            "pre_hooks": dict(model.mlp._forward_pre_hooks) == previous_pre_hooks,
+            "post_hooks": dict(model.mlp._forward_hooks) == previous_post_hooks,
+        }
+        assert all(preserved.values()), preserved
     finally:
-        driver.remove_replay(model)
+        if installer == "public_probe":
+            driver.probe.uninstall(model, ext)
+        else:
+            driver.remove_replay(model)
 
 
 @pytest.mark.parametrize("missing", ["module", "cache", "capture", "boundary"])
