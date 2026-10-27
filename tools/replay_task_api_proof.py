@@ -17,7 +17,7 @@ def _proof_json(raw, label):
         constant=lambda value: ValueError(f"{label}: nonfinite {value}"))
 
 
-def _proof_files(directory):
+def _retained_api_files(directory):
     root = Path(directory).resolve()
     manifest = _proof_json((root / "manifest.json").read_bytes(), "manifest")
     if manifest["format_version"] != 1:
@@ -111,7 +111,7 @@ def _proof_score(exchange, context, continuation):
 
 def replay_proof(directory):
     """Verify fixture custody and independently replay its saved task results."""
-    manifest, files, originals = _proof_files(directory)
+    manifest, files, originals = _retained_api_files(directory)
     load = lambda name: _proof_json(files[name], name)
     try:
         recipe = load("reusable-recipe.json")

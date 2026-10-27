@@ -75,3 +75,38 @@ prerequisites documented in architecture section 7.0 remain in force. All curren
 lane slots, explicit criteria and independent review remain required. No GPU,
 native Tessera quality, performance, energy, residency or next-model readiness
 result follows from the retained CPU evidence.
+
+## Fleet engineering checks
+
+Source `4ac78df9fbdf5559b3136433139db8350023255d` contains the initial recovered
+fixture and tool. The failing-before action
+`ba2a885e316e6b612ec16e1d8efcc4d64c73d30244f159c071ba074eddf456d5`
+reports the absent replay module. Green action
+`fd597121e681fb8c3b18977f0ea5ad4b98f10c63257399669fbb154c30ab74a2`
+passes 12 replay cases, compiles the two Python files and directly exercises the
+CLI. Its verified CAS receipt digest is
+`ca7862679408eb36a9df3278273f10ff8b33abbf213d34cfa8b14c7dc205d9e7`.
+All four continuation sums match the retained raw results exactly. This is
+arithmetic replay of historical observations, not model inference.
+
+The composed action
+`6ee239caac64341ba50b8ce9983d36a0a9c5ad9fbe08731ce95ecdb0341ef1d8`
+uses snapshot parent `4ac78df9fbdf5559b3136433139db8350023255d`. It reports 128
+passes and one failure in the same-name helper check. The newly introduced
+`_proof_files` name collided with an unrelated Stage B helper. The replay
+helper is renamed `_retained_api_files`; the baseline is unchanged. This failed
+action remains part of the evidence.
+
+Checks use the published x86 PrismaBuild client and the existing CPU task-suite
+layer, with `PQ_TASK_SUITE_TESTS=1`, offline model settings, one CPU, 4 GiB and a
+300-second limit for the composed suite. The D1/D29 record is
+`/mnt/shared/paperclip-runs/PRI-221/d1-d29.json`. Action
+`f794444a13e46b886cd0e2db80b58b3d2e0b42b21eb1d619d4f4c02f17ae74e6`
+records passing byte floors for root, scratch, shared and checkout mounts.
+Root inode capacity is unreported by its filesystem. Other inode floors pass.
+No idle-host baseline or measurement-class action was used.
+
+Commands, native endings, verified logs, CLI JSON, source review and sizing
+records are retained in `/mnt/shared/paperclip-runs/PRI-221/`. Final source and
+follow-up action outcomes are registered on PRI-221 and the linked pull
+request. Failed actions are retained alongside passing results.
