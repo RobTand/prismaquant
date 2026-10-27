@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, PRI-226 cache-name compatibility consolidation.
+Source provenance: base `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`,
+characterization parent `b8c72f601499d7372e2b4e7f3ff0b7cce20c91c8`.
+The shared name-projection module owns ordered rendered-cache name candidates
+for ProductionWeightCache and native export's weights-only fallback. Each
+consumer retains its format grammar and lookup precedence. Section 8.8.1
+records this compatibility helper separately from strict profile projection.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -31838,6 +31846,13 @@ requirement set; the first makes the four agree on what a unit is *called*,
 the second would make them agree on which units *exist*.
 
 #### 8.8.1 The shared name-projection layer
+
+`production_cache_name_candidates` owns rendered-cache compatibility spelling
+for `ProductionWeightCache.resolve_key` and native export's fallback lookup.
+It yields the original name, an optional `.weight` removal, then an optional
+`model.language_model.` to `model.` projection of the original, deduplicated
+in order. It does not compose those rewrites or choose a format alias.
+This compatibility lookup does not replace the strict profile API below.
 
 `prismaquant/name_projection.py` (2026-08-22, `walker/name-projection`)
 lands the ONE projection between the pipeline's parameter-name namespaces
