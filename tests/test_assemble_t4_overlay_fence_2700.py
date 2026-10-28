@@ -25,7 +25,7 @@ def release_gate():
 
 def _run_gate(module, name, request):
     test = getattr(module, name)
-    test(**{name: request.getfixturevalue(name) for name in inspect.signature(test).parameters})})
+    test(**{name: request.getfixturevalue(name) for name in inspect.signature(test).parameters})
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def test_hardlink_gate_exercises_real_rehash_without_clock_progress(release_gate
     assert jce.FENCE_REHASHED == {"assemble catalog wire fence": 1}
 
 
-def test_corruption_gate_exercises_real_rehash_without_clock_progress(release_gate, colliding_stamps, request):
+def test_corruption_gate_exercises_real_rehash_without_clock_progress(release_gate, monkeypatch, colliding_stamps, request):
     refusals = []
     real_rehash = jce._rehash_drifted
 
@@ -116,7 +116,7 @@ def test_corruption_gate_does_not_mistake_unrelated_errors_for_content_refusal(r
 
     def broken_fence(cell):
         raise RuntimeError("2700: unrelated fence failure")
-
+        
     def tool_with_unrelated_failure():
         tool = real_tool()
         monkeypatch.setattr(tool, "fence_cell_artifacts", broken_fence)
