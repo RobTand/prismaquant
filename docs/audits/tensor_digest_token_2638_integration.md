@@ -1,5 +1,90 @@
 # Token-owner integration (#2638 / #3012)
 
+## Repair on 2026-10-28
+
+This repair adopts [PR #3022](https://github.com/RobTand/prismaquant/pull/3022)
+at `58a2db30074498e0d9522ea00c6859289e82a622`, preserving its two original
+TrustLadder commits and [repair adjudication](https://github.com/RobTand/prismaquant/pull/3022#issuecomment-6403753446).
+The replacement is [PR #3158](https://github.com/RobTand/prismaquant/pull/3158),
+branch `prismaquant-3012-pri52`, with non-closing references to #3012 and #2638.
+No linked issue or parent obligation is closed by this slice.
+
+Current GitHub main and local origin/main were both verified at
+`05b62b4742793a2188abd4ed041fc4d46fd6c2c0`. All eight affected paths were
+unchanged from the original integration base before adoption. A task-owned
+isolated worktree applied the retained patch without changing production bytes,
+acceptance tests, source pins, baseline or shared prose. The replacement preserves
+the original commits and merges that main at
+`a0c93c2f6296a32896d36286869102fe27f14a41`; its eight-file diff matches the
+tested worktree. Only this repair section is added after that qualification.
+The final PR head, including this documentation-only update, belongs in the
+review handoff rather than in a self-referential source file.
+
+The closed, unmerged [precursor #2645](https://github.com/RobTand/prismaquant/pull/2645)
+was compared at `2ebf5b3226064a41b62b17e70ba640c7d415c0eb`. Its token recipe
+matches the retained recipe's AST exactly. Its three other owner recipes and
+Stage A/cache rewrites are excluded by #3012's explicit one-recipe scope;
+their independent goldens remain as local-retention tests. No missing in-scope
+token behavior was identified. Census work remains outside this repair.
+
+Fresh local CPU command, from the isolated worktree:
+
+```sh
+TMPDIR="$PAPERCLIP_TASK_SCRATCH_DIR/cpu-tmp" \
+XDG_CACHE_HOME="$PAPERCLIP_TASK_SCRATCH_DIR/cache" \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 CUDA_VISIBLE_DEVICES= \
+/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python -m pytest \
+  -c pytest.ini --basetemp="$PAPERCLIP_TASK_SCRATCH_DIR/cpu-tmp/pytest-pinned" \
+  --timeout=120 --tb=short -q tests/test_tensor_digest_owner_recipes_2638.py \
+  tests/test_tensor_digests_1384.py tests/test_guarded_read_digest_retention_2637.py \
+  tests/test_tessera_campaign.py tests/test_duplication_baseline.py
+```
+
+Result: **126 passed, 14 skipped**, exit 0, 137.75s, 14 torch JIT warnings.
+Python 3.14.4, torch 2.11.0+cpu, transformers 5.17.0; installed Tessera Git
+identity matches `aaa417003f0ee690e8ace138acd18df7f9531369`.
+Log SHA256: `db5a60f6cf4a30975827c3b1ecef9e7988c3f80595e639d098195d3f6940ee4c`.
+The initial stale `/home/rob/venvs/pq-cpu312` run had **112 passed, 14 skipped,
+14 failed** in 177.49s: every failure required the absent `tessera.metadata` API.
+Its log SHA256 is `921e8d0e1b1dfc92efbbb84c2a533778afe3c2e7e85657920d285990c76fba4b`.
+The retry changed to the pinned installed environment; no production workaround,
+shared environment mutation or acceptance weakening was made.
+
+Fresh `python tools/duplication_inventory.py --write-baseline` ran in a separate
+inventory-only worktree of `a0c93c2f6296a32896d36286869102fe27f14a41`, exit 0:
+0 near-duplicate pairs, 130 same-name helper groups, 276 primitive sites.
+All regenerated sections match shipped membership recursively modulo list order;
+the shipped baseline remains exactly main minus the token consumer scope,
+277 to 276. Existing list order and the canonical identity below are preserved.
+No scanner or sibling baseline changes were imported.
+
+The retained CUDA wrapper receipt, stdout and quiescence hashes below were
+recomputed from retained files. Terminal state is executed, exit 0, cleanup
+complete, one attempt on sparklina. Underlying PrismaBuild action:
+`49064446a5379690a9e0bf7ac9a39500cb60915726bffca2cdd19f3f2606f434`.
+Its canonical CAS receipt digest is
+`a7be40140b0a3dd36080d5dd3e5a21db3a6980a0ff38fcc3b97c5f584bf23681`;
+verified result blob `55b6ffbe75ccd26fc5cd7a2305b1bdc8e5275acbb9ffa072bf06575508ac871b`
+has code 0 and decodes to the recorded **3 passed, 11 deselected in 0.89s**.
+Retained input owner bytes equal this repair's owner bytes. This is recovered
+historical byte-transfer evidence, not a fresh GPU or model-scale qualification.
+No new GPU job was submitted and no historical acceptance is promoted.
+
+The linked-issue status passed on integration head `a0c93c2f6296a32896d36286869102fe27f14a41`
+with `Refs open same-repository parent #3012`. Final-head checks remain required.
+Local tests are evidence only. Integrated-SHA CI remains a GitHub/Mergify queue
+gate; a skipped PR CPU job and historical PB receipts do not replace it.
+Native independent review is assigned to Tactical Worker 29. That same-family
+review does not satisfy the separate D52 cross-family/exact-head requirement;
+manager routing is still required before queue integration. No merge is performed.
+
+Inherited diagnostic history is retained below: one failed raw-order assertion,
+two missing-working-directory normalization diagnostics, followed by successful
+membership/order-preserving verification. The source PR had zero native reviews
+and review threads when adopted. No new implementer/reviewer bounce occurred.
+All following sections and Test evidence lines are the retained historical report,
+not a claim that its old source base or old commands describe this repair run.
+
 ## Freshness and scope
 
 Integration source base: `6d8288adc94b3c4b624c143ed372fb6513f32784`.
