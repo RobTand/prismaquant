@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -84,6 +85,57 @@ def _owner(tmp_path, monkeypatch, *, n_batches=chain.GROUP_SIZE):
     owner._local_output_spool = ProducedOutputSpool(
         backend, capacity_deferred=CapacityDeferred)
     return owner, publication, backend
+
+
+@pytest.mark.parametrize("options", [{}, {"paced": None}, {"paced": True}, {"paced": False}])
+def test_submit_selects_only_the_requested_group_pacing(tmp_path, options):
+    calls = []
+
+    class Export(ControlledExport):
+        def submit_group(self, batch_id, *, entries, **kwargs):
+            calls.append(kwargs)
+            return super().submit_group(batch_id, entries=entries)
+
+    adapter = ProducedOutputSpool(Export(tmp_path / "local"), capacity_deferred=CapacityDeferred)
+    adapter.reserve("batch", 65536)
+    ref = write_exact_activation_cache_entry(
+        adapter.directory("batch"), "entry", torch.arange(8), identity={"session": "fixture"},
+        max_tensor_bytes=64, max_file_bytes=65536)
+    adapter.record("batch", ref, tmp_path / "canonical")
+    adapter.submit("batch", **options)
+    assert calls == ([options] if options.get("paced") is not None else [{}])
+
+
+@pytest.mark.parametrize("options", [{}, {"paced": None}, {"paced": True}, {"paced": False}])
+def test_produced_files_select_only_the_requested_group_pacing(tmp_path, monkeypatch, options):
+    from test_streamed_boundary_artifacts import _bound
+
+    calls = []
+    commits = []
+
+    class Export(ControlledExport):
+        def submit_group(self, batch_id, *, entries, **kwargs):
+            calls.append(kwargs)
+            answer = super().submit_group(batch_id, entries=entries)
+            self.acknowledge(batch_id)
+            return answer
+
+    backend = Export(tmp_path / "spool")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    with _bound(tmp_path / "writer") as owner, monkeypatch.context() as patch:
+        patch.setattr(owner, "_produced", SimpleNamespace(
+            batch_id_for=lambda **kwargs: "batch",
+            require_prewrite=lambda **kwargs: None))
+        patch.setattr(owner, "_produced_plan", {"write_only": True})
+        patch.setattr(owner, "_local_output_spool", adapter)
+        patch.setattr(owner, "_produced_commit_origin", commits.append)
+        refs = owner.write_produced_files(
+            [("record.bin", b"original-bytes")], kind="handoff-record", boundary_index=0,
+            **options)
+        assert calls == ([options] if options.get("paced") is not None else [{}])
+        assert Path(refs[0].path).read_bytes() == b"original-bytes"
+        assert commits == [{"batch_id": "batch", "references": refs}]
+        assert backend.groups["batch"]["released"]
 
 
 def test_preallocation_uses_serialized_inode_and_preserves_exact_bytes(tmp_path, monkeypatch):
