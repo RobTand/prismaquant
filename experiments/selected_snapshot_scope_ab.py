@@ -29,7 +29,7 @@ def write(path, value):
 
 
 def prepare(spec_path, workspace, row_id, out):
-    from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
+    from prismaquant.tessera_campaign_rows import load_spec, streamed_resource_plan
     spec = load_spec(spec_path)
     workspace, out = Path(workspace), Path(out)
     original = json.loads((workspace/'plan.json').read_text())
@@ -46,7 +46,7 @@ def prepare(spec_path, workspace, row_id, out):
     for policy in ('whole-layer-v1', 'selected-tensors-v1'):
         selected = copy.deepcopy(spec)
         selected['campaign_argv'] += ['--source-snapshot-policy', policy]
-        resources[policy] = _streamed_resource_plan(selected, census, row['members'], selected_source=True)
+        resources[policy] = streamed_resource_plan(selected, census, row['members'], selected_source=True)
     _reference_identity, reference_states = priced_state(Path(row['dir']))
     reference_sha = hashlib.sha256(json.dumps(reference_states, sort_keys=True,
         separators=(',', ':'), allow_nan=False).encode()).hexdigest()

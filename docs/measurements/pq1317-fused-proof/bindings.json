@@ -1,0 +1,54 @@
+{
+  "schema": "pq2546.bindings.v1",
+  "checkpoint": {
+    "path": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "config_sha256": "33e63ec7fe607658be712bd6dd3c16c6549960d8e7f0483d34b939881b55f943",
+    "shard_files": 120,
+    "bound_tensors": 38770,
+    "source": "tessera_expert_projection source identity carried in each allocation"
+  },
+  "exported_artifacts": {
+    "x_picks": {
+      "dir": "/mnt/shared/tessera-runs/moe/glm53-x-picks-full-6be66bc/exported",
+      "plan_assignment_sha256": "ac0957308f729887239701eb702d334d8c2eb0f3277f872c8d247c652cb79c51",
+      "shard_count": 120,
+      "producer_git": "3725c1b1",
+      "serving_contract_version": 38,
+      "export_action": "ad87b7c860f116d50cc63af767aa9524cc5dfa22221eaa46c56ab7b43a6f846b",
+      "export_receipt": "/mnt/shared/tessera-runs/moe/glm53-x-picks-full-6be66bc/run-notes.json"
+    },
+    "a8s": {
+      "dir": "/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/exported",
+      "manifest_sha256": "ca623e331b6039b401c3bb4a17618e6caf6a14bcfe2143108e926ac8561443c1",
+      "all_files_bytes": 175527382717,
+      "shard_count": 120,
+      "producer_git": "a5f3b232cb3c424b537a06713c728c86153d55fb",
+      "serving_contract_version": 44,
+      "plan_assignment_sha256": "b9cec2ecfab6fe7e668fa9d086bebb2a43f1ba0c88dfab54faa2fa174d85a1e2",
+      "composition_receipt": "/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/composition-receipt.json"
+    }
+  },
+  "profile": {
+    "spec": "prismaquant/model_profiles/specs/glm5_next.json",
+    "spec_id": "glm5_next",
+    "spec_priority": 210,
+    "implementation": "prismaquant/model_profiles/glm5_next.py",
+    "detection": "detect_profile over the checkpoint config, model_type glm5_next_text"
+  },
+  "producer_build": {
+    "x_picks_export_command": "experiments/export_tessera_serving.py with --cached-producer-source-sha256 0833671bbddbc3fb7186bdbed0a905ef248c23ffdf1aeee0c083322680d20f6b",
+    "x_picks_producer_source": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/identity-reseal-20260911/producer-source-d403cc5a31/src/tessera",
+    "a8s_producer_package_sha256": "da5805bc707c041efaeb27c5083fb7809fd8cdc51d501f41103b791270b569cb",
+    "a8s_producer_package": "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63/src/tessera",
+    "note": "Producer identities are recorded from retained receipts, not re-hashed here."
+  },
+  "packaged_contract": {
+    "path": "/mnt/shared/tessera-pins/fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb/src/tessera/serving/runtime_contract.json",
+    "sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+    "bytes": 278035,
+    "pin_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    "pin_file": "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
+    "pin_matches_contract": true
+  },
+  "pin_preflight": "/mnt/shared/tessera-measurements/pq-pin-fca4c6ce0/preflight.json"
+}

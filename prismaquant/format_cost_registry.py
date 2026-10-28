@@ -240,8 +240,10 @@ class RegistryFormatPlugin:
             return lambda blk: spec.quantize_dequantize(blk.contiguous())
 
         if name in ("NVFP4", "NVFP4A16"):
-            from . import export_native_compressed as enc
+            from . import native_render_codec as _native_render_codec
+            from .format_registry import registry_rtn_levers
 
+            levers = registry_rtn_levers()
             group = 16
             in_f = int(w.shape[1])
             if in_f % group != 0:
@@ -253,15 +255,16 @@ class RegistryFormatPlugin:
             for lo in range(0, int(w.shape[0]), rows_scan):
                 blk = w[lo:lo + rows_scan].float()
                 grouped = blk.reshape(blk.shape[0], in_f // group, group)
-                s = enc._select_nvfp4_group_scales(grouped)
+                s = _native_render_codec.select_nvfp4_group_scales(
+                    grouped, levers=levers)
                 gmax = torch.maximum(gmax, s.amax())
                 del blk, grouped, s
-            global_real = (gmax / enc.FP8_E4M3_MAX).clamp_min(1e-12)
+            global_real = (gmax / _native_render_codec.FP8_E4M3_MAX).clamp_min(1e-12)
 
             def _qdq(blk):
-                out = enc._rtn_dequant_nvfp4(
+                out = _native_render_codec.rtn_dequant_nvfp4(
                     blk.float(), group_size=group,
-                    global_real_override=global_real)
+                    global_real_override=global_real, levers=levers)
                 return out.to(blk.dtype)
 
             return _qdq

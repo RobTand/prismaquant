@@ -30,12 +30,11 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
-from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA  # noqa: E402
+from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     exact_entry_record, write_adjoint_checkpoint)
-from prismaquant.joint_quantum_handoff import (  # noqa: E402
+from prismaquant.joint_quantum_handoff import (
     BAND_SERIAL_READSET_SCHEMA,
-    HANDOFF_LOAD_PHASE,
     HandoffEmitter,
     QuantumHandoffRefused,
     band_serial_manifest,
@@ -44,6 +43,7 @@ from prismaquant.joint_quantum_handoff import (  # noqa: E402
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
 from test_quantum_executable_readset import (  # noqa: E402
@@ -700,10 +700,11 @@ def test_band_serial_refuses_what_it_cannot_run(tmp_path, monkeypatch, capsys, c
         tmp_path, monkeypatch, run_identity_extra=extra)
     flags = ["--band-serial"] + ([] if case == "no-tier" else ["--handoff-tier", TIER])
     if case == "legacy-rows":
+        from prismaquant.joint_campaign_ledger import seal_quantum_record
         for path in records.glob("layer-*.json"):
             record = json.loads(path.read_text())
             del record["executable_readset"]
-            path.write_text(json.dumps(record))
+            path.write_text(json.dumps(seal_quantum_record(record)))
     gateway = dispatch.FakeGateway()
     if case == "foreign-handoff":
         assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0

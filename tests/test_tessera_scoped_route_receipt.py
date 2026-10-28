@@ -9,7 +9,7 @@ from prismaquant import lane_eligibility as lane
 from prismaquant import shipcard
 from prismaquant import tessera_route_receipt as receipt
 from prismaquant import tessera_shipcard
-from tessera.serving import runtime_image
+from tessera import image_metadata
 
 
 IMAGE = "example/runtime@sha256:" + "a" * 64
@@ -24,6 +24,16 @@ def _text(value):
 
 def _sha(text):
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _launch(image):
+    """The launcher record Tessera's resolver emits for ``image`` pinned and
+    present, typed here; test_the_typed_launch_record_is_the_producers checks it."""
+    return {"schema": "tessera.runtime_image/1", "requested": image,
+            "requested_tag": None, "pinned": image, "required": image,
+            "gated": True, "present": True, "repo_digests": [image],
+            "resolved_digest": image.rsplit("@", 1)[1], "resolved_reference": image,
+            "local_id": "fixture", "refused": False, "reason": "pinned", "fix": None}
 
 
 def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
@@ -87,10 +97,9 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
               "checkpoint_sidecars": {"config.json": _sha(binding["config_json"]),
                                       "tessera_serving_manifest.json": _sha(binding["manifest_json"])},
               "records": {}, "record_owner": {}}
-    launch = runtime_image.resolve(IMAGE, contract={"versions": {"default_serve_image": IMAGE}},
-        inspector=lambda _: {"present": True, "repo_digests": [IMAGE], "local_id": "fixture"})
-    census["runtime_image_declaration"] = runtime_image.declared_reference(
-        IMAGE, env=runtime_image.container_env(launch))
+    census["runtime_image_declaration"] = image_metadata.declared_reference(
+        IMAGE, env={image_metadata.CENSUS_IMAGE_ENV: IMAGE,
+                    image_metadata.CENSUS_DECLARATION_ENV: json.dumps(_launch(IMAGE))})
     for phase, m in (("decode", 1), ("prefill", 64)):
         census["records"][phase] = {module: {"kind": kind, "policy": "TESSERA_FP8:resident",
                                             "symbol": symbol, "decoder": decoder,
@@ -137,6 +146,24 @@ def make(data):
     return tessera_shipcard.make_route_census_record(tool="test", model_sha=shipcard.compute_model_sha(model_dir),
         route_records=census, priced_routes=[], substitute_decoders=[],
         binding=binding, build=build, model_dir=model_dir)
+
+
+def test_the_typed_launch_record_is_the_producers():
+    """The census fixture types Tessera's launcher record; the producer emits it.
+
+    Where Tessera's serving package is installed beside the tests (never from
+    production), its resolver runs on the same pinned, present image, and its
+    launcher export must declare the same reference the fixture declares.
+    """
+    runtime_image = pytest.importorskip("tessera.serving.runtime_image")
+    launch = runtime_image.resolve(
+        IMAGE, contract={"versions": {"default_serve_image": IMAGE}},
+        inspector=lambda _: {"present": True, "repo_digests": [IMAGE], "local_id": "fixture"})
+    assert launch == _launch(IMAGE)
+    typed = {image_metadata.CENSUS_IMAGE_ENV: IMAGE,
+             image_metadata.CENSUS_DECLARATION_ENV: json.dumps(_launch(IMAGE))}
+    assert (image_metadata.declared_reference(IMAGE, env=runtime_image.container_env(launch))
+            == image_metadata.declared_reference(IMAGE, env=typed))
 
 
 @pytest.mark.parametrize("structure", ["dense", "routed_moe"])
@@ -234,8 +261,8 @@ def test_runtime_declaration_replay_uses_carried_evidence_and_manifest_identity(
     declaration = data[0]["runtime_image_declaration"]
     declaration["record"]["local_id"] = "another-daemon-config-digest"
     declaration["record"]["repo_digests"].append("mirror/runtime@sha256:" + "b" * 64)
-    monkeypatch.setenv(runtime_image.CENSUS_IMAGE_ENV, "wrong-host-image")
-    monkeypatch.setenv(runtime_image.CENSUS_DECLARATION_ENV, "not-json")
+    monkeypatch.setenv(image_metadata.CENSUS_IMAGE_ENV, "wrong-host-image")
+    monkeypatch.setenv(image_metadata.CENSUS_DECLARATION_ENV, "not-json")
     record = make(data)
     assert record["passed"] is True
     assert tessera_shipcard.verify_route_census_record("route.census", record,

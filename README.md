@@ -5,7 +5,7 @@
 PrismaQuant's allocator is **AURA** (*Production-Faithful KL–Fisher Allocation*): a per-Linear cost model built from KL-Fisher probes of the full model multiplied against the *production-rendered* weight error — the exact bytes that ship — solved as a multi-choice knapsack, and gated by real KL measured on a held-out split before anything is published. Three output containers:
 
 - **`compressed-tensors`** — vanilla vLLM serves it natively (`vllm serve $WORK_DIR/exported`), no custom kernels. NVFP4 / FP8 / BF16 per Linear, CUTLASS kernels on Blackwell.
-- **GGUF** — llama.cpp *and* vLLM (via the GGUF plugin) serve the same file, again with no PrismaQuant kernels. Full k-quant + IQ menu, per-tensor mixed, imatrix-weighted. This is how a 295B MoE fits on one 128 GB box.
+- **GGUF, deprecated** — retained for existing use, with no further fixes or enhancements. See the [GGUF lane's historical reference](docs/lanes/gguf.md).
 - **Tessera** — the Tessera trellis wire, served by **Tessera's own** out-of-tree vLLM plugin (`tessera.serving`, `quant_method = "tessera"`), using native kernels only. Still an unforked vLLM: install the exact commit in `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`, no core patches; a route the pinned contract does not device-qualify fails closed. The lane is declared and fail-closed unless the installed Tessera IS that commit and its packaged `runtime_contract.json` hashes to the pinned digest.
 
 ---
@@ -57,7 +57,7 @@ export SELECTION_MODE=validated-surrogate  # real-KL frontier selection (default
 vllm serve $WORK_DIR/exported --quantization compressed-tensors
 ```
 
-**GGUF lane (llama.cpp + vLLM):**
+**GGUF lane, deprecated (historical command):**
 
 ```bash
 export EXPORT_CONTAINER=gguf TARGET_PROFILE=gguf COST_MODE=local

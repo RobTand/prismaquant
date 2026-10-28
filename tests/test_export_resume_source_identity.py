@@ -181,6 +181,32 @@ def test_manifest_without_source_identity_is_refused(tmp_path, monkeypatch):
     assert "source_identity" in json.loads(manifest.read_text())
 
 
+@pytest.mark.parametrize("admission", [None, "render_witness_v1"])
+def test_manifest_from_before_the_shard_bound_witness_gate_is_refused(
+    tmp_path, monkeypatch, admission,
+):
+    """Layers packed before fused NVFP4 re-packs required the render's
+    joint-global witness (no stamp), or required one that named no shard
+    (v1), were never checked against the shard they read; replaying them
+    would ship a legacy or overwritten cache's re-pack past the gate."""
+    run, source = _exporter(tmp_path, monkeypatch)
+    cache = tmp_path / "resume"
+    _fill_cache(run, source, cache, weight=_WEIGHT_A, bias=_BIAS_A)
+
+    manifest = cache / "manifest.json"
+    legacy = json.loads(manifest.read_text())
+    assert legacy.pop("fused_nvfp4_global_admission") == "render_witness_v2"
+    if admission is not None:
+        legacy["fused_nvfp4_global_admission"] = admission
+    manifest.write_text(json.dumps(legacy))
+
+    replays: list = []
+    run(cache, replay_log=replays)
+    assert replays == [], f"a {admission or 'pre-witness'} manifest admitted replay"
+    assert json.loads(manifest.read_text())["fused_nvfp4_global_admission"] == (
+        "render_witness_v2")
+
+
 # --------------------------------------------------------------------------
 # The identical-source resume must keep working, byte for byte.
 # --------------------------------------------------------------------------
@@ -269,7 +295,7 @@ def test_digest_cache_rehashes_a_same_size_rewrite(tmp_path):
     so restoring mtime after an in-place same-size rewrite still re-hashes."""
     import os
 
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     _write_source(source, weight=_WEIGHT_A, bias=_BIAS_A)
@@ -291,7 +317,7 @@ def test_digest_cache_rehashes_a_same_size_rewrite(tmp_path):
 
 
 def test_identity_cache_hit_returns_the_same_digest(tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     _write_source(source, weight=_WEIGHT_A, bias=_BIAS_A)
@@ -307,7 +333,7 @@ def test_a_symlink_snapshot_is_the_same_source_as_the_plain_directory(tmp_path):
     one source, so a resume across the two spellings is not refused."""
     import os
 
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     plain = tmp_path / "plain"
     _write_source(plain, weight=_WEIGHT_A, bias=_BIAS_A)
@@ -397,7 +423,7 @@ def test_changed_config_json_refuses_replay(tmp_path, monkeypatch):
 
 
 def test_config_json_is_part_of_the_content_identity(tmp_path):
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     _write_source(source, weight=_WEIGHT_A, bias=_BIAS_A)
@@ -413,7 +439,7 @@ def test_config_json_is_part_of_the_content_identity(tmp_path):
 def test_appearing_config_json_is_a_different_source(tmp_path):
     """An absent file contributes no row, so a config.json that appears
     later must not compare equal to the run that had none."""
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     _write_source(source, weight=_WEIGHT_A, bias=_BIAS_A)
@@ -428,7 +454,7 @@ def test_appearing_config_json_is_a_different_source(tmp_path):
 def test_changed_index_json_is_a_different_source(tmp_path):
     """`model.safetensors.index.json` decides which shard a tensor is read
     from; the shards it names can be byte-identical either way."""
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     source.mkdir(parents=True, exist_ok=True)
@@ -461,7 +487,7 @@ def test_changed_remote_code_module_is_a_different_source(tmp_path):
     the checkpoint root (MiniMax-M2, DeepSeek-V4). Editing one changes the
     module the payloads were quantized through while config.json and every
     shard stay identical."""
-    from prismaquant.cost_streaming import build_source_checkpoint_identity
+    from prismaquant.streamed_model_identity import build_source_checkpoint_identity
 
     source = tmp_path / "source"
     _write_source(source, weight=_WEIGHT_A, bias=_BIAS_A)

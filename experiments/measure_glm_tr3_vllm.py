@@ -546,7 +546,7 @@ def scorer_engine_kwargs(args, *, model, topology):
 
 def _tr3_gold_record(result, *, model_sha, model, spec_decode_detected):
     """Called only by the completed measurement, never by a saved-result importer."""
-    from prismaquant.shipcard import make_record
+    from prismaquant.shipcard_slots import make_record
 
     fidelity = tr3_kl_fidelity(vocab_size=VOCAB_SIZE, n_windows=WINDOW_COUNT,
                               seqlen=CONTEXT_LENGTH)

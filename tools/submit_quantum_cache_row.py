@@ -123,10 +123,8 @@ def main(argv=None) -> int:
     parser.add_argument("--submit", action="store_true")
     args = parser.parse_args(argv)
     spec = sealed_spec(args.row)
-    from tools.tessera_campaign_container import (
-        local_scratch_environment,
-        validate_container,
-    )
+    from prismaquant.campaign_container_spec import validate_container
+    from tools.tessera_campaign_container import local_scratch_environment
 
     validate_container(spec)
     scratch = local_scratch_environment(spec, spec["env"])

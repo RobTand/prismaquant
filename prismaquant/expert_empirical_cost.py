@@ -530,9 +530,9 @@ def measure_expert_unit_costs(
     allocator-payload row dicts keyed by full member names and ``unit_kls``
     maps ``experts_qname -> {fmt: unit_kl}``.
     """
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     profile = resolve_routed_expert_profile(model, profile)
@@ -742,9 +742,9 @@ EXPERT_CHECKPOINT_STAGE = "expert empirical cost"
 
 def _streamed_expert_unit_records(model, profile, *, unit_filter, max_units):
     """Return serving units in the resident measurer's exact order."""
-    from prismaquant.sensitivity_probe import (
-        _is_packed_experts_module,
-        _packed_experts_param_names,
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+        packed_experts_param_names as _packed_experts_param_names,
     )
 
     packed = [
@@ -814,7 +814,7 @@ def _expert_checkpoint_identity(
     )
 
     calib = calib_ids.detach().to("cpu").contiguous()
-    from prismaquant.cost_streaming import validate_streamed_model_identity
+    from prismaquant.streamed_model_identity import validate_streamed_model_identity
 
     exact_model_identity = validate_streamed_model_identity(
         model_identity, where="expert empirical checkpointing"
@@ -873,9 +873,11 @@ def _write_expert_unit_checkpoint(
 
 
 def _validate_expert_checkpoint_state(
-    qname: str, state: Mapping[str, object]
+    qname: str, state: Mapping[str, object], *, forked: bool
 ) -> dict[str, object]:
     expected = {"stats", "costs", "unit_kls"}
+    if forked:
+        expected.add("kl_windows")
     if set(state) != expected:
         raise RuntimeError(
             f"expert unit checkpoint for {qname} has fields "
@@ -982,7 +984,7 @@ def measure_expert_unit_costs_streamed(
             qnames=qnames,
         )
         completed = {
-            qname: _validate_expert_checkpoint_state(qname, state)
+            qname: _validate_expert_checkpoint_state(qname, state, forked=False)
             for qname, state in raw_completed.items()
         }
 
@@ -1085,7 +1087,9 @@ def _fork_quantized_unit(
     Also captures ``rows_meta[qn]`` (member names/shapes/metadata) on the
     first call, while the layer is resident.
     """
-    from prismaquant.sensitivity_probe import _packed_experts_param_names
+    from prismaquant.probe_inventory import (
+        packed_experts_param_names as _packed_experts_param_names,
+    )
 
     device = runner.device
     swaps: list[tuple] = []
@@ -1316,7 +1320,7 @@ def measure_expert_unit_costs_forked(
             qnames=qnames,
         )
         completed = {
-            qname: _validate_expert_checkpoint_state(qname, state)
+            qname: _validate_expert_checkpoint_state(qname, state, forked=True)
             for qname, state in raw_completed.items()
         }
     pending = [qn for qn in qnames if qn not in completed]
@@ -1362,54 +1366,46 @@ def measure_expert_unit_costs_forked(
         for f_i, fmt in enumerate(measured_fmts):
             t_pass0 = time.time()
             forks: dict[str, torch.Tensor] = {}
-            for depth in range(runner.prefetch_lookahead):
-                runner.context.schedule_prefetch(depth)
-            for layer in range(num_layers):
-                runner.context.install(
-                    layer,
-                    require_prefetched=runner.require_prefetched_residency,
-                )
-                runner.context.schedule_prefetch(
-                    layer + runner.prefetch_lookahead
-                )
-                try:
-                    # Advance every existing fork through this live layer
-                    # BEFORE forking at it, so a new fork's hidden is not
-                    # double-advanced.
-                    for qn in list(forks):
-                        forks[qn] = runner.isolated_layer(
-                            batch, layer, forks[qn], pass_state=None
-                        )
-                    for qn in pending:
-                        if layer_of[qn] != layer:
-                            continue
-                        forks[qn] = _fork_quantized_unit(
-                            runner,
-                            batch,
-                            layer,
-                            kind_by_qname[qn],
-                            unit_by_qname[qn],
-                            qn,
-                            fmt,
-                            profile=profile,
-                            expert_chunk=expert_chunk,
-                            col_weights=weights,
-                            rows_meta=rows_meta,
-                        )
-                        torch.cuda.empty_cache()
-                finally:
-                    runner.context.unload(layer)
-                if progress and (
-                    layer % 5 == 4 or layer == num_layers - 1
-                ):
-                    avail, swap = _avail_swap_gb()
-                    rate = (time.time() - t_pass0) / (layer + 1)
-                    eta_min = rate * (num_layers - layer - 1) / 60.0
-                    _log(f"fork pass {fmt} ({f_i + 1}/"
-                         f"{len(measured_fmts)}): layer "
-                         f"{layer + 1}/{num_layers}, {len(forks)} forks "
-                         f"live, avail {avail:.0f}G swap {swap:.1f}G, "
-                         f"~{eta_min:.0f} min left in pass")
+            with runner.context.walk_layers(
+                    range(num_layers), prefetch_lookahead=runner.prefetch_lookahead,
+                    require_prefetched=runner.require_prefetched_residency) as walk:
+                for block in walk:
+                    with block:
+                        layer = block.layer
+                        # Advance existing forks before creating this layer's
+                        # fork, so its hidden state is advanced exactly once.
+                        for qn in list(forks):
+                            forks[qn] = runner.isolated_layer(
+                                batch, layer, forks[qn], pass_state=None
+                            )
+                        for qn in pending:
+                            if layer_of[qn] != layer:
+                                continue
+                            forks[qn] = _fork_quantized_unit(
+                                runner,
+                                batch,
+                                layer,
+                                kind_by_qname[qn],
+                                unit_by_qname[qn],
+                                qn,
+                                fmt,
+                                profile=profile,
+                                expert_chunk=expert_chunk,
+                                col_weights=weights,
+                                rows_meta=rows_meta,
+                            )
+                            torch.cuda.empty_cache()
+                    if progress and (
+                        layer % 5 == 4 or layer == num_layers - 1
+                    ):
+                        avail, swap = _avail_swap_gb()
+                        rate = (time.time() - t_pass0) / (layer + 1)
+                        eta_min = rate * (num_layers - layer - 1) / 60.0
+                        _log(f"fork pass {fmt} ({f_i + 1}/"
+                             f"{len(measured_fmts)}): layer "
+                             f"{layer + 1}/{num_layers}, {len(forks)} forks "
+                             f"live, avail {avail:.0f}G swap {swap:.1f}G, "
+                             f"~{eta_min:.0f} min left in pass")
             for qn in pending:
                 logits = runner.tail_logits(batch, forks.pop(qn))
                 total = 0.0
@@ -1591,7 +1587,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--dataset", default=None,
         help="Optional calibration source (HF id, .jsonl, .txt) via "
-        "sensitivity_probe.load_calibration; default is the WikiText "
+        "calibration_data.load_calibration; default is the WikiText "
         "windowed loader (matches aura_cost).")
     p.add_argument("--expert-chunk", type=int, default=16,
                    help="Experts quantized per in-place RTN chunk.")
@@ -1658,7 +1654,7 @@ def _streaming_model_identity(
     identity_cache_path: str | Path | None = None,
 ) -> dict[str, object]:
     """Stable source manifest used to bind expert end-to-end KL resumes."""
-    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
 
     return build_streamed_model_identity(
         runner,
@@ -1668,6 +1664,8 @@ def _streaming_model_identity(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     args = _build_parser().parse_args(argv)
     if args.resume and not args.checkpoint_dir:
         raise SystemExit("--resume requires --checkpoint-dir")
@@ -1680,8 +1678,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from prismaquant.build_rtn_cache import stage_multimodal
     from prismaquant.model_profiles import detect_profile
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
 
-    staged, _cleanup = stage_multimodal(args.model)
+    source_root = resolve_source_checkpoint_path(args.model)
+    native_source = source_model_decode_contract(source_root) is not None
+    source_binding = (
+        build_source_model_binding(source_root, dtype=torch.bfloat16)
+        if native_source else None
+    )
+    staged, _cleanup = stage_multimodal(str(source_root))
     # Detection is the authority for routed-expert membership and also
     # installs any architecture-owned vendored modelling override. Resolve it
     # before constructing the model; a fallback-after-load would recreate the
@@ -1701,13 +1709,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             anchor = Path(args.checkpoint_dir or args.output).parent
             offload_dir = str(anchor / "expert-cost-streaming-offload")
         streamed_runner = build_streamed_causal_lm(
-            staged,
+            str(source_root) if native_source else staged,
             device=torch.device(args.device),
             dtype=torch.bfloat16,
             offload_folder=offload_dir,
             profile=profile,
         )
         model = streamed_runner.model
+    elif native_source:
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        device = torch.device(args.device)
+        model = load_resident_source_model(
+            str(source_root), device=device, dtype=torch.bfloat16,
+            offload_folder=str(Path(args.output).parent / "expert-cost-resident-offload"),
+            resource_check=CaptureMemoryGuard(device).check,
+            attn_implementation="eager",
+        ).eval()
     else:
         model = AutoModelForCausalLM.from_pretrained(
             staged, dtype=torch.bfloat16, trust_remote_code=True,
@@ -1728,10 +1747,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     # source_tensor_name keeps the checkpoint's own nesting
     # (`model.language_model.*`), so against the staged index the fill's
     # prefix filter silently matches nothing (how production_recache calls it).
-    fill_src = args.model if Path(args.model).exists() else staged
+    fill_src = str(source_root)
     filled = (
         0
-        if streamed_runner is not None
+        if streamed_runner is not None or native_source
         else fill_packed_experts_from_source(
             model, fill_src, profile, progress=True
         )
@@ -1740,7 +1759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log(f"filled {filled} packed-expert params from source shards")
 
     if args.dataset:
-        from prismaquant.sensitivity_probe import load_calibration
+        from prismaquant.calibration_data import load_calibration
         calib = load_calibration(
             tok, args.dataset, args.n_calib_samples, args.calib_seqlen,
             calib_seed=args.calib_seed)
@@ -1808,6 +1827,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     checkpoint_dir=args.checkpoint_dir,
                     resume=args.resume,
                     model_identity=streamed_model_identity,
+                    checkpoint_identity_extra=(
+                        {"source_binding": source_binding} if source_binding is not None else None
+                    ),
                 )
             else:
                 stats, costs, unit_kls = measure_expert_unit_costs_streamed(
@@ -1823,6 +1845,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     checkpoint_dir=args.checkpoint_dir,
                     resume=args.resume,
                     model_identity=streamed_model_identity,
+                    checkpoint_identity_extra=(
+                        {"source_binding": source_binding} if source_binding is not None else None
+                    ),
                 )
         finally:
             streamed_runner.shutdown()
@@ -1832,6 +1857,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             col_weights=col_weights,
             expert_sample=args.expert_sample, max_units=args.max_units,
             unit_filter=args.unit_filter)
+    if source_binding is not None:
+        for rows in costs.values():
+            for row in rows.values():
+                row["source_binding"] = source_binding
     provenance = {
         "schema": SCHEMA,
         "git_commit": _git_commit(),
@@ -1850,6 +1879,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "max_units": int(args.max_units),
         "unit_filter": args.unit_filter,
     }
+    if source_binding is not None:
+        provenance["source_binding"] = source_binding
 
     if args.merge_base:
         with open(args.merge_base, "rb") as fh:
@@ -1879,6 +1910,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         prov = dict(payload.get("provenance", {}) or {})
         prov["backfilled_from_base"] = added
         prov["backfill_base"] = args.backfill_base
+        if added and source_binding is not None:
+            # The current native binding qualifies newly measured rows only.
+            # Preserve old rows' separate provenance instead of restamping it.
+            prov["backfill_provenance"] = base_cost.get("provenance")
         payload["provenance"] = prov
         if added:
             _log(f"backfilled {len(added)} sidecar rows from "

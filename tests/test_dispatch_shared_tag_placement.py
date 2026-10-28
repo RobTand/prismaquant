@@ -14,12 +14,12 @@ subset rule:
 * the hermetic case replays the live offer shapes through the published
   matcher -- the host pair matches nothing, ``gb10`` matches both Sparks and
   excludes a box of another class;
-* the live case asks the same question of the real worker offers through the
-  public ``PoolQueue.placeable_hosts``, and skips when the fleet mount is not
-  visible (the mount-dependent convention of the other campaign tests).
+* the opt-in live case in ``test_dispatch_shared_tag_placement_fleet_data.py``
+  asks the real worker offers through ``PoolQueue.placeable_hosts`` and skips
+  when the fleet mount is not visible.
 
-Both halves skip, never pass, when the published client or the live queue
-cannot be read: a green run must mean the matcher actually answered.
+The hermetic case skips when the published client cannot be read. The separate
+live case also requires the live queue; a pass means its matcher answered.
 """
 from __future__ import annotations
 

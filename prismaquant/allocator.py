@@ -81,6 +81,9 @@ and the curve is tiny so the dependency would not pay for itself.)
 """
 from __future__ import annotations
 
+from . import probe_statistics
+
+
 import argparse
 import csv
 import hashlib
@@ -93,8 +96,13 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .glm_mtp_selection import MtpCostInput
 
 from . import format_registry as fr
+from .assignment_space import AggregationPolicy, AssignmentSpace
 from .allocator_solver import (
     Candidate,
     _shape_from_stats,
@@ -103,11 +111,10 @@ from .allocator_solver import (
     legal_formats_from_candidates,
     promote_fused,
     promote_moe_pair,
-    promote_serving_units,
     solve_with_promotion,
 )
-from .allocator_candidates import (
-    PASSTHROUGH_SOURCE_REQUIREMENTS,
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
+from prismaquant.allocator_candidates import (
     _FUSED_SIBLING_MARKER,
     _PACKED_GROUP_MARKER,
     _format_kernel_supports_shape,
@@ -119,8 +126,6 @@ from .allocator_candidates import (
     aggregate_packed_serving_groups,
     build_candidates,
     calibrate_activation_fair_pricing,
-    expand_fused_sibling_assignment,
-    expand_packed_group_assignment,
     fused_sibling_group_members,
     packed_role_split_profile,
     packed_serving_group_members,
@@ -131,16 +136,16 @@ from .allocator_candidates import (
     summarize_paired_rate_trade,
     summarize_paired_routed_layer,
     reduce_continuous_menu,
-    _cost_ucb_z,
     price_paired_rate_trade,
     reprice_paired_candidates,
+    require_candidate_coverage,
 )
+from prismaquant.priced_cell import CostPricingPolicy
 from .digests import (
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
     bytes_sha256hex,
     file_digest_sha256hex,
-    file_sha256hex,
 )
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
@@ -601,6 +606,32 @@ def _format_cli_choices() -> tuple[str, ...]:
 # relaxes a container's independent export or serving qualification gates.
 _VISUAL_PREFIX_RE = re.compile(r"^(?:model\.)?visual\.")
 
+VISUAL_NON_LINEAR_NAME_RE = re.compile(
+    r"(?:^|\.)("
+    r"pos_embed|patch_embed|embed_tokens"  # embedding tables, not Linears
+    r"|rotary_emb|lm_head"  # fixed parts: rotary cache, fixed head
+    r"|router"  # router: never a priced Linear
+    r"|downsample"  # strided conv block, not a Linear
+    r"|[^.]*conv[^.]*"  # conv weights, not Linears
+    r"|[^.]*norm[^.]*"  # norms, not Linears
+    r")(?:\.|$)"
+)
+
+
+def _admitting_visual_root(name: str, profile=None) -> str | None:
+    """Return the declared visual root that admits `name`, if any."""
+    roots = profile.visual_root_prefixes() if profile is not None else ()
+    if roots:
+        for root in roots:
+            if name.startswith(root + ".") or (
+                root.startswith("model.") and name.startswith(root[6:] + ".")
+            ):
+                return root
+        return None
+    if _VISUAL_PREFIX_RE.match(name):
+        return "model.visual" if name.startswith("model.") else "visual"
+    return None
+
 
 def _is_visual_linear(name: str, profile=None) -> bool:
     """Classify a visual Linear by the profile's declared root namespaces.
@@ -608,15 +639,10 @@ def _is_visual_linear(name: str, profile=None) -> bool:
     Keep the existing source/recipe `model.` alias. Callers without declared
     roots retain the historical visual namespace control; a declared family
     cannot acquire unrelated body/audio namespaces through a loose prefix.
+    Role tags such as `vis_*`/`merger_*` are not module namespaces and
+    never admit.
     """
-    roots = profile.visual_root_prefixes() if profile is not None else ()
-    if roots:
-        return any(
-            name.startswith(root + ".")
-            or (root.startswith("model.") and name.startswith(root[6:] + "."))
-            for root in roots
-        )
-    return bool(_VISUAL_PREFIX_RE.match(name))
+    return _admitting_visual_root(name, profile) is not None
 
 
 def _prepare_visual_allocations(
@@ -884,8 +910,8 @@ def _final_allowability_scopes(assignment, context_by_unit, stats, rung_allowabi
 
 
 def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
-                target_profile=None) -> tuple[dict, dict]:
-    """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
+                target_profile=None) -> tuple[MtpCostInput, dict]:
+    """The owned MTP cost and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
     Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
     charge the selected MTP rungs, not the layer's source bytes, and the
@@ -903,7 +929,8 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
                          "and --mtp-serve-constants")
     declared = getattr(args, "mtp_formats", None)
     try:
-        payload = load_mtp_cost(args.mtp_joint_cost)
+        cost = load_mtp_cost(args.mtp_joint_cost)
+        payload = cost.payload
         constants = json.loads(Path(args.mtp_serve_constants).read_text())
         points = (json.loads(Path(args.mtp_acceptance_points).read_text())
                   if args.mtp_acceptance_points else [])
@@ -926,10 +953,10 @@ def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=No
         raise SystemExit(2) from exc
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
-    return payload, record
+    return cost, record
 
 
-def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
+def _stamp_mtp_selection(cost: MtpCostInput, layer_cfg: dict, body_assignment: Mapping,
                          record: Mapping) -> None:
     """Add the MTP layer's selected rungs (``_select_mtp``) to ``layer_cfg``.
 
@@ -950,11 +977,9 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
     # The preflight binds every selected MTP receipt back to the measured cost
     # (PQ #1665): the stamper names the bound file, so it seals the file's
     # digest beside the path instead of leaving the sha to a later backfill.
-    # Owner read (digests.file_sha256hex): no new raw hashlib site (#1667).
-    cost_sha256 = file_sha256hex(args.mtp_joint_cost)
     layer_cfg[LAYER_CONFIG_META_KEY]["mtp_selection"] = {
-        **record, "cost_path": str(args.mtp_joint_cost),
-        "mtp_joint_cost_sha256": cost_sha256, "units": len(assignment)}
+        **record, "cost_path": cost.path,
+        "mtp_joint_cost_sha256": cost.sha256, "units": len(assignment)}
     print(f"[alloc] MTP selection: {record['rung']} "
           f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
           f"({record['selection']['regime']})", flush=True)
@@ -1029,7 +1054,6 @@ def _validate_assignment_candidate_membership(
         "repair to export and can recreate mixed serving units. Sample:\n"
         f"  {sample}"
     )
-
 
 
 # Role tokens used to bucket the bit-attribution report. Best-effort: anything
@@ -1421,28 +1445,24 @@ def discover_visual_linear_stats_from_source(
             + "; ".join(scan_errors[:8])
         )
 
-    # Only rank-2 weights are Linear-like; conv1d / norms / biases are
+    # Only rank-2 weights are Linear-like; conv / norms / biases are
     # kept at BF16 passthrough regardless of --visual-format.
-    # Additionally, blacklist known rank-2 tensors that live in
-    # `nn.Parameter` / `nn.Embedding` modules (NOT `nn.Linear`), which
-    # the compressed-tensors loader in vLLM cannot consume. Example:
+    # Additionally, VISUAL_NON_LINEAR_NAME_RE excludes known non-Linear
+    # modules by name across five classes (embedding, conv, norm, router,
+    # fixed parts), including rank-2 tensors that live in `nn.Parameter` /
+    # `nn.Embedding` modules (NOT `nn.Linear`) which the
+    # compressed-tensors loader in vLLM cannot consume. Example:
     # `model.visual.pos_embed.weight` is an Embedding-like learned
-    # parameter with shape (num_pos, hidden) — rank-2 but NOT a Linear.
-    # Quantizing it produces `pos_embed.input_global_scale` etc. which
-    # vLLM's VL runtime rejects with `KeyError: pos_embed.input_global_scale`
-    # because its `model.visual.pos_embed` is a bare Parameter, not a
-    # quantizable Linear module.
-    _NON_LINEAR_RE = re.compile(
-        r"(?:^|\.)("
-        r"pos_embed"            # positional embedding (nn.Parameter/Embedding)
-        r"|rotary_emb"          # rotary pos embed cache
-        r")(?:\.|$)"
-    )
+    # parameter — rank-2 but NOT a Linear. Quantizing it produces
+    # `pos_embed.input_global_scale` etc. which vLLM's VL runtime rejects
+    # with `KeyError: pos_embed.input_global_scale` because its
+    # `model.visual.pos_embed` is a bare Parameter, not a quantizable
+    # Linear module.
     out: dict[str, dict[str, object]] = {}
     for name, shape, dtype in candidates:
         if len(shape) != 2:
             continue
-        if _NON_LINEAR_RE.search(name):
+        if VISUAL_NON_LINEAR_NAME_RE.search(name):
             continue
         qname = name[:-len(".weight")] if name.endswith(".weight") else name
         out_features, in_features = (int(shape[0]), int(shape[1]))
@@ -1475,6 +1495,39 @@ def discover_visual_linear_stats_from_source(
 def discover_visual_linears_from_source(model_path: str, *, profile=None) -> list[str]:
     """Backwards-compatible name-only view of source visual Linears."""
     return list(discover_visual_linear_stats_from_source(model_path, profile=profile))
+
+
+def visual_linear_roster(
+    model_path: str,
+    *,
+    profile=None,
+    strict: bool = False,
+) -> dict[str, dict[str, object]]:
+    """Quantizable vision/merger roster with shape and name provenance.
+
+    Keys match `discover_visual_linear_stats_from_source`. Each entry adds
+    `shape` ([out, in]), `name_source` (`checkpoint_index` when names come
+    from `model.safetensors.index.json`, else `source_header`), and
+    `visual_root` (the declared root that admits the name). Out-of-scope
+    classes (embedding, conv, norm, router, fixed parts) never appear:
+    `VISUAL_NON_LINEAR_NAME_RE` excludes them by name and non-rank-2
+    weights are not Linear-like. Read-only over the source checkpoint;
+    allocator math, export, pins, kernels and gates are untouched.
+    """
+    stats = discover_visual_linear_stats_from_source(
+        model_path, profile=profile, strict=strict
+    )
+    index_path = Path(model_path) / "model.safetensors.index.json"
+    name_source = "checkpoint_index" if index_path.exists() else "source_header"
+    roster: dict[str, dict[str, object]] = {}
+    for qname, entry in stats.items():
+        roster[qname] = {
+            **entry,
+            "shape": [entry["out_features"], entry["in_features"]],
+            "name_source": name_source,
+            "visual_root": _admitting_visual_root(qname, profile),
+        }
+    return roster
 
 
 def validate_source_visual_passthrough_contract(
@@ -1517,7 +1570,6 @@ def validate_source_visual_passthrough_contract(
         "pricing them as a re-encode would make the assignment budget false. "
         "Choose an explicit re-encoding format or use a matching source."
     )
-
 
 
 # ---------------------------------------------------------------------------
@@ -1625,106 +1677,6 @@ def validate_final_serving_promotion_noop(
         f"stale. Changed {len(changed)} entries, sample={sample}. Move this "
         "coupling before solve_with_promotion or recompute accounting."
     )
-
-
-def renormalize_probe_fisher(stats: dict, meta: dict, *,
-                             allow_legacy: bool = False) -> int | None:
-    """Recompute h_trace/h_w2_sum/h_trace_per_expert from the stored RAW
-    accumulators with the one correct shared denominator: the global calib
-    token count.
-
-    Older incremental probes finalized `h_trace = h_trace_raw /
-    n_tokens_seen` PER ROW, where per-expert Linears only count their
-    ROUTED tokens — inflating a rarely-routed expert's Fisher by
-    (global/routed), i.e. inverted importance weighting. The typical
-    inflation is ~n_experts/top_k (≈32x on a 256-expert top-8 model);
-    the degenerate 1-routed-token case reaches ~33,000x at a 32k-token
-    calibration. Dense rows saw exactly the global count, so their values
-    are unchanged; probes written by the fixed finalize renormalize to
-    identical values — the recompute is idempotent (see PER-ROW STAMPS).
-
-    PER-ROW STAMPS WIN. A row that already carries ``h_trace_norm_tokens``
-    was written by a fixed finalize (the field was introduced with it) and
-    is already divided by the global count of the pass that PRODUCED it —
-    which is not always this probe's meta count. `incremental_probe` merges
-    the multimodal visual pass (finalized at ``n_samples x max_text_len``,
-    e.g. 8x128) into the body probe, and `merge_probe_pickles` keeps the
-    FIRST shard's meta (the body's, e.g. 32x1024), so recomputing every row
-    from the meta count would rescale the visual rows by ~32x away from
-    what their writer computed — and would not be idempotent. Honouring the
-    row stamp keeps each row on its own writer's denominator and makes the
-    recompute a true no-op for any probe written by the fixed finalize.
-
-    Returns the probe-wide token count (the meta fallback used for
-    unstamped rows), or None when nothing could be renormalized. A row
-    with raw accumulators, no stamp, and no usable meta count is a HARD
-    ERROR (SystemExit) — silently allocating on routed-token-normalized
-    Fisher mis-spends the bit budget; `allow_legacy=True`
-    (--allow-legacy-fisher-norm) downgrades it to a warning and keeps the
-    probe's stored h_trace values.
-    """
-    meta = meta or {}
-    meta_tokens = int(meta.get("fisher_norm_tokens", 0) or 0)
-    if meta_tokens <= 0:
-        meta_tokens = (int(meta.get("nsamples", 0) or 0)
-                       * int(meta.get("seqlen", 0) or 0))
-
-    renormed = 0
-    unresolvable = 0
-    denominators: dict[int, int] = {}
-    for entry in stats.values():
-        if not isinstance(entry, dict) or "h_trace_raw" not in entry:
-            continue
-        # The row's own writer-stamped denominator, else the probe-wide one.
-        row_tokens = int(entry.get("h_trace_norm_tokens", 0) or 0)
-        if row_tokens <= 0:
-            row_tokens = meta_tokens
-        if row_tokens <= 0:
-            unresolvable += 1
-            continue
-        entry["h_trace"] = float(entry["h_trace_raw"]) / row_tokens
-        if "h_w2_sum_raw" in entry:
-            entry["h_w2_sum"] = (
-                float(entry["h_w2_sum_raw"]) / row_tokens)
-        per_raw = entry.get("h_trace_per_expert_raw")
-        if per_raw is not None:
-            entry["h_trace_per_expert"] = [
-                float(v) / row_tokens for v in per_raw]
-        # Keep the probe-side stamp truthful on legacy pickles.
-        entry["h_trace_norm_tokens"] = row_tokens
-        denominators[row_tokens] = denominators.get(row_tokens, 0) + 1
-        renormed += 1
-
-    if unresolvable:
-        msg = (
-            "probe rows carry raw Fisher accumulators but no usable token "
-            "count: neither a per-row h_trace_norm_tokens stamp nor "
-            f"meta.fisher_norm_tokens / nsamples+seqlen ({unresolvable} of "
-            f"{len(stats)} rows). h_trace cannot be renormalized by the "
-            "global calib token count; legacy per-row normalization inflates "
-            "routed-expert rows by (global/routed) — typically "
-            "~n_experts/top_k — and the allocator would mis-spend the bit "
-            "budget on rarely-routed experts. Re-run the probe with current "
-            "code (it stamps meta.fisher_norm_tokens), or pass "
-            "--allow-legacy-fisher-norm to proceed with the stored legacy "
-            "values anyway.")
-        if not allow_legacy:
-            raise SystemExit(f"[alloc] ERROR: {msg}")
-        print(f"[alloc] WARNING (--allow-legacy-fisher-norm): {msg}",
-              flush=True)
-
-    if renormed:
-        mix = ", ".join(f"{n}x{cnt} rows"
-                        for n, cnt in sorted(denominators.items()))
-        print(f"[alloc] Fisher renormalized: {renormed}/{len(stats)} rows "
-              f"→ h_trace_raw / global calib tokens [{mix}] "
-              "(per-expert routed-count normalization corrected)", flush=True)
-        if meta_tokens > 0:
-            return meta_tokens
-        # Meta-less probe carried entirely by row stamps: report the
-        # denominator the most rows share (the body pass').
-        return max(denominators.items(), key=lambda kv: (kv[1], kv[0]))[0]
-    return None
 
 
 _FISHER_CAP_ROLE_RE = re.compile(r"layers\.(\d+)\.[a-z_]+\.([a-z_]+)$")
@@ -2202,12 +2154,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--visual-format",
                     choices=_format_cli_choices(),
                     default="BF16",
-                    help="Uniform format for all visual-encoder Linears "
-                         "(`model.visual.blocks.*`). Phase 1 fallback: "
-                         "assigned to every visual Linear when "
-                         "--visual-sensitivity=uniform OR when --visual-"
-                         "sensitivity=fisher but the probe / cost pickles "
-                         "don't carry real visual Fisher data. BF16 (default) "
+                    help="Fixed auxiliary format for profile-declared visual "
+                         "Linears when --visual-sensitivity=uniform or no "
+                         "visual costs are supplied. Measured fisher mode "
+                         "requires complete stats, costs and legal candidates. "
+                         "BF16 (default) "
                          "reproduces passthrough behavior; NVFP4 / "
                          "FP8_DYNAMIC shrink the tower to quantized storage via the "
                          "existing RTN math at export time.")
@@ -2331,7 +2282,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--serve-device-budget-bytes", type=int, default=None,
                     help="Hard constraint: resident weight bytes + "
                          "--serve-kv-bytes + --serve-peak-scratch-bytes must "
-                         "be <= this.")
+                         "be <= this. Without --measured-runtime-table, requires "
+                         "--serve-dispatch-table and --serve-workload-mix.")
     ap.add_argument("--rank-device-budget-bytes", default=None,
                     help="Comma-separated per-rank device budgets, one per rank "
                          "of the world a per-rank measured runtime table prices. "
@@ -2413,6 +2365,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "candidate-minus-baseline probe UCB and the routed expert-dominance guard. "
                          "Required for mixed-rate COST_UCB_Z; no menu baseline is inferred.")
     args = ap.parse_args(argv)
+    pricing_policy = CostPricingPolicy.from_environment()
     cost_baseline_assignment = None
     if args.cost_baseline_assignment is not None:
         from .layer_config import load_assignment
@@ -2820,7 +2773,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     _mtp_selection_memo: list = []
 
     def _mtp_selection():
-        """``(payload, record)``, selected once: the card and the stamp read one choice."""
+        """``(cost input, record)``, selected once: the card and stamp read one choice."""
         if not _mtp_selection_memo:
             _mtp_selection_memo.append(_select_mtp(
                 args, serving_target=tessera_serving_target, profile=model_profile,
@@ -2856,7 +2809,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     validate_probe_payload(probe, args.probe)
     validate_cost_payload(cost_data, args.costs)
     require_no_research_exact_member_scalar(cost_data)
-    from .joint_aura import prepare_joint_aura_identities
+    from prismaquant.joint_aura_rows import prepare_joint_aura_identities
     prepare_joint_aura_identities(cost_data)
     # One DP prices in one currency: a cost table carrying Tessera-currency
     # rows (output_mse under the route's activation contract) is admissible
@@ -2918,7 +2871,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # from the stored raw accumulators; hard error on probes that cannot
     # be renormalized unless --allow-legacy-fisher-norm. See
     # renormalize_probe_fisher for the full story.
-    renormalize_probe_fisher(stats, probe.get("meta", {}),
+    probe_statistics.renormalize_probe_fisher(stats, probe.get("meta", {}),
                              allow_legacy=args.allow_legacy_fisher_norm)
 
     # ---- Robust Fisher clip (opt-in research lever) ----
@@ -3220,7 +3173,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         activation_pricing_stats,
         activation_pricing_costs,
         specs_sorted,
-    )
+    pricing_policy=pricing_policy,
+                         )
     if activation_pricing.enabled:
         print(
             "[alloc] activation-fair pricing: "
@@ -3266,9 +3220,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         packed=not args.no_packed_aggregation,
         fused=not args.no_fused_aggregation,
     )
-    candidates = build_candidates(
+    body_build = build_candidates(
         stats, costs, specs_sorted, calibrated_gains,
-        census_loo=census_loo,
+        pricing_policy=pricing_policy, census_loo=census_loo,
         census_loo_groups=census_loo_groups,
         source_manifest=source_manifest,
         target_profile=target_profile,
@@ -3286,6 +3240,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         **({"preserve_runtime_frontier": True}
            if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
     )
+    candidates = body_build.candidates
+    costs = body_build.cost_rows
+    materialized_cost_rows = dict(costs)
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
              f"{len(fused_members_deferred)} fused-sibling members keep whole "
@@ -3324,12 +3281,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             )
         head_stats = {name: stats[name] for name in head_probe_names}
         head_costs = {name: costs[name] for name in head_probe_names}
-        head_candidates = build_candidates(
+        head_build = build_candidates(
             head_stats,
             head_costs,
             [fr.get_format(lm_head_format_canonical)],
             calibrated_gains,
-            census_loo=census_loo,
+            pricing_policy=pricing_policy, census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3345,6 +3302,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             allowability_m=args.pact_regime,
             allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
+        head_candidates = head_build.candidates
+        costs.update(head_build.cost_rows)
+        materialized_cost_rows.update(head_build.cost_rows)
         missing_head_candidates = [
             name for name in head_probe_names
             if _find_candidate_for_format(
@@ -3420,12 +3380,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     if mtp_names:
         mtp_stats = {name: stats[name] for name in mtp_names}
         mtp_costs = {name: costs[name] for name in mtp_names}
-        mtp_candidates = build_candidates(
+        mtp_build = build_candidates(
             mtp_stats,
             mtp_costs,
             [fr.get_format(mtp_format_canonical)],
             calibrated_gains,
-            census_loo=census_loo,
+            pricing_policy=pricing_policy, census_loo=census_loo,
             source_manifest=source_manifest,
             target_profile=target_profile,
             mask_records=candidate_mask_records,
@@ -3435,6 +3395,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             allowability_m=args.pact_regime,
             allowability_tensor_parallel=args.pact_tensor_parallel or 1,
         )
+        mtp_candidates = mtp_build.candidates
+        costs.update(mtp_build.cost_rows)
+        materialized_cost_rows.update(mtp_build.cost_rows)
         missing_mtp_candidates = [
             name for name in mtp_names
             if _find_candidate_for_format(
@@ -3563,6 +3526,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             flush=True,
         )
 
+    require_candidate_coverage(
+        set(stats) - set(mtp_names_without_costs), candidates,
+    )
+
     pre_aggregation_availability = {
         spec.name: sum(
             1 for per_name in candidates.values()
@@ -3633,7 +3600,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # is a validated no-op.
     if not args.no_packed_aggregation:
         stats, costs, candidates = aggregate_packed_serving_groups(
-            stats, costs, specs_sorted, candidates, profile=model_profile,
+            stats, costs, specs_sorted, candidates, pricing_policy=pricing_policy, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
             **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
@@ -3666,7 +3633,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     tessera_group_menu_report: dict = {}
     if not args.no_fused_aggregation:
         stats, costs, candidates = aggregate_fused_siblings(
-            stats, costs, specs_sorted, candidates, profile=model_profile,
+            stats, costs, specs_sorted, candidates, pricing_policy=pricing_policy, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
             baseline_assignment=cost_baseline_assignment,
@@ -3706,9 +3673,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         try:
             candidates = reprice_paired_candidates(
                 stats, cost_data["costs"], candidates, cost_baseline_assignment,
-                profile=model_profile, ucb_z=_cost_ucb_z(), report=paired_candidate_report)
+                profile=model_profile, ucb_z=pricing_policy.ucb_z, report=paired_candidate_report)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
+    aggregated_candidate_names = tuple(candidates)
     candidates = filter_candidates_for_profile(candidates, target_profile)
 
     # The aggregated super items were built one candidate per format NAME,
@@ -3726,6 +3694,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         report=tessera_menu_report_agg,
         **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
+
+    require_candidate_coverage(aggregated_candidate_names, candidates)
 
     post_aggregation_availability = {
         spec.name: sum(
@@ -3802,44 +3772,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     )
     print(f"[alloc] format applicability → {applicability_report_path}")
 
-    def _stats_entry_for_assignment_name(name: str) -> dict | None:
-        entry = stats.get(name)
-        if isinstance(entry, dict):
-            return entry
-        fixed_entry = fixed_stats.get(name)
-        if isinstance(fixed_entry, dict):
-            return fixed_entry
-        original_entry = accounting_stats.get(name)
-        if isinstance(original_entry, dict):
-            return original_entry
-        return None
+    assignment_space = AssignmentSpace(
+        stats=stats, fixed_stats=fixed_stats, accounting_stats=accounting_stats,
+        fixed_formats=fixed_format_assignment,
+        aggregation=AggregationPolicy(packed=not args.no_packed_aggregation,
+                                      fused=not args.no_fused_aggregation),
+        profile=model_profile, format_rank=format_rank,
+        legal_formats=per_linear_legal_formats,
+    )
 
-    def _expand_assignment_for_seed_json(
-        assignment: dict[str, str],
-        *,
-        include_auxiliary: bool = True,
-    ) -> dict[str, str]:
-        """Expand DP super-items into the per-Linear seed-assignment shape.
-
-        The allocator can solve over packed-serving-group and fused-sibling
-        super-items. The KL probe's seed path wants ordinary module qnames;
-        it already handles legality, pinning, and fused coherence, but giving
-        it expanded names preserves the intended frontier point instead of
-        making the super-item markers look like unknown entries.
-        """
-        expanded = dict(assignment)
-        if not args.no_packed_aggregation:
-            expanded = expand_packed_group_assignment(expanded, stats)
-        if not args.no_fused_aggregation:
-            expanded = expand_fused_sibling_assignment(expanded, stats)
-        if include_auxiliary:
-            expanded.update(fixed_format_assignment)
-        return promote_serving_units(
-            expanded,
-            format_rank,
-            profile=model_profile,
-            legal_formats=per_linear_legal_formats,
-        )
 
     measured_runtime_resources = {}
     measured_option_assignments = {}
@@ -3849,7 +3790,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             RuntimeBinding, build_runtime_resources, rank_local_member_shapes,
             reconcile_serving_unit_rows,
         )
-        from .joint_aura import validate_joint_aura_entry
+        from prismaquant.joint_aura_rows import validate_joint_aura_entry
         try:
             if dict(measured_runtime_table.fixed_assignment) != fixed_format_assignment:
                 raise ValueError("measured table fixed auxiliary assignment differs "
@@ -3860,8 +3801,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     if option.serialized_sidecar_identity is not None:
                         raise ValueError("measured runtime search requires additive serialized "
                                          "candidate bytes; shared candidate sidecars are unsupported")
-                    members = expand_fused_sibling_assignment(
-                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    members = assignment_space.unit_members(unit, option.fmt)
                     measured_option_assignments[(unit, option.fmt)] = members
                     identities = {}
                     shapes = {}
@@ -3877,7 +3817,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                             raise ValueError(f"{name}:{fmt}: measured runtime source/calibration "
                                              "differs from the joint AURA evidence")
                         identities[name] = digest
-                        entry = _stats_entry_for_assignment_name(name)
+                        entry = assignment_space.stats_for(name)
                         if entry is None:
                             raise ValueError(f"{name}: measured runtime has no independent shape")
                         shapes[name] = _shape_from_stats(entry)
@@ -3950,13 +3890,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             member_shapes, member_structure = {}, {}
             for unit, options in sorted(candidates.items()):
                 for option in options:
-                    members = expand_fused_sibling_assignment(
-                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    members = assignment_space.unit_members(unit, option.fmt)
                     pact_option_members[(unit, option.fmt)] = members
                     for name in members:
                         if name in member_shapes:
                             continue
-                        entry = _stats_entry_for_assignment_name(name)
+                        entry = assignment_space.stats_for(name)
                         if entry is None:
                             raise ValueError(f"{name}: PACT has no independent shape")
                         member_shapes[name] = _shape_from_stats(entry)
@@ -4027,79 +3966,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
         return evaluate_serve_constraints(
             expanded_assignment,
-            {**accounting_stats, **fixed_stats, **stats},
+            assignment_space.scope_stats(),
             serve_context,
             lane_for=_serve_lane_for,
             resident_bytes=resident_bytes,
         )
 
-    def _assignment_payload_totals(
-        assignment: Mapping[str, str],
-        *,
-        require_all_stats: bool,
-    ) -> dict[str, float | int | list[str]]:
-        """Exact assignment-scope tensor payload.
 
-        Candidate memory remains the additive DP proposal cost.  This function
-        is the exact filter/reporting path: NVFP4 global scale tensors are
-        included.
-        """
-        total = 0.0
-        params = 0
-        missing: list[str] = []
-        for name, fmt in assignment.items():
-            entry = _stats_entry_for_assignment_name(name)
-            if not isinstance(entry, dict):
-                missing.append(name)
-                continue
-            params += int(entry.get("n_params", 0) or 0)
-            # Super-items (packed groups, fused siblings) carry exact
-            # per-format byte sums; their stats entries have no single
-            # (out, in) shape, so the shape fallback is only for plain rows.
-            memory_map = entry.get("_memory_bytes_by_format")
-            if isinstance(memory_map, dict) and fmt in memory_map:
-                total += 8.0 * memory_map[fmt]
-                if fmt == "NVFP4":
-                    total += 8.0 * nvfp4_global_sidecar_bytes(
-                        name,
-                        _shape_from_stats(entry),
-                        weight_only=bool(
-                            entry.get(NVFP4_WEIGHT_ONLY_STATS_KEY, False)
-                        ),
-                    )
-                continue
-            shape = _shape_from_stats(entry)
-            payload_bytes, _identity, _sidecar_identity = serialized_candidate_payload(
-                fr.get_format(fmt),
-                shape,
-                qname=name,
-            )
-            total += 8.0 * payload_bytes
-            if fmt == "NVFP4":
-                total += 8.0 * nvfp4_global_sidecar_bytes(
-                    name,
-                    shape,
-                    weight_only=bool(
-                        entry.get(NVFP4_WEIGHT_ONLY_STATS_KEY, False)
-                    ),
-                )
-        if missing and require_all_stats:
-            raise AssertionError(
-                "exact assignment payload has no shape/stats for "
-                f"{len(missing)} tensor(s): {sorted(missing)[:12]}"
-            )
-        return {
-            "bits_total": float(total),
-            "quantizable_params": int(params),
-            "bits_per_param": float(total) / max(params, 1),
-            "missing_stats_names": sorted(missing),
-        }
-
-    def _assignment_bits_total(assignment: dict[str, str]) -> float:
-        return float(_assignment_payload_totals(
-            assignment,
-            require_all_stats=True,
-        )["bits_total"])
 
     _solve_cache: dict[float, tuple] = {}
     # Solver diagnostics per target, kept beside the memo so a cache hit never
@@ -4137,7 +4010,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return price_paired_rate_trade(
                 cost_data["costs"], assignment,
                 {n: cost_baseline_assignment[n] for n in assignment},
-                profile=model_profile, ucb_z=_cost_ucb_z())
+                profile=model_profile, ucb_z=pricing_policy.ucb_z)
         except ValueError as exc:
             raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
 
@@ -4208,12 +4081,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 for unit, fmt in proposal.assignment.items():
                     raw_expanded.update(measured_option_assignments[(unit, fmt)])
                 raw_expanded.update(fixed_format_assignment)
-                expanded = _expand_assignment_for_seed_json(proposal.assignment)
+                expanded = assignment_space.expand(proposal.assignment).assignment
                 if expanded != raw_expanded:
                     raise SystemExit("[alloc] ERROR: serving promotion changed a measured "
                                      "runtime proposal; aggregate coupled units and measure "
                                      "their exact whole-operator options before selection")
-                exact = _assignment_payload_totals(
+                exact = assignment_space.payload(
                     {name: fmt for name, fmt in expanded.items()
                      if name not in fixed_format_assignment}, require_all_stats=True)
                 achieved = float(exact["bits_per_param"])
@@ -4276,11 +4149,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             })
             if assign is None:
                 return None, float("nan"), float("inf"), float("inf")
-            expanded = _expand_assignment_for_seed_json(
+            expanded = assignment_space.expand(
                 assign,
                 include_auxiliary=False,
-            )
-            exact = _assignment_payload_totals(
+            ).assignment
+            exact = assignment_space.payload(
                 expanded,
                 require_all_stats=True,
             )
@@ -4333,39 +4206,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             flush=True,
         )
 
-        assignment_expanded = dict(assignment)
-
-        # Expand packed-serving-group super-items back to per-tensor entries.
-        if not args.no_packed_aggregation:
-            assignment_expanded = expand_packed_group_assignment(
-                assignment_expanded, stats)
-
-        # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
-        if not args.no_fused_aggregation:
-            assignment_expanded = expand_fused_sibling_assignment(
-                assignment_expanded, stats)
-
-        assignment_expanded.update(fixed_format_assignment)
-        assignment_before_serving_promotion = dict(assignment_expanded)
-
-        # vLLM's FusedMoE requires all projections of the same expert to share
-        # one scheme. Packed groups are first-class DP units, so this promotion
-        # is a validated no-op (validate_final_serving_promotion_noop below);
-        # it stays as the serve-time coherence backstop for the un-aggregated
-        # paths (--no-packed-aggregation / --no-fused-aggregation). It is handed
-        # per-Linear legality so the shared format it lands on is runnable for
-        # every member, and it is still a no-op here by construction: an
-        # aggregated unit's format came from the intersection of its members'
-        # candidate sets, and the un-aggregated paths were already promoted
-        # against the same sets inside solve_with_promotion.
-        assignment_expanded = promote_serving_units(
-            assignment_expanded,
-            format_rank,
-            profile=model_profile,
-            legal_formats=per_linear_legal_formats,
-        )
+        expansion = assignment_space.expand(assignment)
+        assignment_before_serving_promotion = dict(expansion.before_promotion)
+        assignment_expanded = expansion.assignment
         from .allocator_candidates import require_assignment_rung_allowability
-        final_scope_stats = {**accounting_stats, **fixed_stats, **stats}
+        final_scope_stats = assignment_space.scope_stats()
         final_scopes = _final_allowability_scopes(
             assignment_expanded, tessera_context_by_unit, final_scope_stats, rung_allowability,
             m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel or 1)
@@ -4376,9 +4221,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             tessera_menu_widths["rung_allowability_scopes"] = {
                 name: scope for name, scope in final_scopes.items() if scope is not None}
             tessera_menu_widths["canonical_quality"] = {
-                name: final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})[fmt]
+                name: row["canonical_quality"]
                 for name, fmt in assignment_expanded.items()
-                if fmt in final_scope_stats.get(name, {}).get("_canonical_quality_by_format", {})}
+                if (row := materialized_cost_rows.get(name, {}).get(fmt)) is not None
+                and row.get("canonical_quality") is not None}
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,
@@ -4407,7 +4253,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 artifact_size_for=_artifact_size_for,
                 canonical_format=_canonical_candidate_format,
             )
-            achieved = float(_assignment_payload_totals(
+            achieved = float(assignment_space.payload(
                 body_assignment_for_accounting(assignment_expanded),
                 require_all_stats=True)["bits_per_param"])
             try:
@@ -4553,7 +4399,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         for layer, row in paired_trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
                              + DIRECT_ASCII_SPACED_LAX.text(refusals))
-        final_body_payload = _assignment_payload_totals(
+        final_body_payload = assignment_space.payload(
             final_body_assignment,
             require_all_stats=True,
         )
@@ -4569,7 +4415,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 f"exact-filtered solve: final={final_body_achieved}, "
                 f"solve={achieved}"
             )
-        final_assignment_payload = _assignment_payload_totals(
+        final_assignment_payload = assignment_space.payload(
             assignment_expanded,
             require_all_stats=False,
         )
@@ -4763,7 +4609,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # no keys, and a table carrying a population but no projection carries
         # only the population.
         if args.mtp_joint_cost:
-            _stamp_mtp_selection(args, layer_cfg, assignment_expanded, _mtp_selection()[1])
+            cost, record = _mtp_selection()
+            _stamp_mtp_selection(cost, layer_cfg, assignment_expanded, record)
         selection_request = lane.allocation_selection_request_path(args)
         if selection_request:
             lane.write_allocation_selection_request(selection_request,
@@ -4804,7 +4651,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             achieved_bits=final_body_achieved,
             assignment_expanded=assignment_expanded,
             candidates=candidates,
-            stats_entry_for=_stats_entry_for_assignment_name,
+            stats_entry_for=assignment_space.stats_for,
             format_specs=format_specs,
             visual_decision_names=visual_decision_names,
             profile=model_profile,
@@ -4839,7 +4686,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return total, part
         # PQ #1610: the MTP layer ships its selected rungs, not its source
         # bytes; the floor must hold what ships.
-        payload, record = _mtp_selection()
+        cost, record = _mtp_selection()
+        payload = cost.payload
         excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
         overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
             if excluded else []
@@ -4893,13 +4741,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             priced_total, _part = _partition_source_total(
                 _fp, src_total, src_manifest,
                 where="pareto candidate footprint",
-                assigned_names={**accounting_stats, **fixed_stats, **stats})
+                assigned_names=assignment_space.scope_stats())
             _footprint_ctx.update({
                 "fp": _fp,
                 "source_total_bytes": priced_total,
                 "regime": _fp.source_regime(src_by_dtype),
                 "source_manifest": src_manifest,
-                "stats": {**accounting_stats, **fixed_stats, **stats},
+                "stats": assignment_space.scope_stats(),
             })
         except Exception as exc:  # pricing is additive; never break allocation
             print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
@@ -5013,7 +4861,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # the non-unit payload plus the units' member names (#1716).  The
             # card reports the two apart so `non_unit_payload_bytes` stays
             # honest, but the unit budget must subtract both.
-            priced = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
+            priced = {name: _pact_payload_bytes(assignment_space.expand(dict(a)).assignment)
                       for name, a in ends.items()}
             outside = {name: priced[name][0] - _pact_unit_bytes(a) for name, a in ends.items()}
             names_outside = {name: priced[name][1] for name in ends}
@@ -5048,10 +4896,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             for unit, fmt in assignment.items():
                 raw_expanded.update(pact_option_members[(unit, fmt)])
             raw_expanded.update(fixed_format_assignment)
-            expanded = _expand_assignment_for_seed_json(dict(assignment))
+            expanded = assignment_space.expand(dict(assignment)).assignment
             if expanded != raw_expanded:
                 return {"feasible": False, "reason": "serving_promotion_changed_the_vertex"}
-            exact = _assignment_payload_totals(
+            exact = assignment_space.payload(
                 {name: fmt for name, fmt in expanded.items()
                  if name not in fixed_format_assignment}, require_all_stats=True)
             achieved = float(exact["bits_per_param"])
@@ -5101,7 +4949,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     raise ValueError(f"PACT baseline {unit}: requires one uniquely priced serving choice, "
                                      f"found {len(matching)}")
                 assignment[unit] = matching[0]
-            if _expand_assignment_for_seed_json(assignment) != expanded:
+            if assignment_space.expand(assignment).assignment != expanded:
                 raise ValueError("PACT baseline serving expansion changes its assignment")
             # Match the existing runtime solver's sorted binary64 fold exactly.
             time_ms = 0.0
@@ -5287,8 +5135,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                       "diagnostics": diag}
             if assign is None:
                 return record
-            expanded = _expand_assignment_for_seed_json(assign)
-            exact = _assignment_payload_totals(
+            expanded = assignment_space.expand(assign).assignment
+            exact = assignment_space.payload(
                 {name: fmt for name, fmt in expanded.items()
                  if name not in fixed_format_assignment}, require_all_stats=True)
             verdict = _serve_feasibility(expanded)
@@ -5347,7 +5195,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         format_params = defaultdict(int)
         for name, fmt in assign.items():
             format_counts[fmt] += 1
-            entry = _stats_entry_for_assignment_name(name)
+            entry = assignment_space.stats_for(name)
             if isinstance(entry, dict):
                 format_params[fmt] += int(entry.get("n_params", 0) or 0)
         total_with_aux = total + fixed_total_dloss
@@ -5366,11 +5214,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             **{f"params_{k}": v for k, v in format_params.items()},
         })
         if args.pareto_output_dir:
-            expanded = _expand_assignment_for_seed_json(assign)
-            budget_expanded = _expand_assignment_for_seed_json(
+            expanded = assignment_space.expand(assign).assignment
+            budget_expanded = assignment_space.expand(
                 assign,
                 include_auxiliary=False,
-            )
+            ).assignment
             expanded_counts = defaultdict(int)
             for fmt in expanded.values():
                 expanded_counts[fmt] += 1
@@ -5384,8 +5232,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "total_predicted_dloss_with_aux": float(total_with_aux),
                 "assignment": expanded,
                 "format_counts": dict(sorted(expanded_counts.items())),
-                "bits_total": _assignment_bits_total(budget_expanded),
-                "bits_total_with_aux": _assignment_bits_total(expanded),
+                "bits_total": assignment_space.bits_total(budget_expanded),
+                "bits_total_with_aux": assignment_space.bits_total(expanded),
             })
 
     # Coarse Kneedle, then golden-section refinement inside the knee bracket so
@@ -5413,9 +5261,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             if args.pareto_output_dir:
                 r_assign, r_ach, r_tot, r_mut = _solve_for_target(refined["target_bits"])
                 if r_assign is not None:
-                    r_exp = _expand_assignment_for_seed_json(r_assign)
-                    r_bud = _expand_assignment_for_seed_json(
-                        r_assign, include_auxiliary=False)
+                    r_exp = assignment_space.expand(r_assign).assignment
+                    r_bud = assignment_space.expand(
+                        r_assign, include_auxiliary=False).assignment
                     r_counts = defaultdict(int)
                     for fmt in r_exp.values():
                         r_counts[fmt] += 1
@@ -5429,8 +5277,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         "total_predicted_dloss_with_aux": float(r_tot + fixed_total_dloss),
                         "assignment": r_exp,
                         "format_counts": dict(sorted(r_counts.items())),
-                        "bits_total": _assignment_bits_total(r_bud),
-                        "bits_total_with_aux": _assignment_bits_total(r_exp),
+                        "bits_total": assignment_space.bits_total(r_bud),
+                        "bits_total_with_aux": assignment_space.bits_total(r_exp),
                         "knee_refined": True,
                     })
 
@@ -5710,20 +5558,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         src_total_full = int(src_total)
         src_total, source_partition = _partition_source_total(
             _fp, src_total, src_manifest, where="byte-budget selection",
-            assigned_names={**accounting_stats, **fixed_stats, **stats})
+            assigned_names=assignment_space.scope_stats())
 
         # Stats view for the footprint accounting: the same three-map
-        # precedence `_stats_entry_for_assignment_name` uses (aggregated DP
+        # precedence `assignment_space.stats_for` uses (aggregated DP
         # stats > fixed MTP/visual > pre-aggregation accounting stats), so
         # every name in an EXPANDED assignment resolves and the shared
         # function prices exactly the tensors the inlined copy did.
-        _footprint_stats = {**accounting_stats, **fixed_stats, **stats}
+        _footprint_stats = assignment_space.scope_stats()
 
         def _artifact_for_target(t: float):
             assign_t, ach_t, tot_t, _mut = _solve_for_target(t)
             if assign_t is None:
                 return None
-            expanded_t = _expand_assignment_for_seed_json(assign_t)
+            expanded_t = assignment_space.expand(assign_t).assignment
             ctx = f"byte-budget selector (target_bits={t:.3f})"
             # ONE accounting path: footprint.assignment_artifact_bytes owns
             # the manifest -> resolve -> check-non-negative -> floor sequence
@@ -5821,9 +5669,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 cheapest_fmt[cand_name] = min(
                     cand_list, key=lambda c: (c.memory_bytes, c.fmt)).fmt
             try:
-                expanded_floor = _expand_assignment_for_seed_json(
-                    cheapest_fmt, include_auxiliary=False)
-                totals = _assignment_payload_totals(
+                expanded_floor = assignment_space.expand(
+                    cheapest_fmt, include_auxiliary=False).assignment
+                totals = assignment_space.payload(
                     expanded_floor, require_all_stats=True)
             except Exception:
                 return None

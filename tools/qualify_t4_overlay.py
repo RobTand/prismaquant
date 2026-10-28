@@ -13,10 +13,10 @@ from prismaquant.staged_tier_policy import policy_is_active, refuse_pool_bulk_re
 
 @functools.lru_cache(maxsize=1)
 def decoder_provenance():
- from prismaquant.tessera_campaign import _checkpoint_identity_api
+ from prismaquant.tessera_campaign_wire import require_checkpoint_identity_api
  import importlib.metadata
  distribution=importlib.metadata.distribution('tessera-quant');direct_url=distribution.read_text('direct_url.json')
- return {'schema':'prismaquant.catalog_qualification_decoder.v1','decoder':_decoder_identity(None),'distribution':{'name':distribution.metadata['Name'],'version':distribution.version,'direct_url':None if direct_url is None else json.loads(direct_url),'direct_url_sha256':None if direct_url is None else hashlib.sha256(direct_url.encode()).hexdigest()},'installed_encoder_source_sha256':_checkpoint_identity_api().encoder_source_sha256(),'torch':torch.__version__,'cuda':torch.version.cuda,'scope':'actual installed decoder used for this cell; no encoding performed'}
+ return {'schema':'prismaquant.catalog_qualification_decoder.v1','decoder':_decoder_identity(None),'distribution':{'name':distribution.metadata['Name'],'version':distribution.version,'direct_url':None if direct_url is None else json.loads(direct_url),'direct_url_sha256':None if direct_url is None else hashlib.sha256(direct_url.encode()).hexdigest()},'installed_encoder_source_sha256':require_checkpoint_identity_api().encoder_source_sha256(),'torch':torch.__version__,'cuda':torch.version.cuda,'scope':'actual installed decoder used for this cell; no encoding performed'}
 from prismaquant.digests import bytes_sha256hex as digest
 from prismaquant.joint_catalog_extension import catalog_stat_fence
 def read_cell(cell):

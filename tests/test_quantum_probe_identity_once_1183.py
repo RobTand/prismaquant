@@ -11,8 +11,9 @@ import pickle
 
 import pytest
 
-import prismaquant.aura_cost as aura
-from prismaquant import cost_streaming, joint_aura
+from prismaquant import joint_aura_rows
+from prismaquant import aura_provenance
+from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
 
@@ -36,7 +37,7 @@ def _campaign(tmp_path, monkeypatch):
         source_model_identity=_model_identity("joint-source"),
         unit_roster_sha256=runtime._hex("a"), plan_sha256=runtime._hex("d"),
         prepared_sha256=runtime._hex("e"), read_manifest_sha256=runtime._hex("f"),
-        implementation_sha256=aura._aura_source_sha256())
+        implementation_sha256=aura_provenance.producer_package_sha256())
     return single, receipt, output_root
 
 
@@ -44,8 +45,8 @@ def _counted_quantum(tmp_path, monkeypatch, single, receipt, output_root):
     """Run one quantum; count probe-identity work inside the core only."""
     counts = {"validations": 0, "plain_probe_hashes": 0}
     active = []
-    validate = cost_streaming.validate_streamed_model_identity
-    digest = joint_aura.identity_sha256
+    validate = cost_streaming_identity.validate_streamed_model_identity
+    digest = joint_aura_rows.joint_identity_sha256
     core = runtime.run_layer_quantum_core
 
     def counted_validate(*args, **kwargs):
@@ -65,9 +66,9 @@ def _counted_quantum(tmp_path, monkeypatch, single, receipt, output_root):
         finally:
             active.pop()
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity",
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity",
                         counted_validate)
-    monkeypatch.setattr(joint_aura, "identity_sha256", counted_digest)
+    monkeypatch.setattr(joint_aura_rows, 'joint_identity_sha256', counted_digest)
     monkeypatch.setattr(runtime, "run_layer_quantum_core", counted_core)
     payload, _record, _counters = runtime._run_quantum(
         tmp_path, monkeypatch, single=single, layer=1, receipt=receipt,
@@ -98,7 +99,7 @@ def test_the_rows_carry_the_ordinary_probe_identity(tmp_path, monkeypatch):
     payload, _counts = _counted_quantum(tmp_path, monkeypatch, single, receipt,
                                         output_root)
     probe = payload["provenance"]["probe_identity"]
-    digest = joint_aura.identity_sha256(probe)
+    digest = joint_aura_rows.joint_identity_sha256(probe)
     assert type(probe) is dict
     assert payload["provenance"]["probe_identity_sha256"] == digest
     # In memory, as the quantum returns them: consumers digest rows as JSON
@@ -109,7 +110,7 @@ def test_the_rows_carry_the_ordinary_probe_identity(tmp_path, monkeypatch):
             canonical_json_sha256(row, where="cost row")
             assert row["probe_identity_sha256"] == digest
             assert row["joint_operator_identity"]["probe_identity_sha256"] == digest
-            assert joint_aura.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
     # cost.pkl and the unit checkpoints are pickles; the shared identity
     # restores as one ordinary dict.
     restored = pickle.loads(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
@@ -121,13 +122,13 @@ def test_the_rows_carry_the_ordinary_probe_identity(tmp_path, monkeypatch):
 
 def test_a_probe_identity_changed_after_validation_refuses(tmp_path, monkeypatch):
     single, receipt, output_root = _campaign(tmp_path, monkeypatch)
-    validated = joint_aura.validated_probe_identity
+    validated = joint_aura_rows.validated_probe_identity
 
     def validated_then_changed(probe):
         result = validated(probe)
         probe["changed_after_validation"] = True
         return result
 
-    monkeypatch.setattr(joint_aura, "validated_probe_identity", validated_then_changed)
+    monkeypatch.setattr(joint_aura_rows, 'validated_probe_identity', validated_then_changed)
     with pytest.raises(RuntimeError, match="changed after it was validated"):
         _counted_quantum(tmp_path, monkeypatch, single, receipt, output_root)

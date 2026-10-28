@@ -190,6 +190,8 @@ def final_hidden_phase(args):
 
 
 def _text_config(model_path):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     config = AutoConfig.from_pretrained(model_path)
@@ -219,9 +221,11 @@ def projection_phase(args):
     if path.exists():
         raise RuntimeError(f"{path} exists; the projection publishes once")
     raw = (json.dumps(carried, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+    from prismaquant.cost_stage_checkpoint import publish_new_bytes
 
-    atomic_write_bytes(path, raw)
+    destination = path.parent.resolve(strict=False) / path.name
+    if not publish_new_bytes(destination, raw, nofollow=True):
+        raise RuntimeError(f"{path} exists; the projection publishes once")
     return {
         "phase": "projection",
         "projection": {"path": str(path.resolve()), "sha256": hashlib.sha256(raw).hexdigest()},
@@ -247,6 +251,8 @@ def capture_phase(args):
         final, _ = cap.read_bound_json(args.final_hidden, args.final_hidden_sha256)
         if final["inputs"]["calibration_sha256"] != calibration["calibration_sha256"]:
             raise RuntimeError("the final hidden states were computed on another calibration draw")
+        cap.require_final_hidden_source(
+            final, plan["canonical_capture"], where="MTP capture final hidden")
         final_ref = {"schema": cap.FINAL_HIDDEN_SCHEMA,
                      "path": str(Path(args.final_hidden).resolve()),
                      "sha256": args.final_hidden_sha256}

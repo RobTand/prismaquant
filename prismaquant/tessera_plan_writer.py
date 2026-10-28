@@ -455,26 +455,36 @@ def build_serving_plan(config: dict, shapes: dict, *, cover: str, allow_disagree
                 f"one names layers {priced_layers}.  Broadcasting a multi-layer allocation would "
                 f"have to invent a rule for which layer's rate wins.")
         broadcast_from = priced_layers[0]
-        by_role = {role_of(q): payload for q, payload in tessera.items()}
         bf16_roles = {role_of(q) for q in bf16}
+        by_role = {}
+        for source_qname, payload in tessera.items():
+            role = role_of(source_qname)
+            source = source_qname + ".weight"
+            if role in by_role or role in bf16_roles:
+                others = ([by_role[role][0]] if role in by_role else [])
+                others += [name + ".weight" for name in bf16 if role_of(name) == role]
+                raise PlanError(
+                    f"--cover broadcast-by-role has ambiguous priced sources for role "
+                    f"{role!r}: {others + [source]}")
+            if source not in shapes:
+                raise PlanError(
+                    f"--cover broadcast-by-role priced source {source!r} has no model shape")
+            by_role[role] = (source, payload, shapes[source])
         chosen = {}
         for tensor, shape in shapes.items():
             qname = tensor[: -len(".weight")]
             role = role_of(qname)
-            source = f"model.layers.{broadcast_from}.{qname.split('.', 3)[3]}.weight"
-            if role in bf16_roles and role not in by_role:
-                plan[tensor] = "BF16"
-                continue
             if role not in by_role:
                 plan[tensor] = "BF16"        # unpriced role: say BF16, do not assume it
                 continue
-            if source in shapes and shapes[source] != shape:
+            source, payload, source_shape = by_role[role]
+            if source_shape != shape:
                 raise PlanError(
-                    f"{qname} is {shape} but the priced {source} is {shapes[source]}; a rung is "
+                    f"{qname} is {shape} but the priced {source} is {source_shape}; a rung is "
                     f"a rate on a SHAPE (the CHANNEL plane amortises over rows), so broadcasting "
                     f"it onto a different shape would be a different rate.  Use "
                     f"--cover as-allocated.")
-            chosen[qname] = by_role[role]
+            chosen[qname] = payload
     else:                                                       # pragma: no cover - argparse
         raise PlanError(f"unknown coverage mode {cover!r}")
 

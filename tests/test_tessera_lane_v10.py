@@ -220,7 +220,7 @@ def test_a_v9_closed_contract_reader_refuses_a_v10_table(monkeypatch, tmp_path):
     path.write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
     with pytest.raises(contract.TesseraContractError) as excinfo:
-        contract._load_at(str(path), sha, contract.TESSERA_DEV_PIN_COMMIT)
+        contract.read_tessera_contract(str(path), sha, contract.TESSERA_DEV_PIN_COMMIT)
     message = str(excinfo.value)
     assert "tessera.lane-eligibility.v10" in message
     assert "lane_eligibility.schema must be one of" in message

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from experiments import pb905_checkpoint_export as exp
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from test_band_serial_handoff_produced import band_campaign, pb_source, producer_owner
 import test_stage_a_produced_boundary_chain as chain
 from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noqa: F401

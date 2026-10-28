@@ -231,18 +231,19 @@ def test_prismabuild_accepts_the_completed_manifest(campaign):
         pytest.skip(f"published PrismaBuild not visible at {PUBLISHED_PB_SRC}")
     if str(PUBLISHED_PB_SRC) not in sys.path:
         sys.path.insert(0, str(PUBLISHED_PB_SRC))
-    import prismabuild.core as core
-    if not Path(core.__file__).resolve().is_relative_to(PUBLISHED_PB_SRC.resolve()):
-        # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-        # site-packages prismabuild turn the test green without running it.
-        pytest.fail(
-            "a different prismabuild is already imported -- it shadows the "
-            "published generation under test; the interpreter carries a stale "
-            "prismabuild (PQ #1109)")
-    import prismabuild.storage_tiers as tiers
+    import prismabuild.data_manifest as data_manifest
+    import prismabuild.manifest_layout as manifest_layout
+    for module in (data_manifest, manifest_layout):
+        if not Path(module.__file__).resolve().is_relative_to(PUBLISHED_PB_SRC.resolve()):
+            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
+            # site-packages prismabuild turn the test green without running it.
+            pytest.fail(
+                "a different prismabuild is already imported -- it shadows the "
+                "published generation under test; the interpreter carries a stale "
+                "prismabuild (PQ #1109)")
     manifest = _build(campaign, _spans(campaign))
-    core.validate_data_manifest(manifest)
+    data_manifest.validate_data_manifest(manifest)
     # The completion's index runs are not contiguous; PrismaBuild's read-order
     # expansion has to accept that, or the seal refuses the whole manifest.
-    assert len(tiers.manifest_phase_ranges(manifest)) == \
+    assert len(manifest_layout.manifest_phase_ranges(manifest)) == \
         len(manifest["read_plan"]["phases"])

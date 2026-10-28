@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import aura_provenance
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256, write_unit
 from test_tessera_joint_aura import (
     _unlink_render, bind, fixture, installed_encoder_source_sha256,
@@ -279,8 +280,7 @@ def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, com
     import torch
     from types import SimpleNamespace
 
-    from prismaquant import (
-        aura_cost, calibration_data, cost_streaming, gpu_guard, memory_management)
+    from prismaquant import calibration_data, cost_streaming, gpu_guard, memory_management
     from prismaquant import model_profiles
     from prismaquant import tessera_joint_aura as bridge
 
@@ -310,7 +310,7 @@ def test_execute_passes_the_plan_policy_to_the_intake(tmp_path, monkeypatch, com
         monkeypatch.setattr(bridge, "_preflight_run_prepared", lambda *_a, **_k: None)
     monkeypatch.setattr(calibration_data, "load_calibration_input", lambda *_a, **_k:
         (torch.zeros((512, 512), dtype=torch.int64), {"provenance": draw}))
-    monkeypatch.setattr(aura_cost, "_aura_source_sha256", lambda: "i" * 64)
+    monkeypatch.setattr(aura_provenance, "producer_package_sha256", lambda: "i" * 64)
     monkeypatch.setattr(bridge, "_prepare_source_owner",
                         lambda *_a, **_k: SimpleNamespace(close=lambda: None))
 

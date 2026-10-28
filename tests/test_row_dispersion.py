@@ -62,7 +62,7 @@ def test_tail_metrics_single_spike_has_known_gini():
 
 
 def test_tail_metrics_hand_computable_percentile_ratio():
-    # Linear interpolation: p50=1 and p99 lies 90% of the way from 1 to 11.
+    # Linear interpolation: p50=1 and p99 lies 91% of the way from 1 to 11.
     values = [1.0] * 9 + [11.0]
     metrics = tail_metrics(values)
     assert metrics["p50"] == 1.0

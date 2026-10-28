@@ -1,9 +1,11 @@
-"""End-to-end proof that a shard read is served off PrismaBuild's stage tier.
+"""Check a staged-read traffic threshold and compare returned tensor values.
 
 Not a unit test: this uses the LIVE residency map composed for the GLM-5.3-Flash
 joint run, the real staged ranges on /stage/prewarm, and the real seam
-(layer_streaming._source_safe_open).  It measures bytes per NFS mount, so a
-redirect that silently fell back to the pool cannot pass.
+(layer_streaming._source_safe_open). Acceptance requires stage client bytes
+of at least 90% of the selected payload, a resolver hit, and equal values.
+Pool traffic is reported but does not veto acceptance; mount totals are not
+attributed solely to this process.
 
 Read-only.  Writes nothing anywhere.
 """
@@ -110,7 +112,7 @@ def main():
     ok = (not bad
           and stage_d[0] >= picked_bytes * 0.9
           and rep.get("range_hits", 0) + rep.get("hits", 0) > 0)
-    print("\nVERDICT:", "STAGE-FED AND CORRECT" if ok else "NOT DEMONSTRATED")
+    print("\nVERDICT:", "STAGE TRAFFIC THRESHOLD AND VALUES PASS" if ok else "NOT DEMONSTRATED")
     if not ok:
         print("  reason: " + ", ".join(filter(None, [
             f"{len(bad)} tensor(s) differ" if bad else "",

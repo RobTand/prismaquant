@@ -24,6 +24,8 @@ pins release.
 """
 from __future__ import annotations
 
+from prismaquant import joint_quantum_row as quantum_row
+
 import copy
 import gzip
 import hashlib
@@ -32,6 +34,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from prismaquant.joint_campaign_ledger import seal_quantum_record
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -212,7 +216,7 @@ def test_builder_declares_one_render_phase_per_retained_window(tmp_path):
         render_prerequisite=dict(RENDER_PREREQ),
         prepared_inputs=_prepared_inputs(record, files))
     names = [phase["name"] for phase in manifest["read_plan"]["phases"]]
-    assert names == list(jl.quantum_executable_phase_names(
+    assert names == list(quantum_row.quantum_executable_phase_names(
         [3], 2, n_probes=N_PROBES, replay_windows=len(record["windows"]),
         render_phases=True))
     for window, _ in WINDOW_PAIRS:
@@ -241,7 +245,7 @@ def test_builder_keeps_legacy_bytes_without_prepared_inputs(tmp_path):
         render_prerequisite=dict(RENDER_PREREQ))
     assert "prepared_input" not in manifest["annotations"]
     assert [phase["name"] for phase in manifest["read_plan"]["phases"]] == (
-        list(jl.quantum_executable_phase_names(
+        list(quantum_row.quantum_executable_phase_names(
             [3], 2, n_probes=N_PROBES,
             replay_windows=len(record["windows"]))))
     assert manifest == kwargs["manifest"]
@@ -409,7 +413,7 @@ def test_dispatch_refuses_foreign_prepared_roster(
     manifest_path.write_bytes(wire)
     bound["executable_readset"]["manifest_sha256"] = hashlib.sha256(
         wire).hexdigest()
-    (records / "layer-002.json").write_text(json.dumps(bound))
+    (records / "layer-002.json").write_text(json.dumps(seal_quantum_record(bound)))
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
         ["--records", str(records), "--output-root", str(out),
@@ -438,7 +442,7 @@ def test_dispatch_refuses_mover_reference_shaped_contract(
         wire).hexdigest()
     bound["executable_readset"]["prepared_input"] = copy.deepcopy(
         impostor["annotations"]["prepared_input"])
-    (records / "layer-002.json").write_text(json.dumps(bound))
+    (records / "layer-002.json").write_text(json.dumps(seal_quantum_record(bound)))
     gateway = dispatch.FakeGateway()
     code = dispatch.main(
         ["--records", str(records), "--output-root", str(out),

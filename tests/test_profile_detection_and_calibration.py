@@ -4,7 +4,7 @@ import torch
 
 from prismaquant import build_production_cache
 from prismaquant.model_profiles import DefaultProfile, detect_profile_with_warning
-from prismaquant.validate_assignments_kl import _load_calibration_repeats
+from prismaquant.calibration_data import CalibrationRequest, load_validation_calibration
 
 
 def test_detect_profile_with_warning_logs_default_profile(tmp_path, capsys):
@@ -30,7 +30,7 @@ def test_validate_assignment_dataset_loader_forwards_calib_seed(monkeypatch):
         return torch.zeros((n_samples, seqlen), dtype=torch.long)
 
     monkeypatch.setattr(
-        "prismaquant.validate_assignments_kl.load_calibration",
+        "prismaquant.calibration_data.load_calibration",
         fake_load_calibration,
     )
     tokenizer = object()
@@ -44,7 +44,7 @@ def test_validate_assignment_dataset_loader_forwards_calib_seed(monkeypatch):
         calib_repeat_seed_stride=1000,
     )
 
-    out = _load_calibration_repeats(tokenizer, args)
+    out = load_validation_calibration(tokenizer, CalibrationRequest.from_namespace(args)).selection_repeats
 
     assert len(out) == 1
     assert seen["args"] == (tokenizer, "calib.jsonl", 3, 8, 123)

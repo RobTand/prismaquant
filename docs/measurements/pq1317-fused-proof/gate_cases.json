@@ -1,0 +1,25 @@
+{
+  "schema": "pq2546.gate-cases.v1",
+  "gate": "prismaquant.tessera_export_lane.require_fused_rung_coherence, called from require_assignment_scope",
+  "licence": "packaged contract fused_module block: q256 per_member, rows per_member, mixed_rung_receipt false",
+  "pbtest": {
+    "action_key": "e827ceebdbaf1dbd0c8e660a4629fc685142d3da91cb45b070dc88cf63146c13",
+    "host": "dl380g10",
+    "interpreter": "/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python",
+    "summary": "5 passed, 43 deselected",
+    "reconciliation": {"collected": 5, "ran": 5, "passed": 5, "problems": []},
+    "record": "/home/rob/fleet/ceo/exec/ig-pq-2546-l1-a1/fused-gates-qualified-pbtest.json"
+  },
+  "cases": [
+    {"node": "test_uniform_fused_module_never_reads_the_licence", "outcome": "pass", "proves": "uniform modules pass without reading the licence"},
+    {"node": "test_mixed_rung_fused_module_is_refused_without_a_serve_receipt", "outcome": "pass", "proves": "mixed rungs refuse while mixed_rung_receipt is false"},
+    {"node": "test_mixed_rung_fused_module_with_a_receipt_is_reported", "outcome": "pass", "proves": "mixed rungs with a receipt pass and are reported"},
+    {"node": "test_mixed_rung_fused_module_needs_a_published_licence", "outcome": "pass", "proves": "mixed rungs refuse with no fused_module block"},
+    {"node": "test_fused_module_mixing_a_tessera_wire_with_bf16_is_refused", "outcome": "pass", "proves": "mixed decoder families refuse even with a receipt"}
+  ],
+  "bound_allocations": [
+    {"name": "x_picks", "gate": "pass", "mixed_groups": 0},
+    {"name": "a8s", "gate": "pass", "mixed_groups": 0},
+    {"name": "balanced", "gate": "pass", "mixed_groups": 0}
+  ]
+}

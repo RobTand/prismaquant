@@ -189,7 +189,8 @@ function branchPolicy(pullRequest) {
   if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) {
     throw new Error("pull request creation time is missing or malformed");
   }
-  const exempt = branch.startsWith("ig/") || branch.startsWith("release") ||
+  const exempt = branch.startsWith("ig/") || branch.startsWith("pg/") || branch.startsWith("pg-train/") ||
+    branch.startsWith("release") ||
     Date.parse(createdAt) < BRANCH_RULE_CUTOFF;
   const match = branch.match(/^prismaquant-([0-9]+)(-[a-z0-9][a-z0-9-]*)?$/);
   return { branch, exempt, issueNumber: match ? Number(match[1]) : null };

@@ -181,7 +181,7 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None, added=None,
 
 def _campaign_identity(tmp_path, inputs):
     """The frozen campaign identity an operator seals once, bound by path and digest."""
-    from tools.dispatch_tessera_campaign import campaign_identity, joint_campaign_scope
+    from prismaquant.tessera_campaign_table import (campaign_identity, joint_campaign_scope)
     plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
     return _write(tmp_path, 'campaign-identity.json', campaign_identity(joint_campaign_scope(plan)))
 
@@ -189,7 +189,7 @@ def _campaign_identity(tmp_path, inputs):
 def _expected_scope(inputs, identity):
     """The scope the dispatcher stamps on a campaign-scoped submission
     (``dispatch_tessera_campaign.cmd_submit_joint``)."""
-    from tools.dispatch_tessera_campaign import joint_campaign_scope
+    from prismaquant.tessera_campaign_table import (joint_campaign_scope)
     plan = json.loads(Path(inputs['original_plan']['path']).read_bytes())
     return {**joint_campaign_scope(plan), 'campaign_identity_sha256': identity['sha256']}
 
@@ -441,7 +441,7 @@ def test_a_tampered_derived_scope_refuses(tmp_path, campaign, probe, change):
     the identity file's fields, the plan's stated digests and counts, and the
     bindings the derivation names. Changed bytes under the bound digest
     refuse before any field is read."""
-    from tools.dispatch_tessera_campaign import campaign_identity
+    from prismaquant.tessera_campaign_table import (campaign_identity)
     inputs, receipt, capture, identity, scope = _scoped_case(tmp_path, campaign, probe)
     bound = create_extension(inputs=inputs, adjoint_capture=capture, output=tmp_path/'extension.json',
                              campaign_identity=identity)
@@ -586,7 +586,7 @@ def test_a_recovered_stage_a_binds_its_canonical_roster_spelling(tmp_path, campa
     so a recovered run's band can create it; either spelling on the other
     kind of run refuses."""
     from prismaquant.joint_catalog_extension import extension_run_header
-    from prismaquant.joint_layer_quanta import roster_digest
+    from prismaquant.joint_campaign_ledger import (roster_digest)
     inputs, receipt, _ = _pair(tmp_path, campaign, probe)
     newline = receipt['run_identity']['unit_roster_sha256']
     canonical = roster_digest(campaign['roster'])

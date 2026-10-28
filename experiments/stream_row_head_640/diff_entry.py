@@ -44,6 +44,15 @@ def unwrap(value):
     return value
 
 
+def displayed_value(value, path):
+    """Render a known difference, distinguishing an absent key from its value."""
+    for part in path:
+        if isinstance(value, dict) and part not in value:
+            return "<missing>"
+        value = value[part]
+    return repr(value)[:300]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -66,12 +75,9 @@ def main() -> int:
         paths = ca.differences(da, db)
         print(f"  differing fields: {len(paths)}")
         for path in paths:
-            va, vb = da, db
-            for part in path:
-                va, vb = va[part], vb[part]
             dotted = ".".join(map(str, path)) or "<root>"
-            print(f"    {dotted}\n      {name_a}: {repr(va)[:300]}"
-                  f"\n      {name_b}: {repr(vb)[:300]}"
+            print(f"    {dotted}\n      {name_a}: {displayed_value(da, path)}"
+                  f"\n      {name_b}: {displayed_value(db, path)}"
                   f"\n      volatile: {ca.volatile(path)}")
         if isinstance(da, dict):
             print(f"  keys: {sorted(map(str, da))}")

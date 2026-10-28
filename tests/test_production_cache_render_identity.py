@@ -14,10 +14,12 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
 import torch
 import torch.nn as nn
 
 from prismaquant.production_weight_cache import fill_production_weight_cache
+from prismaquant.render_cache_paths import cache_weight_filename
 
 
 class _TinyTwoLinear(nn.Module):
@@ -183,6 +185,64 @@ def test_fresh_directory_writes_validated_sidecar(tmp_path, monkeypatch):
     assert identity["rendered_pairs"] == ["l1|NVFP4", "l2|NVFP4"]
 
 
+@pytest.mark.parametrize("first_writer", [
+    "streamed", "different-resident", "same-resident", "pre_guard_resident",
+])
+def test_first_published_render_identity_survives_a_concurrent_resident_start(
+    first_writer, tmp_path, monkeypatch,
+):
+    import prismaquant.production_weight_cache as pwc
+
+    _fake_render_env(monkeypatch)
+    calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
+    sidecar = _sidecar(tmp_path)
+    if first_writer == "pre_guard_resident":
+        torch.save(torch.eye(32), tmp_path / cache_weight_filename("l1", "NVFP4"))
+    injected = False
+    first_bytes = None
+
+    def interleave(publish):
+        def after_first_writer(path, payload, **kwargs):
+            nonlocal injected, first_bytes
+            if path == sidecar and not injected:
+                injected = True
+                if first_writer == "streamed":
+                    pwc.claim_streamed_cache_directory(
+                        tmp_path, render_scope="format-menu",
+                        requested_formats=["NVFP4"], levers={},
+                        calib_hash="streamed-calibration",
+                        render_formats_by_qname={"l1": ["NVFP4"]},
+                        max_act_rows=8,
+                    )
+                else:
+                    first_ids = (
+                        calib_ids if first_writer in {"same-resident", "pre_guard_resident"}
+                        else torch.tensor([[2, 3]], dtype=torch.long)
+                    )
+                    with monkeypatch.context() as listing:
+                        if first_writer == "pre_guard_resident":
+                            # The two starts observe different unregistered
+                            # shard listings, but the same rendering inputs.
+                            listing.setattr(pwc, "_pre_guard_trusted_shards", lambda _path: [])
+                        _fill(_TinyTwoLinear(), first_ids, tmp_path)
+                first_bytes = sidecar.read_bytes()
+            return publish(path, payload, **kwargs)
+
+        return after_first_writer
+
+    # Interleave the actual first writer at either publication boundary, so
+    # the oracle covers the old replace and the corrected no-clobber publish.
+    monkeypatch.setattr(pwc, "atomic_write_bytes", interleave(pwc.atomic_write_bytes))
+    monkeypatch.setattr(pwc, "publish_new_bytes", interleave(pwc.publish_new_bytes))
+    if first_writer in {"same-resident", "pre_guard_resident"}:
+        _fill(_TinyTwoLinear(), calib_ids, tmp_path)
+    else:
+        with pytest.raises(ValueError, match="streamed fill|calib_hash"):
+            _fill(_TinyTwoLinear(), calib_ids, tmp_path)
+    assert injected and first_bytes is not None
+    assert sidecar.read_bytes() == first_bytes
+
+
 def test_preguard_directory_warns_and_adopts_identity(
     tmp_path, monkeypatch, capsys
 ):
@@ -192,7 +252,7 @@ def test_preguard_directory_warns_and_adopts_identity(
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     assert not _sidecar(tmp_path).exists()
 
@@ -270,7 +330,7 @@ def test_preguard_shards_record_trust_admission(tmp_path, monkeypatch):
 
     _fake_render_env(monkeypatch)
     model = _TinyTwoLinear()
-    shard_name = pwc._cache_weight_filename("l1", "NVFP4")
+    shard_name = cache_weight_filename("l1", "NVFP4")
     torch.save(
         model.l1.weight.detach().to(torch.float32),
         tmp_path / shard_name,
@@ -319,7 +379,7 @@ def test_append_merge_preserves_trust_admission(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     _fill(model, torch.tensor([[0, 1]], dtype=torch.long), tmp_path)
     before = json.loads(_sidecar(tmp_path).read_text())
@@ -346,7 +406,7 @@ def test_base_adoption_preserves_trust_admission(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     # An append running first in a pre-guard directory records the admission
     # alongside its section; the base fill then adopts the append-only file.
@@ -380,7 +440,7 @@ def test_trust_admission_causes_no_false_mismatch(tmp_path, monkeypatch):
     model = _TinyTwoLinear()
     torch.save(
         model.l1.weight.detach().to(torch.float32),
-        tmp_path / pwc._cache_weight_filename("l1", "NVFP4"),
+        tmp_path / cache_weight_filename("l1", "NVFP4"),
     )
     calib_ids = torch.tensor([[0, 1]], dtype=torch.long)
     _fill(model, calib_ids, tmp_path)

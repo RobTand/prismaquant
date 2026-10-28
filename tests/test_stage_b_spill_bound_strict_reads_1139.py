@@ -122,7 +122,7 @@ def _bind_stage(tmp_path, monkeypatch, manifest, digest, *, skip=()):
             "bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
         copies[path] = str(copy)
     monkeypatch.setattr(staged_whole_file, "read_staged_entry",
-                        lambda resolver, path, staged, *, label:
+                        lambda resolver, path, staged, *, label, max_bytes=None:
                         Path(staged["stage_path"]).read_bytes())
     reads = io.StagedPreparationReads(_StageDouble(entries), manifest_sha256=digest)
     monkeypatch.setattr(io, "_STAGED_READS", reads)

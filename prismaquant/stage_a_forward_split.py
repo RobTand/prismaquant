@@ -23,7 +23,7 @@ row that any free GPU can run:
   record. A range is whole read windows (``prefetch_batches``), so each
   quantum's produced-output groups are its own.
 * **One join.** It holds the ranges to the partition plane with
-  :func:`~prismaquant.cost_streaming.verify_boundary_partition_coverage`,
+  :func:`~prismaquant.streamed_boundary_artifacts.verify_boundary_partition_coverage`,
   requires every quantum's owner status to be ``complete``, publishes the
   tail checkpoint from the partials with the chain split's own join
   (:func:`~prismaquant.stage_a_chain_split.join_split_checkpoint`), and

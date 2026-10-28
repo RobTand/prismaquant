@@ -38,6 +38,7 @@ import json
 import os
 import re
 import struct
+from pathlib import Path
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 #: A safetensors header is a u64 length and that many bytes of JSON. This
@@ -305,3 +306,41 @@ def chain_opening_window(order: Sequence[int], lookahead: int) -> tuple[int, ...
     all, are asked for first, nearest first.
     """
     return tuple(order[:max(1, int(lookahead))])
+
+
+def read_tensor_header(path: Path) -> dict[str, dict]:
+    """Read one safetensors-compatible container header, never its data."""
+
+    header, _base, _size = read_safetensors_header(str(path))
+    return {
+        name: meta for name, meta in header.items() if name != "__metadata__"
+    }
+
+
+def read_artifact_shard_headers(artifact_dir: str | Path) -> dict[str, dict[str, dict]]:
+    """``{shard file name: {tensor name: safetensors metadata}}``. Headers only.
+
+    The shards are the index's ``weight_map`` values, or the one
+    ``model.safetensors`` of an unindexed checkpoint, in sorted order. Each
+    tensor is attributed to the file whose header names it, so a caller that
+    needs to know which file a read opens (source authentication hashes whole
+    files, RobTand/prismaquant#1491) reads it here instead of re-deriving the
+    index rule.
+    """
+
+    root = Path(artifact_dir)
+    index = root / "model.safetensors.index.json"
+    if index.exists():
+        shards = sorted(set(json.loads(index.read_text())["weight_map"].values()))
+    else:
+        shards = ["model.safetensors"]
+    return {shard: read_tensor_header(root / shard) for shard in shards}
+
+
+def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
+    """``{tensor name: safetensors metadata}`` across every shard. Headers only."""
+
+    header: dict[str, dict] = {}
+    for shard_header in read_artifact_shard_headers(artifact_dir).values():
+        header.update(shard_header)
+    return header

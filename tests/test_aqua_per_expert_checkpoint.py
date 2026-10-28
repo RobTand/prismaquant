@@ -331,8 +331,8 @@ def test_the_shard_handle_cache_releases_an_evicted_shard(tmp_path, monkeypatch)
     assert cache._open == {}
 
 
-def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
-    """The trace root asked for: joint rows are exempt, not double-counted.
+def test_a_joint_row_is_never_stamped_with_the_aqua_a_side():
+    """The A-side merge preserves a real joint-priced row.
 
     A joint row's one signed residual already carries the weight, activation and
     mixed terms under a single downstream Fisher, and
@@ -343,12 +343,10 @@ def test_a_joint_row_is_never_stamped_with_the_aqua_a_side(monkeypatch):
     row and stop the allocation.
     """
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.allocator_candidates import ACT_DLOSS_KEY
+    from prismaquant.priced_cell import ACT_DLOSS_KEY
 
-    joint: dict = {}                      # sentinel: the predicate is the subject
+    joint = _joint_row("a", "NVFP4")
     costs = {"a": {"NVFP4": joint}}
-    monkeypatch.setattr(aqc, "cost_entry_is_joint_aura", lambda e: e is joint,
-                        raising=False)
     report = aqc.merge_act_dloss(costs, {"a": {"NVFP4": 0.1}})
 
     assert ACT_DLOSS_KEY not in joint, (
@@ -375,10 +373,9 @@ def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
     import math
 
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-    from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
-    from prismaquant.joint_aura import (
-        arithmetic_identity, identity_sha256, make_joint_aura_entry,
-    )
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
+    from prismaquant.joint_aura import arithmetic_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 
     content = {"config": {"fixture": True},
                "weight_map": {"fixture.weight": "fixture.weight"},
@@ -397,7 +394,7 @@ def _joint_row(name, fmt, *, loss=1.0, shape=(_ROWS, _IN)):
              "distribution": "rademacher", "normalization": "global_kl_fisher",
              "temperature": 1.0, "arithmetic": arithmetic}
     operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name,
-                "format": fmt, "probe_identity_sha256": identity_sha256(probe),
+                "format": fmt, "probe_identity_sha256": joint_identity_sha256(probe),
                 "source_weight": {"content_sha256": "a" * 64,
                                   "shape": list(shape),
                                   "dtype": "torch.float32",
@@ -542,7 +539,7 @@ def test_a_mixed_artifact_prices_exactly_its_legacy_cells(tmp_path,
     import sys
 
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.allocator_candidates import ACT_DLOSS_KEY
+    from prismaquant.priced_cell import ACT_DLOSS_KEY
 
     name = "model.layers.0.mlp.down_proj"
     joint = _joint_row(name, "NVFP4")
@@ -569,7 +566,7 @@ def test_a_malformed_joint_claim_refuses_before_any_pricing(tmp_path,
     import sys
 
     from prismaquant import aqua_activation_cost as aqc
-    from prismaquant.joint_aura import JOINT_CURRENCY
+    from prismaquant.joint_aura_rows import JOINT_CURRENCY
 
     name = "model.layers.0.mlp.down_proj"
     cost_out, argv = _cli_fixture(

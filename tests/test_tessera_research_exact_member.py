@@ -2,10 +2,9 @@
 import pytest
 
 from prismaquant.allocator import require_no_research_exact_member_scalar
-from prismaquant.tessera_campaign import (
-    research_exact_member_scope, select_anchor_groups,
-)
-from tools.dispatch_tessera_campaign import MergeRefused, merge_payloads
+from prismaquant.tessera_campaign_table import (select_anchor_groups)
+from prismaquant.tessera_campaign import research_exact_member_scope
+from prismaquant.tessera_campaign_table import (MergeRefused, merge_payloads)
 
 
 def _selection(members):
@@ -36,6 +35,6 @@ def test_exact_member_rejects_unproven_sample_and_consumers():
     scalar = {"provenance": {"research_exact_member_scope": {"member": "stack.0.down"}}}
     with pytest.raises(SystemExit, match="no allocator or stack-estimate licence"):
         require_no_research_exact_member_scalar(scalar)
-    from prismaquant.tessera_campaign import SCHEMA
+    from prismaquant.tessera_campaign_table import (SCHEMA)
     with pytest.raises(MergeRefused, match="cannot be merged"):
         merge_payloads({"row": {"schema": SCHEMA, **scalar}}, census={}, capture_sha256="0" * 64)

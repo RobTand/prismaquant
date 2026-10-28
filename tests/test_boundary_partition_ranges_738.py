@@ -8,8 +8,7 @@ import pytest
 
 
 def test_512_partitions_cover_without_gaps_or_overlaps():
-    from prismaquant.cost_streaming import (
-        verify_boundary_partition_coverage, plan_boundary_partition_ranges)
+    from prismaquant.streamed_boundary_artifacts import verify_boundary_partition_coverage, plan_boundary_partition_ranges
 
     for n_ranges in (1, 2, 3, 7, 512):
         ranges = plan_boundary_partition_ranges(n_partitions=512, n_ranges=n_ranges)
@@ -20,7 +19,7 @@ def test_512_partitions_cover_without_gaps_or_overlaps():
 
 
 def test_widths_differ_by_at_most_one():
-    from prismaquant.cost_streaming import plan_boundary_partition_ranges
+    from prismaquant.streamed_boundary_artifacts import plan_boundary_partition_ranges
 
     widths = [entry["partitions"]
               for entry in plan_boundary_partition_ranges(n_partitions=512, n_ranges=7)]
@@ -28,8 +27,7 @@ def test_widths_differ_by_at_most_one():
 
 
 def test_coverage_refuses_gaps_and_overlaps():
-    from prismaquant.cost_streaming import (
-        verify_boundary_partition_coverage, plan_boundary_partition_ranges)
+    from prismaquant.streamed_boundary_artifacts import verify_boundary_partition_coverage, plan_boundary_partition_ranges
 
     full = plan_boundary_partition_ranges(n_partitions=8, n_ranges=3)
     gapped = [{**full[0]}, {**full[1], "partition_start": 4, "partitions": 2},
@@ -42,8 +40,7 @@ def test_coverage_refuses_gaps_and_overlaps():
 
 
 def test_coverage_refuses_drift_and_bad_counts():
-    from prismaquant.cost_streaming import (
-        verify_boundary_partition_coverage, plan_boundary_partition_ranges)
+    from prismaquant.streamed_boundary_artifacts import verify_boundary_partition_coverage, plan_boundary_partition_ranges
 
     full = plan_boundary_partition_ranges(n_partitions=8, n_ranges=3)
     doubled = full + [full[0]]

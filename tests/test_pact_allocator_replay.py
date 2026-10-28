@@ -15,6 +15,10 @@ evidence.
 """
 from __future__ import annotations
 
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 import json
 import math
 import sys
@@ -68,16 +72,10 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
     monkeypatch.setattr(tessera_menu, "tessera_runtime_contract", lambda: contract)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
 
-    # The pinned scope the shape table must equal: the REAL tracked pin (its
-    # live gate runs against the installed contract), and the installed
-    # contract's eligibility swapped for the same synthetic table the attested
-    # menu reads.
+    # The owned metadata and parsed matching pin carry the exact same bytes.
+    snapshot = install_metadata(monkeypatch, payload)
     pin = pins.load_tessera_serving_runtime_pin()
-    eligibility = lane_eligibility._parse_table(
-        payload["lane_eligibility"], payload["formats"], "", pin.serving_commit,
-        pin.contract_sha256, native_extensions=payload["native_extensions"])
-    published = {row["family"]: row for row in payload["formats"]}
-    monkeypatch.setattr(tessera_render, "_pinned_serving_table", lambda: (eligibility, published))
+    eligibility = snapshot.eligibility
 
     from test_shape_runtime_prices import observation_fixture, _consume_observations
 
@@ -91,6 +89,7 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
         binding = observation_fixture(
             tmp_path, agent=family, m=M, family=family, grid=grid, route=route,
             rate_q256=int(rate), kernel_lane=cell.executes[0], runtime_image=IMAGE,
+            contract_sha256=snapshot.sha256, tessera_commit=pin.serving_commit,
             samples=(milliseconds, milliseconds * 1.01, milliseconds * 0.99))
         observations.append(Path(binding["path"]))
     table = _consume_observations(observations, table_id="pact-fixture")

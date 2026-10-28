@@ -10,11 +10,12 @@ importantly, the four things the admission must NOT do:
   * it must not be described as making AURA activation-quantization-aware;
   * it must not let the currency contract exist in two spellings.
 """
-
 import pathlib
 
 import pytest
 
+from prismaquant import priced_cell
+from prismaquant import source_format_contracts
 from prismaquant import allocator_candidates as candidates
 from prismaquant import anchored_cost
 from prismaquant import format_registry as fr
@@ -26,8 +27,8 @@ _REPO = pathlib.Path(__file__).resolve().parents[1]
 def _anchored_entry(**overrides) -> dict:
     entry = {
         "predicted_dloss": 4.0e-6,
-        "cost_currency": candidates.ANCHORED_AURA_COST_CURRENCY,
-        "cost_source": candidates.ANCHORED_AURA_COST_SOURCE,
+        "cost_currency": priced_cell.ANCHORED_AURA_COST_CURRENCY,
+        "cost_source": priced_cell.ANCHORED_AURA_COST_SOURCE,
         "fisher_application_count": 1,
     }
     entry.update(overrides)
@@ -35,14 +36,14 @@ def _anchored_entry(**overrides) -> dict:
 
 
 def test_anchored_row_needs_all_three_stamps_and_refuses_near_misses():
-    assert candidates.cost_entry_is_anchored_aura_supersurrogate(
+    assert priced_cell.cost_entry_is_anchored_aura_supersurrogate(
         _anchored_entry())
 
     # Each stamp alone is insufficient: drop any one and the claim fails.
     for field in ("cost_currency", "cost_source", "fisher_application_count"):
         partial = _anchored_entry()
         partial.pop(field)
-        assert not candidates.cost_entry_is_anchored_aura_supersurrogate(
+        assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate(
             partial), field
 
     # A plausible-looking near-miss string must not be accepted. This is the
@@ -52,19 +53,19 @@ def test_anchored_row_needs_all_three_stamps_and_refuses_near_misses():
         {"cost_currency": "aura"},
         {"cost_source": "render"},
         {"cost_source": "aura_render"},
-        {"cost_source": candidates.SOURCE_PASSTHROUGH_COST_SOURCE},
+        {"cost_source": priced_cell.SOURCE_PASSTHROUGH_COST_SOURCE},
     ):
-        assert not candidates.cost_entry_is_anchored_aura_supersurrogate(
+        assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate(
             _anchored_entry(**forged)), forged
 
     # The h^2 guard: predicted_dloss already contains the KL-Fisher, so a row
     # claiming a second application is not an anchored row.
     for count in (0, 2, "1", None):
-        assert not candidates.cost_entry_is_anchored_aura_supersurrogate(
+        assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate(
             _anchored_entry(fisher_application_count=count)), count
 
-    assert not candidates.cost_entry_is_anchored_aura_supersurrogate({})
-    assert not candidates.cost_entry_is_anchored_aura_supersurrogate(None)
+    assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate({})
+    assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate(None)
 
 
 def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
@@ -75,7 +76,7 @@ def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
         "test premise: the rung quantizes activations")
 
     anchored_zero = _anchored_entry(predicted_dloss=0.0)
-    assert not candidates.cost_entry_prices_unmeasured_activation_at_zero(
+    assert not priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
         stats, anchored_zero, 0.0, fmt)
 
     # Every other zero-priced row on an activation-quantizing format is still
@@ -85,17 +86,17 @@ def test_anchored_zero_is_retained_but_the_guard_keeps_full_strength():
     for entry in (
         {"predicted_dloss": 0.0},
         {"predicted_dloss": 0.0,
-         "cost_source": candidates.TESSERA_INTERPOLATED_COST_SOURCE},
+         "cost_source": priced_cell.TESSERA_INTERPOLATED_COST_SOURCE},
         _anchored_entry(predicted_dloss=0.0, fisher_application_count=2),
         {k: v for k, v in _anchored_entry(predicted_dloss=0.0).items()
          if k != "cost_currency"},
     ):
-        assert candidates.cost_entry_prices_unmeasured_activation_at_zero(
+        assert priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
             stats, entry, 0.0, fmt), entry
 
     # And the guard's own positive-sensitivity exemption still governs: a
     # measured-dead unit stays free to take the cheapest format.
-    assert not candidates.cost_entry_prices_unmeasured_activation_at_zero(
+    assert not priced_cell.cost_entry_prices_unmeasured_activation_at_zero(
         {"h_trace": 0.0}, {"predicted_dloss": 0.0}, 0.0, fmt)
 
 
@@ -104,14 +105,14 @@ def test_anchored_row_is_priced_directly_and_stamped_with_its_own_branch():
     fmt = "FP8_E4M3"
     entry = _anchored_entry(predicted_dloss=7.5e-6)
 
-    assert candidates.cost_entry_activation_pricing_branch(
-        stats, entry, fmt) == candidates.ANCHORED_AURA_BRANCH
+    assert priced_cell.cost_entry_activation_pricing_branch(
+        stats, entry, fmt) == priced_cell.ANCHORED_AURA_BRANCH
     # Distinguishable from "we looked for a sample and found none".
-    assert candidates.ANCHORED_AURA_BRANCH != candidates.BRANCH_UNCALIBRATED
+    assert priced_cell.ANCHORED_AURA_BRANCH != candidates.BRANCH_UNCALIBRATED
 
-    priced = candidates.cost_entry_predicted_dloss(
+    priced = priced_cell.cost_entry_predicted_dloss(
         stats, entry, format_name=fmt)
-    weight_only = candidates.cost_entry_weight_only_dloss(stats, entry)
+    weight_only = priced_cell.cost_entry_weight_only_dloss(stats, entry)
     assert priced == weight_only, "anchored rows are read directly"
 
 
@@ -132,9 +133,9 @@ def test_anchored_rows_never_enter_the_p5a_calibration_sample():
 def test_the_currency_contract_has_exactly_one_definition():
     """Two spellings is how a near-miss silently routes down the wrong branch."""
     assert anchored_cost.AURA_CURRENCY is (
-        candidates.ANCHORED_AURA_COST_CURRENCY)
+        priced_cell.ANCHORED_AURA_COST_CURRENCY)
     assert anchored_cost.PRODUCTION_RENDER_SOURCE is (
-        candidates.ANCHORED_AURA_COST_SOURCE)
+        priced_cell.ANCHORED_AURA_COST_SOURCE)
 
 
 def test_the_flag_is_not_documented_as_an_activation_error_model():
@@ -150,9 +151,8 @@ def test_the_flag_is_not_documented_as_an_activation_error_model():
     source = (_REPO / "prismaquant/allocator_candidates.py").read_text()
     assert "activation-quantization-BLIND" in source
     assert "NOT a claim that AURA models activation-QUANTIZATION error" in source
-    predicate = source.split(
-        "def cost_entry_is_anchored_aura_supersurrogate")[1].split(
-            "\ndef ")[0]
+    predicate = priced_cell.cost_entry_is_anchored_aura_supersurrogate.__doc__
+    assert predicate is not None
     assert "weights-only" in predicate
     assert "activation-quantization-blind" in predicate
 
@@ -194,22 +194,22 @@ def test_terminals_keep_the_passthrough_contract_not_the_aura_branch():
     """A byte-verbatim terminal is exact by construction, not an anchored row."""
     terminal = {
         "predicted_dloss": 0.0,
-        "cost_currency": candidates.ANCHORED_AURA_COST_CURRENCY,
-        "cost_source": candidates.SOURCE_PASSTHROUGH_COST_SOURCE,
+        "cost_currency": priced_cell.ANCHORED_AURA_COST_CURRENCY,
+        "cost_source": priced_cell.SOURCE_PASSTHROUGH_COST_SOURCE,
         "fisher_application_count": 1,
     }
-    assert not candidates.cost_entry_is_anchored_aura_supersurrogate(terminal)
+    assert not priced_cell.cost_entry_is_anchored_aura_supersurrogate(terminal)
 
     fmt = "MXFP4_SOURCE"
     assert not fr.get_format(fmt).act_quant_changes_input
-    assert candidates.cost_entry_is_source_passthrough(terminal, fmt)
-    assert candidates.cost_entry_activation_pricing_branch(
+    assert priced_cell.cost_entry_is_source_passthrough(terminal, fmt)
+    assert priced_cell.cost_entry_activation_pricing_branch(
         {"h_trace": 1.0}, terminal, fmt) == candidates.BRANCH_SOURCE_PASSTHROUGH
 
     block = "FP8_BLOCK_UE8M0_SOURCE"
     assert not fr.get_format(block).act_quant_changes_input
-    assert block in candidates.SOURCE_PASSTHROUGH_FORMATS
-    assert candidates.cost_entry_is_source_passthrough(terminal, block)
+    assert block in source_format_contracts.SOURCE_PASSTHROUGH_FORMATS
+    assert priced_cell.cost_entry_is_source_passthrough(terminal, block)
 
 
 if __name__ == "__main__":  # pragma: no cover

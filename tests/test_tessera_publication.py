@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant.tessera_publication import (
     BoundedPublisher, PublicationError, PublicationJob,
 )
@@ -232,20 +234,6 @@ def test_a_zero_budget_is_refused_rather_than_silently_synchronous():
 # The campaign's two writes, with and without a publisher
 # ---------------------------------------------------------------------------
 
-class _Spec:
-    act_dtype_name = "a16"
-
-    def bits_for_shape(self, shape):
-        return 4 * shape[0] * shape[1]
-
-    def memory_bytes_for_shape(self, shape):
-        return shape[0] * shape[1] // 2
-
-
-class _Family:
-    name = "TQ"
-
-
 class _Cache:
     def __init__(self, cache_dir):
         self.cache_dir = str(cache_dir)
@@ -253,18 +241,12 @@ class _Cache:
         self.metadata = {}
 
 
-def _prepared():
-    return dict(spec=_Spec(), family=_Family(), rung=1088,
-                activation_qdq=None, input_scale=None, activation_kwargs=None)
-
-
 def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
             barrier=None, blob=b"wire-bytes"):
-    """Run ``_finish_anchor`` over fakes, optionally behind a save barrier."""
+    """Measure a cell with controlled encoding, optionally behind a save barrier."""
     import torch
 
     from prismaquant import production_weight_cache as pwc
-    from prismaquant import tessera_campaign as tc
 
     monkeypatch.setattr(
         pwc, "_local_forward_render_score",
@@ -283,13 +265,15 @@ def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
     cache_dir.mkdir(parents=True, exist_ok=True)
     wire_dir.mkdir(parents=True, exist_ok=True)
     weight = torch.zeros((8, 8), dtype=torch.bfloat16)
-    return tc._finish_anchor(
+    from prismaquant import tessera_render
+    monkeypatch.setattr(tessera_render, 'encode_tessera_unit',
+                        lambda *_args, **_kwargs: (torch.zeros((8, 8)), blob))
+    return cell_measurement.measure_cell(
         qname=qname, weight=weight, activations=torch.zeros((4, 8)),
         # Uppercase because the cache canonicalises its key and the wire path
         # does not; a mixed-case name would name two different things.
-        format_name="NVFP4", cache=_Cache(cache_dir), wire_dir=wire_dir,
-        prepared=_prepared(), render=torch.zeros((8, 8)), blob=blob,
-        elapsed=1.0, publisher=publisher), cache_dir, wire_dir
+        format_name="TESSERA_E4M3_K1_R1024", cache=_Cache(cache_dir), wire_dir=wire_dir,
+        hessian_required=False, publisher=publisher), cache_dir, wire_dir
 
 
 def test_a_blocked_writer_blocks_the_encode_thread_when_publication_is_synchronous(
@@ -326,18 +310,18 @@ def test_a_publisher_lets_the_next_unit_start_while_the_writer_is_blocked(
         # still inside torch.save. That is the whole point of the change.
         assert anchor.qname == "model.layers.0.q"
         assert pub.outstanding == 1
-        assert not (wire_dir / "model__layers__0__q__NVFP4.tessera").exists(), (
+        assert not (wire_dir / "model__layers__0__q__TESSERA_E4M3_K1_R1024.tessera").exists(), (
             "the wire landed before the render it is sequenced behind")
         assert pub.completed() == [], (
             "a job reported complete while its writer was still blocked")
         barrier.set()
-        assert pub.drain() == [("files", "model.layers.0.q", "NVFP4")]
+        assert pub.drain() == [("files", "model.layers.0.q", "TESSERA_E4M3_K1_R1024")]
     finally:
         barrier.set()
         pub.close()
     # The drain leaves ordinary files, in the ordinary places, with the
     # ordinary names: nothing here is a new store.
-    assert (wire_dir / "model__layers__0__q__NVFP4.tessera").read_bytes() == b"wire-bytes"
+    assert (wire_dir / "model__layers__0__q__TESSERA_E4M3_K1_R1024.tessera").read_bytes() == b"wire-bytes"
     assert len(list(cache_dir.glob("*"))) == 1
     assert not list(cache_dir.glob("*.tmp"))
 
@@ -464,7 +448,7 @@ def test_the_temporary_file_is_not_left_behind_by_a_completed_publication(
     finally:
         pub.close()
     assert [p.name for p in wire_dir.glob("*")] == [
-        "model__layers__0__q__NVFP4.tessera"]
+        "model__layers__0__q__TESSERA_E4M3_K1_R1024.tessera"]
     assert not [p.name for p in cache_dir.glob("*.tmp")]
     assert os.listdir(cache_dir)
 
@@ -490,8 +474,8 @@ def _ledger(publisher, journalled):
 
 
 def _files_job(publisher, name, publish):
-    """Stand in for the render/wire job ``_finish_anchor`` submits."""
-    from prismaquant.tessera_campaign import FILES_JOB
+    """Stand in for the render/wire job ``measure_cell`` submits."""
+    from prismaquant.tessera_cell_measurement import FILES_JOB
 
     _stage(publisher, PublicationJob(
         key=(FILES_JOB, name, "NVFP4"), charged_bytes=1, publish=publish))
@@ -642,7 +626,6 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     runs a campaign holding bytes nobody reserved.
     """
     from prismaquant import autoscale
-    from tools import dispatch_tessera_campaign as dispatch
 
     seen: dict = {}
 
@@ -651,7 +634,7 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
         return {"memory_bytes": 100}
 
     monkeypatch.setattr(autoscale, "selected_anchor_resources", selected)
-    dispatch._streamed_resource_plan(
+    campaign_rows.streamed_resource_plan(
         dict(model="/source", campaign_argv=[
             "--streaming", "--publication-overlap-bytes", "8388608",
             "--campaign-identity-bytes", "536870912"]),
@@ -661,7 +644,7 @@ def test_the_dispatcher_carries_the_staging_bound_into_the_plan(monkeypatch):
     assert seen["campaign_identity_bytes"] == 536870912
 
     seen.clear()
-    dispatch._streamed_resource_plan(
+    campaign_rows.streamed_resource_plan(
         dict(model="/source", campaign_argv=["--streaming"]),
         dict(unit_shapes={"a": [3, 4]}, counts={"a": 9}), ["a"],
         selected_source=True)

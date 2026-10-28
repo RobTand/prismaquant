@@ -1,7 +1,7 @@
 """Actual CPU tensor regression for calibration counts independent of H/score rows."""
 import unittest
 import torch
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
 
 class CaptureCountTests(unittest.TestCase):
@@ -11,7 +11,7 @@ class CaptureCountTests(unittest.TestCase):
                    torch.arange(12, 24, dtype=torch.float32).reshape(3, 4)]
         for cap in (0, 2):
             with self.subTest(max_rows=cap):
-                rows, hess, counts, maxima = _collect_activations(
+                rows, hess, counts, maxima = capture_activation_statistics(
                     net, ['0'], batches, max_rows=cap, device='cpu', want_hessian=False)
                 self.assertEqual(counts, {'0': 6})
                 self.assertEqual(hess, {})
@@ -21,7 +21,7 @@ class CaptureCountTests(unittest.TestCase):
     def test_hessian_mode_keeps_full_gram_and_same_row_count(self):
         net = torch.nn.Sequential(torch.nn.Linear(4, 3, bias=False)).eval()
         batches = [torch.arange(24, dtype=torch.float32).reshape(6, 4)]
-        rows, hess, counts, maxima = _collect_activations(
+        rows, hess, counts, maxima = capture_activation_statistics(
             net, ['0'], batches, max_rows=0, device='cpu', want_hessian=True)
         self.assertEqual(counts, {'0': 6})
         self.assertIsNone(rows['0'])

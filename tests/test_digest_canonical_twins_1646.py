@@ -9,9 +9,8 @@ is byte-identical by construction, including int keys (numeric sort, #1640
 lesson). The fixture holds base-computed sha/text on fixed inputs (unicode,
 int keys, NaN literal for the lax profile).
 
-Kept, not widened: ``reseal_campaign_identity`` (stdlib-only by documented
-decision), ``measure_served_gold`` (torch-free), ``serve_fingerprint``
-(serving container, no package).
+The reseal package uses the owned checkpoint profiles. Independent served
+measurement and serving-container encodings retain their existing boundaries.
 """
 
 from __future__ import annotations

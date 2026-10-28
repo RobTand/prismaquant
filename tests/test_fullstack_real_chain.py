@@ -718,10 +718,7 @@ def _measured_row(qname, fmt, probe, sign, activation_max_abs):
     deterministic fixture outputs of actual reads, sealed by the same
     production entry constructor the runtime publishes.
     """
-    from prismaquant.joint_aura import (  # noqa: E402
-        identity_sha256,
-        make_joint_aura_entry,
-    )
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
     from prismaquant.production_weight_cache import (  # noqa: E402
         _cb_cache_tensor_identity,
     )
@@ -734,7 +731,7 @@ def _measured_row(qname, fmt, probe, sign, activation_max_abs):
                 "format": fmt, "source_weight": weight,
                 "rendered_weight": weight, "activation": activation,
                 "arithmetic": probe["arithmetic"],
-                "probe_identity_sha256": identity_sha256(probe)}
+                "probe_identity_sha256": joint_identity_sha256(probe)}
     steps = [sign * (i + 1) * (1 if i % 2 == 0 else -1) for i in range(3)]
     return make_joint_aura_entry(
         operator_identity=operator, probe_identity=probe,

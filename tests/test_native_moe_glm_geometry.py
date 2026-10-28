@@ -234,20 +234,10 @@ def test_a_rank_outside_its_world_is_refused(rank, diagnostic):
     assert diagnostic in str(caught.value), str(caught.value)
 
 
-def test_an_indivisible_cut_is_refused_rather_than_rounded():
-    """The divisibility rule is reachable only through a shape that is legal.
-
-    GLM's own intermediate is 2048, so 2047 is refused earlier -- by the source
-    comparison, which is the stronger check. The divisibility rule is a
-    property of the cut itself and is tested where it can be reached: the
-    validator is called directly with a legal-source shape whose intermediate
-    is a multiple of nothing, so the refusal is about arithmetic rather than
-    provenance.
-    """
+def test_source_geometry_mismatch_refuses_and_valid_tp2_passes():
     with pytest.raises(ValueError) as caught:
         panel.validate_geometry(glm_shape(intermediate_size=2047, tensor_parallel=2))
     assert "refusing a stack that is not the captured one" in str(caught.value), str(caught.value)
-    # And with the source comparison satisfied, an odd cut is still refused.
     legal = glm_shape(intermediate_size=2048, tensor_parallel=3 - 1)
     assert panel.validate_geometry(legal)["tensor_parallel"] == 2
 
@@ -349,12 +339,7 @@ def test_a_source_that_does_not_renormalize_its_top_k_weights_is_refused():
 
 
 def test_a_correction_bias_must_be_the_sources_fp32_bias():
-    """A missing bias stays missing; a present one must be the source's FP32 bias.
-
-    `None` is legitimate here and says this source has no correction bias. What
-    is refused is a bias that claims to be present and is not the captured FP32
-    tensor, because the selection rule reads its values.
-    """
+    """Malformed present bias records cannot replace the captured FP32 bias."""
     for bad in ({"content_sha256": "b" * 64, "dtype": "torch.bfloat16"},
                 {"content_sha256": "b" * 64},
                 "b" * 64):

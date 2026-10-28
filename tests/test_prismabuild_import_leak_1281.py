@@ -353,6 +353,7 @@ def test_source_consumers_restore_the_public_plugin_import_graph():
     program = (
         "import importlib, sys, pytest\n"
         "import prismabuild.core as core\n"
+        "import prismabuild.storage_tiers as storage_tiers\n"
         "import prismabuild.pytest_test_bound as plugin\n"
         "package = sys.modules['prismabuild']\n"
         "before = {n: m for n, m in sys.modules.items() "
@@ -366,6 +367,8 @@ def test_source_consumers_restore_the_public_plugin_import_graph():
         "assert all(after[n] is before[n] for n in before)\n"
         "assert importlib.import_module('prismabuild.core') is core\n"
         "assert package.core is core\n"
+        "assert importlib.import_module('prismabuild.storage_tiers') is storage_tiers\n"
+        "assert package.storage_tiers is storage_tiers\n"
         "assert sys.modules['prismabuild.pytest_test_bound'] is plugin\n"
         "print('public plugin graph restored')\n"
     )

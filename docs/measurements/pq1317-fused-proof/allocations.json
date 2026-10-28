@@ -1,0 +1,54 @@
+{
+  "schema": "pq2546.allocations.v1",
+  "method": "canonicalize_assignment, then serving_groups_by_key, _fused_sibling_groups, and require_fused_rung_coherence under detect_profile(/mnt/shared/models/GLM-5.3-Flash-BF16). No stack_decisions in any allocation, so no member-map expansion applied; routed experts are unpacked per-expert units bound by tessera_expert_projection.",
+  "producer_action": "a56a86a36f2fdbe4b397f2e1bd46acee1240af33eaa9db6bfb58cc7c9813a8d6",
+  "recomputed_action": "7680586a544446a636150f9688a25f451e277db06fd32cb9a941ecef0c55cef0",
+  "recomputed_host": "dl380g10",
+  "recomputed_interpreter": "/home/rob/venvs/pq-pin-fca4c6ce0-pb027103d9/bin/python",
+  "retained_probe": "/mnt/shared/tessera-measurements/pq2546-a1/source-probe.json",
+  "allocations": [
+    {
+      "name": "x_picks",
+      "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/topology-1278-20260925/scoped-alloc-v38-6be66bc/layer_config.json",
+      "sha256": "b0cc6063d49ede76b5e5e0b1b00ca0c76a4f0b857dd108b47e38dbc03e14e657",
+      "bytes": 247478406,
+      "units": 36547,
+      "target_profile": "glm_packed_research_sm121",
+      "menu": {"priced_rungs": 19, "attested_rungs": 0, "research_admitted_rungs": 19, "menu_mode": "research"},
+      "formats": {"BF16": 238, "TESSERA_E4M3_K1_R1024": 3, "TESSERA_BF16_K1_R832": 4, "TESSERA_E4M3_K1_R1088": 3, "TESSERA_BF16_K1_R1088": 8, "TESSERA_BF16_K1_R1024": 35426, "TESSERA_E4M3_K1_R896": 864, "TESSERA_E4M3_K1_R832": 1},
+      "serving_groups": {"packed": 42, "fused": 70},
+      "fused_groups": 70,
+      "mixed_fused_groups": {},
+      "fused_gate": {"outcome": "pass", "result": null}
+    },
+    {
+      "name": "a8s",
+      "path": "/mnt/shared/tessera-runs/moe/glm53-a8-bf16menu-20260930/release/layer_config.json",
+      "sha256": "153a4d53f2672098242a1e6b2d5e6acfb2fee2ca17496b66f97e2cbf395adc9d",
+      "bytes": 179803939,
+      "units": 37414,
+      "target_profile": "glm_packed_research_sm121",
+      "menu": {"priced_rungs": 19, "attested_rungs": 1, "research_admitted_rungs": 0, "menu_mode": "attested"},
+      "formats": {"BF16": 238, "TESSERA_E4M3_K1_R1024": 36312, "TESSERA_BF16_K1_R1024": 864},
+      "serving_groups": {"packed": 43, "fused": 71},
+      "fused_groups": 71,
+      "mixed_fused_groups": {},
+      "fused_gate": {"outcome": "pass", "result": null}
+    },
+    {
+      "name": "balanced",
+      "path": "/mnt/shared/tessera-runs/moe/glm53-pact-balanced-20260928/inputs/balanced-assignment.json",
+      "sha256": "b36e6634dae0cacd0ce6469eebe921e67bc10b4d5b49329fcb14e759e4b3ab8f",
+      "bytes": 188462210,
+      "units": 37414,
+      "target_profile": "glm_packed_research_sm121",
+      "menu": {"priced_rungs": 19, "attested_rungs": 0, "research_admitted_rungs": 1, "menu_mode": "research"},
+      "formats": {"TESSERA_E2M1_K2_R896": 25130, "TESSERA_BF16_K1_R1024": 8689, "TESSERA_E4M3_K1_R1024": 3468, "BF16": 127},
+      "serving_groups": {"packed": 43, "fused": 71},
+      "fused_groups": 71,
+      "mixed_fused_groups": {},
+      "fused_gate": {"outcome": "pass", "result": null}
+    }
+  ],
+  "module_census_note": "The fused census counts allocator serving groups (gate/up fused modules plus dense pairs), not vLLM fused tensors. Routed experts ride packed groups, uniform per layer in every allocation. The published module census (x_picks 57 modules / 36309 units; a8s manifest 120 shards) is bound in bindings.json and matches the assignments above."
+}
