@@ -1292,7 +1292,7 @@ class StreamedBoundaryArtifacts:
         """
         return [dict(ref) for ref in self._produced_origin_batches]
 
-    def write_produced_files(self, files, *, kind, boundary_index):
+    def write_produced_files(self, files, *, kind, boundary_index, paced: bool | None = None):
         """Write small files into the generation directory as one group.
 
         ``files`` is an ordered list of ``(name, bytes)`` pairs. An owner
@@ -1303,6 +1303,8 @@ class StreamedBoundaryArtifacts:
         group's PB reservation and PrismaBuild exports them in list order.
         This method returns only after the export is acknowledged, so a
         caller that puts its record last can rely on the record's presence.
+        ``paced`` selects this group's PB export mode; ``None`` preserves
+        the backend's sealed default.
         Without the spool each file is written through its ``.tmp`` name
         and linked into place, in the same order.
 
@@ -1376,7 +1378,8 @@ class StreamedBoundaryArtifacts:
                     _write_new_file(path, payload)
                     spool.record(batch_id, dataclasses.replace(
                         reference, path=str(path)), self.directory)
-                spool.submit(batch_id)
+                options = {} if paced is None else {"paced": paced}
+                spool.submit(batch_id, **options)
                 # The handoff record's barrier: on the export's own state,
                 # never a clock (PQ #1110).
                 spool.await_group(batch_id, where="produced-files")
