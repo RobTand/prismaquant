@@ -38,7 +38,7 @@ from tests import test_no_tautological_tests as guard
          None, None),
     ],
 )
- def test_scan_mechanical_tautologies(tmp_path, body, rule, line):
+def test_scan_mechanical_tautologies(tmp_path, body, rule, line):
     source = "def test_sample():\n" + textwrap.indent(body, "    ") + "\n"
     (tmp_path / "test_sample.py").write_text(source, encoding="utf-8")
     expected = [] if rule is None else [Finding("test_sample.py", line, "test_sample", rule)]
