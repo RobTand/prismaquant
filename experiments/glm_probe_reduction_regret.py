@@ -55,8 +55,15 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from multiprocessing import get_context
+from pathlib import Path
 
 import numpy as np
+
+# Support direct-script execution from an uninstalled checkout as well as -m.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.qnames import DOTTED_LAYER_QNAME
 
 BASE = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908"
 WORKSPACE = f"{BASE}/first-proof-anchor-preparation-05/workspace"
@@ -67,7 +74,7 @@ CURRENCY = "output_mse_under_route_activation_contract"
 BYTE_TARGET = 155_668_854_528
 TOTAL_QUANTIZABLE_PARAMS = 305_915_756_544
 DENSE_TOKENS = 262_144
-LAYER_RE = re.compile(r"\.layers\.(\d+)\.")
+LAYER_RE = DOTTED_LAYER_QNAME
 EXPERT_RE = re.compile(r"\.experts\.(\d+)\.(\w+)$")
 DENSE_PROJ_RE = re.compile(r"^(.*)\.(\w+)$")
 

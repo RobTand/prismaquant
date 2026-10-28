@@ -65,6 +65,9 @@
   PB `b77df200bfdb` passes 7 host-capability tests, `b63327b84bed` passes 3 isolation
   orders, `fbe76d599bc4` passes 3 walk tests standalone, and the remaining DSv4 shards
   pass 36 tests on x86. The unprovisioned spill ceiling case skips with the new reason.
+- The calibration-read fallback hashes through `digests.file_digest_sha256hex` (#2636).
+  The guarded loop keeps its resource checks, page release, descriptor alias, and stat fence.
+  Digests, read boundaries, and refusals stay identical. No owner recipe is added.
 - The G3 harness now resides in `tools/g3job` and consumes PB phased residency (#2301).
   It omits a source tensor only when every requested forward uses a complete replacement.
   Used source tensors retain their byte-integrity checks.
@@ -157,6 +160,13 @@
   Failed rejected-trace deletion also fails in both modes; a successful deletion leaves an evidence-only cap rejection.
 
 ### Changed
+- Record the six guarded-read, serializer write-sink, consumed-size and BLAKE2b
+  scientific-seed digest sites as evidenced retentions in the #2540 census.
+  Remove their eligible cohorts and require matching caller/owner source identities
+  before relying on the manifest; hashing, read guards, seeds and wire formats
+  remain unchanged (#2637). Revalidate the unchanged retained scopes against
+  current main without relabeling the historical snapshot; live calibration-hash
+  compatibility coverage supports the archived sample-parallel retention reference.
 - **Bound-publication digest sites route to the digest owners** (Refs #1301, part of #2542).
   `stage_b_prep_io._hash_range` delegates to the one new exact recipe,
   `prismaquant.digests.file_range_sha256hex`: open once, seek to the offset,

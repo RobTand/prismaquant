@@ -12807,13 +12807,19 @@
     },
     "contract_kind": "write-time-stream",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain the write sink: SHA256 consumes torch.save writes after the byte-ceiling check without reopening the file. No exact owner owns serializer-write acquisition; a file reader or framed stream would change that contract.",
+    "retention_evidence": {
+     "kind": "write-sink",
+     "reference": "tests/test_exact_activation_entry_read_amplification.py::test_write_hashes_the_serialized_bytes_without_rereading_the_entry",
+     "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "write-time-stream:hashlib:prismaquant/perturbed_x_cache.py::SerializedEntryDigest.__init__@207:21"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/perturbed_x_cache.py::_read_exact_entry@2117:14",
@@ -12939,13 +12945,19 @@
     },
     "contract_kind": "guarded-readinto",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain guarded readinto hashing in the caller-owned buffer with 262144-byte windows and a growth read(1). Preserve receipt/stat fences, digest/decode/metadata order and page release with no extra read. No exact owner owns this acquisition contract.",
+    "retention_evidence": {
+     "kind": "guarded-read",
+     "reference": "tests/test_exact_activation_entry_read_amplification.py::test_prefetch_reads_each_entry_once",
+     "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "guarded-readinto:hashlib:prismaquant/perturbed_x_cache.py::_read_exact_entry@2117:14"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13",
@@ -13027,13 +13039,19 @@
     },
     "contract_kind": "binary-digest",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain this scientific seed unchanged: BLAKE2b-64 of UTF-8 cal_hash:group_key, interpreted little-endian and masked to 63 bits. No exact owner owns these algorithm options and integer result; changing them changes subsample groups.",
+    "retention_evidence": {
+     "kind": "scientific-seed",
+     "reference": "tests/test_perturbed_x_cache.py::test_perturbed_cache_shares_row_subsample_for_fused_siblings",
+     "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "binary-digest:hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/perturbed_x_cache.py::calibration_data_hash@2375:8",
@@ -13211,13 +13229,19 @@
     },
     "contract_kind": "calibration-blake2b",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain this scientific identity unchanged: BLAKE2b-128 over tensor bytes, sorted mapping keys, sequence order and repr fallbacks, returning 32 hex characters. No exact owner owns the complete calibration recipe; changing it changes downstream seeds.",
+    "retention_evidence": {
+     "kind": "scientific-seed",
+     "reference": "tests/test_sample_parallel_probe.py::test_prepare_artifact_binds_every_local_slice",
+     "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "calibration-blake2b:hashlib:prismaquant/perturbed_x_cache.py::calibration_data_hash@2375:8"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17",
@@ -13358,13 +13382,19 @@
     },
     "contract_kind": "guarded-readinto",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain guarded readinto hashing in the admitted buffer with 16777216-byte windows, interleaved resource/descriptor/named-stat fences and page advice. Preserve growth, checksum and bounded decode ordering with no extra read. No exact owner owns this acquisition contract.",
+    "retention_evidence": {
+     "kind": "guarded-read",
+     "reference": "tests/test_verified_capture_load.py::test_large_tensor_uses_readinto_and_releases_buffer_before_return",
+     "source_blob": "55ee7e847de5c97dca65ed7a2c8727b297d5c479",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "guarded-readinto:hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity@3218:13",
@@ -14775,7 +14805,13 @@
     "disposition": "add-exact-owner-recipe",
     "eligible": true,
     "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+        "retention_evidence": {
+     "status": "retained-by-pq2636-2026-10-10",
+     "guard": "resource_check loop, page release, descriptor alias, stat fence",
+     "page_window": "SOURCE_HASH_BLOCK_BYTES (16777216)",
+     "admission_charge": "source_hash_window = 2 * SOURCE_HASH_BLOCK_BYTES (33554432, RobTand/prismaquant#1491)",
+     "owner_gap": "digests stays stdlib-only and read-neutral; it owns no per-block page advice"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
     "cohort": "guarded-capture:hashlib:prismaquant/tessera_calibration_cache.py::sha256@69:21"
@@ -14905,6 +14941,12 @@
     "disposition": "migrate-exact-route",
     "eligible": true,
     "disposition_reason": "Use the exact owner route without changes to consumer policy.",
+        "migration": {
+     "status": "migrated-by-pq2636-2026-10-10",
+     "manifest": "refresh_2540 (2026-10-09, source 30b6231df000726beda55fb6706e641a5cb2ccb0): route prismaquant.digests.file_digest_sha256hex, migrate-exact-route, eligible",
+     "routed_expression": "file_digest_sha256hex(handle)",
+     "evidence": "tests/test_digest_calibration_cache_1512.py ordered-trace and digest-equality checks"
+    },
     "retention_evidence": null,
     "epic_key": "k3",
     "epic": "prismaquant#2542",
@@ -15120,13 +15162,19 @@
     },
     "contract_kind": "sized-file-read",
     "ratcheted": true,
-    "disposition": "add-exact-owner-recipe",
-    "eligible": true,
-    "disposition_reason": "Add only this proven recipe gap. Do not substitute a nearby profile or change consumer policy.",
-    "retention_evidence": null,
+    "disposition": "retain",
+    "eligible": false,
+    "disposition_reason": "Retain the consumed-size contract: SHA256 and the byte count come from the same 16777216-byte reads and must both match the receipt. Keep symlink/containment rejection and the hash_blob=False size-only branch. A hash-only owner plus a separate size check does not own this joint read contract.",
+    "retention_evidence": {
+     "kind": "consumed-size",
+     "reference": "tests/test_tessera_census_cache.py::test_same_size_changed_blob_refuses_at_export_intake_or_under_hash_blobs",
+     "source_blob": "a7e64371421c65c16b3c587c8034b5a15336963e",
+     "manifest": "refresh_2540",
+     "source_commit": "30b6231df000726beda55fb6706e641a5cb2ccb0"
+    },
     "epic_key": "k3",
     "epic": "prismaquant#2542",
-    "cohort": "sized-file-read:hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13"
+    "cohort": null
    },
    {
     "id": "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256@1605:13",
@@ -133191,46 +133239,6 @@
     ]
    },
    {
-    "id": "write-time-stream:hashlib:prismaquant/perturbed_x_cache.py::SerializedEntryDigest.__init__@207:21",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/perturbed_x_cache.py",
-    "calls": [
-     "hashlib:prismaquant/perturbed_x_cache.py::SerializedEntryDigest.__init__@207:21"
-    ]
-   },
-   {
-    "id": "guarded-readinto:hashlib:prismaquant/perturbed_x_cache.py::_read_exact_entry@2117:14",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/perturbed_x_cache.py",
-    "calls": [
-     "hashlib:prismaquant/perturbed_x_cache.py::_read_exact_entry@2117:14"
-    ]
-   },
-   {
-    "id": "binary-digest:hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/perturbed_x_cache.py",
-    "calls": [
-     "hashlib:prismaquant/perturbed_x_cache.py::_seed_from@2405:13"
-    ]
-   },
-   {
-    "id": "calibration-blake2b:hashlib:prismaquant/perturbed_x_cache.py::calibration_data_hash@2375:8",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/perturbed_x_cache.py",
-    "calls": [
-     "hashlib:prismaquant/perturbed_x_cache.py::calibration_data_hash@2375:8"
-    ]
-   },
-   {
-    "id": "guarded-readinto:hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/perturbed_x_cache.py",
-    "calls": [
-     "hashlib:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry@903:17"
-    ]
-   },
-   {
     "id": "json-publication:supplemental-json:prismaquant/perturbed_x_cache.py::capture_perturbed_activation_cache@3656:8",
     "epic": "prismaquant#2542",
     "module": "prismaquant/perturbed_x_cache.py",
@@ -133788,14 +133796,6 @@
     "module": "prismaquant/tessera_campaign.py",
     "calls": [
      "supplemental-json:prismaquant/tessera_campaign.py::_run_streamed_calibration@6504:18"
-    ]
-   },
-   {
-    "id": "sized-file-read:hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13",
-    "epic": "prismaquant#2542",
-    "module": "prismaquant/tessera_census_cache.py",
-    "calls": [
-     "hashlib:prismaquant/tessera_census_cache.py::_verify_dense_blob@245:13"
     ]
    },
    {
@@ -138350,6 +138350,22 @@
      "source_blob": "b724e8216a94648b7e907b3c9a2017a95b556f4d"
     }
    ],
+   "guarded_read_retention_2637": {
+    "merge_revalidation": {
+     "source_commit": "914bf79807120fa60f433714e95cffd44b917d92",
+     "source_identity_reference": "tests/test_guarded_read_digest_retention_2637.py::CURRENT_SOURCE_BLOBS",
+     "scope": "Recheck the six retentions against current main after surrounding caller refactors and owner additions. All six retained function source segments are unchanged from refresh_2540; original call IDs, source blobs and evidence remain historical. Pin current whole-file caller/owner identities separately and refuse unreviewed changes. The added JSON profiles and open/seek file_range_sha256hex recipe own none of the guarded-readinto, serializer write-sink, joint consumed-size or BLAKE2b contracts. No production edits in this leaf.",
+     "coverage_transition": "tests/test_sample_parallel_probe.py moved to archive/sample_parallel_probe_2026-10-15/tests/test_sample_parallel_probe.py and is not executable current coverage. Preserve its original evidence reference; qualify calibration hashing with the live tensor-digest oracle and fused-sibling subsampling tests instead.",
+     "active_calibration_reference": "tests/test_tensor_digests_1384.py::test_calibration_data_hash_keeps_its_value",
+     "command": "python tools/duplication_inventory.py --write-baseline && python -m pytest tests/test_guarded_read_digest_retention_2637.py tests/test_digest_calibration_cache_1512.py tests/test_exact_activation_entry_read_amplification.py tests/test_verified_capture_load.py tests/test_census_digest_owner_1301.py tests/test_duplication_baseline.py tests/test_union_tessera_census_tables.py tests/test_perturbed_x_cache.py tests/test_tessera_census_cache.py tests/test_tensor_digests_1384.py tests/test_retained_activation_reader.py tests/test_bound_publication_digest_routing_2639.py tests/test_census_publisher_digest_owner_1301.py tests/test_docs_staleness.py tests/test_docs_entrypoints.py tests/test_architecture_doc.py -q --basetemp=\"$TMPDIR/pytest\"",
+     "result": "330 passed, 6 CUDA-gated skips. Baseline regeneration is unchanged from current main: 0 near-duplicate pairs, 130 same-name groups, 277 gated primitive digest sites. GPU behavior was not verified; the archived sample-parallel producer suite was not run.",
+     "test_evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"5f0a5057f330f9ac43cd754dcc896cfe8054089d02418686c82967ff42b63a6e\",\"size\":1949}},\"operation\":\"995fc9a2695ff05fad85da77b952de0b38ec6bcc3cf7adeefb8365ad8571c9de\",\"receipt\":\"c28191edebc4187fa29152902c0d01f8ed0674086077e51efa57c0db7c1cc3e8\"}]"
+    },
+    "scope": "Initial post-refresh retention decisions for six calls only. At that snapshot caller and owner source bytes remained at the refresh_2540 identities; no production behavior changes.",
+    "command": "python tools/duplication_inventory.py --write-baseline && python -m pytest tests/test_guarded_read_digest_retention_2637.py tests/test_digest_calibration_cache_1512.py tests/test_exact_activation_entry_read_amplification.py tests/test_verified_capture_load.py tests/test_census_digest_owner_1301.py tests/test_duplication_baseline.py tests/test_union_tessera_census_tables.py tests/test_perturbed_x_cache.py tests/test_tessera_census_cache.py tests/test_sample_parallel_probe.py -q --basetemp=\"$TMPDIR/pytest\"",
+    "result": "292 passed, 1 CUDA-only skip. Baseline regeneration is unchanged: 1 near-duplicate pair, 142 same-name groups, 304 gated primitive digest sites. GPU behavior was not verified.",
+    "test_evidence": "[Test evidence {\"artifacts\":{\"stderr\":{\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size\":0},\"stdout\":{\"digest\":\"0bb47c35e7fe6d8be9c09f742709683bf49c15ba384e4a926548c91c14265615\",\"size\":1949}},\"operation\":\"56dec618979c825f65dc8629d7e5433637cba38e949ef65a7b71049571a4700f\",\"receipt\":\"eba9a53189903bdd5bbf6cffbe6a005622eb8a35823f9f863212489f7c238c16\"}]"
+   },
    "limit": "The audit records source contracts. It does not qualify migration bytes, GPU work, serving, or performance."
   },
   "summary": {
@@ -138367,12 +138383,12 @@
    },
    "supplemental_calls": 275,
    "mutable_modules": 203,
-   "eligible_cohorts": 652,
+   "eligible_cohorts": 646,
    "calls_by_disposition": {
     "migrate-exact-route": 270,
-    "retain": 25,
+    "retain": 31,
     "owner-implementation": 16,
-    "add-exact-owner-recipe": 109
+    "add-exact-owner-recipe": 103
    },
    "modules_by_epic": {
     "k2": 124,

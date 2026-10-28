@@ -25,6 +25,7 @@ from .digests import (
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
+    file_digest_sha256hex,
     git_blob_sha1hex,
     hex_chain_sha256hex,
     indent2_json_file_bytes,
@@ -91,7 +92,7 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
                         advised = end
                 if resource_check is not None:
                     resource_check(f'after_capture_hash:{Path(path).name}')
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+        return file_digest_sha256hex(handle)
 
 
 @contextmanager
@@ -1018,7 +1019,8 @@ class CaptureSourceAuthentication:
         """Let a census derived from this capture's source bind its roster.
 
         A derived capture covers units the canonical capture never ran (an
-        MTP layer outside the streamed text forward) over the same source
+        MTP layer outside the streamed text forward, or the scoped attention
+        roster the body campaign pins) over the same source
         checkpoint. It inherits this owner's hash-bound source roster instead
         of re-hashing every shard, and its payload reads are still
         authenticated one shard at a time. The derived census must name the
@@ -1752,8 +1754,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             payload = dict(inputs=acts[name],hessian=hessians[name],count=counts[name],
                            max_abs=maxima[name],name=name,source=SOURCE)
             _validate_tensors(name,payload,census,identity['max_act_rows'])
-            path, record, _fingerprint = _write_capture_entry(root, name, inputs=acts[name],
+            path, record, fingerprint = _write_capture_entry(root, name, inputs=acts[name],
                 hessian=hessians[name], count=counts[name], max_abs=maxima[name])
+            _require_verified_entry(path, name, record, {**record, 'fingerprint': fingerprint})
             file_stat = path.stat() if release_file_pages else None
         else:
             if record.get('path') != str(expected_path):

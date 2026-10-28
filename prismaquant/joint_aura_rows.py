@@ -307,7 +307,9 @@ def _validate_sequence_attribution(sidecar, entry):
         selected_tokens_per_row=geometry.get("selected_tokens_per_row"),
         n_sequences=geometry.get("n_sequences"),
         calibration_sha256=geometry.get("calibration_sha256"),
-        with_leaveout=("leaveout" in sidecar),
+        # Infer required leaveout from whole-draw geometry, not serialized
+        # presence: deleting an eligible section must not disable validation.
+        with_leaveout=None,
     )
     if recalculated != sidecar:
         raise ValueError(
