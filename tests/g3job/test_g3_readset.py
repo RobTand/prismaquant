@@ -141,15 +141,19 @@ def test_one_arm_omission_is_bitwise_equal_in_logits_and_fp64_kl(tmp_path):
         weight.copy_(replacement)
         outputs.append(torch.arange(12, dtype=torch.bfloat16).reshape(3, 4).float() @ weight.float().T)
     teacher = torch.tensor([[0.3, -0.1], [0.9, 0.4], [-0.5, 0.7]], dtype=torch.float32)
-    import ast
-    source = (G.PQ / "experiments/glm_tr3_full_vocab.py").read_text()
-    function = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "token_kl")
-    namespace = {"torch": torch}
-    exec(compile(ast.Module(body=[function], type_ignores=[]), "glm_tr3_full_vocab.py", "exec"), namespace)
-    token_kl = namespace["token_kl"]  # exactly the unchanged pinned KL, no second recipe
+    # Exercise the actual compatibility entry point, including its imports and
+    # delegation. Extracting only its AST body loses module import bindings.
+    from experiments.glm_tr3_full_vocab import token_kl
+    import runpy
+    old_token_kl = runpy.run_path(str(Path(__file__).resolve().parents[1] /
+                                    "fixtures" / "token_kl_old_2778.py"))["token_kl"]
     assert torch.equal(outputs[0].view(torch.uint8), outputs[1].view(torch.uint8))
-    assert torch.equal(token_kl(teacher, outputs[0], require_cuda=False).view(torch.uint8),
-                       token_kl(teacher, outputs[1], require_cuda=False).view(torch.uint8))
+    scores = [token_kl(teacher, output, require_cuda=False) for output in outputs]
+    assert torch.equal(scores[0].view(torch.uint8), scores[1].view(torch.uint8))
+    for output, score in zip(outputs, scores):
+        assert score.dtype == torch.float64
+        assert torch.equal(score.view(torch.uint8),
+                           old_token_kl(teacher, output, require_cuda=False).view(torch.uint8))
     print('BITWISE one-arm tiny BF16 forward + FP64 KL old-source-read/new-omission: equal')
 
 

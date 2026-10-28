@@ -442,7 +442,7 @@ class ProducedOutputSpool:
             self._local[canonical.path] = (batch_id, local_reference)
         return canonical
 
-    def submit(self, batch_id):
+    def submit(self, batch_id, *, paced: bool | None = None):
         with self._lock:
             group = self._groups[batch_id]
             if group["submitted"]:
@@ -458,7 +458,8 @@ class ProducedOutputSpool:
                 entries.append(entry)
             if not entries:
                 raise ProducedOutputSpoolRefused("cannot export an empty output group")
-            answer = self.backend.submit_group(batch_id, entries=entries)
+            options = {} if paced is None else {"paced": paced}
+            answer = self.backend.submit_group(batch_id, entries=entries, **options)
             if not answer.get("ok"):
                 self._refuse(batch_id, answer, where="submit")
             group["submitted"] = True

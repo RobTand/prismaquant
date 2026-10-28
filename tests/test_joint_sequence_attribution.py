@@ -417,6 +417,140 @@ def test_streamed_attribution_config_must_be_well_formed():
             sequence_attribution={"candidates": ["model.layers.0.missing@FP8_DYNAMIC"]})
 
 
+# ---- requested-attribution publication/restore completeness (#2793) --------
+
+
+def _requested_price_fixture(*, selection="all", zero_cost=False):
+    # Reuse the measured-unit fixture: restore must reach the attribution
+    # boundary, not fail on identity or legacy/joint sample alignment first.
+    from prismaquant.joint_price_step import (
+        JointResumeContract, ProbeResumePolicy, RequiredAttribution,
+    )
+    from test_joint_price_step import FORMAT, _completed, _step
+
+    if zero_cost:
+        completed, _ = _step()
+        for probe in range(completed.measurements.n_probes):
+            completed.consume_probe(
+                probe, {(UNIT_A, FORMAT): _comps(0.0, 0.0, 0.0)},
+                {UNIT_A: {"g_trace": 0.0}})
+        state = completed.complete_unit(UNIT_A)
+    else:
+        completed, state = _completed()
+    restored, _ = _step()
+    keys = None if selection == "all" else (
+        {(UNIT_A, FORMAT)} if selection == "selected" else set())
+    requirement = None if selection == "disabled" else RequiredAttribution(
+        keys=keys, refusal=lambda name, fmt: ValueError(
+            f"sequence_attribution required for {name}@{fmt}"))
+    for price in (completed, restored):
+        price.resume_contract = JointResumeContract(
+            ProbeResumePolicy.EXACT, attribution=requirement)
+        if zero_cost:
+            price.zero_cost_formats = (FORMAT,)
+    return completed, restored, state, FORMAT
+
+
+def _price_sidecar(row, sizes):
+    first = 0
+    specs = []
+    for size in sizes:
+        specs.append((first, size))
+        first += size
+    # The first block carries the authority; other whole blocks carry zero.
+    # The existing builder remains the oracle for prices and descriptive SE.
+    components = [[dict(authority)] + [_comps(0.0, 0.0, 0.0)
+                                       for _ in sizes[1:]]
+                  for authority in row["signed_components_per_probe"]]
+    return _sidecar(_blocks(*specs), components, row["signed_per_probe"],
+                    n_sequences=first)
+
+
+def _exercise_price_boundary(boundary, completed, restored, state, fmt, sidecar):
+    if boundary == "restore":
+        row = state["joint_aura_rows"][fmt]
+        if sidecar == "absent":
+            row.pop("sequence_attribution", None)
+        else:
+            row["sequence_attribution"] = copy.deepcopy(sidecar)
+        restored.restore_unit(UNIT_A, state)
+        return restored.rows[UNIT_A][fmt]
+    completed.prepare_rows(
+        [UNIT_A], sidecar=lambda name, candidate, components: (
+            None if sidecar == "absent" else copy.deepcopy(sidecar)))
+    return completed.rows[UNIT_A][fmt]
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("selection", ["all", "selected"])
+@pytest.mark.parametrize("sidecar", [None, "absent", {}],
+                         ids=["null", "absent", "invalid-mapping"])
+def test_requested_attribution_rejects_missing_or_null_sidecar(
+        boundary, selection, sidecar):
+    completed, restored, state, fmt = _requested_price_fixture(selection=selection)
+    with pytest.raises((ValueError, RuntimeError), match="attribution"):
+        _exercise_price_boundary(
+            boundary, completed, restored, state, fmt, sidecar)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("selection,zero_cost", [
+    ("disabled", False), ("unselected", False), ("all", True),
+])
+def test_requested_attribution_preserves_legacy_exemptions(
+        boundary, selection, zero_cost):
+    completed, restored, state, fmt = _requested_price_fixture(
+        selection=selection, zero_cost=zero_cost)
+    row = _exercise_price_boundary(
+        boundary, completed, restored, state, fmt, "absent")
+    assert "sequence_attribution" not in row
+    assert joint_aura_rows.validate_joint_aura_entry(row)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("sizes", [(1, 1), (2, 2)],
+                         ids=["per-sequence", "equal-coarse-blocks"])
+@pytest.mark.parametrize("damage", ["section", "prices", "standard-error"])
+def test_requested_attribution_rejects_deleted_eligible_leaveout(
+        boundary, sizes, damage):
+    completed, restored, state, fmt = _requested_price_fixture()
+    sidecar = _price_sidecar(state["joint_aura_rows"][fmt], sizes)
+    assert sidecar["leaveout"]["jackknife_standard_error"] > 0.0
+    if damage == "section":
+        del sidecar["leaveout"]
+    elif damage == "prices":
+        del sidecar["leaveout"]["price_per_block"]
+    else:
+        del sidecar["leaveout"]["jackknife_standard_error"]
+    with pytest.raises((ValueError, RuntimeError), match="attribution|leaveout"):
+        _exercise_price_boundary(
+            boundary, completed, restored, state, fmt, sidecar)
+
+
+@pytest.mark.parametrize("boundary", ["publish", "restore"])
+@pytest.mark.parametrize("sizes", [(1, 1), (2, 2), (2,), (1, 2)],
+                         ids=["per-sequence", "equal-coarse-blocks",
+                              "one-block", "unequal-blocks"])
+def test_requested_attribution_accepts_complete_geometry_without_repricing(
+        boundary, sizes):
+    completed, restored, state, fmt = _requested_price_fixture()
+    original = copy.deepcopy(state["joint_aura_rows"][fmt])
+    sidecar = _price_sidecar(original, sizes)
+    eligible = len(sizes) >= 2 and len(set(sizes)) == 1
+    assert ("leaveout" in sidecar) == eligible
+    row = _exercise_price_boundary(
+        boundary, completed, restored, state, fmt, sidecar)
+    assert joint_aura_rows.validate_joint_aura_entry(row)
+    assert row["sequence_attribution"] == sidecar
+    if eligible:
+        leaveout = row["sequence_attribution"]["leaveout"]
+        assert leaveout["uncertainty_scope"] == LEAVEOUT_SCOPE
+        assert "no generalization claim" in leaveout["assumption"]
+    # Sidecar validation may never reprice or relabel the authoritative row.
+    assert {key: value for key, value in row.items()
+            if key != "sequence_attribution"} == original
+
+
 # ---- checkpoint resume boundary -------------------------------------------
 
 def test_checkpoint_resume_across_attribution_boundary_refuses(tmp_path, monkeypatch):
