@@ -1,0 +1,35 @@
+{
+  "mode": "serial",
+  "batches": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Batch 1",
+      "parent_ids": [],
+      "status": { "code": "running" },
+      "started_at": "2026-10-28T00:00:00Z",
+      "estimated_merge_at": null,
+      "estimated_ci_finish_at": null,
+      "ci_finished_at": null,
+      "scopes": ["__default__"],
+      "queue_rule_name": "default",
+      "checks_summary": { "passed": 0, "total": 2 },
+      "queue_pull_request_number": 3144,
+      "sub_batches": [],
+      "pull_requests": [
+        {
+          "number": 3143,
+          "title": "Refs #3140",
+          "url": "https://github.com/RobTand/prismaquant/pull/3143",
+          "author": { "id": 123, "login": "contributor", "avatar_url": "https://avatars.githubusercontent.com/u/123" },
+          "queued_at": "2026-10-28T00:00:00Z",
+          "priority_alias": "medium",
+          "priority_rule_name": "default",
+          "labels": [],
+          "scopes": ["__default__"],
+          "queue_state_labels": []
+        }
+      ]
+    }
+  ],
+  "waiting_pull_requests": []
+}

@@ -1,0 +1,117 @@
+name: Fleet integrated CI
+
+on:
+  workflow_run:
+    workflows: [Linked issue policy]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: read
+      checks: write
+    outputs:
+      binding: ${{ steps.admit.outputs.binding }}
+      checks: ${{ steps.admit.outputs.checks }}
+      integrated: ${{ steps.admit.outputs.integrated }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - id: admit
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71
+        env:
+          MERGIFY_API_TOKEN: ${{ secrets.MERGIFY_API_TOKEN }}
+        with:
+          script: |
+            await require('./.github/scripts/fleet_policy.cjs').admit({ github, context, core });
+
+  fleet:
+    needs: admission
+    runs-on: [self-hosted, linux, x64, fleet]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.admission.outputs.integrated }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        env:
+          EXPECTED_SHA: ${{ needs.admission.outputs.integrated }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Verify runner Node runtime
+        run: node -e "if (Number(process.versions.node.split('.')[0]) < 22) process.exit(1)"
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Run policy tests
+        run: |
+          node .github/scripts/linked_issue.test.cjs
+          node .github/scripts/queue_policy.test.cjs
+      - name: Resolve Tessera pin
+        id: tessera
+        run: |
+          tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
+          printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: RobTand/tessera
+          ref: ${{ steps.tessera.outputs.commit }}
+          path: .ci/tessera
+          persist-credentials: false
+      - name: Install CPU test dependencies
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --no-deps .ci/tessera
+          python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+      - name: Run CPU tests
+        env:
+          CUDA_VISIBLE_DEVICES: ''
+          TMPDIR: ${{ runner.temp }}
+          PYTHONPATH: .
+          OMP_NUM_THREADS: '1'
+          MKL_NUM_THREADS: '1'
+          OPENBLAS_NUM_THREADS: '1'
+          NUMEXPR_NUM_THREADS: '1'
+          TORCHINDUCTOR_COMPILE_THREADS: '1'
+          MAX_JOBS: '1'
+        run: python -m pytest -c pytest.ini tests/ -q --timeout=300 -ra -p no:cacheprovider
+
+  publish:
+    if: ${{ always() && needs.admission.result == 'success' }}
+    needs: [admission, fleet]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      checks: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71
+        env:
+          MERGIFY_API_TOKEN: ${{ secrets.MERGIFY_API_TOKEN }}
+          BINDING: ${{ needs.admission.outputs.binding }}
+          CHECK_IDS: ${{ needs.admission.outputs.checks }}
+          FLEET_RESULT: ${{ needs.fleet.result }}
+        with:
+          script: |
+            const conclusion = await require('./.github/scripts/fleet_policy.cjs').finish({
+              github, context, binding: JSON.parse(process.env.BINDING),
+              checkIds: JSON.parse(process.env.CHECK_IDS), result: process.env.FLEET_RESULT,
+            });
+            if (conclusion !== 'success') core.setFailed('Fleet tests or fresh candidate verification failed');
