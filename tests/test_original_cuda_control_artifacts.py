@@ -1,6 +1,7 @@
 """Selected-result byte binding, not a synthetic CUDA/provider qualification."""
 import hashlib
 import json
+from pathlib import Path
 import subprocess
 import sys
 
@@ -129,7 +130,8 @@ def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
         retain_artifact(PrismaBuildCAS(tmp_path / 'cas'), 'torch_trace', path, identity)
 
 
-def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path):
+def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     program = (
         'import hashlib, json, os, sys; from pathlib import Path; '
         'from experiments.original_cuda_control import artifact_cas, _ARTIFACT_CAS_SDK_VERSIONS; '
@@ -148,6 +150,7 @@ def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp
         'except RuntimeError as error:\n assert "qualified immutable-input CAS helper" in str(error)\n'
         'else:\n raise AssertionError("unqualified future SDK was admitted")\n')
     done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas')],
+                          cwd=Path(__file__).resolve().parents[1],
                           capture_output=True, text=True, check=True)
     observed = json.loads(done.stdout)
     assert observed['root'] == str(tmp_path / 'cas')
