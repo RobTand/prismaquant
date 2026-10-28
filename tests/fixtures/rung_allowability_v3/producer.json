@@ -1,6 +1,6 @@
 {
   "repository": "RobTand/tessera",
-  "commit": "d9ec5291791ea09592f96c7e75a45d8f5cf23b1c",
+  "commit": "8f881a7248f86321beee1c40f15ea3cc617591ff",
   "path": "src/tessera/rung_allowability.py",
-  "sha256": "3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821"
+  "sha256": "c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c"
 }

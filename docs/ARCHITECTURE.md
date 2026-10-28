@@ -1906,6 +1906,19 @@ qualification are implied. The retained #2364/PR2647 adoption candidate
 is not a competing adoption or publication. Campaign remains parent reviewer
 and must review the exact follow-up head before integration.
 
+Re-stamped 2026-10-28 (PRI-50, replacement for PR3005): the repair preserves
+the native-TCQ public-loader change and its immutable offline inputs from
+`03959d7f8ef4903eb7ed3d103573eda719991934`, on current main. The retained
+PR2647 controls from `f2d79d7b908f00d4e17f26d81d5c28d1941f2c19` now live
+unchanged in `tests/test_t4_menu_retained.py`; their private-table cases still
+require `PQ_T4_MENU_TABLE` and do not turn skips into qualification. The
+metadata-only producer declaration and digest match that retained source.
+Historical receipts and its corrective revision count of one remain retained,
+not fresh gates. This compatibility slice does not close #2421 or #2364.
+Native independent review, D52 cross-family review, Campaign exact-head review
+and the required integration checks remain separate gates. No runtime pin,
+active index, shared baseline, changelog or qualification hold changes.
+
 CPU verification of this compatibility repair: 308 passed (14 dependency
 deprecation warnings) with
 `python -m pytest tests/test_t4_menu_followup.py tests/test_rung_allowability.py tests/test_shape_runtime_prices.py tests/test_pact_hull.py tests/test_canonical_consumer_join.py tests/test_tessera_menu.py tests/test_tessera_menu_context.py tests/test_tessera_menu_metadata.py -q --basetemp="$TMPDIR/pytest"`.
@@ -1982,8 +1995,8 @@ Scope recipes use the digest owner's strict, ASCII-escaped, default-spaced JSON 
 Class identities use its lax profile. Exact cache bytes and nonfinite policies remain unchanged.
 The selected table, explicit index, unit scopes, chord sources and class
 cost sources remain in allocation and frontier provenance.
-The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
-Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The pure metadata dependency is Tessera `8f881a7248f86321beee1c40f15ea3cc617591ff`.
+Its module SHA-256 is `c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c`.
 The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
 The existing isolated test adapter fetches that module when no source is
 supplied. No untracked producer, serving overlay or global feature skip is required.
