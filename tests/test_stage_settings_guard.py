@@ -16,6 +16,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from prismaquant import pipeline
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,54 +134,34 @@ def test_changed_setting_is_exit_2_naming_the_diff(tmp_path):
     assert "refusing silent reuse" in joined
 
 
-def test_aura_cost_streaming_and_checkpoint_directory_are_reuse_identity(tmp_path):
+@pytest.mark.parametrize("stage", ("aura-cost", "aura-hybrid-cost"))
+@pytest.mark.parametrize(
+    ("changed_key", "changed_value"),
+    (
+        ("AURA_COST_STREAMING", "0"),
+        ("AURA_COST_CHECKPOINT_DIR", "/runs/aura-b"),
+    ),
+    ids=("streaming", "checkpoint-directory"),
+)
+def test_aura_streaming_and_checkpoint_directory_are_reuse_identity(
+    tmp_path, stage, changed_key, changed_value
+):
     base = _full_settings()
     base.update({
         "AURA_COST_STREAMING": "1",
         "AURA_COST_CHECKPOINT_DIR": "/runs/aura-a",
     })
 
-    for changed_key, changed_value in (
-        ("AURA_COST_STREAMING", "0"),
-        ("AURA_COST_CHECKPOINT_DIR", "/runs/aura-b"),
-    ):
-        artifact = tmp_path / f"cost-{changed_key}.pkl"
-        pipeline.check_stage_settings(
-            artifact, "aura-cost", _document(**base)
-        )
-        artifact.write_bytes(b"cost")
+    artifact = tmp_path / f"{stage}-{changed_key}.pkl"
+    pipeline.check_stage_settings(artifact, stage, _document(**base))
+    artifact.write_bytes(b"cost")
 
-        changed = dict(base, **{changed_key: changed_value})
-        code, messages = pipeline.check_stage_settings(
-            artifact, "aura-cost", _document(**changed)
-        )
-        assert code == 2
-        assert changed_key in "\n".join(messages)
-
-
-def test_aura_hybrid_streaming_and_checkpoint_directory_are_reuse_identity(tmp_path):
-    base = _full_settings()
-    base.update({
-        "AURA_COST_STREAMING": "1",
-        "AURA_COST_CHECKPOINT_DIR": "/runs/aura-a",
-    })
-
-    for changed_key, changed_value in (
-        ("AURA_COST_STREAMING", "0"),
-        ("AURA_COST_CHECKPOINT_DIR", "/runs/aura-b"),
-    ):
-        artifact = tmp_path / f"aura-hybrid-{changed_key}.pkl"
-        pipeline.check_stage_settings(
-            artifact, "aura-hybrid-cost", _document(**base)
-        )
-        artifact.write_bytes(b"cost")
-
-        changed = dict(base, **{changed_key: changed_value})
-        code, messages = pipeline.check_stage_settings(
-            artifact, "aura-hybrid-cost", _document(**changed)
-        )
-        assert code == 2
-        assert changed_key in "\n".join(messages)
+    changed = dict(base, **{changed_key: changed_value})
+    code, messages = pipeline.check_stage_settings(
+        artifact, stage, _document(**changed)
+    )
+    assert code == 2
+    assert changed_key in "\n".join(messages)
 
 
 def test_cb_imatrix_source_is_reuse_identity_for_harvest_and_render(tmp_path):
