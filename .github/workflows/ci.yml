@@ -1,4 +1,4 @@
-# PrismaQuant CI — full hosted suite on main/manual; PR smoke plus PB gate.
+# PrismaQuant CI — full hosted suite on main, manual runs and ready PRs.
 #
 # WHY THIS EXISTS: five substantial pull requests (#13-#17) sat open for eleven
 # days with nothing to run them, while `main` itself carried three failing
@@ -16,7 +16,12 @@
 # "should raise `timeout-minutes` in the same PR"; the suite has since grown
 # 1.75x, so this is that PR: 60 min gives ~2x on the worst observed job. A
 # job that reaches the limit is a timeout, not a slow build — re-measure and
-# raise it here again rather than retrying. The skips are the CUDA-gated
+# raise it here again rather than retrying. Re-measured 2026-10-28 from the
+# main runs of 2026-10-22 to 2026-10-26: ~22,500 tests, pytest took 29 to 56
+# min and the worst job 58 min against that 60 min limit. The job now also
+# gates pull requests in the Mergify queue (#3140), where a timeout dequeues
+# the pull request, so the limit is 90 min, inside the queue's 2 hour
+# `checks_timeout`. The skips are the CUDA-gated
 # tests. GitHub-hosted runners have no GPU, so
 # kernel numerics, real-checkpoint streaming and anything touching a served
 # artifact remain a manual gate on the Spark — this is a correctness net for
@@ -32,6 +37,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review starts the full suite when a draft is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 # A second push to a PR makes the first run's result irrelevant, so PR runs
@@ -52,14 +59,18 @@ permissions:
   contents: read
 
 jobs:
-  # Every main tree and manual dispatch retains the complete Python 3.12 CPU
-  # suite. PRs retain the import/CLI smoke and allowlist checks below; their
-  # pre-merge full suite is the required composed PrismaBuild pb-tests check.
+  # Every main tree, manual dispatch and ready PR runs the complete Python
+  # 3.12 CPU suite. `tests (py3.12, cpu)` is the required pre-merge check in
+  # place of the PrismaBuild pb-tests status, which nothing posts any more
+  # (#3140). Mergify's in-place queue update pushes the integrated head to the
+  # PR, so this job tests exactly what merges. Drafts skip it until marked
+  # ready. Tests that already fail on main on hosted runners are excluded by
+  # .github/hosted-known-failures.txt, so the check fails on new failures only.
   tests:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: tests (py${{ matrix.python }}, cpu)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -122,6 +133,20 @@ jobs:
         # The constraints pin what CI tests to what the campaign runs (#1419).
         run: python -m pip install -c .github/ci-constraints.txt -e '.[test]'
 
+      # One pytest argument per line for both test steps below: an entry with
+      # `::` is deselected, and a bare path is a module that fails at import,
+      # so it is ignored before collection.
+      - name: Exclude known hosted failures
+        run: |
+          while IFS= read -r entry; do
+            case "$entry" in
+              ''|'#'*) ;;
+              *::*) printf -- '--deselect=%s\n' "$entry" ;;
+              *) printf -- '--ignore=%s\n' "$entry" ;;
+            esac
+          done < .github/hosted-known-failures.txt > "$RUNNER_TEMP/known-failure-args"
+          echo "excluding $(wc -l < "$RUNNER_TEMP/known-failure-args") known hosted failures"
+
       # CUDA_VISIBLE_DEVICES is belt-and-braces: hosted runners have no GPU, but
       # this makes a local reproduction of a CI failure one env var away, and
       # keeps the skip set identical between here and a developer's box.
@@ -151,9 +176,11 @@ jobs:
           PY
           )"
           echo "pytest workers=$workers (CPU affinity and available-memory bound)"
+          mapfile -t known < "$RUNNER_TEMP/known-failure-args"
           python -m pytest -c pytest.ini tests/ -q --timeout=300 \
             -m "not own_cgroup" \
-            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider
+            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider \
+            "${known[@]}"
 
       # Tests with the own_cgroup mark hold this process's cgroup readings to
       # the bytes they free (tests/cgroup_readings.py). Every process of this
@@ -166,13 +193,14 @@ jobs:
       - name: Run cgroup-reading tests in a scope of their own
         if: ${{ !cancelled() }}
         run: |
+          mapfile -t known < "$RUNNER_TEMP/known-failure-args"
           sudo -n systemd-run --scope --quiet -- \
             setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
             env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
-              -q --timeout=300 -ra -p no:cacheprovider
+              -q --timeout=300 -ra -p no:cacheprovider "${known[@]}"
 
   # The boundary allowlists only shrink (decoupling step 0, #1534). The
   # tests hold each list equal to the code; this job refuses a pull request
