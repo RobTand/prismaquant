@@ -1,9 +1,15 @@
 """CPU-only CLI-shape coverage for the O4 recipe, without running capture phases."""
 from __future__ import annotations
 
+import ast
+import hashlib
 import os
 from pathlib import Path
 import shlex
+
+import pytest
+
+from test_tessera_calibration_cache import capture as capture
 
 
 def test_o4_documented_mtp_phase_arguments(monkeypatch, tmp_path):
@@ -53,3 +59,55 @@ def test_o4_documented_mtp_phase_arguments(monkeypatch, tmp_path):
     assert capture.final_hidden == str(root / "final-hidden" / "manifest.json")
     assert capture.expert_projection == str(root / "mtp-projection" / "mtp-projection.json")
     assert capture.census_out == str(root / "mtp-census.json")
+
+
+@pytest.mark.parametrize("consumer", ["dispatch", "final-plan"])
+def test_o4_documented_capture_bindings(consumer, capture, monkeypatch, tmp_path):
+    from prismaquant import tessera_calibration_cache
+    from tools import dispatch_tessera_campaign
+
+    _, census_path, census, identity, acts, hessians, _ = capture
+    receipt = tessera_calibration_cache.publish_capture(
+        tmp_path / "mtp-capture", census_path=census_path, identity=identity,
+        acts=acts, hessians=hessians, counts=census["counts"], maxima=census["max_abs"],
+    )
+    monkeypatch.setenv("O4_ROOT", str(tmp_path))
+    monkeypatch.setenv("WORKSPACE", str(tmp_path / "anchor campaign"))
+    monkeypatch.setenv("CAMPAIGN_SPEC", str(tmp_path / "campaign spec.json"))
+    recipe = (Path(__file__).resolve().parents[1] / "docs" / "experiments"
+              / "accumulate_window_o4_2896.md").read_text(encoding="utf-8")
+
+    if consumer == "dispatch":
+        prefix = "python -m tools.dispatch_tessera_campaign "
+        commands = [
+            line[len(prefix):] for line in recipe.replace("\\\n", " ").splitlines()
+            if line.startswith(prefix + "plan ")
+        ]
+        assert len(commands) == 1
+        parsed = []
+        monkeypatch.setattr(dispatch_tessera_campaign, "cmd_plan", parsed.append)
+        dispatch_tessera_campaign.main([
+            os.path.expandvars(arg) for arg in shlex.split(commands[0])
+        ])
+        assert len(parsed) == 1
+        binding = Path(parsed[0].calibration_cache)
+        assert binding == Path(receipt["path"])
+        assert hashlib.sha256(binding.read_bytes()).hexdigest() == receipt["sha256"]
+    else:
+        snippets = recipe.split("python - <<'PY'\n")[1:]
+        constructions = [snippet.split("\nPY", 1)[0] for snippet in snippets
+                         if "p['canonical_capture'] =" in snippet.split("\nPY", 1)[0]]
+        assert len(constructions) == 1
+        construction = ast.parse(constructions[0])
+        nodes = [
+            node for node in construction.body
+            if (isinstance(node, ast.FunctionDef) and node.name == "bound")
+            or (isinstance(node, ast.Assign)
+                and ast.unparse(node.targets[0]) == "p['canonical_capture']")
+        ]
+        assert len(nodes) == 2
+        plan = {}
+        namespace = {"Path": Path, "hashlib": hashlib, "root": tmp_path, "p": plan}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), "<O4 final-plan>", "exec"),
+             namespace)
+        assert plan["canonical_capture"] == receipt
