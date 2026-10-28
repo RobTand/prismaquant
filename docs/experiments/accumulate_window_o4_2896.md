@@ -155,7 +155,7 @@ mkdir "$WORKSPACE"
 cp "$O4_ROOT/mtp-census.json" "$WORKSPACE/census.json"
 python -m tools.dispatch_tessera_campaign plan \
   --spec "$CAMPAIGN_SPEC" --workspace "$WORKSPACE" \
-  --calibration-cache "$O4_ROOT/mtp-capture/manifest.json"
+  --calibration-cache "$O4_ROOT/mtp-capture/capture_manifest.json"
 python -m tools.dispatch_tessera_campaign check \
   --workspace "$WORKSPACE" --spec "$CAMPAIGN_SPEC"
 # Separately authorized GPU campaign: submit waits, but inspect receipts too.
@@ -205,7 +205,7 @@ p['model'] = str(Path(os.environ['MODEL']).resolve())
 p['output_root'] = str(root / 'joint')  # nonexistent before prepare
 p['source_digest_cache'] = bound(root / 'source-digest-cache.json')
 p['calibration_input'] = bound(os.environ['CALIBRATION_INPUT'])
-p['canonical_capture'] = bound(root / 'mtp-capture/manifest.json')
+p['canonical_capture'] = bound(root / 'mtp-capture/capture_manifest.json')
 p['inputs'].update({
     'census': bound(workspace / 'census.json'),
     'campaign_plan': bound(workspace / 'plan.json'),
