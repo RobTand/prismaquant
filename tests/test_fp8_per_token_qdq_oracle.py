@@ -168,6 +168,7 @@ def _stub_cuda_preparation(monkeypatch):
         return real_empty(*args, **{**kwargs, "device": "meta"})
 
     monkeypatch.setattr(torch.cuda, "device", device_guard)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
     monkeypatch.setattr(torch, "empty", empty)
     return state, observe
 
@@ -212,8 +213,12 @@ def _triton_available() -> bool:
 
 
 needs_cuda_triton = pytest.mark.skipif(
-    not (torch.cuda.is_available() and _triton_available()),
-    reason="the fused per-token QDQ needs CUDA and Triton",
+    not (
+        torch.cuda.is_available()
+        and _triton_available()
+        and torch.cuda.get_device_capability() >= (8, 9)
+    ),
+    reason="the fused per-token QDQ needs sm89+ CUDA and Triton",
 )
 
 
@@ -511,6 +516,7 @@ def test_fused_eligibility_bounds_without_cuda_or_large_allocation(monkeypatch, 
     fused = _fused()
 
     rows = _CudaMetadataTensor(shape)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
     monkeypatch.setattr(fused, "triton_available", lambda: True)
     monkeypatch.setattr(fused, "_kernel", _forbidden)
     assert fused.fused_eligible(rows, element_dtype=E4M3) is eligible
@@ -525,6 +531,7 @@ def test_fused_eligibility_preserves_autograd_contract(monkeypatch, grad_enabled
     fused = _fused()
 
     rows = _CudaMetadataTensor((4, 256), requires_grad=requires_grad)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
     monkeypatch.setattr(fused, "triton_available", lambda: True)
     with torch.set_grad_enabled(grad_enabled):
         assert fused.fused_eligible(rows, element_dtype=E4M3) is not (
@@ -781,6 +788,8 @@ def test_public_fused_launch_uses_input_device_stream_and_restores_caller(
 
     caller = torch.cuda.current_device()
     input_device = (caller + 1) % torch.cuda.device_count()
+    if torch.cuda.get_device_capability(input_device) < (8, 9):
+        pytest.skip("the fused input device needs sm89+ CUDA")
     with torch.cuda.device(input_device):
         values = _real_activations(8, 256, torch.bfloat16, f"cuda:{input_device}")
         want = _reference(values, element_dtype=E4M3, element_max=448.0)

@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-28, PRI-53/#3160 hardware eligibility correction to reviewed
+head `cfa998066fbe70be94e5e059f10e6ef4c5b4dec6`.
+Per-token fused FP8 QDQ requires input-device CUDA capability >= 8.9 for its
+retained FP8 conversion instructions; older targets use the torch reference.
+This is an instruction-compatibility gate, not numerical qualification of
+other architectures. Kernel arithmetic and historical receipts are unchanged;
+the dated CPU/GB10 qualification statements below remain source-scoped.
+
 As of: 2026-10-24, corrected #2666 delivery reconciliation for #2867.
 Source base: `9aaae55c48476937d0e1a7d23fcb73d8a66daf96`;
 branch: `tl/prismaquant-01bfa780fa96-wp1`; historical repair: `ecaf0114`.
@@ -18087,12 +18095,13 @@ launch writes codes, FP32 scales/dequant and optional FP32
 `dx = dequant - input.float()`. This optional dx is not a joint-hook roundtrip
 or fused backward; weight QDQ and joint-hook dx subtraction remain unchanged.
 
-The repaired-v2 bounds are BF16/FP16/FP32, 1 <= K <= 16384, canonical
+The repaired-v2 bounds are input-device CUDA capability >= 8.9,
+BF16/FP16/FP32, 1 <= K <= 16384, canonical
 E4M3FN/E5M2 maxima 448/57344 and signed-int32 offsets including power-of-two
 tile padding. Noncontiguous inputs may require a torch copy; empty row batches
 launch nothing. The input-device guard uses that device's current stream and
 restores the caller's device; constants are rounded on CPU independently of
-torch's default device. CPU, wider/unsupported rows, noncanonical maxima,
+torch's default device. CPU, pre-sm89 CUDA devices, wider/unsupported rows, noncanonical maxima,
 logical negative views, forward-AD duals (even under `no_grad`) and
 grad-enabled reverse-mode inputs requiring gradients use
 `fp8_dynamic.fp8_qdq_reference`. The final `2**-127` scale floor is retained.

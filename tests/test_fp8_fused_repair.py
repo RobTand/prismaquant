@@ -19,11 +19,100 @@ from test_fp8_per_token_qdq_oracle import (
     _devices,
     _real_activations,
     _reference,
+    _stub_cuda_preparation,
     needs_cuda_triton,
 )
 
 
-def test_register_tile_eligibility_boundaries():
+@pytest.mark.parametrize("element", sorted(ELEMENTS))
+@pytest.mark.parametrize(
+    "capability, eligible",
+    (((8, 0), False), ((8, 6), False), ((8, 8), False),
+     ((8, 9), True), ((9, 0), True), ((12, 1), True)),
+)
+def test_fused_eligibility_checks_input_device_capability(monkeypatch, element, capability, eligible):
+    queries = []
+    rows = _CudaMetadataTensor((1, 4))
+    input_device = torch.device("cuda:1")
+
+    def get_capability(device=None):
+        queries.append(device)
+        return capability
+
+    monkeypatch.setattr(_CudaMetadataTensor, "device", property(lambda self: input_device))
+    monkeypatch.setattr(torch.cuda, "get_device_capability", get_capability)
+    monkeypatch.setattr(torch.cuda, "current_device", _forbidden)
+    assert _fused().fused_eligible(rows, element_dtype=ELEMENTS[element][0]) is eligible
+    assert queries == [input_device]
+
+
+@pytest.mark.parametrize("entry", PUBLIC_ENTRIES, ids=("qdq", "with_dx"))
+@pytest.mark.parametrize("element", sorted(ELEMENTS))
+@pytest.mark.parametrize("capability", ((8, 0), (8, 8)))
+def test_public_unsupported_device_uses_reference_without_cuda(
+    monkeypatch, entry, element, capability,
+):
+    element_dtype, element_max = ELEMENTS[element]
+    cpu_values = torch.tensor([[0.0, -0.0, 1.0, -2.0], [448.0, 224.0, -448.0, 0.0]])
+    want = _reference(cpu_values, element_dtype=element_dtype, element_max=element_max)
+    values = _CudaMetadataTensor(tuple(cpu_values.shape))
+    input_device = torch.device("cuda:1")
+    queries = []
+    reference_calls = []
+    real_reference = fp8.fp8_qdq_reference
+
+    def get_capability(device=None):
+        queries.append(device)
+        return capability
+
+    def reference(*args, **kwargs):
+        reference_calls.append(1)
+        return real_reference(*args, **kwargs)
+
+    monkeypatch.delenv(fp8.DISABLE_FUSED_ENV, raising=False)
+    monkeypatch.setattr(_CudaMetadataTensor, "device", property(lambda self: input_device))
+    monkeypatch.setattr(
+        _CudaMetadataTensor, "to", lambda self, *args, **kwargs: cpu_values.to(*args, **kwargs),
+    )
+    monkeypatch.setattr(torch.cuda, "get_device_capability", get_capability)
+    monkeypatch.setattr(torch.cuda, "current_device", _forbidden)
+    monkeypatch.setattr(fp8, "fp8_qdq_reference", reference)
+    monkeypatch.setattr(_fused(), "fused_per_token_qdq", _forbidden)
+    monkeypatch.setattr(_fused(), "_kernel", _forbidden)
+    actual = entry(values, element_dtype=element_dtype, element_max=element_max)
+    actual, dx = actual if entry is PUBLIC_ENTRIES[1] else (actual, None)
+    assert queries == [input_device]
+    assert reference_calls == [1]
+    _assert_public_bits(entry, actual, dx, cpu_values, want)
+
+
+@pytest.mark.parametrize("entry", PUBLIC_ENTRIES, ids=("qdq", "with_dx"))
+@pytest.mark.parametrize("element", sorted(ELEMENTS))
+@pytest.mark.parametrize("capability", ((8, 9), (9, 0), (12, 1)))
+def test_public_supported_device_propagates_compiler_failure_without_cuda(
+    monkeypatch, entry, element, capability,
+):
+    element_dtype, element_max = ELEMENTS[element]
+    values = _CudaMetadataTensor((1, 4))
+    state, _ = _stub_cuda_preparation(monkeypatch)
+    error = RuntimeError("supported device compiler failure")
+
+    def fail_kernel():
+        raise error
+
+    monkeypatch.delenv(fp8.DISABLE_FUSED_ENV, raising=False)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
+    monkeypatch.setattr(_CudaMetadataTensor, "to", _forbidden)
+    monkeypatch.setattr(fp8, "fp8_qdq_reference", _forbidden)
+    monkeypatch.setattr(_fused(), "_kernel", fail_kernel)
+    with pytest.raises(RuntimeError, match="supported device compiler failure") as caught:
+        entry(values, element_dtype=element_dtype, element_max=element_max)
+    assert caught.value is error
+    assert not state["inside"]
+
+
+def test_register_tile_eligibility_boundaries(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 9))
     # No giant allocation: the offset bound must include power-of-two padding.
     element_dtype = torch.float8_e4m3fn
     assert _fused().fused_eligible(

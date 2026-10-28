@@ -82,10 +82,11 @@ def fused_eligible(
     *,
     element_dtype: torch.dtype,
 ) -> bool:
-    """Check tensor/layout support, not compiler availability.
+    """Check tensor/layout and input-device support, not compiler availability.
 
     Eligible CUDA calls must surface compiler/import errors rather than silently
-    substituting the multi-op reference. This kernel has no autograd backward.
+    substituting the multi-op reference. Native FP8 conversion requires sm89+.
+    This kernel has no autograd backward.
     """
     if (
         not isinstance(rows, torch.Tensor)
@@ -112,7 +113,7 @@ def fused_eligible(
     extent = max(n_rows - 1, 0) * n_cols + padded_cols
     if rows.numel() > 2**31 - 1 or extent > 2**31 - 1:
         return False
-    return True
+    return torch.cuda.get_device_capability(rows.device) >= (8, 9)
 
 
 _KERNEL = None
