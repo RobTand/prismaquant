@@ -1,0 +1,102 @@
+# Tests that already fail on main on GitHub-hosted runners, excluded from both
+# pytest steps of the `tests` job in .github/workflows/ci.yml. An entry with
+# `::` is passed to --deselect, which matches node ID prefixes; a bare path is
+# a module that fails at import and is passed to --ignore.
+#
+# Taken from main run 40363756269 (05b62b47, 2026-10-26). Runs 40084107273
+# (2026-10-24) and 39980425672 (2026-10-23) failed on the same tests, apart
+# from tests changed between those commits. With these excluded, a red
+# `tests (py3.12, cpu)` on a pull request means a new failure (#3140).
+#
+# Remove an entry when its test passes on hosted runners. Do not add an entry
+# to get a pull request through the queue.
+
+# FileNotFoundError: missing /mnt/shared/tessera-pins
+tests/g3job/test_g3.py
+
+# ModuleNotFoundError: No module named 'prismabuild'
+tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[False]
+tests/g3job/test_g3_launch_read_plan.py::test_launch_plan_preserves_phases_and_checks_its_own_digest[True]
+
+# FileNotFoundError: missing /mnt/shared/pq2253-acquisition-cli-*
+tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh
+
+# ModuleNotFoundError: No module named 'prismabuild'
+tests/test_checkpoint_staged_readset_1366.py::test_claim_digest_and_pb_decoder_are_used
+
+# AssertionError
+tests/test_dispatch_joint_quanta.py::test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box
+tests/test_dispatch_joint_quanta.py::test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed
+
+# AssertionError
+tests/test_dispatch_stage_b_release_gate_2705.py::test_stage_b_accounting_gate_executes_without_legacy_pb_api[absent]
+tests/test_dispatch_stage_b_release_gate_2705.py::test_stage_b_accounting_gate_executes_without_legacy_pb_api[as_deployed]
+
+# AssertionError: (child pytest run failed)
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[compressor-layout-1984-1985]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[grouped-fisher-1959]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-1957-1958]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-export-gate-2276]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[model-walk-fake-trace-2594]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[nested-rotary-2279]
+tests/test_dsv4_fixture_isolation.py::test_real_dsv4_contracts_after_native_import[rope-axis-1990-1992]
+
+# Failed: G3 manifest contract must be validated, not skipped: PrismaBuild runtime source is not ...
+tests/test_g3_manifest_validator_2699.py::test_g3_release_oracle_reaches_current_manifest_validator
+
+# AssertionError: Tensor-likes are not close!
+tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication
+
+# AssertionError: (child pytest run failed)
+tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import
+tests/test_layer_streaming_mxfp4_isolation.py::test_non_expert_fp8_grid_after_native_dsv4_import
+tests/test_layer_streaming_mxfp4_isolation.py::test_shared_expert_scope_after_native_dsv4_import
+tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_checkpoint_after_native_dsv4_import
+tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_int8_group16_after_native_dsv4_import
+
+# FileNotFoundError: missing /mnt/shared/pq-lfm-affinity-audit-*
+tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_declares_admitted_affinity
+tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_source_manifest_drift
+tests/test_lfm_native_launcher_affinity_audit.py::test_lfm_launcher_refuses_unresolved_image_digest
+
+# RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...
+tests/test_native_aura_source_binding_audit.py::test_hub_native_aura_uses_resolved_original_source[streamed-journal]
+tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-bfloat16]
+tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-False-float32]
+tests/test_native_aura_source_binding_audit.py::test_ordinary_aura_main_delivers_declared_values_before_measurement[True-True-bfloat16]
+
+# RuntimeError: streamed layer 0 is not resident after its required prefetch; refusing synchronous ...
+tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-bf16-control]
+tests/test_native_source_resident_intake_audit.py::test_actual_resident_caller_receives_decoded_source[expert-streamed-main-native-block-fp8]
+
+# ModuleNotFoundError: No module named 'prismabuild'
+tests/test_original_cuda_control_artifacts.py::test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports
+tests/test_original_cuda_control_artifacts.py::test_publication_binds_all_actual_node_sidecars
+tests/test_original_cuda_control_artifacts.py::test_retained_artifact_refuses_replaced_granted_bytes
+
+# AssertionError: fixture requires its real admitted PB owner
+tests/test_physical_host_foreign_container_audit.py::test_absent_owned_cid_never_cleans_a_successor_by_name[auto_removed]
+tests/test_physical_host_foreign_container_audit.py::test_absent_owned_cid_never_cleans_a_successor_by_name[replaced_name]
+tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_action]
+tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_name]
+tests/test_physical_host_foreign_container_audit.py::test_cleanup_refuses_a_cid_with_changed_ownership[wrong_nonce]
+tests/test_physical_host_foreign_container_audit.py::test_existing_name_refuses_before_creation_and_remains_untouched
+tests/test_physical_host_foreign_container_audit.py::test_failed_creation_never_falls_back_to_name_cleanup[failed_create]
+tests/test_physical_host_foreign_container_audit.py::test_failed_creation_never_falls_back_to_name_cleanup[failed_owned_create]
+tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_cannot_stop_or_remove_a_borrowed_name
+tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_preserves_an_unrelated_named_container
+tests/test_physical_host_foreign_container_audit.py::test_failed_preflight_without_a_container_remains_an_observation
+tests/test_physical_host_foreign_container_audit.py::test_name_reused_after_preflight_is_not_borrowed_on_failed_create
+tests/test_physical_host_foreign_container_audit.py::test_owned_creation_cleans_only_the_verified_cid
+
+# ModuleNotFoundError: No module named 'prismabuild' (fixture)
+tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_fresh_root_reaches_only_private_queue_boundary
+tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_refuses_existing_root_without_deleting_payload
+
+# AssertionError
+tests/test_spaced_lax_tools_routing_1301.py::test_source_adoption_batch_reaches_only_its_actual_input_boundary
+
+# Failed: DID NOT RAISE RuntimeError
+tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-0]
+tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-1]
+tests/test_tessera_calibration_cache.py::test_torn_during_read_fences_refuse_in_both_modes[validate_cached-None]
