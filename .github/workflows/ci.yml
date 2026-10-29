@@ -177,7 +177,10 @@ jobs:
           )"
           echo "pytest workers=$workers (CPU affinity and available-memory bound)"
           mapfile -t known < "$RUNNER_TEMP/known-failure-args"
-          python -m pytest -c pytest.ini tests/ -q --timeout=300 \
+          # --timeout bounds each test. The slowest took 150 to 217 s on most
+          # main runs, 297 s on a slow runner on 2026-10-23, and hit the old
+          # 300 s limit on 2026-10-28. 600 s keeps ~2x over the worst (#3140).
+          python -m pytest -c pytest.ini tests/ -q --timeout=600 \
             -m "not own_cgroup" \
             -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider \
             "${known[@]}"
