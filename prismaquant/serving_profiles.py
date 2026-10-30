@@ -1354,8 +1354,8 @@ def require_profile_export_lane(
     """Require a profile's inherited exporter lane to match the container.
 
     This is intentionally keyed by ``export_lane.id`` rather than profile id:
-    a narrow hardware policy may extend the historical CB profile while using
-    the same serializer/container contract.
+    a hardware-specific derived profile can retain its base container contract
+    while using a different profile id.
     """
 
     from .model_profiles.structure import canonical_export_lane

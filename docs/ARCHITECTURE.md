@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, PQ #3134 completion-receipt staging ownership.
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+The standalone completion-receipt publisher acquires its exclusive staging
+file before entering cleanup. An occupied staging file or symlink refuses
+without removal. Successfully acquired stages retain the existing hard-link
+publication, mode 0600, fsync order and cleanup on success or later failure.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.

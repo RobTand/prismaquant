@@ -5,7 +5,7 @@ not serve a model and a **derived** image does. It exists because an image tag i
 not a pin: a tag on one box is unreadable by a gate, a reviewer, or a future
 session, and the edits it carries have no home.
 
-Each subdirectory holds:
+Each recorded patch-set subdirectory holds:
 
 * `MANIFEST.json` — schema `prismaquant.serving_runtime_patch_set.v1`: the base
   image by digest, the derived image (by registry digest when one exists, and
@@ -17,7 +17,12 @@ Each subdirectory holds:
 * A `Dockerfile` that builds `FROM` the base digest and re-imports the patched
   module to assert every edit landed.
 
-Read one with `prismaquant.serving_runtime_patch_set.load_serving_runtime_patch_set`.
+The `glm53_dflash2_drafter` and `glm53_draft_cache_copy` subdirectories are
+source candidates. They have no qualifying manifest or recorded serving image;
+`glm53_draft_cache_copy` also has no Dockerfile.
+
+Read a recorded set with
+`prismaquant.serving_runtime_patch_set.load_serving_runtime_patch_set`.
 
 Two rules the reader enforces:
 
