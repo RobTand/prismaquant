@@ -1883,7 +1883,48 @@ An unresolved explicit scope waits. It never becomes an unscoped allowance.
 
 The producer owns geometry classification and the performance menu.
 Its missing half-bit coverage remains missing. T4 remains unadmitted under
-its current policy. T8 R1280 remains a quality anchor, not a menu option.
+the installed aaa41700 producer's current policy. T8 R1280 remains a quality
+anchor, not a menu option.
+
+The public loader can also consume a producer-validated v3 native-TCQ
+publication whose canonical family registry supplies reader rate bounds and
+step instead of a legacy WINDOW `allowable_rungs` rule. That reader grid is
+only a representability constraint, not a performant rate roster. A native
+publication may sample a coarser grid; the producer still owns class identity,
+menu membership, timing and per-cell admission. Legacy WINDOW families retain
+their existing rule and table-step intersection. Current-version/build
+selection and geometry, native, calibration and fused-family gates are
+unchanged. Paired-value semantics, serialized bytes, operator prices and PACT
+remain with their existing owners; no scientific quality is synthesized.
+
+This is consumer compatibility with valid canonical input, not live T4
+adoption. The offline T4 table is synthetic mechanics input, not measured
+quality/cost, numerical or native evidence, or serving qualification. No
+runtime pin or active index changes, first production composition, or serving
+qualification are implied. The retained #2364/PR2647 adoption candidate
+`f2d79d7b908f00d4e17f26d81d5c28d1941f2c19` remains separate; this loader repair
+is not a competing adoption or publication. Campaign remains parent reviewer
+and must review the exact follow-up head before integration.
+
+Re-stamped 2026-10-28 (PRI-50, replacement for PR3005): the repair preserves
+the native-TCQ public-loader change and its immutable offline inputs from
+`03959d7f8ef4903eb7ed3d103573eda719991934`, on current main. The retained
+PR2647 controls from `f2d79d7b908f00d4e17f26d81d5c28d1941f2c19` now live
+unchanged in `tests/test_t4_menu_retained.py`; their private-table cases still
+require `PQ_T4_MENU_TABLE` and do not turn skips into qualification. The
+metadata-only producer declaration and digest match that retained source.
+Historical receipts and its corrective revision count of one remain retained,
+not fresh gates. This compatibility slice does not close #2421 or #2364.
+Native independent review, D52 cross-family review, Campaign exact-head review
+and the required integration checks remain separate gates. No runtime pin,
+active index, shared baseline, changelog or qualification hold changes.
+
+CPU verification of this compatibility repair: 308 passed (14 dependency
+deprecation warnings) with
+`python -m pytest tests/test_t4_menu_followup.py tests/test_rung_allowability.py tests/test_shape_runtime_prices.py tests/test_pact_hull.py tests/test_canonical_consumer_join.py tests/test_tessera_menu.py tests/test_tessera_menu_context.py tests/test_tessera_menu_metadata.py -q --basetemp="$TMPDIR/pytest"`.
+No GPU or serving qualification run was performed.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"58bf7d0726824045f65671d021f5c952d0d25d6380bc59bf624e599a4819d3e4","size":1154}},"operation":"624d919e19434ae7ab0ca80cd152c5b24f3f5609ffe3d5b6887b23bdda2ca7cb","receipt":"2523baec2e6f899af4fd9af9ff01f69afb9d30e95d9fa4413b0ea7719e408bf7"}]
 
 Qualified neighbouring whole anchors supply the producer's linear chord.
 Both scientific currencies retain their actual quantity through the price owner.
@@ -1954,8 +1995,8 @@ Scope recipes use the digest owner's strict, ASCII-escaped, default-spaced JSON 
 Class identities use its lax profile. Exact cache bytes and nonfinite policies remain unchanged.
 The selected table, explicit index, unit scopes, chord sources and class
 cost sources remain in allocation and frontier provenance.
-The pure metadata dependency is Tessera `d9ec5291791ea09592f96c7e75a45d8f5cf23b1c`.
-Its module SHA-256 is `3e2b904b18231a7283cce581fbc45d824f8191a3a011d104f342ed90ac7d6821`.
+The pure metadata dependency is Tessera `8f881a7248f86321beee1c40f15ea3cc617591ff`.
+Its module SHA-256 is `c2a8fa35aee64bd4effd4cd24ee1e8b6ed208afc30cf71fe2a81f283074a6a3c`.
 The test declaration resides in `tests/fixtures/rung_allowability_v3/producer.json`.
 The existing isolated test adapter fetches that module when no source is
 supplied. No untracked producer, serving overlay or global feature skip is required.
