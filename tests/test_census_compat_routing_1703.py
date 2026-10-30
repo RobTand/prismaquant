@@ -15,23 +15,12 @@ import pytest
 from prismaquant import tessera_campaign as tc
 from prismaquant import glm_capture_compatibility as gcc
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
-
-
-def _spy(monkeypatch, module, name):
-    calls = []
-    real = getattr(module, name, None)
-
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-
-    monkeypatch.setattr(module, name, stand_in, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def test_publish_load_execution_routes(monkeypatch, tmp_path):
-    dumps_calls = _spy(monkeypatch, tc, "indent2_json_file_bytes")
-    hash_calls = _spy(monkeypatch, tc, "bytes_sha256hex")
+    dumps_calls = record_unary_calls(monkeypatch, tc, "indent2_json_file_bytes")
+    hash_calls = record_unary_calls(monkeypatch, tc, "bytes_sha256hex")
     out = tc._publish_capture_load_execution(
         tmp_path, capture={"c": 1}, execution={"e": 2}, resources={})
     assert len(dumps_calls) == 1
@@ -40,8 +29,8 @@ def test_publish_load_execution_routes(monkeypatch, tmp_path):
 
 
 def test_create_compat_routes(monkeypatch, tmp_path):
-    dumps_calls = _spy(monkeypatch, gcc, "indent2_json_file_bytes")
-    hash_calls = _spy(monkeypatch, gcc, "bytes_sha256hex")
+    dumps_calls = record_unary_calls(monkeypatch, gcc, "indent2_json_file_bytes")
+    hash_calls = record_unary_calls(monkeypatch, gcc, "bytes_sha256hex")
     monkeypatch.setattr(gcc, "_verify", lambda *a, **k: None)
     monkeypatch.setattr(gcc, "source_derivative_identity", lambda model: {"r": 1})
     target = tmp_path / "compat.json"

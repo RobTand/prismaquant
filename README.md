@@ -80,7 +80,10 @@ python -m prismaquant.allocator --formats NVFP4,FP8_DYNAMIC,BF16 \
   --target-bits 4.75
 ```
 
-The pipeline runs probe → cost → allocator → export → serve-smoke end-to-end, with fail-fast gates on any configuration that would break the measurement contract (it will tell you exactly why and what to set). Models too large for memory (200B+ MoE) run the streaming layer-by-layer path — peak memory is bounded by ~1 layer + a tunable cache.
+The native pipeline runs probe → cost → allocator → export with fail-fast
+configuration gates. It prints the open shipcard slots after export; the serving
+lane must complete the serving and quality gates separately before shipping.
+Models too large for memory (200B+ MoE) run the streaming layer-by-layer path — peak memory is bounded by ~1 layer + a tunable cache.
 
 ---
 
