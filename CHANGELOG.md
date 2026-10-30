@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Reconcile shipcard's existing file-digest routes and descriptor retention (#2635, #1301).
+  Reuse 40 original frozen outcomes and check current consumers against the original recipe.
+  Preserve runtime code, the historical census and the existing baseline.
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
   Bounded local reads retain digest-valid symlink behavior, independent of memo state.
