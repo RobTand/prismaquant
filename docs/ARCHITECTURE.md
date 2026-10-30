@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-28, PRI-53/#3160 hardware eligibility correction to reviewed
+head `cfa998066fbe70be94e5e059f10e6ef4c5b4dec6`.
+Per-token fused FP8 QDQ requires input-device CUDA capability >= 8.9 for its
+retained FP8 conversion instructions; older targets use the torch reference.
+This is an instruction-compatibility gate, not numerical qualification of
+other architectures. Kernel arithmetic and historical receipts are unchanged;
+the dated CPU/GB10 qualification statements below remain source-scoped.
+
+As of: 2026-10-24, corrected #2666 delivery reconciliation for #2867.
+Source base: `9aaae55c48476937d0e1a7d23fcb73d8a66daf96`;
+branch: `tl/prismaquant-01bfa780fa96-wp1`; historical repair: `ecaf0114`.
+Only the per-token FP8 QDQ delivery and its qualification are reconciled.
+Historical timings/receipts do not establish repaired-v2 performance.
+Fresh qualification: 107 passed/153 skipped on CPU; 302 passed/4 skipped on GB10.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -18069,6 +18084,47 @@ This applies to plain FP8 and Tessera routes inheriting that activation policy;
 the compressed-tensors weight quantizer, wire recipes, format menu and serving
 gates are unchanged. Existing producer source hashing distinguishes newly
 measured costs from prior arithmetic. Gate: `tests/test_fp8_dynamic_native_parity.py`.
+
+Reconciled (2026-10-24, `tl/prismaquant-01bfa780fa96-wp1`, base
+`9aaae55c48476937d0e1a7d23fcb73d8a66daf96`) for **per-token FP8 QDQ
+repair #2867**, selectively from repaired delivery `ecaf0114` (not unrelated
+main changes). The recovered contract routes both
+`fp8_dynamic_activation_qdq_vllm` and its `_with_dx` entry through
+`prismaquant/kernels/fp8_per_token_qdq.py` for eligible CUDA rows; one `(M,)`
+launch writes codes, FP32 scales/dequant and optional FP32
+`dx = dequant - input.float()`. This optional dx is not a joint-hook roundtrip
+or fused backward; weight QDQ and joint-hook dx subtraction remain unchanged.
+
+The repaired-v2 bounds are input-device CUDA capability >= 8.9,
+BF16/FP16/FP32, 1 <= K <= 16384, canonical
+E4M3FN/E5M2 maxima 448/57344 and signed-int32 offsets including power-of-two
+tile padding. Noncontiguous inputs may require a torch copy; empty row batches
+launch nothing. The input-device guard uses that device's current stream and
+restores the caller's device; constants are rounded on CPU independently of
+torch's default device. CPU, pre-sm89 CUDA devices, wider/unsupported rows, noncanonical maxima,
+logical negative views, forward-AD duals (even under `no_grad`) and
+grad-enabled reverse-mode inputs requiring gradients use
+`fp8_dynamic.fp8_qdq_reference`. The final `2**-127` scale floor is retained.
+`PRISMAQUANT_DISABLE_FP8_FUSED_QDQ` forces the reference for diagnosis;
+eligible CUDA import/compilation errors propagate rather than silently fall back.
+
+The recovered design retains a whole row in registers and converts/decodes
+FP8 codes through full-width registers to avoid narrow packed-i8 corruption.
+**One launch does not prove one input load**: compiled TTIR/PTX must show one
+logical load, loads before stores, no backward reload loop and no spills for
+both formats, with/without dx, at K=4,5000,16384. The historical GB10/sm121
+qualification does not qualify this checkout or other architectures. Current
+qualification passed the single admitted GPU command (two acceptance files
+plus four regressions): 302 passed, four two-device skips, 30.43s pytest time
+against an approximately ten-minute budget. CPU cannot establish CUDA
+parity or compiled TTIR/PTX properties; the GPU compiled assertions passed.
+Historical tables/receipts and the current PRE-RUN decision/results are in
+`docs/measurements/fp8-fused-per-token-qdq-2026-10-10.md`. No repaired-v2
+performance claim is made. Contract source: `ecaf0114`; acceptance gates:
+`tests/test_fp8_per_token_qdq_oracle.py`, `tests/test_fp8_fused_repair.py`;
+regressions: `tests/test_fp8_dynamic_native_parity.py`,
+`tests/test_joint_aura_one_squaring.py`, `tests/test_joint_aura_packed.py`,
+`tests/test_joint_replay_aggregate_guard.py`.
 
 Re-stamped (2026-09-07, `integration/native-moe-panel`) for **whole routed native
 operator evidence** (#309). `prismaquant.native_moe_panel` retains original
