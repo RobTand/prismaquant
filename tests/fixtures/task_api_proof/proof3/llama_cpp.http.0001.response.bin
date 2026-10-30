@@ -1,0 +1,1 @@
+{"id":"cmpl-9286b766-8a1a-4b07-9282-a704b2147a23","object":"text_completion","created":1791434092,"model":"d50-smollm2-135m-f16","choices":[{"text":" Celsius scale.","index":0,"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}

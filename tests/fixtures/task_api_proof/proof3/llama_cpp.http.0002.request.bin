@@ -1,0 +1,1 @@
+{"prompt": "The capital of France is", "model": "d50-smollm2-135m-f16", "max_tokens": 8, "temperature": 0.0, "stop": ["\n", "<|endoftext|>"], "seed": 17}

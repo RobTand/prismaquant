@@ -1,0 +1,138 @@
+{
+  "format_version": 1,
+  "scope": "Historical retained CPU API protocol replay only. No live endpoint, native Tessera, GPU, model quality, performance or runtime witness qualification.",
+  "historical": {
+    "action_key": "dbcc9990d780b5909ba83d462c95a829453ab68e007e7399c80c1db9bf6686c3",
+    "receipt_sha256": "de8cb365b83ecadb9cf0b6b946c22387dcb2a9ede6ae20bad792d8d494956a6b",
+    "receipt_path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/db/dbcc9990d780b5909ba83d462c95a829453ab68e007e7399c80c1db9bf6686c3.json",
+    "source_base": "2ea7000848a128f4dfd4abef894302001166a5cb",
+    "snapshot_commit": "e8b99455876a72f6127d5dd0b0d5f9898fec36dd"
+  },
+  "files": {
+    "reusable-recipe.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/reusable-recipe.json",
+      "bytes": 23174,
+      "sha256": "15a858899bc43f2aecfc87f5564d9a000c28c0428dcf6b5456edab0146fe8da9"
+    },
+    "task-inputs.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/task-inputs.json",
+      "bytes": 1304,
+      "sha256": "71724909c52d245241e389b69a71355b13776b79fc91214a0467a30b40b893b2"
+    },
+    "task-data.jsonl": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/task-data.jsonl",
+      "bytes": 244,
+      "sha256": "88eb702f4f1a1589fbb682357ccd1ce0068c4cdfa12bd4b06690215706ee8161"
+    },
+    "proof3/capabilities.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/capabilities.json",
+      "bytes": 15889,
+      "sha256": "9c1aac36d1d6516589faad3475c8388302a844353442c97b5951a7becbd2fd94"
+    },
+    "proof3/transcript.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/transcript.json",
+      "bytes": 20186,
+      "sha256": "e50ba5709a37d886bdec1067662ededc7420f3496a3a7c9514f4dc49eadfdd80"
+    },
+    "proof3/llama_cpp/generation.result.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/generation.result.json",
+      "bytes": 9547,
+      "sha256": "1c9b769446a6c6ae841dbac4808676b695fe449ad3dc7af5a3a47a243b396f1b"
+    },
+    "proof3/llama_cpp/scoring.result.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/scoring.result.json",
+      "bytes": 9782,
+      "sha256": "f569ecb840c7d1168cf8f8baf3bd054aa6c5db34cacb24fc2f7f1a26d378e85d"
+    },
+    "evidence-source-d50_api_proof.py.txt": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/evidence-source-d50_api_proof.py.txt",
+      "bytes": 16467,
+      "sha256": "3b5be41b561f9553efc3aca92957dadf3e7b4253c1b76e8cd5123bad1f9576b0"
+    },
+    "proof3/llama_cpp/client.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/client.json",
+      "bytes": 373,
+      "sha256": "8db1a975ae1bebbfca587f9473b32d9bcabfbc088645f703cda2411d8bdaef44"
+    },
+    "proof3/llama_cpp/generation.config.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/generation.config.json",
+      "bytes": 1101,
+      "sha256": "cccc7ef4c187f6b6856753d532f59adeb813428492690e84a04c4efda591f33b"
+    },
+    "proof3/llama_cpp/scoring.config.json": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp/scoring.config.json",
+      "bytes": 984,
+      "sha256": "aa64bdfe4de5f3c1d64a3971e3a292a8146f5fc3540fcb392ce6f60c56feba9c"
+    },
+    "proof3/llama_cpp.http.0000.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0000.request.bin",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "proof3/llama_cpp.http.0000.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0000.response.bin",
+      "bytes": 106,
+      "sha256": "632ad52713e978ebd1b5c941db0860f512f6830b97c4df270b161a9d74d82b00"
+    },
+    "proof3/llama_cpp.http.0001.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0001.request.bin",
+      "bytes": 165,
+      "sha256": "2a75c82b5baf186b4191a7e67d00223e38bf1acebb3bfddc76d135007f789fcf"
+    },
+    "proof3/llama_cpp.http.0001.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0001.response.bin",
+      "bytes": 285,
+      "sha256": "6cead1e1c2432b94542cf562cb5d31376a66cec1f8aa79bb09feefb7d1a78ba3"
+    },
+    "proof3/llama_cpp.http.0002.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0002.request.bin",
+      "bytes": 153,
+      "sha256": "39c04b6d7b428053b9f7a7cac3e612ea118aa45dea4906f5c5f8a7ac8a7ce4be"
+    },
+    "proof3/llama_cpp.http.0002.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0002.response.bin",
+      "bytes": 305,
+      "sha256": "312515c5b2170bf5689c37f3a3c52662a511d94989c4290414004f39a87863ef"
+    },
+    "proof3/llama_cpp.http.0003.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0003.request.bin",
+      "bytes": 173,
+      "sha256": "db683a73291b1c436e325dec92da39e84fd80366c4ef52a4aac4942f9c7f8644"
+    },
+    "proof3/llama_cpp.http.0003.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0003.response.bin",
+      "bytes": 1029,
+      "sha256": "9f40ee875c873f9521a386af79c7744d1cd59f74e3b1163bcb69044213eb352e"
+    },
+    "proof3/llama_cpp.http.0004.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0004.request.bin",
+      "bytes": 176,
+      "sha256": "970037b2b6d8148b88dcd2abc4b25997ed6e0de3c46b547082214425661f1279"
+    },
+    "proof3/llama_cpp.http.0004.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0004.response.bin",
+      "bytes": 1067,
+      "sha256": "68f0dcf28dd48bb211f2603c25f96a9aa0f2a456b1c6f28bb2579ea84e6be627"
+    },
+    "proof3/llama_cpp.http.0005.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0005.request.bin",
+      "bytes": 154,
+      "sha256": "fd5538b6d3d4a91394e0cdbee8b656fd1c57122ba2fe1c55ad7a49ff7ec05ac1"
+    },
+    "proof3/llama_cpp.http.0005.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0005.response.bin",
+      "bytes": 838,
+      "sha256": "ac4d8514961245f8f801232f12ceb53fde1bdb0f0ec10d69dbc2f706b44b8981"
+    },
+    "proof3/llama_cpp.http.0006.request.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0006.request.bin",
+      "bytes": 153,
+      "sha256": "658d9409d8a3f0507c8cd05786f1ed11e0cd45318d441aa5ea30f65c05534230"
+    },
+    "proof3/llama_cpp.http.0006.response.bin": {
+      "original_path": "/mnt/shared/prismabuild-fleet/qualification/testcost-d50-cpu-task-api-proof-20261008/proof3/llama_cpp.http.0006.response.bin",
+      "bytes": 808,
+      "sha256": "5953214ff5b0177ff1b80d4ed4bd2e712f4354b40e0801e9bc813239fb13ccf8"
+    }
+  }
+}

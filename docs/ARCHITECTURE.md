@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-26, D50 retained CPU API proof recovery (#2913, parent #2411).
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+Section 7.0.3 documents the offline replay of the accepted CPU API exchanges.
+The fixture preserves original response bytes and historical run identities.
+Replay does not contact a listener, load weights, or fill a shipcard slot.
+The serving-task producer witness and source hold remain prerequisites.
+No serving lane, runtime pin, numerical default, or gate changes.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -29419,6 +29427,32 @@ Use `--verify-only` to replay stored quality and card evidence without new infer
 Missing evidence still refuses. A CPU preflight, selected tests or primitive
 parity does not establish serving, model quality or multi-host behavior.
 
+
+#### 7.0.3 Replay accepted CPU API evidence
+
+The accepted D50 CPU protocol proof is retained in
+`tests/fixtures/task_api_proof/`. Its manifest records the original qualification
+paths and byte digests. The archived source helper is text evidence only.
+`python -m tools.replay_task_api_proof --evidence-dir tests/fixtures/task_api_proof`
+checks the retained HTTP bodies, task population, seeds and numerical results.
+It reuses the task metric and population owners. It derives each continuation
+boundary from the recorded token offsets and compares the resulting logprob
+sum with the actual public client's raw result.
+
+This command performs historical replay. It does not execute a tokenizer,
+start a server, load a model, or establish a currently loaded endpoint.
+The original proof used a real small CPU model and public lm-eval client.
+Its historical converted artifact is retained as provenance only; replay adds
+no GGUF reader or serving support. See the
+[recovery and evidence record](measurements/d50-cpu-api-replay-2026-10-26.md).
+
+The serving adapter remains HF-only in the live source. The intended launch's
+producer-owned witness and compatible public verifier are still required by
+#2430/#2911 before production adapter edits resume. The current runtime pin
+`aaa417003f0ee690e8ace138acd18df7f9531369` does not package
+`tessera.endpoint_witness`; later producer source alone does not establish
+consumer compatibility or release the hold. The replay cannot fill this gap,
+the independent offline-G3 artifact binding, or any lane's served gate.
 
 ### 7.1 What runs where
 

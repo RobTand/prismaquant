@@ -1,0 +1,1 @@
+{"id":"cmpl-d928efb5-7f6f-4608-b7f8-4f79808731be","object":"text_completion","created":1791434092,"model":"d50-smollm2-135m-f16","choices":[{"text":" Paris. It is the largest city in","index":0,"logprobs":null,"finish_reason":"length"}],"usage":{"prompt_tokens":6,"completion_tokens":8,"total_tokens":14}}
