@@ -52,7 +52,7 @@ import hashlib
 import json
 
 
-REPLAY_SCHEMA = "prismaquant.exl3_grouped_down_replay/2"
+REPLAY_SCHEMA = "prismaquant.exl3_grouped_down_replay/3"
 
 # The boundary the whole-tensor comparison selected.  Named, not inferred from
 # execution order: an ordering assumption would silently follow a change in
@@ -255,22 +255,22 @@ class GroupedDownReplay:
             return False
         return True
 
-    def run(self, fn, args):
-        """Replay ``fn`` on ``args``, into buffers this allocates.
+    def run(self, fn, args, *, inputs_before, initial_out):
+        """Replay the original inputs, including the accumulator's initial bytes.
 
-        Storage, stated rather than implied.  Three output-shaped FP32 buffers
-        are live at once: the retained clone of the original output, the
+        Four output-shaped FP32 buffers are live at once: the pre-call
+        accumulator, the retained clone of the original output, the
         retained clone of the first replay that later replays are compared
         against, and the current probe.  At ``[2048, 4096]`` FP32 that is about
-        32 MB each, so about 96 MB resident for the length of the loop, plus
+        32 MB each, so about 128 MB resident for the length of the loop, plus
         two BF16 copies of half that transiently inside ``compare``.  Nothing
         is kept after the record is built.
         """
         import torch
 
         out = args[3]
-        before = {name: describe(value, name=name)
-                  for name, value in zip(ARGUMENT_NAMES, args)}
+        before = inputs_before
+        initial_out_sha256 = _hash(initial_out)
 
         # Retained, because "the original is unchanged" has to be checked
         # against something after the replays run.
@@ -284,10 +284,11 @@ class GroupedDownReplay:
         replays = []
         first = None
         for index in range(self.repeats):
-            probe = torch.zeros_like(out)
+            probe = initial_out.clone()
+            replay_initial_sha256 = _hash(probe)
             fn(args[0], args[1], args[2], probe, *args[4:])
             entry = {"index": index, "sha256": _hash(probe),
-                     "finite": _finite(probe)}
+                     "finite": _finite(probe), "initial_out_sha256": replay_initial_sha256}
             if first is None:
                 first = probe.detach().clone()
             else:
@@ -325,6 +326,7 @@ class GroupedDownReplay:
             "original_out_unchanged_after_replays": unchanged,
             "inputs_before": before,
             "inputs_after": after,
+            "replay_initial_out_sha256": initial_out_sha256,
             "inputs_stable": _inputs_stable(before, after),
             "replays": replays,
             "distinct_replay_digests": len(distinct),
@@ -332,6 +334,8 @@ class GroupedDownReplay:
             # reader does not have to assemble them from the entries.
             "same_input_inference_supported": bool(
                 _inputs_stable(before, after)
+                and before["out"]["sha256"] == initial_out_sha256
+                and all(entry["initial_out_sha256"] == initial_out_sha256 for entry in replays)
                 and all(entry["finite"]["all_finite"] for entry in replays)
                 and original_before["fp32_finite"]["all_finite"]),
             "interpretation": (
@@ -339,7 +343,7 @@ class GroupedDownReplay:
                 "bytes across repeats.  Reading that as 'different output on the "
                 "same arguments' requires inputs_stable to be true and the "
                 "compared outputs to be finite; with inputs_stable false the "
-                "arguments changed under the call and the digests say nothing "
+                "read-only arguments changed under the call and the digests say nothing "
                 "about the kernel, and a non-finite result makes the magnitudes "
                 "beside it meaningless.  A value of 1 bounds how often a "
                 "difference appears at this shape and occupancy over this many "
@@ -354,7 +358,7 @@ class GroupedDownReplay:
 
 
 def _inputs_stable(before, after):
-    """Whether every recorded argument still reads the same at the end.
+    """Whether the nine read-only arguments still read the same at the end.
 
     Full-byte hashes, so this is content equality of what was passed.  It is
     not content equality of what a pointer table points at: this diagnostic
@@ -363,7 +367,7 @@ def _inputs_stable(before, after):
     """
     if set(before) != set(after):
         return False
-    return all(before[name] == after[name] for name in before)
+    return all(before[name] == after[name] for name in before if name != "out")
 
 
 def install(model, ext, state, *, module_name=DEFAULT_MODULE,
@@ -394,21 +398,35 @@ def install(model, ext, state, *, module_name=DEFAULT_MODULE,
         replay.inside = False
         return output
 
-    handles = [target.register_forward_pre_hook(enter),
-               target.register_forward_hook(leave)]
-
-    original = ext.exl3_fat_moe_down
+    handles = []
+    try:
+        handles.append(target.register_forward_pre_hook(enter))
+        handles.append(target.register_forward_hook(leave))
+        original = ext.exl3_fat_moe_down
+    except BaseException:
+        for handle in handles:
+            handle.remove()
+        raise
 
     def wrapped(*args):
+        observe = len(args) == len(ARGUMENT_NAMES) and replay.should_fire(args[3])
+        if observe:
+            before = {name: describe(value, name=name)
+                      for name, value in zip(ARGUMENT_NAMES, args)}
+            initial_out = args[3].detach().clone()
         result = original(*args)
-        if len(args) == len(ARGUMENT_NAMES) and replay.should_fire(args[3]):
-            replay.run(original, args)
+        if observe:
+            replay.run(original, args, inputs_before=before, initial_out=initial_out)
         return result
 
-    ext.exl3_fat_moe_down = wrapped
     model._tr3_grouped_down_replay = replay
     model._tr3_grouped_down_handles = handles
     model._tr3_grouped_down_original = original
+    try:
+        ext.exl3_fat_moe_down = wrapped
+    except BaseException:
+        uninstall(model, ext)
+        raise
     return {"module": module_name, "repeats": repeats,
             "required_rows": required_rows, "schema": REPLAY_SCHEMA}
 
