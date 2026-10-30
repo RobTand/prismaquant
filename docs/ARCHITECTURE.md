@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, PRI-101 retained-input compatibility repair.
+Source commits: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` plus preserved
+`1de5bf4b7246835ee331ead7b47f88d52f9db042`, with regressions at
+`b124c38006` and the paired compatibility correction.
+The standalone D44 controller binds retained fit, held-out and selection digests
+to frozen task reads and refuses a changed retained population on resume.
+See [the repair contract and historical CPU evidence](d44-retained-scope-2446.md).
+This integration grants no campaign restart, GPU or serving qualification.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -1671,6 +1680,10 @@ admission answer lives in `prismaquant/tessera_runtime/reviewed_answer.json`.
 from the installed runtime. The reviewed values, producer commit and raw contract
 digest are unchanged. Development still checks answer equivalence; serving and
 export still require the separate exact byte pin and code/JSON agreement.
+Re-stamped 2026-10-27 (PQ #2446): the D44 native controller binds retained adoption to the frozen task reads.
+`adopt_retained_units` refuses retained fit digests, held-out digests, or a selection digest that differ from the task frozen reads before retained results remove work. A task without those frozen reads refuses adoption once a retained manifest is supplied. Frozen tensor reads use the full qname basename. The encode receipt must carry the current selection digest. Historical HELD documents bind selection through the verified replacement receipt path and digest; supplied HELD conditioning must also match.
+`routed_main` refuses a supplied retained manifest that differs from the stored catalogue population before resume admits work.
+Matching retained recovery admits once without duplicate admission. Scope digests must be lowercase hexadecimal SHA-256 on both sides; duplicate/ambiguous frozen scope reads refuse. Native occupancy and generation-resolved endings retain custody on ambiguous/unreadable evidence, and cost recovery reads through the native record store. Help and invalid CLI arguments never choose legacy submission; legacy execution requires explicit `--legacy`. Saved routed handoffs resolve state and input paths against the launch directory so a later working-directory change reopens the original custody; legacy wait prompts invoke the current controller script with `--legacy`. Runtime generation, stores, and D1 placement/host/storage declarations use configuration rather than a deployment checkout or fleet guess (see [D44 configuration and CPU evidence](d44-retained-scope-2446.md)). Lifetime balances, completion, ship, and memory gates remain in force. Both new refusals are correctness comparisons against the admitted frozen inputs, not run-identity seals: they bind input bytes the current admission reads, so they refuse in both dev and certified modes.
 
 Re-stamped 2026-10-09 (PQ #2301, revision 8): `tools/g3job` owns the imported G3 measurement harness.
 The source delivery is standalone head `a23165b979a90536e060a2c99ea26930d5445a59`.
