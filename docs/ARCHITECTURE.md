@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-27, PRI-226 native export argument parsing.
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+The native export branch in `run-pipeline.sh` uses one local
+`append_export_tristate_arg` parser for `EXPORT_GPTQ` and
+`EXPORT_SCALE_SWEEP`. It appends to the existing export argument array in
+GPTQ-then-scale-sweep order. Both settings retain their `auto` default,
+exact accepted spellings and setting-specific exit-2 refusal.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
