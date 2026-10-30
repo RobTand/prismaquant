@@ -1,4 +1,4 @@
-# #2533 retained-measurement acceptance fixtures
+# #2776 retained failed-arm acceptance fixtures
 
 These fixtures support CPU-only publication checks, not a new measurement.
 Rob's binding decision `dec-1009-211419-a139` prohibits another GPU run.
@@ -57,6 +57,10 @@ The complete result files retain window IDs, teacher-logit hashes, source and
 producer identities, scored-position counts and per-window values, so the test
 can verify matching before recomputing. The historical paired report is not
 used as a substitute for recomputing both teachers from their retained samples.
+The summary also records `original_regression`, the historical
++0.001982807772259931, and `fraction_of_original_regression`, the primary
+teacher2/all25 signed delta divided by that value. This descriptive fraction
+does not establish additivity or shipping prices.
 
 The other two acceptance tests require artifact filenames/digests, identity
 bindings, CPU/GPU action and receipt identifiers, failed preparation attempts,
@@ -65,6 +69,32 @@ Use full paths or a clearly declared root plus relative paths. Human review
 still verifies the complete assignment comparison, authorization chronology,
 preflight duration/metadata-only evidence, resource admission/return codes,
 review counters, telemetry alignment and honestly stated evidence gaps.
+
+## Recovered per-position arrays
+
+The four NPY files are adopted byte-for-byte from PR #3023 head
+`897fb7b521391ea2af1ebcbdb1b9b2ab74e610ee`. They are little-endian float64,
+C-order arrays with shape `(25, 2047)`, 409,528 bytes each. Row order follows
+the corresponding result JSON's ordered `windows` list.
+
+| Fixture | SHA-256 |
+| --- | --- |
+| candidate-teacher2.npy | `43c0dfa831c538d8efa574ab961fe34d9f60e677dbb3a912a7d98346b5b70f69` |
+| candidate-teacher04.npy | `25083251ab141744dbee33961bd7a3b19da5c851a42cfebd69de11d643b9ea4e` |
+| a8s-teacher2.npy | `5e13b59a9ce27df01357c137ace36c725dd1f72dccaab65ab89e3cae94507a62` |
+| a8s-teacher04.npy | `5debf6cff9bf04f0bd2dc06f81c840b087eced3f82ab6f6ce3f4616937235973` |
+
+Candidate historical originals are
+`/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/gpu-score/latecut41_44_wa-latecut41-44/per_position_kl.{teacher2,teacher04}.npy`.
+Control historical originals are
+`/mnt/shared/tessera-measurements/surrogate-diag-20260929/g3/runs/a8s_wa-gate2/per_position_kl.{teacher2,teacher04}.npy`.
+
+The existing numerical test now checks these digests, reconstructs each window
+mean from its 2,047 positions, compares it with the result JSON, and computes
+the paired delta and sample-SD/sqrt(25) uncertainty from the reconstructed means.
+The arrays add a check of per-position reduction that the existing JSON means
+cannot provide. They do not authenticate an uninterrupted custody chain or a
+teacher producer. The index and three result JSON files remain unchanged.
 
 ## Known limits to preserve in the report
 
@@ -81,11 +111,11 @@ result yet" sentence is stale relative to the later paired result. Preserve
 prior CPU failures and the nanosecond-integer precision repair; use the exact
 handoff proof actually bound into the executed request.
 
-## Research acceptance run
+## Historical research acceptance run
 
 `python -m pytest tests/test_pq2281_confirming_arm_report.py -q --basetemp="$TMPDIR/pytest"`
-ran successfully as a test invocation: three assertions failed because the
-requested report is absent on main. There were no collection/import errors or
+ran as a pre-implementation test invocation: three assertions failed because
+the requested report was absent from main at that historical revision. There were no collection/import errors or
 skips. This is expected pre-implementation failure, not a measurement run.
 The retained stdout was read back with `read_test_artifact`.
 

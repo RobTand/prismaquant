@@ -1,10 +1,16 @@
-# #2281 / #2533: retained A8S L41–L44 R832 confirming arm
+# #2776: retained failed A8S L41–L44 R832 confirming arm (parent #2281)
 
 ## Conclusion and scope
 
 **Failed hypothesis confirmation.** The October 5, 2026 arm-minus-A8S paired KL delta is positive but below the preregistered **delta >= 0.0015** criterion for both teachers. Teacher2/all25 remains the primary teacher/population; criterion_met=false. Successful execution is not hypothesis confirmation. This result neither establishes a production-quality gate nor definitively explains the original regression.
 
-This is a CPU-only publication of the existing `campaign-t8-late-cut-confirmation` under #2533 / parent #2281, not a replacement campaign. Rob's October 9 decision `dec-1009-211419-a139` supersedes the original dispatch request and cancels the 240 GPU minutes. No GPU submission, new weights, encoder work, teacher/instrument substitution, source mutation, or serving/performance qualification was performed for this publication.
+This standalone #2776 CPU-only note adopts the existing report from commit `4accbe7cbde18c15e0d6b26c08e87e07c32d3f8a` at the same path. #2533 is stopped. Parent #2281 remains unresolved. The existing evidence catalog and failed result remain the basis of this publication.
+
+Rob's binding correction at **2026-10-09T21:16:20Z** supersedes the earlier request to repeat `campaign-t8-late-cut-confirmation`. Decisions `dec-1009-165401-0740` and `dec-1009-211419-a139` concern that later dispatch/publication sequence. The October 5 arm already ran and failed, and the correction cancels the proposed 240 GPU minutes. The rounded **+0.00083 delta / 0.00016 SE** is binding CEO-attributed evidence. CPU reconstruction of the recovered bytes separately corroborates it. The primary decision transcripts remain unverified.
+
+Against the original positive regression **+0.001982807772259931**, the primary arm-minus-A8S delta gives a descriptive ratio of **41.978664157%, approximately 42%**. A positive KL delta means worse KL than A8S. This ratio does not establish additivity, identify all remaining responsible layers, or qualify shipping prices. Subtracting this delta from the original regression has no reported uncertainty because the required paired covariance is unavailable.
+
+This publication introduces no GPU submission, new measurement, weight rewrite, encoder work, teacher or instrument substitution, source mutation, or serving qualification. It has no W1/W2 dependency.
 
 ## Paired measurement
 
@@ -13,9 +19,11 @@ This is a CPU-only publication of the existing `campaign-t8-late-cut-confirmatio
 | teacher2 (primary) | all25 (primary) | 25 | 0.028342628003488222 | 0.02751027178789452 | +0.0008323562155937031 | 0.0001602368391371253 | false |
 | teacher04 | all25 | 25 | 0.02828275958062752 | 0.027426096704948534 | +0.0008566628756789866 | 0.0001537487041147601 | false |
 
+Historical CPU reconstruction from the four recovered per-position arrays uses row means over 2,047 positions, then pairs across 25 windows. It gives teacher2/all25 delta **+0.000832356215593703**, SE **0.00016023683913712466**; supplementary teacher04 delta **+0.0008566628756789864**, SE **0.00015374870411476006**. The table and JSON retain the adopted summary's numerically equivalent last-bit values.
+
 Recomputed from matched retained per-window samples: d_i = candidate_i − A8S_i; delta = mean(d_i), SE = sample SD(d_i)/sqrt(25), with sample SD using denominator 24. This is descriptive across-window uncertainty, not repeat-run variability or uncertainty from 51,175 independent positions. Last-bit decimal differences from floating-point summation do not affect the criterion. No clean17 estimate is substituted for all25; its frozen subset remains recorded in the paired artifact.
 
-Candidate and control have identical ordered 25 unique window IDs, identical per-window teacher-logit data hashes for each of both teachers, identical source initialization contract and source model identity, and equal producer_identity objects. Context length is 2048, with 2,047 unmasked causal positions 0..2046 per window (51,175 total). The metric is KL(teacher||candidate), full 154,880 vocabulary, FP64 normalization and reduction from raw FP32 logits. This does not attest teacher2's generating arithmetic dtype merely from a BF16 model name. The paired result and both full result files below preserve the matching and producer/source identities, not merely aggregate scores.
+Candidate and control have identical ordered 25 unique window IDs, identical per-window teacher-logit data hashes for each of both teachers, identical source initialization contract and source model identity, and equal producer_identity objects. Context length is 2048, with 2,047 unmasked causal positions 0..2046 per window (51,175 total). The metric is KL(teacher||candidate), full 154,880 vocabulary, FP64 normalization and reduction from raw FP32 logits. This does not attest teacher2's generating arithmetic dtype merely from a BF16 model name. The paired result preserves the reductions. The two full result files preserve ordered windows, per-window teacher-logit hashes and producer/source identity objects. Equal producer objects and matching logit hashes do not independently authenticate teacher2's producer. The explicit equality flags in those results refer to teacher04. The retained teacher manifest hashes and panel identity bind the historical contract, but the portable fixtures omit the full teacher manifests and token arrays. The historical A8S scorer bytes are not independently authenticated here. "Unchanged offline G3" means numerical-method compatibility, not universal historical byte equality.
 
 ## Selection and frozen input audit
 
@@ -41,7 +49,11 @@ The actual `invocation-preflight.json` binds manifest, scorer, preparation proof
 
 ## Authorization and execution chronology
 
-The retained action was published **2026-10-05 13:18:02.323229 UTC** (queue `published_unix=1791206282.3232286`), before October 9 authorization `dec-1009-165401-0740`. The exact handoff declares: “CEO explicit release received by Main; one priority-0 class-gb10 any-Spark arm is authorized only after exact PB x86 authentication passes. No encode or extra arm; do not withdraw for Window4.” Its parent gate is NEXT D30 terminal plus independent physical cleanup/release, or explicit CEO release. This is a recorded declaration, **not a separately authenticated primary authorization transcript**. October 9's later no-run decision authorizes this publication, not retrospective fabrication of Window4 or dated kernels evidence for October 5. Primary Window4/kernels/campaign records outside the promised readable mounts were not independently inspected; the original October 9 submit-condition claim cannot be verified here.
+The retained action was published **2026-10-05 13:18:02.323229 UTC** (queue `published_unix=1791206282.3232286`), before the October 9 decision `dec-1009-165401-0740`. Both October 9 decisions postdate the run. They concern the later dispatch/publication sequence and cannot be prior authorization for October 5. The actual earlier authorization timestamp remains unverified. No timestamp is inferred from decision-ID digits. The exact handoff declares: “CEO explicit release received by Main; one priority-0 class-gb10 any-Spark arm is authorized only after exact PB x86 authentication passes. No encode or extra arm; do not withdraw for Window4.” Its parent gate is NEXT D30 terminal plus independent physical cleanup/release, or explicit CEO release. This is a recorded declaration, **not a separately authenticated primary authorization transcript**. October 9's later no-run decision authorizes this publication, not retrospective fabrication of Window4 or dated kernels evidence for October 5. Primary Window4/kernels/campaign records outside the promised readable mounts were not independently inspected; the original October 9 submit-condition claim cannot be verified here.
+
+Window4/republish conditions remain a historical compliance question. The retained declaration alone cannot establish compliance with the earlier condition. This note orders no submission or republish.
+
+Supplied historical workflow event **seq 1010055**, workflow attempt **3**, records **"activity interrupted without proof of worker loss"**. This is workflow history, not an additional scoring attempt or an independently established scientific review count. This note preserves inherited history and leaves unknown independent-review counters unknown.
 
 The request declares its checkout snapshot input (SHA-256 `62853508af289863b5dbe1aa51ac70f42f123d8a9f66fe35a8919f0f9a014870`) and no child dependency list. The handoff is bound by path/hash in command arguments. There is no submitted dependency on k1 or another child; CPU qualification and parent release are historical prerequisites, not scheduler-enforced child edges. Resource admission and authorization holds are distinct from those dependencies, and child processes are not child actions.
 
@@ -53,7 +65,7 @@ Named attempt stdout/stderr sidecars were absent on inspection; only the attempt
 
 ## Observer alignment and limits
 
-Both in-process traces and retained telemetry are digest-bound below. First-layer trace has 382,023 events over about 10.804 s starting 13:18:42.124744 UTC; L5-install trace has 197,030 events over about 10.809 s starting 13:22:09.406235 UTC. CPU operations, CUDA runtime, kernels and copies are present. These are selected first-layer/L5-install observations, **not complete L41–L44 or whole-run kernel coverage**. Profiler no-warmup warning limits interpretation.
+Both in-process traces and retained telemetry have raw-file digest citations below. The two profiler-trace hashes are research observations, not previously published immutable producer bindings. Telemetry hashes also match the producer result's declared hashes. First-layer trace has 382,023 events over about 10.804 s starting 13:18:42.124744 UTC; L5-install trace has 197,030 events over about 10.809 s starting 13:22:09.406235 UTC. CPU operations, CUDA runtime, kernels and copies are present. These are selected first-layer/L5-install observations, **not complete L41–L44 or whole-run kernel coverage**. Profiler no-warmup warning limits interpretation.
 
 Telemetry wrapper spans `1791206310.9772573`–`1791210517.6282334`. Netdata has 835 collection rounds, 1,670 host rows: sparky `1791206311.033952`–`1791210516.3671453`, sparklina `1791206311.0531657`–`1791210516.3838038`. Python sampler has 4,196 samples at `1791206310.997452`–`1791210517.4056053`. These align with the scorer and encompass the two trace windows, but start roughly 13.87 s after claim and stop 3.95 s before terminal completion. Trace alignment uses baseTimeNanoseconds `1790857026000000000` plus event ts in microseconds, not the displayTimeUnit label.
 
@@ -72,6 +84,30 @@ Paths below are historical citations, not runtime dependencies for checks. SHA-2
 | paired-result.json | `/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/paired-result.json` | `1133209b27b114c739fff1d803280d6a33dae1cf949daa7cca0f693eaf11d675` |
 | candidate-result.json | `/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/gpu-score/latecut41_44_wa-latecut41-44/result.json` | `168707a152c5f71202da55c8c13823a08a24b811829ca5576d6def3647595d13` |
 | a8s-result.json | `/mnt/shared/tessera-measurements/surrogate-diag-20260929/g3/runs/a8s_wa-gate2/result.json` | `7b18d2a579df67324c5252c3d1078b7eb3a82de7920217c47bab44c354dd6df5` |
+
+### Recovered per-position arrays (raw)
+
+Portable byte-for-byte copies and provenance are under `tests/fixture-data/pq2281-confirming-arm/`, adopted from prior fixture work `a7d20474c0bf21a543514294474a1ccca9bdcc9b` plus the recovered arrays. Checks need neither fleet access nor historical Git objects. Each array is NPY v1 little-endian float64, C-order, shape (25, 2047), 409,528 bytes. Rows follow each result's ordered `windows` list.
+
+| Fixture | SHA-256 |
+|---|---|
+| candidate-teacher2.npy | `43c0dfa831c538d8efa574ab961fe34d9f60e677dbb3a912a7d98346b5b70f69` |
+| candidate-teacher04.npy | `25083251ab141744dbee33961bd7a3b19da5c851a42cfebd69de11d643b9ea4e` |
+| a8s-teacher2.npy | `5e13b59a9ce27df01357c137ace36c725dd1f72dccaab65ab89e3cae94507a62` |
+| a8s-teacher04.npy | `5debf6cff9bf04f0bd2dc06f81c840b087eced3f82ab6f6ce3f4616937235973` |
+
+Candidate historical originals: `/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/gpu-score/latecut41_44_wa-latecut41-44/per_position_kl.{teacher2,teacher04}.npy`.
+Control historical originals: `/mnt/shared/tessera-measurements/surrogate-diag-20260929/g3/runs/a8s_wa-gate2/per_position_kl.{teacher2,teacher04}.npy`.
+Recovery and CPU arithmetic corroborate the attributed numbers, not an uninterrupted custody chain. The producer's CAS text digest does not directly bind these arrays or result JSONs.
+
+### Additional source bindings from the full results
+
+| Identity | SHA-256 |
+|---|---|
+| A8S control manifest | `504df10d2bffa1ab99dd88e3d6fae606a4c45034587c29c22c51dcc70f507bcf` |
+| root-bf16-upstream-source-binding.json | `23370e25f6b42e316f72d6cbc8f3f5747a65705b388c910da93545f487edc0fa` |
+| original-execution.json source derivative | `38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed` |
+| common container content | `eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd` |
 
 ### Input records (raw)
 
@@ -162,6 +198,8 @@ Relative to `/mnt/shared/tessera-measurements/t8-latecut-L41-L44-20261005/source
   "delta_definition": "arm-minus-A8S",
   "pre_registered_delta_threshold": 0.0015,
   "criterion_met": false,
+  "original_regression": 0.001982807772259931,
+  "fraction_of_original_regression": 0.41978664156889717,
   "results": {
     "teacher2": {
       "all25": {
@@ -192,3 +230,7 @@ The CPU acceptance check verifies numerical publication and required citation pr
 Verification command: `python -m pytest tests/test_pq2281_confirming_arm_report.py -q --basetemp="$TMPDIR/pytest"` — **3 passed in 0.59 s**, exit code 0; retained stdout read back. No GPU check was run or needed. The unavailable historical checks are identified above, not counted as passes.
 
 [Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"0a4669cdfa71de5e492f11a0bea2fb342e280c1d5fd396a3eab388fbb30a1336","size":268}},"operation":"cef456e606d021e067b1c33ff53a244f8ed0446b0aeb0e506b02934bfa47a2fa","receipt":"eaba879b57de3d5a1d997bbd2bcab12bcbf28dfa1cab057569c0a86aa80114f1"}]
+
+## Historical adoption corrections for #2776
+
+This continuation carries forward #3023's standalone ownership, October 9 correction, descriptive ratio, recovered-array identities and custody limits. It retains the original publication verification above as historical evidence. Those receipts do not qualify this continuation's source. Current validation uses the existing `tests/test_pq2281_confirming_arm_report.py`, extended to check recovered-array reductions and the ratio. The duplicate prose-matching suite from #3023 is omitted. Fresh PrismaBuild action keys and receipts belong to the replacement PR. No new scientific result or corrected-price qualification follows from these publication corrections.

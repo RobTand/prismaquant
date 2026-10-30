@@ -1,15 +1,17 @@
-"""CPU-only acceptance for #2533's retained-measurement publication.
+"""CPU-only acceptance for #2776's retained failed-arm publication.
 
 The report is prose plus one fenced JSON summary; see the fixture README for
 its small data contract. No fleet access, model import, subprocess, or GPU is
 needed. Fixture paths are historical citations, never paths to open at runtime.
 """
 
+import ast
 import hashlib
 import json
 import math
 import re
 import statistics
+import struct
 from pathlib import Path
 
 import pytest
@@ -18,11 +20,18 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixture-data" / "pq2281-confirming-arm"
 REPORT = ROOT / "docs" / "results" / "pq2281-confirming-arm.md"
 SUMMARY_SCHEMA = "pq2281.confirming_arm.summary.v1"
+ORIGINAL_REGRESSION = 0.001982807772259931
+ARRAY_DIGESTS = {
+    "candidate-teacher2.npy": "43c0dfa831c538d8efa574ab961fe34d9f60e677dbb3a912a7d98346b5b70f69",
+    "candidate-teacher04.npy": "25083251ab141744dbee33961bd7a3b19da5c851a42cfebd69de11d643b9ea4e",
+    "a8s-teacher2.npy": "5e13b59a9ce27df01357c137ace36c725dd1f72dccaab65ab89e3cae94507a62",
+    "a8s-teacher04.npy": "5debf6cff9bf04f0bd2dc06f81c840b087eced3f82ab6f6ce3f4616937235973",
+}
 
 
 def _report():
     assert REPORT.is_file(), (
-        "#2533 still needs docs/results/pq2281-confirming-arm.md: publish the "
+        "#2776 needs docs/results/pq2281-confirming-arm.md: publish the "
         "retained failed confirmation; do not rerun the GPU arm"
     )
     return REPORT.read_text(encoding="utf-8")
@@ -49,6 +58,17 @@ def _assert_citations(text, records):
     for label, record in records.items():
         assert Path(record["path"]).name in text, f"Missing artifact citation: {label}"
         assert record["sha256"] in text, f"Missing artifact digest: {label}"
+
+
+def _array_window_means(name):
+    data = (FIXTURES / name).read_bytes()
+    assert hashlib.sha256(data).hexdigest() == ARRAY_DIGESTS[name]
+    assert data[:8] == b"\x93NUMPY\x01\x00"
+    header_size = struct.unpack("<H", data[8:10])[0]
+    header = ast.literal_eval(data[10:10 + header_size].decode("ascii"))
+    assert header == {"descr": "<f8", "fortran_order": False, "shape": (25, 2047)}
+    values = struct.unpack("<" + "d" * (25 * 2047), data[10 + header_size:])
+    return [statistics.fmean(values[i * 2047:(i + 1) * 2047]) for i in range(25)]
 
 
 def test_signed_paired_statistics_and_failed_confirmation():
@@ -80,6 +100,10 @@ def test_signed_paired_statistics_and_failed_confirmation():
         assert arm[teacher]["positions"] == a8s[teacher]["positions"] == 51175
         for aw, bw in zip(arm["windows"], a8s["windows"], strict=True):
             assert aw[teacher]["teacher_logits_data_sha256"] == bw[teacher]["teacher_logits_data_sha256"]
+        arm_means = _array_window_means(f"candidate-{teacher}.npy")
+        a8s_means = _array_window_means(f"a8s-{teacher}.npy")
+        assert arm_means == pytest.approx(arm[teacher]["per_window_mean"], rel=0, abs=1e-12)
+        assert a8s_means == pytest.approx(a8s[teacher]["per_window_mean"], rel=0, abs=1e-12)
         # all25 is mandatory. If clean17 is also summarized, it must retain the
         # frozen subset and cannot replace all25 as the confirmation population.
         populations = summary["results"][teacher]
@@ -87,8 +111,8 @@ def test_signed_paired_statistics_and_failed_confirmation():
         assert set(populations) <= {"all25", "clean17"}
         for population, actual in populations.items():
             ids = set(arm_ids) if population == "all25" else clean_ids
-            av = [v for wid, v in zip(arm_ids, arm[teacher]["per_window_mean"], strict=True) if wid in ids]
-            bv = [v for wid, v in zip(arm_ids, a8s[teacher]["per_window_mean"], strict=True) if wid in ids]
+            av = [v for wid, v in zip(arm_ids, arm_means, strict=True) if wid in ids]
+            bv = [v for wid, v in zip(arm_ids, a8s_means, strict=True) if wid in ids]
             differences = [a - b for a, b in zip(av, bv, strict=True)]
             expected = {
                 "candidate_mean": statistics.mean(av),
@@ -103,6 +127,10 @@ def test_signed_paired_statistics_and_failed_confirmation():
                 )
     delta = summary["results"]["teacher2"]["all25"]["paired_delta_mean"]
     assert summary["criterion_met"] == (delta >= summary["pre_registered_delta_threshold"])
+    assert summary["original_regression"] == ORIGINAL_REGRESSION
+    assert summary["fraction_of_original_regression"] == pytest.approx(
+        delta / ORIGINAL_REGRESSION, rel=0, abs=1e-12
+    )
 
 
 def test_report_binds_the_frozen_inputs_and_complete_selection():
