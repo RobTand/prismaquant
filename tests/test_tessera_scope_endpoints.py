@@ -251,6 +251,7 @@ def _v5_contract(monkeypatch, *, with_experts=True):
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: parsed)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
+    return payload
 
 
 @pytest.mark.parametrize("token", [False, True])
