@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Projected CUDA qualification can now request a fresh private pinned payload
+through the existing staged reader. Same-handle live/source metadata validation
+precedes allocation; the ordered coordinator adopts contiguous pinned storage
+without another host copy. Host consumers remain pageable by default; pool,
+unmapped and qualified-original routes retain private pin-copy fallback and
+source-retirement cleanup. Existing completion/cancellation fencing retains the
+pinned owner. See [the adaptation evidence](measurements/pq2039_private_staging_adaptation.md)
+for current behavioral checks, historical copy attribution and explicit timing,
+clock, energy and full-campaign limits.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
