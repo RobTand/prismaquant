@@ -78,8 +78,14 @@ The same holds for any functionality, not only byte movement.
 `tests/test_duplication_baseline.py` compares
 `tools/duplication_inventory.py`'s structural near-duplicates and same-name
 helpers against a shrink-only baseline, so a copy of existing functionality
-fails even when its text differs. Reuse or extend the existing
-implementation instead.
+can fail even when its text differs. That gate scans Python under
+`prismaquant/` and `tools/` with the scanner's recorded exclusions, and its
+near-duplicate check compares different files. Run the same tool with
+`--coverage-report PATH` to account for all Git-tracked paths and report
+structural candidates across the remaining Python files, including pairs
+within one file. This audit does not change the baseline. Structural matches
+require semantic reading, and a clean report does not prove the absence of
+logical duplication. Reuse or extend the existing implementation instead.
 
 If a call site needs different behavior, add a shared method to the existing
 cache abstraction and reuse it everywhere.
