@@ -253,7 +253,30 @@ async function publishStatus(github, identity, targetUrl, state, description) {
   });
 }
 
-async function run({ github, context, core }) {
+async function verifyIssuePolicy(github, context) {
+  const identity = pullRequestIdentity(context);
+  const response = await readPullRequest(github, identity);
+  const result = evaluateClosingIssues(response, identity.repository, identity.pullNumber);
+  const policy = branchPolicy(context.payload.pull_request);
+  let parent;
+  const matchesBranch = () => result.issues.some((issue) => issue.number === policy.issueNumber);
+  if (!result.ok || (!policy.exempt && policy.issueNumber && !matchesBranch())) {
+    parent = await readOpenParent(github, response, identity, context.serverUrl,
+      policy.exempt ? null : policy.issueNumber);
+    if (parent) result.issues.push(parent);
+  }
+  return { identity, result, policy, parent, matchesBranch: matchesBranch() };
+}
+
+async function requireIssuePolicy(github, context) {
+  const verified = await verifyIssuePolicy(github, context);
+  if (!verified.result.issues.length || (!verified.policy.exempt && !verified.matchesBranch)) {
+    throw new Error(`pull request #${verified.identity.pullNumber} fails the existing issue/branch policy`);
+  }
+  return verified;
+}
+
+async function run({ github, context, core, queueStatus }) {
   let identity;
   let targetUrl;
   try {
@@ -267,21 +290,15 @@ async function run({ github, context, core }) {
       "Resolving closing issues or an open parent reference",
     );
 
-    const response = await readPullRequest(github, identity);
-    const result = evaluateClosingIssues(
-      response,
-      identity.repository,
-      identity.pullNumber,
-    );
-
-    const policy = branchPolicy(context.payload.pull_request);
-    let parent;
-    const matchesBranch = () => result.issues.some((issue) => issue.number === policy.issueNumber);
-    if (!result.ok || (!policy.exempt && policy.issueNumber && !matchesBranch())) {
-      parent = await readOpenParent(github, response, identity, context.serverUrl,
-        policy.exempt ? null : policy.issueNumber);
-      if (parent) result.issues.push(parent);
+    const queue = require("./queue_policy.cjs");
+    if (queue.isQueueCandidate(context.payload.pull_request)) {
+      await queue.verifyQueue({ github, context, pull: context.payload.pull_request, queueStatus });
+      await publishStatus(github, identity, targetUrl, "success", "Authenticated Mergify batch and member issue policy verified");
+      core.info("accepted fresh authenticated Mergify batch");
+      return;
     }
+
+    const { result, policy, parent, matchesBranch } = await verifyIssuePolicy(github, context);
 
     if (!result.issues.length) {
       await publishStatus(github, identity, targetUrl, "failure", "No closing issue or open same-repository parent is linked");
@@ -289,7 +306,7 @@ async function run({ github, context, core }) {
       return;
     }
 
-    if (!policy.exempt && !matchesBranch()) {
+    if (!policy.exempt && !matchesBranch) {
       const expected = result.issues.map((issue) => `prismaquant-${issue.number}`).join(", ");
       await publishStatus(github, identity, targetUrl, "failure",
         "Branch rule: expected prismaquant-<issue> for a verified linked issue");
@@ -341,5 +358,6 @@ module.exports = {
   evaluateClosingIssues,
   publishStatus,
   pullRequestIdentity,
+  requireIssuePolicy,
   run,
 };
