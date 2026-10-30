@@ -3780,8 +3780,12 @@ def run_streamed_calibration(request: CensusRequest | CaptureRequest, runner, pr
         # The files the forward never read (MTP sidecars, tokenizer assets)
         # are hashed now; every other digest was recorded by its read.
         source_receipt = source.authenticate_complete_source()
+        source_files = source.recorded_source_files()
+        # Close verifies the admission digests against the held bytes (#2010).
+        # A refused source must not leave a reusable capture manifest behind.
+        source.close()
         receipt = writer.finish(model_load_contract=contract,
-                                source_files=source.recorded_source_files())
+                                source_files=source_files)
         _write_capture_load_execution(request, writer, guard=guard,
                                       resources=resources if guard is not None else None)
         from .cost_stage_checkpoint import atomic_write_bytes
