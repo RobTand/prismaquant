@@ -86,6 +86,7 @@ import torch
 import torch.nn as nn
 
 import prismaquant.native_render_codec as _native_render_codec
+from . import name_projection
 from .native_render_levers import NativeRenderLevers
 from .render_cache_paths import (
     cache_weight_filename, require_injective_cache_filenames,
@@ -1060,14 +1061,6 @@ class ProductionWeightCache:
             path = str(Path(self.cache_dir) / path)
         return path
 
-    def _name_candidates(self, name: str) -> list[str]:
-        candidates = [name]
-        if name.endswith(".weight"):
-            candidates.append(name[:-len(".weight")])
-        if name.startswith("model.language_model."):
-            candidates.append("model." + name[len("model.language_model."):])
-        return list(dict.fromkeys(candidates))
-
     def _format_candidates(self, fmt: str) -> list[str]:
         raw = str(fmt)
         candidates = [raw, raw.upper()]
@@ -1088,7 +1081,7 @@ class ProductionWeightCache:
 
     def resolve_key(self, name: str, fmt: str) -> tuple[str, str] | None:
         """Resolve recipe aliases to the concrete stored cache key."""
-        for cand in self._name_candidates(name):
+        for cand in name_projection.production_cache_name_candidates(name):
             for fmt_cand in self._format_candidates(fmt):
                 key = (cand, fmt_cand)
                 if key in self.weights:

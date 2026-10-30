@@ -103,6 +103,7 @@ __all__ = [
     "fused_sibling_group_key",
     "VLLM",
     "strip_weight_leaf",
+    "production_cache_name_candidates",
 ]
 
 # ---------------------------------------------------------------------------
@@ -151,6 +152,20 @@ def strip_weight_leaf(tensor_name: str) -> str:
     """
     name = str(tensor_name)
     return name[: -len(".weight")] if name.endswith(".weight") else name
+
+
+def production_cache_name_candidates(name: str) -> tuple[str, ...]:
+    """Ordered compatibility spellings for rendered-weight cache lookup.
+
+    Leaf removal and the historical multimodal prefix projection each apply
+    to the original name; combining them would admit an additional cache key.
+    """
+    names = [name]
+    if name.endswith(".weight"):
+        names.append(strip_weight_leaf(name))
+    if name.startswith("model.language_model."):
+        names.append("model." + name[len("model.language_model."):])
+    return tuple(dict.fromkeys(names))
 
 
 def _default_expert_parent_for_projection(projection_name: str) -> str | None:
