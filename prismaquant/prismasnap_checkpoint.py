@@ -324,16 +324,7 @@ def _sha256_file(path: Path, chunk_bytes: int = 16 << 20) -> str:
 
 
 def _atomic_json(path: Path, payload: object) -> None:
-    data = DIRECT_UTF8_INDENT2_STRICT.encoded(payload)
-    tmp = path.with_name(f".{path.name}.tmp")
-    if os.path.lexists(tmp):
-        raise RuntimeError(f"refusing stale PrismaSnap temporary file {tmp}")
-    with tmp.open("xb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
-    _fsync_dir(path.parent)
+    _atomic_bytes(path, DIRECT_UTF8_INDENT2_STRICT.encoded(payload))
 
 
 def _fsync_dir(path: Path) -> None:

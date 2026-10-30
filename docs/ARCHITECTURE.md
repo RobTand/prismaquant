@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-10-26, retained GGUF status correction.
+Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `prismaquant-1295-pri226-publication`).
+Section 1.1 records the 2026-10-17 GGUF deprecation in AGENTS.md.
+This corrects prose only; retained GGUF code and serving gates are unchanged.
+As of: 2026-10-27, SDK5 release-smoke fixture repair, PQ #2826.
+Source commit: `8e7dbf876be6a60916866872016f5400e79281d7` (tested fixture and smoke; this follow-up records documentation only).
+The SDK5 qualification section below separates CPU contract integration from historical retained evidence and native qualification.
+
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -3693,6 +3701,18 @@ The SDK refuses a result without a native producer context in both modes.
 `tests/test_no_new_seals.py` counts the two kinds of join in each function.
 Tests: `tests/test_original_source_admission.py` and
 `tests/test_held_producer_sdk5_smoke_2152.py`.
+
+Re-stamped 2026-10-27 (PQ #2826): this release smoke authenticates a private
+CPU native-carrier fixture under `tmp_path`, using the installed SDK5 reader
+with `require_native_producer_context=True`, the standard-capture binder and
+the real consumer join. Certified matching identity reaches the helper-tree
+seal; foreign nonce and scope identities refuse, while D32 dev controls join
+and stamp. It proves contract integration only. Historical retained-producer
+evidence recovery and PB #1485 native qualification remain separate.
+The current x86 CPU interpreter is
+`/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python`; it carries the
+reviewed SDK5 and current Tessera development pins. The October 9 task-suite
+layer above predates the current Tessera pin and refuses in pbtest preflight.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -22288,7 +22308,7 @@ by measurement, not by the cost model (§2).
 |---|---|---|---|---|
 | Native | `compressed-tensors` | vanilla vLLM, Blackwell CUTLASS | maintained: NVFP4, FP8_DYNAMIC/E4M3, BF16; FP8_SOURCE remains a source-artifact compatibility codec | production default for the maintained W4A4/W8A8/BF16 menu; W8A16/source FP8 is not SM120 performance eligibility |
 | **Tessera** | `tessera` wire (`quant_method = "tessera"`) | vLLM + **Tessera's own** plugin (`tessera.serving`), installed into the stock image from an immutable pin; PrismaQuant consumes only the packaged `runtime_contract.json` | the Tessera trellis wire, synthesized and priced by name (§5.7) | **declared, with a container arm, and admitted by the pin**: `EXPORT_CONTAINER=tessera` is a lane the driver can act on since 2026-09-02 (§9.4), and since 2026-09-04 the pin names an exact Tessera commit plus the SHA-256 of the `runtime_contract.json` it packages — `tessera_lane_admission(name).admitted` admits matched cells when the installed Tessera hashes to that digest, and False for any other tree, by the pin rather than by an edit. Dense-only at TP=1 for anything shipped; the contract's two `routed_moe` cells are decided by their own packaged `evidence.smoke.status` — refused on `"repetitive"` (v17–v20), not refused on `"recorded"` (v21), with no predicate change either way. Lane schema v9 (Tessera #327) puts the rule and the rows behind a status into the contract, and this reader re-derives both the status and the attribution by calling Tessera's own functions rather than restating the rule |
-| GGUF | single `.gguf` | llama.cpp; vLLM via `vllm-gguf-plugin` | Q2_K…Q8_0 k-quants + IQ family + BF16 | enabled end-to-end; the only 2–3 bpw path |
+| GGUF | single `.gguf` | llama.cpp; vLLM via `vllm-gguf-plugin` | Q2_K…Q8_0 k-quants + IQ family + BF16 | deprecated 2026-10-17; retained implementation, no ongoing support commitment |
 
 A fourth container — the **codebook (CB) / gridbook** lane — was **retired 2026-09-02** on Robert's decision (*"put Tessera in PrismaQuant and remove Gridbook"*) and archived whole at `archive/gridbook_lane_2026-09-02/`, its served measurements included. `EXPORT_CONTAINER=nvfp4_cb` now `exit 2`s. See §9.2 for what went with it.
 
