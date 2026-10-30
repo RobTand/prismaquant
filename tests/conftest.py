@@ -30,6 +30,18 @@ import sys
 import pytest
 
 
+@pytest.fixture
+def synthetic_graph_lane(monkeypatch):
+    """Isolate unrelated card policies from external numerical qualification.
+
+    Requested explicitly by tests with producer-shaped synthetic graph records.
+    Real numerical and unavailable-verifier tests do not request this fixture.
+    """
+    from prismaquant import tessera_lane
+
+    monkeypatch.setattr(tessera_lane, "graph_equality_verify", lambda receipt, scope: None)
+
+
 def _installed_contract() -> dict:
     """The Tessera contract the environment installs, parsed."""
     from importlib.resources import as_file

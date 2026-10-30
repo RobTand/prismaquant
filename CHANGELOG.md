@@ -50,6 +50,11 @@
   Exclusive one-call cohorts route eligible work to #2541, #2542, or #2543. The change has no source, scanner, test, or baseline behavior.
 
 ### Fixed
+- Graph shipcard replay requires original producer-bound equality evidence (#1586).
+  It checks raw receipt/config bytes, artifact identity, observed scope, and rank
+  transport before the lane's shared population and numerical verifier runs.
+  The current pinned verifier remains incompatible; synthetic CPU checks do not
+  qualify a release. The required graph slot and research-card refusal remain.
 - Qualify launch-owned SDK6 artifact-CAS bytes without changing the staged-reader SDK pin (#2683).
 - Remove the host-local spool-default assertion; retain explicit row behavior coverage (#2682).
 - Restore the source-page stat probe before Python 3.14 temp cleanup (#2681).

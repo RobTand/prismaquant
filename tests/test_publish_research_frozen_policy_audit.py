@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 
 @pytest.fixture
 def publication_fixture(tmp_path):

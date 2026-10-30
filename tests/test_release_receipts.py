@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 import prismaquant.release_receipts as ingest
 from prismaquant import shipcard
 from test_shipcard import _artifact, _open_card, _native_record
