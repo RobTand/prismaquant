@@ -281,6 +281,36 @@ Before editing:
   or compressed-tensors layout are touched.
 - Define the KL/bpp/runtime comparison and calibration set.
 
+When writing tests:
+
+- Use ownership-scoped observable oracles and positive evidence against
+  independently known expectations. Counters alone, assertions that repeat
+  implementation calculations, and assertions of a mock's configured return
+  value do not prove the behavior under test.
+- Synchronize ownership transfer and completion publication with explicit
+  events, conditions, or bounded condition polls. Exercise the publication
+  boundary; do not assume worker scheduling or callback order, or sleep for
+  readiness. Scheduling quiet does not prove worker-owned references are gone.
+- Inject or fake clocks for time-dependent behavior. Never assert wall-clock
+  or elapsed-time thresholds; timeouts are generous failure bounds, not
+  correctness or performance oracles.
+- Seed randomness, use `tmp_path` and fake network transports, and declare
+  explicit CPU and memory budgets that account for parallel workers, including
+  xdist. Do not depend on host load, host CPU count, test order, environmental
+  identity reuse (such as inode or mtime reuse), unseeded randomness, real
+  network calls, or fixed temporary paths.
+- Ambient cgroup totals include unrelated allocations and cannot establish
+  ownership release. Positive mapping-lifetime observations prove the scoped
+  mapping behavior, not an exact cgroup-wide physical-memory delta, and do not
+  replace separately scoped committed-memory semantics coverage.
+- Fix the cause of a failing test. Never retry, quarantine, skip (including
+  isolation skips), enlarge tolerances, or weaken a failing assertion to obtain
+  a pass. Retries and isolation skips fix neither an ambient-total oracle nor
+  an ownership-publication race.
+- Require substantive independent review of the guidance and existing positive
+  regression coverage. Mechanical checks and passing commands alone cannot
+  establish their quality.
+
 Before finishing:
 
 - Run targeted tests and compile checks for touched modules.
