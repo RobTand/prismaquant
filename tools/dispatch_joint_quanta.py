@@ -63,6 +63,7 @@ if __package__:
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         local_scratch_environment,
+        local_scratch_request_environment,
         produced_spool_environment,
         stage_b_spill_environment,
     )
@@ -76,6 +77,7 @@ else:
         STAGE_B_SPILL_ENV,
         container_cache_environment,
         local_scratch_environment,
+        local_scratch_request_environment,
         produced_spool_environment,
         stage_b_spill_environment,
     )
@@ -1890,7 +1892,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     # inlined spec bytes supply its outer PB environment below; no ambient
     # coordinator environment or second spec read participates.
     try:
-        scratch = local_scratch_environment(spec, spec.get("env", {}))
+        scratch = local_scratch_request_environment(spec)
         _admit_overlay_caches(spec, scratch)
         _require_replay_regime(spec, emits_handoff="--emit-adjoint-handoff" in payload,
                                chain_batch_size=handoff_chain_batch_size)
@@ -2360,7 +2362,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         resource_policy, environment=sealed_spec.get("env", {}),
         source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
         operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
-    environment = [*local_scratch_environment(sealed_spec, sealed_spec.get("env", {})).items(),
+    environment = [*local_scratch_request_environment(sealed_spec).items(),
                    *produced_spool_row_environment(sealed_spec).items()]
     return quantum_row.QuantumPBEnvelope(
         str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,

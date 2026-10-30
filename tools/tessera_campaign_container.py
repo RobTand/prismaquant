@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -389,6 +390,82 @@ def local_scratch_environment(spec: dict, environ) -> dict:
     forwarded[LOCAL_SCRATCH_PAIRS_ENV] = ",".join(
         f"{root}:{maximum}" for root, maximum in pairs)
     return forwarded
+
+
+def local_scratch_request_environment(spec: dict) -> dict:
+    """Project sealed spec declarations into the outer PB admission envelope.
+
+    Unlike payload forwarding, admission never consults the coordinator's
+    environment. Keep preflight and envelope construction on this same path.
+    """
+    forwarded = local_scratch_environment(spec, spec.get("env", {}))
+    forwarded.update(local_scratch_io_environment(spec, forwarded))
+    return forwarded
+
+
+LOCAL_SCRATCH_IO_ENV = "PRISMABUILD_LOCAL_SCRATCH_IO"
+
+
+def local_scratch_io_environment(spec: dict, scratch: dict) -> dict:
+    """Validate PB v1 traffic independently of occupancy; preserve wire bytes.
+
+    ``scratch`` is the complete validated capacity projection, not a selected
+    root. PB owns profile comparison, freshness at placement and scheduling.
+    """
+    env = spec.get("env", {})
+    if LOCAL_SCRATCH_IO_ENV not in env:
+        return {}
+
+    def refuse(reason):
+        raise ValueError(f"{LOCAL_SCRATCH_IO_ENV}: {reason}")
+
+    def unique_object(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                refuse(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    def nonfinite(value):
+        refuse(f"nonfinite JSON value {value}")
+
+    wire = env[LOCAL_SCRATCH_IO_ENV]
+    if not isinstance(wire, str) or not wire:
+        refuse("scratch I/O declaration must be a nonempty JSON string")
+    try:
+        intent = json.loads(wire, object_pairs_hook=unique_object,
+                            parse_constant=nonfinite)
+    except ValueError as exc:
+        refuse(f"invalid scratch I/O JSON: {exc}")
+    fields = {"schema", "write_bytes", "read_bytes", "profile_contract",
+              "max_profile_age_s"}
+    if not isinstance(intent, dict) or set(intent) != fields:
+        refuse("scratch I/O declaration requires exactly the PB v1 fields")
+    if intent["schema"] != "prismabuild.local_scratch_io.v1":
+        refuse("unsupported scratch I/O schema")
+    for direction in ("write_bytes", "read_bytes"):
+        if type(intent[direction]) is not int or intent[direction] < 0:
+            refuse(f"{direction} must be a nonnegative JSON integer")
+    if not (intent["write_bytes"] or intent["read_bytes"]):
+        refuse("at least one traffic direction must be positive")
+    contract = intent["profile_contract"]
+    if not isinstance(contract, str) or re.fullmatch(r"[A-Za-z0-9_.-]+", contract) is None:
+        refuse("profile_contract must be a nonempty token [A-Za-z0-9_.-]+")
+    age = intent["max_profile_age_s"]
+    # PB checks finiteness as a float, including for JSON integer ages.
+    # Unrepresentable integers must refuse, not escape preflight as overflow.
+    try:
+        valid_age = (type(age) in (int, float) and age > 0
+                     and math.isfinite(float(age)))
+    except OverflowError:
+        valid_age = False
+    if not valid_age:
+        refuse("max_profile_age_s must be a positive finite JSON number")
+    pairs = scratch.get(LOCAL_SCRATCH_PAIRS_ENV, "").split(",")
+    if len(pairs) != 1 or not pairs[0]:
+        refuse("scratch I/O requires exactly one scratch pair")
+    return {LOCAL_SCRATCH_IO_ENV: wire}
 
 
 def _forwarded_local_scratch_environment(spec: dict, environ) -> dict:
