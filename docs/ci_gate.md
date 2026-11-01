@@ -254,8 +254,11 @@ are 4,927, 446, and 293 seconds, respectively. Campaign uses a cached menu
 build whose charge moves among its first consumers. The second split-file
 candidate, `1440db9983e609eb075d3a7a3794036045057f10`, failed run
 41293449843/1 after 512 seconds because of that charge. Its test tail was
-367 seconds on x64 versus 262 seconds on ARM. Runner weighting is qualified
-against that measured unweighted tail before it is retained. Splitting removes the whole-file
+367 seconds on x64 versus 262 seconds on ARM. The weighted trial at
+`0a6e9f19828210eaabeb8ca21a8f94aeb0e46e2d`, run 41294639469/1, passed
+in 481 seconds with budgets enforced and 22,670 unique executed nodes. Its
+test tail was 351 seconds. That modest observed improvement supports retaining
+the runner factors; one trial does not establish a latency guarantee. Splitting removes the whole-file
 scheduling constraint; issue #3200 still owns reducing these tests themselves.
 
 Final-head node-split qualification is recorded in PR #3192 with exact heads,
