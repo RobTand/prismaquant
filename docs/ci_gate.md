@@ -53,8 +53,8 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-Hosted trials 41275735452 and 41277228478 measured Python 3.12 CPU tests
-on x64 and arm64. The 66 bootstrap exceptions are twice the largest observed
+Hosted trials 41275735452, 41277228478, and 41278311643 measured Python 3.12 CPU tests
+on x64 and arm64. The 77 bootstrap exceptions are twice the largest observed
 test time, rounded up. Enforcement remains enabled. Work stealing can move
 shared-fixture setup between testcases, so the exception evidence includes both
 schedulers. Swapped reruns extend architecture coverage before handoff.

@@ -2,45 +2,56 @@
   "schema": "prismaquant.gate_budget.v1",
   "seconds": 20,
   "slow": {
+    "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": 41,
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": 44,
     "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": 118,
     "tests/test_duplication_baseline.py::test_primitive_digest_sites_only_shrink": 124,
     "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": 85,
     "tests/test_fused_fold_enumeration_2287.py::test_dense_gate_up_refuses_in_complete_combination_mode": 173,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[changed_config]": 43,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[hf_id]": 50,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": 45,
-    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": 45,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": 63,
+    "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": 46,
     "tests/test_measure_quant_cost_packed_experts.py::test_packed_experts_measure_output_mse_from_expert_activation_cache": 46,
     "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 45,
+    "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": 49,
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 71,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
+    "tests/test_perturbed_x_cache.py::test_perturbed_cache_captures_then_quantizes_for_forward": 56,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": 63,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[measure]": 72,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_run_owned_cost_keeps_existing_additivity_provenance_stamp": 52,
     "tests/test_pq1588_predispatch_packet.py::test_packet_cell_state_matches_the_pinned_contract": 101,
-    "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 134,
+    "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 135,
     "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 60,
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": 43,
     "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 135,
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 90,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": 59,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": 59,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 72,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": 62,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": 61,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": 60,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": 61,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": 62,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 92,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": 56,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": 93,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": 92,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": 76,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": 64,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": 83,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": 56,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": 42,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-unchanged]": 41,
     "tests/test_run_pipeline_gates_execute.py::test_lm_head_policy_resolver_failure_fires": 81,
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": 48,
     "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": 41,
-    "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": 43,
+    "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": 60,
     "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": 42,
+    "tests/test_tessera_footprint.py::test_every_family_prices_at_the_bounds_it_advertises": 49,
     "tests/test_tessera_forest_bytes.py::test_every_realisable_rung_of_every_family_prices_what_tessera_prices": 83,
     "tests/test_tessera_forest_bytes.py::test_no_tessera_rung_has_a_rate_without_a_shape": 51,
-    "tests/test_tessera_formats.py::test_the_rung_sets_the_size_and_the_completion_depth_is_the_other_axis": 50,
+    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": 50,
+    "tests/test_tessera_formats.py::test_continuity_every_offered_rung_is_encodable": 41,
+    "tests/test_tessera_formats.py::test_the_rung_sets_the_size_and_the_completion_depth_is_the_other_axis": 68,
     "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal": 106,
     "tests/test_tessera_legal_domain.py::test_boundary_witnesses_take_the_previous_legal_neighbour": 61,
     "tests/test_tessera_legal_domain.py::test_every_candidate_carries_its_own_table_width": 282,
@@ -61,15 +72,22 @@
     "tests/test_tessera_menu_real_table.py::test_the_readable_menu_is_exactly_the_published_reader_ranges": 62,
     "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades": 316,
     "tests/test_tessera_routed_e2m1_admission.py::test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap": 89,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": 103,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": 167,
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[2-none]": 200,
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[False]": 106,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": 53,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": 102,
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut": 243,
-    "tests/test_tessera_tp_exact_pin.py::test_menu_expansion_reads_tp_facts_from_its_one_capture": 52,
+    "tests/test_tessera_tp_exact_pin.py::test_menu_expansion_reads_tp_facts_from_its_one_capture": 65,
     "tests/test_tessera_tp_exact_pin.py::test_tp2_menu_keeps_only_the_same_scoped_native_rungs": 251
   },
   "evidence": {
+    "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": {
+      "seconds": 20.284,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/9/junit.xml"
+    },
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": {
       "seconds": 21.969,
       "run": 41275735452,
@@ -105,6 +123,20 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[changed_config]": {
+      "seconds": 21.374,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/13/junit.xml"
+    },
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[hf_id]": {
+      "seconds": 24.956,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/13/junit.xml"
+    },
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": {
       "seconds": 22.113,
       "run": 41277228478,
@@ -113,11 +145,18 @@
       "artifact": "gate-final-1/effective/10/junit.xml"
     },
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": {
-      "seconds": 22.034,
-      "run": 41277228478,
+      "seconds": 31.068,
+      "run": 41278311643,
       "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/10/junit.xml"
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/13/junit.xml"
+    },
+    "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": {
+      "seconds": 22.666,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_measure_quant_cost_packed_experts.py::test_packed_experts_measure_output_mse_from_expert_activation_cache": {
       "seconds": 22.847,
@@ -132,6 +171,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/5/junit.xml"
+    },
+    "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": {
+      "seconds": 24.26,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
       "seconds": 35.404,
@@ -153,6 +199,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
+    },
+    "tests/test_perturbed_x_cache.py::test_perturbed_cache_captures_then_quantizes_for_forward": {
+      "seconds": 27.784,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/15/junit.xml"
     },
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": {
       "seconds": 31.081,
@@ -183,11 +236,11 @@
       "artifact": "gate-final-1/effective/8/junit.xml"
     },
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": {
-      "seconds": 66.508,
-      "run": 41277228478,
+      "seconds": 67.141,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/8/junit.xml"
+      "artifact": "gate-final-1/effective/10/junit.xml"
     },
     "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": {
       "seconds": 29.543,
@@ -232,46 +285,60 @@
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": {
-      "seconds": 35.69,
-      "run": 41275735452,
+      "seconds": 45.573,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
+    },
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": {
+      "seconds": 27.673,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": {
-      "seconds": 30.523,
-      "run": 41275735452,
+      "seconds": 46.095,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": {
-      "seconds": 30.028,
-      "run": 41275735452,
+      "seconds": 45.825,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": {
-      "seconds": 29.973,
-      "run": 41275735452,
+      "seconds": 37.908,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": {
-      "seconds": 30.112,
-      "run": 41275735452,
+      "seconds": 31.732,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": {
-      "seconds": 30.857,
-      "run": 41275735452,
+      "seconds": 41.287,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
+    },
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": {
+      "seconds": 27.802,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": {
       "seconds": 20.623,
@@ -309,11 +376,11 @@
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": {
-      "seconds": 21.136,
-      "run": 41277228478,
+      "seconds": 29.905,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/13/junit.xml"
     },
     "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": {
       "seconds": 20.686,
@@ -321,6 +388,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/7/junit.xml"
+    },
+    "tests/test_tessera_footprint.py::test_every_family_prices_at_the_bounds_it_advertises": {
+      "seconds": 24.373,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/11/junit.xml"
     },
     "tests/test_tessera_forest_bytes.py::test_every_realisable_rung_of_every_family_prices_what_tessera_prices": {
       "seconds": 41.216,
@@ -336,12 +410,26 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/11/junit.xml"
     },
-    "tests/test_tessera_formats.py::test_the_rung_sets_the_size_and_the_completion_depth_is_the_other_axis": {
-      "seconds": 24.841,
-      "run": 41277228478,
+    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": {
+      "seconds": 24.52,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/9/junit.xml"
+      "artifact": "gate-final-1/effective/11/junit.xml"
+    },
+    "tests/test_tessera_formats.py::test_continuity_every_offered_rung_is_encodable": {
+      "seconds": 20.36,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/11/junit.xml"
+    },
+    "tests/test_tessera_formats.py::test_the_rung_sets_the_size_and_the_completion_depth_is_the_other_axis": {
+      "seconds": 33.679,
+      "run": 41278311643,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/11/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal": {
       "seconds": 52.852,
@@ -428,15 +516,15 @@
       "artifact": "gate-final-1/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_native_set_does_not_shrink_the_legal_domain": {
-      "seconds": 55.092,
-      "run": 41277228478,
+      "seconds": 55.145,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_report_names_the_source_state_the_numbers_came_from": {
-      "seconds": 125.19,
-      "run": 41277228478,
+      "seconds": 125.412,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/0/junit.xml"
@@ -484,11 +572,11 @@
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": {
-      "seconds": 51.494,
-      "run": 41275735452,
+      "seconds": 83.26,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/3/junit.xml"
+      "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[2-none]": {
       "seconds": 99.946,
@@ -505,11 +593,11 @@
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": {
-      "seconds": 26.064,
-      "run": 41275735452,
+      "seconds": 50.837,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/3/junit.xml"
+      "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut": {
       "seconds": 121.242,
@@ -519,11 +607,11 @@
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_menu_expansion_reads_tp_facts_from_its_one_capture": {
-      "seconds": 25.957,
-      "run": 41275735452,
+      "seconds": 32.15,
+      "run": 41278311643,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/3/junit.xml"
+      "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_tp2_menu_keeps_only_the_same_scoped_native_rungs": {
       "seconds": 125.386,
@@ -535,7 +623,8 @@
   },
   "hosted_runs": [
     41275735452,
-    41277228478
+    41277228478,
+    41278311643
   ],
   "enforced": true,
   "enforcement_tolerance": 1.5
