@@ -10,8 +10,10 @@ import pytest
 
 
 class GateCollection:
-    def __init__(self, root, files):
+    def __init__(self, root, files, excluded=()):
         self.files = set(files)
+        self.excluded = set(excluded)
+        self.own_cgroup_files = set()
         self.seen, self.collected = set(), set()
         self.collection_failed = False
         self.ranks = {root / path: rank for rank, path in enumerate(files)}
@@ -23,11 +25,20 @@ class GateCollection:
             return True
         return None
 
-    def pytest_collection_modifyitems(self, items):
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_collection_modifyitems(self, items, config):
+        excluded = [item for item in items if item.nodeid in self.excluded]
+        items[:] = [item for item in items if item.nodeid not in self.excluded]
+        if excluded:
+            config.hook.pytest_deselected(items=excluded)
         items.sort(key=lambda item: self.ranks[item.path])
         self.collected.update(item.nodeid for item in items)
         for item in items:
             item.user_properties.append(('gate_nodeid', item.nodeid))
+
+    def pytest_deselected(self, items):
+        self.own_cgroup_files.update(item.nodeid.split('::', 1)[0] for item in items
+                                     if item.get_closest_marker('own_cgroup') is not None)
 
     def pytest_collectreport(self, report):
         path = report.nodeid.split('::', 1)[0]
@@ -44,11 +55,13 @@ class GateCollection:
     def pytest_testnodedown(self, node, error):
         coverage = node.workeroutput.get('gate_coverage', {})
         self.seen.update(coverage.get('seen', []))
+        self.own_cgroup_files.update(coverage.get('own_cgroup_files', []))
         self.collected.update(coverage.get('collected', []))
         self.collection_failed |= bool(error) or coverage.get('collection_failed', True)
 
     def pytest_sessionfinish(self, session, exitstatus):
         coverage = {'seen': sorted(self.seen), 'collected': sorted(self.collected),
+                    'own_cgroup_files': sorted(self.own_cgroup_files),
                     'collection_failed': self.collection_failed, 'exitstatus': int(exitstatus)}
         if hasattr(session.config, 'workerinput'):
             session.config.workeroutput['gate_coverage'] = coverage
@@ -75,4 +88,7 @@ def pytest_gate_configure(config):
     for filename in sorted({Path(path).name for path in files}):
         if not any(fnmatch(filename, pattern) for pattern in config.getini('python_files')):
             config.addinivalue_line('python_files', filename)
-    config.pluginmanager.register(GateCollection(root, files), 'gate-assigned-collection')
+    excluded = json.loads(os.environ.get('GATE_DESELECT_NODEIDS', '[]'))
+    if not isinstance(excluded, list) or any(not isinstance(node, str) for node in excluded):
+        raise pytest.UsageError('invalid gate exact exclusions')
+    config.pluginmanager.register(GateCollection(root, files, excluded), 'gate-assigned-collection')

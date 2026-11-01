@@ -44,7 +44,8 @@ def test_completed_pytest_writes_a_final_verdict(tmp_path, code, verdict):
     assert json.loads((tmp_path / 'output').read_text())['verdict'] == verdict
     command, kwargs = calls[0]
     assert command[command.index('-n') + 1] == '5'
-    assert '--deselect=tests/test_one.py::test_bad' in command
+    assert not any(value.startswith('--deselect') for value in command)
+    assert json.loads(kwargs['env']['GATE_DESELECT_NODEIDS']) == ['tests/test_one.py::test_bad']
     assert json.loads(kwargs['env']['GATE_ASSIGNED_FILES']) == ['tests/test_one.py']
     assert command[-1] == str(tmp_path)
     assert '--timeout=600' in command
@@ -364,6 +365,9 @@ def test_cgroup_tail_is_serial_scoped_and_its_failure_is_final(tmp_path):
             'file="tests/test_scoped.py" classname="tests.test_scoped" name="test_scope" time="1">'
             + ('<failure>scope defect</failure>' if command[0] == 'sudo' else '')
             + '</testcase></testsuite></testsuites>')
+        if command[0] != 'sudo':
+            Path(kwargs['env']['GATE_COLLECTION_REPORT']).write_text(json.dumps({
+                'seen': [path], 'collected': [], 'collection_failed': False, 'own_cgroup_files': [path]}))
         return SimpleNamespace(returncode=1 if command[0] == 'sudo' else 0)
     code = runner.run_plan({'selected': [{'path': path}], 'deselect': []}, root=tmp_path,
         output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml', execute=execute, affinity={1, 2})

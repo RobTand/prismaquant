@@ -185,17 +185,19 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
         collection_path.unlink(missing_ok=True)
         environment['GATE_COLLECTION_REPORT'] = str(collection_path.resolve())
         environment['GATE_ASSIGNED_FILES'] = json.dumps(files)
+        environment['GATE_DESELECT_NODEIDS'] = json.dumps(plan['deselect'])
         environment['PYTHONPATH'] = str(Path(__file__).resolve().parent) + os.pathsep + environment.get('PYTHONPATH', '')
         junit.parent.mkdir(parents=True, exist_ok=True)
         profile = ['-X', 'importtime'] if os.environ.get('GATE_PROFILE_STARTUP') == '1' else []
         command = [sys.executable, *profile, '-m', 'pytest', '-n', str(workers), '--dist=worksteal',
                    '-q', '-ra', '--timeout=600', '-m', 'not own_cgroup', '-p', 'gate_collect', '--rootdir=' + str(root), '--junitxml=' + str(junit), '-o', 'junit_family=xunit1',
-                   *('--deselect=' + target for target in plan['deselect']
-                     if target.split('::', 1)[0] in files), str(root)]
+                   str(root)]
         print('GATE_PYTEST_START', flush=True)
         result = execute(command, cwd=root, env=environment, check=False)
-        own_files = [path for path in files if (root / path).exists() and
-                     'pytest.mark.own_cgroup' in (root / path).read_text()]
+        collection = json.loads(collection_path.read_text()) if collection_path.exists() else {}
+        own_files = sorted(set(collection.get('own_cgroup_files', [])))
+        if set(own_files) - set(files):
+            raise RuntimeError('isolated cgroup assignment is outside the shard')
         if own_files:
             scoped_junit = junit.with_suffix('.cgroup.xml')
             scoped_collection = junit.with_suffix('.cgroup.collection.json')
@@ -205,12 +207,12 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
                 'NUMEXPR_NUM_THREADS', 'TORCHINDUCTOR_COMPILE_THREADS', 'MAX_JOBS'}}
             scoped_env.update(GATE_ASSIGNED_FILES=json.dumps(own_files),
+                              GATE_DESELECT_NODEIDS=environment['GATE_DESELECT_NODEIDS'],
                               GATE_COLLECTION_REPORT=str(scoped_collection.resolve()))
             scoped_command = [sys.executable, '-m', 'pytest', '-q', '-ra', '--timeout=600',
                 '-m', 'own_cgroup', '-p', 'gate_collect', '--rootdir=' + str(root),
                 '--junitxml=' + str(scoped_junit), '-o', 'junit_family=xunit1',
-                *('--deselect=' + target for target in plan['deselect']
-                  if target.split('::', 1)[0] in own_files), str(root)]
+                str(root)]
             scoped = execute(['sudo', '-n', 'systemd-run', '--scope', '--quiet', '--',
                 'setpriv', '--reuid=' + str(os.getuid()), '--regid=' + str(os.getgid()),
                 '--init-groups', 'env', *(key + '=' + value for key, value in scoped_env.items()),
