@@ -25,7 +25,7 @@ PATH_SPEC = importlib.util.spec_from_file_location('gate_paths', Path(__file__).
 gate_paths = importlib.util.module_from_spec(PATH_SPEC)
 PATH_SPEC.loader.exec_module(gate_paths)
 
-POLICY = 'production-loads-bound-paths-helper-closure-v4'
+POLICY = 'specific-references-runtime-data-full-v5'
 
 
 def load_gate_json(path: Path) -> dict:
@@ -318,7 +318,9 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
                  'tools/resolve_tessera_dev_pin.py', 'prismaquant/tessera_runtime_contract.py',
                  'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json'} or
         path.startswith(('.github/', 'tools/ci/gate_', 'tests/test_gate_')) or
-        'constraints' in path or 'requirements' in path)
+        'constraints' in path or 'requirements' in path or
+        path == 'run-pipeline.sh' or
+        path.startswith(('prismaquant/', 'tools/')) and not path.endswith(('.py', '.md', '.rst')))
     if mode == 'full' or triggers:
         names = index if index is not None else (
             path.relative_to(root).as_posix() for path in sorted((root / 'tests').rglob('*.py')))
@@ -339,6 +341,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     version_body = {'policy': POLICY, 'files': sorted(population), 'exclusions': exclusions, 'durations': durations}
     version = DIRECT_ASCII_LAX.sha256(version_body)
     reasons: dict[str, list[str]] = {}
+    explained = set()
     affected = set(changed) | production_import_closure(index, changed)
     import_targets: dict[str, set[str]] = {}
     for path in affected:
@@ -369,6 +372,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
                 why.append('literal path reference: ' + path)
         if why:
             reasons[name] = why
+            explained.update(imported | referenced)
     reverse = helper_importers(index, changed, existing=helper_graph)
     pending = sorted(set(reasons) |
                      {path for path in changed if path.startswith('tests/')})
@@ -383,8 +387,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     unexplained = [path for path in changed if not triggers and
         not (path.startswith('docs/') and path.endswith(('.md', '.rst'))) and
         path not in {'README.md', 'CHANGELOG.md', 'LICENSE'} and
-        not any(path == name or any(path in reason for reason in why)
-                for name, why in reasons.items())]
+        path not in reasons and path not in explained]
     if unexplained:
         triggers.extend(unexplained)
         for name in population:

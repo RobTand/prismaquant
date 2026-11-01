@@ -172,7 +172,8 @@ def references(tree: ast.AST, path: str) -> set[str]:
 
 
 def gate_path_matches(path: str, references: set[str]) -> bool:
-    if path in references or '**' in references:
+    references = {reference for reference in references if reference.strip('/*?.')}
+    if path in references:
         return True
     return any(fnmatchcase(path, reference) or
                (reference.startswith('**/') and fnmatchcase(path, reference[3:]))
