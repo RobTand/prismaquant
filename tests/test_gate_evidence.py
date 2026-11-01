@@ -113,3 +113,29 @@ def test_canary_wall_starts_at_creation_or_explicit_rerun_request(tmp_path):
             {'name': 'gate', 'conclusion': 'success', 'completed_at': '2026-11-01T00:02:00Z'}]}))
         report = evidence.hosted([tmp_path], 20)
         assert report['runs'][0]['wall_seconds'] == expected
+
+
+def test_file_budget_calibration_uses_full_cost_when_fixture_charge_moves(tmp_path):
+    directories = []
+    for run, times, runner in [(1, (55, 1), 'ubuntu-24.04-arm'),
+                               (2, (1, 59), 'ubuntu-24.04')]:
+        directory = tmp_path / str(run)
+        directory.mkdir()
+        (directory / 'run.json').write_text(json.dumps({
+            'id': run, 'run_attempt': 1, 'head_sha': 'a' * 40, 'conclusion': 'success'}))
+        (directory / 'jobs.json').write_text('{"jobs": []}')
+        plan = directory / 'gate-plan-1'
+        plan.mkdir()
+        (plan / 'job-matrix.json').write_text(json.dumps({'include': [{'index': 0, 'runner': runner}]}))
+        result = directory / 'gate-result-1-a1-0'
+        result.mkdir()
+        (result / 'junit.xml').write_text('<testsuites>' + ''.join(
+            f'<testcase file="tests/test_sample.py" classname="tests.test_sample" '
+            f'name="test_{index}" time="{seconds}"/>' for index, seconds in enumerate(times)) + '</testsuites>')
+        directories.append(directory)
+    report = evidence.hosted(directories, 20, file_budgets=['tests/test_sample.py'])
+    assert report['budget']['slow'] == {}
+    assert report['budget']['file_seconds'] == {'tests/test_sample.py': 120}
+    assert report['budget']['file_evidence']['tests/test_sample.py'] == {
+        'seconds': 60, 'run': 2, 'attempt': 1, 'runner': 'ubuntu-24.04',
+        'artifact': 'gate-result-1-a1-0/junit.xml'}
