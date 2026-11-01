@@ -213,6 +213,7 @@ def _dsv4_model(root: Path) -> tuple[Path, dict, dict]:
     return model, raw, config
 
 
+@pytest.mark.own_process
 def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path, monkeypatch):
     from prismaquant.model_profiles import detect_profile
     from prismaquant import streaming_model as sm
