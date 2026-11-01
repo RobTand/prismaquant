@@ -434,3 +434,22 @@ def test_scoped(): Path(__file__).with_name('scoped-ran').touch()
     assert code == 0
     assert (tmp_path / 'tests/scoped-ran').exists()
     assert calls[1][:4] == ['sudo', '-n', 'systemd-run', '--scope']
+
+
+def test_postmerge_quarantine_uses_the_same_exact_collection_hook(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    path = 'tests/test_postmerge.py'
+    (tmp_path / path).write_text('def test_bad(): assert False\ndef test_bad_more(): assert True\n')
+    quarantine = tmp_path / 'tools/ci/gate_quarantine.json'
+    quarantine.write_text(json.dumps({'entries': [{'target': path + '::test_bad'}]}))
+    env = dict(os.environ, PYTHONPATH=str(ROOT / 'tools/ci'))
+    for key in ['GATE_ASSIGNED_FILES', 'GATE_DESELECT_NODEIDS', 'GATE_COLLECTION_REPORT']:
+        env.pop(key, None)
+    result = subprocess.run([sys.executable, '-m', 'pytest', '-p', 'gate_collect', '-q',
+                             '--junitxml=' + str(tmp_path / 'exact.xml')], cwd=tmp_path,
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [case.get('name') for case in ET.parse(tmp_path / 'exact.xml').iter('testcase')] == ['test_bad_more']
