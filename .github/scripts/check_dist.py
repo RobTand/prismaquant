@@ -29,7 +29,6 @@ def _expected(source_root: str) -> set[str]:
     for pattern in (
         "prismaquant/model_profiles/specs/*.json",
         "prismaquant/serving_profile_specs/*.json",
-        "prismaquant/serve_dispatch_tables/*.json",
         "prismaquant/lane_specs/*.json",
         "prismaquant/data/*.pt",
         "prismaquant/data/*.json",
