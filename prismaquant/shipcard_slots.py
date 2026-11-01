@@ -220,7 +220,7 @@ GRAPH_OBSERVATION_SCHEMA = "prismaquant.native_graph_observation/1"
 def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
     """Bind the producer's observations before replaying the lane's equality rule."""
     from .digests import bytes_sha256hex, canonical_json, canonical_json_bytes, file_sha256hex
-    from .shipcard import _strict_json_object
+    from .schemas import strict_json_loads
 
     slot = "native_export.graph"
     metrics = record["metrics"]
@@ -237,7 +237,13 @@ def _verify_graph_receipt(record: Mapping[str, Any], *, model_dir) -> list[str]:
             raise ValueError("graph receipt exceeds 128 MiB")
         if bytes_sha256hex(raw) != digest:
             return [f"{slot}: graph_receipt_sha256 differs from the current receipt bytes"]
-        receipt = _strict_json_object(raw, where="graph receipt")
+        receipt = strict_json_loads(
+            raw.decode("utf-8"),
+            duplicate=lambda key: ValueError(f"graph receipt: duplicate JSON key {key!r}"),
+            constant=lambda value: ValueError(f"graph receipt: nonfinite JSON constant {value!r}"),
+        )
+        if not isinstance(receipt, Mapping):
+            raise ValueError("graph receipt must be an object")
     except (OSError, ValueError, TypeError) as exc:
         return [f"{slot}: malformed or unreadable graph receipt: {exc}"]
     scope = metrics.get("serve_scope")
