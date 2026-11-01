@@ -171,7 +171,7 @@ def references(tree: ast.AST, path: str) -> set[str]:
     return found
 
 
-def matches(path: str, references: set[str]) -> bool:
+def gate_path_matches(path: str, references: set[str]) -> bool:
     if path in references or '**' in references:
         return True
     return any(fnmatchcase(path, reference) or

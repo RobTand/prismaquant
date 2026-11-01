@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
-import hashlib
 import json
 import math
 from pathlib import Path
 import statistics
+import sys
 import xml.etree.ElementTree as ET
 
 
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import file_sha256hex
 
 
 def inventory(reports):
@@ -53,7 +53,7 @@ def inventory(reports):
             if missing:
                 incomplete.append({'repeat': repeat, 'key': key, 'files': missing})
     return {'schema': 'prismaquant.gate_inventory.v1',
-        'reports': [{'path': str(path), 'sha256': digest(path)} for path in reports],
+        'reports': [{'path': str(path), 'sha256': file_sha256hex(path)} for path in reports],
         'actions': actions, 'incomplete': incomplete,
         'always_failing': sorted(node for node, values in outcomes.items()
                                  if len(values) == len(reports) and set(values.values()) == {'fail'}),
@@ -65,7 +65,7 @@ def inventory(reports):
 
 def hosted(directories, default):
     tests = defaultdict(list)
-    files = defaultdict(list)
+    files = defaultdict(lambda: defaultdict(list))
     runs = []
     failures = defaultdict(set)
     for directory in directories:
@@ -80,7 +80,12 @@ def hosted(directories, default):
         effective = list(directory.glob('gate-*-final-*/effective/*/junit.xml'))
         if not effective:
             effective = list(directory.glob('gate-result-*-a1-*/junit.xml'))
+        matrices = list(directory.glob('gate-plan-*/job-matrix.json'))
+        matrix = json.loads(matrices[0].read_text()) if matrices else {'include': []}
+        runners = {row['index']: row['runner'] for row in matrix['include']}
         for path in effective:
+            index = int(path.parent.name) if path.parent.name.isdigit() else int(path.parent.name.rsplit('-', 1)[1])
+            runner = runners.get(index, 'unknown')
             sums = defaultdict(float)
             for case in ET.parse(path).iter('testcase'):
                 filename = case.get('file', '')
@@ -96,11 +101,11 @@ def hosted(directories, default):
                     classes = classname[len(module):].lstrip('.').replace('.', '::')
                     node = filename + '::' + (classes + '::' if classes else '') + case.get('name', '')
                     tests[node].append({'seconds': elapsed, 'run': metadata['id'],
-                                        'attempt': metadata['run_attempt'], 'artifact': str(path.relative_to(directory))})
+                                        'attempt': metadata['run_attempt'], 'runner': runner, 'artifact': str(path.relative_to(directory))})
                     if case.find('failure') is not None or case.find('error') is not None:
                         failures[node].add(metadata['id'])
             for filename, seconds in sums.items():
-                files[filename].append(seconds)
+                files[filename][runner].append(seconds)
     slow = {}
     evidence = {}
     for node, values in sorted(tests.items()):
@@ -110,7 +115,10 @@ def hosted(directories, default):
             evidence[node] = largest
     return {'schema': 'prismaquant.gate_hosted_evidence.v1', 'runs': runs,
         'failures': {node: sorted(ids) for node, ids in sorted(failures.items())},
-        'durations': {name: statistics.median(values) for name, values in sorted(files.items())},
+        'durations': {name: max(statistics.median(samples) for samples in values.values())
+                      for name, values in sorted(files.items())},
+        'architecture_durations': {name: {runner: statistics.median(samples) for runner, samples in sorted(values.items())}
+                                   for name, values in sorted(files.items())},
         'budget': {'seconds': default, 'slow': slow, 'evidence': evidence,
                    'hosted_runs': sorted({run['id'] for run in runs})}}
 

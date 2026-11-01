@@ -13,11 +13,10 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-import hashlib
+import sys
 
-
-def canonical_sha256(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import DIRECT_ASCII_LAX
 
 
 PATH_SPEC = importlib.util.spec_from_file_location('gate_paths', Path(__file__).with_name('gate_paths.py'))
@@ -205,7 +204,7 @@ def helper_importers(index: dict, changed: list[str], existing: dict | None = No
         targets.update(references & targets_to_index)
         patterns = {reference for reference in references if '**' in reference}
         if patterns:
-            targets.update(target for target in targets_to_index if gate_paths.matches(target, patterns))
+            targets.update(target for target in targets_to_index if gate_paths.gate_path_matches(target, patterns))
         for target in targets - {path}:
             reverse.setdefault(target, set()).add(path)
     return reverse
@@ -274,15 +273,11 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     if mode not in {'selection', 'full'}:
         raise ValueError('mode must be selection or full')
     all_tests = {path for path in index if path.startswith('tests/') and Path(path).name.startswith('test_')}
-    fast, other_lanes = set(), {}
-    if fast - all_tests:
-        raise ValueError(f'fast tier names missing files: {sorted(fast - all_tests)}')
     exclusions = exclusion_entries(quarantine)
     by_file = {row['target']: row for row in exclusions if '::' not in row['target']}
-    population = all_tests - other_lanes.keys() - by_file.keys()
-    version_body = {'policy': POLICY, 'files': sorted(population), 'fast': sorted(fast),
-                    'other_lanes': other_lanes, 'exclusions': exclusions, 'durations': durations}
-    version = canonical_sha256(version_body)
+    population = all_tests - by_file.keys()
+    version_body = {'policy': POLICY, 'files': sorted(population), 'exclusions': exclusions, 'durations': durations}
+    version = DIRECT_ASCII_LAX.sha256(version_body)
     reasons: dict[str, list[str]] = {}
     affected = set(changed) | production_import_closure(index, changed)
     import_targets: dict[str, set[str]] = {}
@@ -294,8 +289,6 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         if not name.startswith('tests/'):
             continue
         why = []
-        if name in fast:
-            why.append('fast tier')
         if triggers:
             why.append('whole population: ' + ', '.join(triggers))
         if name in changed:
@@ -308,7 +301,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         referenced = affected & paths
         patterns = {path for path in paths if '**' in path}
         if patterns:
-            referenced.update(path for path in affected if gate_paths.matches(path, patterns))
+            referenced.update(path for path in affected if gate_paths.gate_path_matches(path, patterns))
         for path in sorted(imported | referenced):
             if path in imported:
                 why.append(('direct import: ' if path in changed else 'production import: ') + path)
@@ -317,7 +310,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         if why:
             reasons[name] = why
     reverse = helper_importers(index, changed, existing=helper_graph)
-    pending = sorted({name for name, why in reasons.items() if any(reason != 'fast tier' for reason in why)} |
+    pending = sorted(set(reasons) |
                      {path for path in changed if path.startswith('tests/')})
     seen = set(pending)
     while pending:
@@ -342,9 +335,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     selected = shadow if mode == 'selection' else [
         {'path': name, 'reasons': ['full queue population'],
          'estimated_seconds': durations['files'].get(name)} for name in sorted(population)]
-    deferred = [{'path': name, 'issue': None, **lane}
-                for name, lane in sorted(other_lanes.items()) if name in all_tests]
-    deferred += [{'path': row['target'], 'reason': row['reason'], 'issue': row['issue'],
+    deferred = [{'path': row['target'], 'reason': row['reason'], 'issue': row['issue'],
                   'kind': row['kind'], **({'lane': row['lane']} if row['kind'] == 'environment_lanes' else {}), 'selected_by': reasons.get(row['target'].split('::')[0], [])}
                  for row in exclusions]
     deselect = sorted(row['target'] for row in exclusions if '::' in row['target'] and
