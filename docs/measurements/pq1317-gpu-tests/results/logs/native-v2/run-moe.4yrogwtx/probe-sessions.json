@@ -1,0 +1,26 @@
+[
+ {
+  "executes_tests": true,
+  "exitstatus": 0,
+  "kind": "session",
+  "native_libraries_mapped": {},
+  "pid": 149,
+  "worker": "gw0"
+ },
+ {
+  "executes_tests": true,
+  "exitstatus": 0,
+  "kind": "session",
+  "native_libraries_mapped": {},
+  "pid": 152,
+  "worker": "gw1"
+ },
+ {
+  "executes_tests": false,
+  "exitstatus": 0,
+  "kind": "session",
+  "native_libraries_mapped": {},
+  "pid": 132,
+  "worker": "main"
+ }
+]
