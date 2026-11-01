@@ -1,5 +1,6 @@
 """Hosted CI must cover integrated batches and preserve the post-merge suite."""
 from pathlib import Path
+import os
 import re
 
 import yaml
@@ -102,3 +103,35 @@ def test_control_jobs_include_the_shared_digest_owner_in_sparse_checkout():
         paths = checkout['with']['sparse-checkout'].splitlines()
         assert 'tools/ci' in paths
         assert 'prismaquant' in paths, 'node ownership uses prismaquant.digests before dependency setup'
+
+
+def _post_merge_plugin_runs():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
+    steps = workflow['jobs']['tests']['steps']
+    run_tests = next(step for step in steps if step.get('name') == 'Run tests')
+    scoped = next(step for step in steps if step.get('name', '').startswith('Run cgroup-reading tests'))
+    yield run_tests['env']['PYTHONPATH'], run_tests['run']
+    path = re.search(r'PYTHONPATH=(\S+)', scoped['run']).group(1)
+    yield path, scoped['run']
+
+
+@pytest.mark.parametrize('pythonpath,command', list(_post_merge_plugin_runs()),
+                         ids=['suite', 'own-cgroup-scope'])
+def test_post_merge_suite_can_load_the_gate_collection_plugin(tmp_path, pythonpath, command):
+    # Both post-merge pytest commands load the gate's collection plugin with
+    # the step's own PYTHONPATH. A plugin that can't import its siblings fails
+    # every push to main before any test runs.
+    import subprocess
+    import sys
+    plugins = re.findall(r'-p (\S+)', command)
+    plugin = next(name for name in plugins if 'gate_collect' in name)
+    (tmp_path / 'test_probe.py').write_text('def test_probe():\n    pass\n')
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+        str(ROOT / part) if part != '.' else str(ROOT) for part in pythonpath.split(':')))
+    env.pop('GATE_ASSIGNED_FILES', None)
+    env.pop('GATE_DESELECT_NODEIDS', None)
+    result = subprocess.run(
+        [sys.executable, '-m', 'pytest', '-c', str(ROOT / 'pytest.ini'), '--rootdir', str(ROOT),
+         '-p', 'no:cacheprovider', '-p', plugin, '-q', str(tmp_path / 'test_probe.py')],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
