@@ -25,3 +25,35 @@ def test_large_selection_fans_out_and_unknown_cost_is_conservative():
 def test_empty_selection_has_a_valid_noop_assignment():
     rows = partition.shards([], {}, 1, unknown_seconds=1)
     assert rows[0]['files'] == []
+
+
+def test_runner_weighting_gives_x64_less_work_and_lowers_expected_tail():
+    files = [f'tests/test_{i:02}.py' for i in range(20)]
+    costs = dict.fromkeys(files, 100)
+    ordinary = partition.shards(files, costs, 2, unknown_seconds=1)
+    weighted = partition.shards(files, costs, 2, unknown_seconds=1, runner_factors=[1 / 1.6, 1])
+    assert len(weighted[0]['files']) > len(weighted[1]['files'])
+    assert max(row['estimated_seconds'] for row in weighted) < max(row['estimated_seconds'] for row in ordinary)
+    swapped = partition.shards(files, costs, 2, unknown_seconds=1, runner_factors=[1, 1 / 1.6])
+    assert len(swapped[1]['files']) > len(swapped[0]['files'])
+
+
+def test_every_shard_recomputes_weighted_assignment_from_the_actual_matrix(tmp_path):
+    import json
+    files = ['tests/test_heavy.py', 'tests/test_light.py']
+    costs = {files[0]: 300, files[1]: 10}
+    nodes = {f'{files[0]}::test_{i}': 50 for i in range(6)}
+    population = tmp_path / 'files.txt'; population.write_text('\n'.join(files) + '\n')
+    durations = tmp_path / 'costs.json'; durations.write_text(json.dumps({'files': costs, 'nodes': nodes}))
+    matrix = tmp_path / 'matrix.json'
+    common = ['--files-from', str(population), '--durations', str(durations), '--shards', '2']
+    assert partition.main(['matrix', *common, '--runners', 'ubuntu-24.04-arm,ubuntu-24.04', '--output', str(matrix)]) == 0
+    recorded = json.loads(matrix.read_text())
+    assert recorded['runner_cost_factors'] == [1 / 1.6, 1]
+    expected = partition.shards(files, costs, 2, unknown_seconds=partition.default_unknown_seconds(costs),
+                                node_durations=nodes, runner_factors=recorded['runner_cost_factors'])
+    for index in range(2):
+        output = tmp_path / f'assignment-{index}.json'
+        assert partition.main(['shard', *common, '--matrix', str(matrix), '--index', str(index),
+            '--output-files', str(tmp_path / 'assigned.txt'), '--output-assignment', str(output)]) == 0
+        assert json.loads(output.read_text()) == expected[index]
