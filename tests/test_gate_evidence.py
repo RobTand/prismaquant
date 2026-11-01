@@ -22,6 +22,12 @@ def test_full_gate_uses_effective_retry_artifact_once(tmp_path):
             '<testsuites><testsuite><testcase file="tests/test_sample.py" '
             'classname="tests.test_sample" name="test_cost" time="' + str(seconds) + '">'
             + outcome + '</testcase></testsuite></testsuites>')
+    previous = tmp_path / 'gate-final-1/effective/0'
+    previous.mkdir(parents=True)
+    (previous / 'junit.xml').write_text(
+        '<testsuites><testsuite><testcase file="tests/test_sample.py" '
+        'classname="tests.test_sample" name="test_cost" time="9999"/>'
+        '</testsuite></testsuites>')
     report = evidence.hosted([tmp_path], 20)
     node = 'tests/test_sample.py::test_cost'
     assert report['durations'] == {'tests/test_sample.py': 21}
