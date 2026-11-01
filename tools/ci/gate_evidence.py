@@ -97,10 +97,13 @@ def hosted(directories, default):
                 'setup_seconds': gate_elapsed_seconds(job.get('started_at'), testing.get('started_at')),
                 'test_seconds': gate_elapsed_seconds(testing.get('started_at'), testing.get('completed_at')),
                 'install_seconds': gate_elapsed_seconds(install.get('started_at'), install.get('completed_at'))})
+        requested = metadata.get('requested_at') or (metadata.get('created_at')
+            if metadata['run_attempt'] == 1 else None) or metadata.get('run_started_at')
         runs.append({'id': metadata['id'], 'attempt': metadata['run_attempt'],
                      'head_sha': metadata['head_sha'], 'conclusion': metadata['conclusion'],
                      'final_check': final.get('name'), 'final_conclusion': final.get('conclusion'),
-                     'wall_seconds': gate_elapsed_seconds(metadata.get('run_started_at'), final.get('completed_at')),
+                     'requested_at': requested,
+                     'wall_seconds': gate_elapsed_seconds(requested, final.get('completed_at')),
                      'jobs': job_times})
         # The final artifact exports only effective attempts. Do not count retries twice.
         attempt = metadata['run_attempt']
