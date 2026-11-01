@@ -1,0 +1,5 @@
+{
+  "schema": "prismaquant.gate_durations.v1",
+  "source": "unmeasured bootstrap; every unknown file costs one second",
+  "files": {}
+}

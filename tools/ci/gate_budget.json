@@ -1,0 +1,8 @@
+{
+  "schema": "prismaquant.gate_budget.v1",
+  "seconds": 20,
+  "slow": {},
+  "enforced": false,
+  "measurement": "Bootstrap only: enforce after x64 and arm64 hosted canary measurements.",
+  "hosted_runs": []
+}
