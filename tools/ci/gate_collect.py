@@ -90,12 +90,12 @@ def pytest_gate_configure(config):
 @pytest.hookimpl(specname='pytest_collection_modifyitems', tryfirst=True)
 def pytest_gate_exact_exclusions(config, items):
     raw = os.environ.get('GATE_DESELECT_NODEIDS')
-    if raw is None:
+    if raw is None and 'GATE_ASSIGNED_FILES' not in os.environ:
         quarantine = Path(config.rootpath) / 'tools/ci/gate_quarantine.json'
         excluded = [row['target'] for row in json.loads(quarantine.read_text())['entries']
                     if '::' in row['target']]
     else:
-        excluded = json.loads(raw)
+        excluded = json.loads(raw or '[]')
     if not isinstance(excluded, list) or any(not isinstance(node, str) for node in excluded):
         raise pytest.UsageError('invalid gate exact exclusions')
     targets = set(excluded)
