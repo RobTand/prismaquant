@@ -16,9 +16,9 @@ through PrismaBuild; cite their action keys and results in the PR body.
    The `linked issue` check verifies both the reference and branch number.
 3. Wait for `linked issue` and `pr-gate` to pass.
 
-Classic branch protection requires `linked issue` only. Mergify does not
-inject it into the queues; the queue conditions name `linked issue` and
-`pr-gate` themselves, and the batch draft is judged by `gate` alone.
+Classic branch protection requires `linked issue` only. Mergify adds it to
+the queue conditions, which also name `linked issue` and `pr-gate`, and never
+to the merge conditions, so the batch draft is judged by `gate` alone.
 
 ## Queue and dequeue
 
