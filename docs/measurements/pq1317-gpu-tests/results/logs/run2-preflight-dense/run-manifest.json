@@ -1,0 +1,110 @@
+{
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "closure_files": {
+  ".pbrun-closure.5a3bec173267aa24.json": "{\n \"cwd\": \".\",\n \"dirty_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\n \"head\": \"dffc6a6b72949a5d149406c66bcb16ccfd74e4e7\"\n}"
+ },
+ "docker_command": [
+  "docker",
+  "run",
+  "--rm",
+  "--cpuset-cpus",
+  "5,6",
+  "--user",
+  "1000:1000",
+  "--shm-size",
+  "1g",
+  "-v",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tessera-source:/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tessera-source:ro",
+  "-v",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_:/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_:rw",
+  "-w",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tessera-source",
+  "-e",
+  "TMPDIR=/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tmp",
+  "-e",
+  "HOME=/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/home",
+  "-e",
+  "TORCH_EXTENSIONS_DIR=/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/torch-ext",
+  "-e",
+  "MAX_JOBS=1",
+  "-e",
+  "OMP_NUM_THREADS=1",
+  "-e",
+  "OPENBLAS_NUM_THREADS=1",
+  "-e",
+  "MKL_NUM_THREADS=1",
+  "-e",
+  "NUMEXPR_NUM_THREADS=1",
+  "-e",
+  "PYTHONDONTWRITEBYTECODE=1",
+  "-e",
+  "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+  "-e",
+  "PYTHONPATH=/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tessera-source/src:/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/test-deps:/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/harness",
+  "-e",
+  "CUDA_VISIBLE_DEVICES=",
+  "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "python3",
+  "-u",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/harness/container_entry.py",
+  "--suite",
+  "dense",
+  "--mode",
+  "collect",
+  "--out",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_",
+  "--source",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/tessera-source",
+  "--candidate",
+  "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "--contract-sha256",
+  "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
+  "--nodes-json",
+  "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_/expected-nodes.json"
+ ],
+ "docker_returncode": 0,
+ "finished_unix": 1791587478.420789,
+ "gpu": {
+  "query": "name,uuid,driver_version,compute_cap,memory.total",
+  "rows": [
+   "NVIDIA GB10, GPU-b1eceeea-fec7-371e-2cf3-cd10f2e7b705, 595.99.02, 12.1, [N/A]"
+  ]
+ },
+ "harness_sha256": {
+  "container_entry.py": "bde7261695af8f0a630e3720d7a866a85764ce65d0ad0461579e79dad67acfa9",
+  "native_probe.py": "6b709393dc91c67ac87e656fdbe1f913d9094514e160451a2c7e171990d535bd",
+  "probe_selftest.py": "1e4c3b41e10a8170f93d212a7ed56cc42a46f34dd66ef1477f6e11828b011931",
+  "run_suite.py": "cac4344bdb87d0c752634a6794655ae96ba86b3fa2dbcaaab91798fd0c635566"
+ },
+ "host": "sparklina",
+ "image": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+ "image_inspect": {
+  "architecture": "arm64",
+  "created": "2026-09-25T16:46:23.284603861-04:00",
+  "id": "sha256:9e6882df27dd5274bcb8fe048a0c435c531bbd794247cfc964556cf7d60fbc7d",
+  "reference": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "repo_digests": [
+   "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5"
+  ]
+ },
+ "mode": "collect",
+ "native_libraries_built": [],
+ "out": "/mnt/shared/tessera-measurements/pq1317-gpu-tests/collect-dense.o1ovqpc_",
+ "package_sha256": {
+  "candidate.json": "0ee08986969b7f897dc647d8e96c456c1bc6c552528232c89f4c403ea8335a67",
+  "roster.json": "0f2607af14e20b383666891fcbb0922664a8a40a8219792bc5bbfa14a8628889"
+ },
+ "schema": "pq1317.run.v1",
+ "source": {
+  "head": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "tracked_files": 2005,
+  "tree": "3b304c6cab442c530cb864e532be2d147571c792",
+  "url": "https://github.com/RobTand/tessera.git"
+ },
+ "started_unix": 1791587465.9854443,
+ "suite": "dense",
+ "triton": {
+  "kernels": {},
+  "targets": []
+ }
+}

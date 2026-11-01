@@ -1,5 +1,148 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-01, integration 3 refresh after integration 2, PQ #3180.
+Source parents: integration 3 `e852147953db361a4b01e962f3cdb5f08e3da399` and
+main `5e240896bf96c970ab513a04e9f2fb9ad7d7cb2b`.
+The merge retains both parents' architecture text, including their original
+provenance and evidence limits. No pipeline default, stage, format, plugin,
+serving lane or ship gate changes in this refresh.
+
+As of: 2026-11-01, integration 3 for PQ #3180.
+Source commit: `8b3fc3401ac2398112e5455263678871c9b51bf2` (five reviewed member merges).
+Source base for the checkpoint-name follow-up:
+`b753a660178dbeeb074e4b6e4391762f2b67930e` (regression tests, before repair).
+Export assignment projection maps the profile's body prefix through its
+existing source-tensor naming accessor before comparing checkpoint keys.
+This preserves wrapper and native-causal Qwen body names without changing
+profile lane declarations or the independent scope, geometry and serving-cell
+checks. The wrapper regression fails before this repair; the native-causal
+control passes. This is source-name recognition, not serving qualification.
+The sections below preserve the member text for #2575, #2789, #2826 and
+#3134. Their dated evidence retains its original source and qualification
+limits. This integration combines those contracts; its fresh PrismaBuild
+verification is recorded in the integration PR. No new GPU or serving
+qualification is claimed.
+
+## Vision selected-cache / export intake completion (#2575)
+
+Implementation provenance: TrustLadder run `dd982abdbab3484a93af4508a9fdc2a3`,
+work package `prismaquant-c298c57cee18-wp1`, checkout base
+`9a0b814a94018146962612a5e4f47737f8d4674b` (research inspected
+`914bf79807120fa60f433714e95cffd44b917d92`). This stamp accompanies the
+implementation in the same change; it is not producer-source qualification.
+Earlier architecture stamps below retain their original scope.
+
+The ownership join remains at existing intake boundaries:
+
+- **Source ownership:** `profile.visual_linear_roster(model_path)` owns canonical
+  visual/merger Linear names, source shapes and admitting roots. The allocator
+  retains its complete measured population and independent choices. Neither that
+  API nor allocator policy is reimplemented or changed here.
+- **Selected-wire authentication:** `tessera_census_cache` owns complete census
+  selection, BF16-only out-of-census choices, measured cells, sealed source,
+  encoder and recipe identities, source geometry, and original wire sizes and
+  digests. Journal loading, manifest construction and installed
+  `CachedUnitBundle` intake preserve the complete selected receipt population.
+  Authenticating synthetic receipts does not confer serving admission.
+- **Export recognition:** scoped `preflight` already passes the detected profile
+  and `model_path` to `_write_plan_assignment`. The existing header reader now
+  also collects exact source names, separately from its body shape map. An
+  explicit BF16 name must exist before any projected assignment is written;
+  real visual/fixed tensors remain legal source-precision passthrough. Low-bit
+  names must belong to the profile-owned decoder root or the existing explicitly
+  selected MTP source scope. Rank-2 tensor existence and allocator role tags are
+  not admission. The existing named **outside the text graph** refusal still
+  takes precedence for declared visual low-bit names. This namespace check does
+  not replace installed serving-cell, geometry or admission checks, nor add
+  visual shapes to the producer body graph. Direct translation-only callers
+  without source context cannot establish source existence.
+
+**Architecture implementation self-sign-off:** source/profile ownership,
+selected-cache authentication and installed serving-contract recognition remain
+separate, joined through existing intake arguments. No parallel cache, visual
+classifier, producer graph or qualification metadata schema was introduced.
+GLM's independent source-precision policy, including `model.visual.`, is unchanged.
+No allocator/profile, capture-default, runtime-pin, kernel, numerical, release-chain
+or admission-gate changes were made. The existing projection regression fixture
+now includes the source header for its explicitly assigned BF16 router; no
+acceptance assertions or acceptance test files were changed.
+
+**CPU evidence only:** synthetic allocator/cache fixtures exercise names,
+geometry, full populations and receipt authentication, not measured production
+wires or numerical/serving performance. The fresh-process installed producer test
+writes a deliberate `--layers 0` BF16 copy and checks artifact names, dtype/values,
+plan and manifest using PQ's runtime-pin/packaged-contract readers. The configured
+pin remains `aaa417003f0ee690e8ace138acd18df7f9531369`; packaged-contract SHA256 is
+`ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e`.
+Supplied exploratory evidence observed producer git stamps of both that pin
+and `027103d9a8417e06c7f13356e58779a313cd7088` despite matching packaged-contract
+hashes. A nonempty producer stamp is therefore recorded, not treated as exact
+producer-source qualification. No newer Tessera checkout qualifies this pin.
+GPU/serving acceptance remains separate (#2812 and parent #1921); no GPU work was
+performed. This scoped completion is for #2575, not closure of #1921.
+
+Verification (plain CPU commands, `--basetemp="$TMPDIR/pytest"` throughout):
+
+- `python -m pytest tests/test_vision_serve_recognition_1921.py -k 'explicit_bf16_source_name' -q --basetemp="$TMPDIR/pytest"`:
+  **5 passed, 34 deselected**.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"7d3e96c8ddb3614ade5159a3cc79ad39f54a8427e3653999b31087cd8e6ae7a4","size":776}},"operation":"9ab4dcdf52c33f63e4dec02829f80acdf4db27fbd0d92ed0398a566dddf319a8","receipt":"467beab6ca91002b2f5a04ae64723b3020805ccd7ea75b78b135694214284905"}]
+
+- `python -m pytest tests/test_vision_roster_1921.py tests/test_visual_allocator_units_1936.py tests/test_visual_allocator_roots_1921.py tests/test_tessera_census_cache.py tests/test_vision_alloc_failclosed_1921.py tests/test_vision_serve_recognition_1921.py -q --basetemp="$TMPDIR/pytest"`:
+  **135 passed**.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"47b270bc96f29893b849243418a28e6ee4493249f6206219656ffa5516b84e96","size":902}},"operation":"44eb292fc6553b4e8beaa987d21df333a2b54a8f45e4d028d15ccf33706abb9b","receipt":"77cdc6c0e88e10c8b8e9ab1a5d47775062fdd75f5aaa742c0f37f438d696a90f"}]
+
+- `python -m pytest tests/test_tessera_export_lane.py tests/test_tessera_export_scope.py tests/test_tessera_glm_source_namespace.py tests/test_tessera_selected_cache.py tests/test_tessera_expert_projection.py tests/test_glm_mtp_source_scope.py tests/test_glm_mtp_selection.py tests/test_glm_mtp_priced_wires_1413.py tests/test_mtp_formats_menu_1692.py tests/test_tessera_plan_writer.py tests/test_tessera_export_projection.py tests/test_tessera_materialization.py -q --basetemp="$TMPDIR/pytest" --tb=short`:
+  **259 passed**. Initial development runs exposed an overly narrow shard-regex
+  guard and the omitted BF16 router header; both were corrected before this run.
+
+[Test evidence {"artifacts":{"stderr":{"digest":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","size":0},"stdout":{"digest":"cbd03def2c65d47ac1e862d977a8f9049aa74f26758e50173d0da7ae79267b7d","size":1074}},"operation":"265cb5c48736f7af1a09ac0f02cca5f8c7db7f17f8fe817af67d90132a6d6433","receipt":"0a55dac119fa84ef7aaa5cad024c2a9a1fdccbf8b878c86b45523de465738b51"}]
+
+---
+
+As of: 2026-10-27, SDK5 release-smoke fixture repair, PQ #2826.
+Source commit: `8e7dbf876be6a60916866872016f5400e79281d7` (tested fixture and smoke; this follow-up records documentation only).
+The SDK5 qualification section below separates CPU contract integration from historical retained evidence and native qualification.
+
+As of: 2026-10-27, PQ #3134 completion-receipt staging ownership.
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+The standalone completion-receipt publisher acquires its exclusive staging
+file before entering cleanup. An occupied staging file or symlink refuses
+without removal. Successfully acquired stages retain the existing hard-link
+publication, mode 0600, fsync order and cleanup on success or later failure.
+
+As of: 2026-10-27, PRI-226 cache-name compatibility consolidation.
+Source provenance: base `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`,
+characterization parent `b8c72f601499d7372e2b4e7f3ff0b7cce20c91c8`.
+The shared name-projection module owns ordered rendered-cache name candidates
+for ProductionWeightCache and native export's weights-only fallback. Each
+consumer retains its format grammar and lookup precedence. Section 8.8.1
+records this compatibility helper separately from strict profile projection.
+
+As of: 2026-10-27, PRI-226 native export argument parsing.
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+The native export branch in `run-pipeline.sh` uses one local
+`append_export_tristate_arg` parser for `EXPORT_GPTQ` and
+`EXPORT_SCALE_SWEEP`. It appends to the existing export argument array in
+GPTQ-then-scale-sweep order. Both settings retain their `auto` default,
+exact accepted spellings and setting-specific exit-2 refusal.
+
+As of: 2026-10-27, EXL3 diagnostic replay repair, Refs #2769 and #468.
+Source commit: `3ec8fcad`.
+The opt-in `experiments.diagnose_exl3_grouped_down_replay` driver reuses the
+native scorer's authenticated loaders, capture, configuration and alignment
+owners for one sealed window. Diagnostic reports bind complete runtime/source
+identities and reject malformed worker evidence. Probe schema `/3` snapshots
+arguments before the real call and starts each replay from the original
+accumulator input, which can contain thin-expert contributions. It checks the
+nine read-only inputs separately from served-output preservation. Valid evidence
+publishes after owned native capture and replay cleanup. The ordinary scorer, qualification
+predicate, format menu, plugin pin, stage graph and shipping gates are unchanged.
+This is CPU-verifiable diagnostic engineering, not a native numerical repair.
+Historical full25 remains measured but incomparable while #468 is unresolved.
+See `docs/experiments/exl3_grouped_down_replay_driver.md`.
+
 As of: 2026-10-27, graph shipcard receipt verification, PRI-15 / #1586.
 Source baseline: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`; approved PRI-11
 spec revision `43adca93-5c6a-4e7b-bf5f-fe57569ecd43` governs this source slice.
@@ -3576,6 +3719,13 @@ remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
 
+PQ #2789 (owner-loop portion of PB #811): produced Stage A retirement now
+observes keyed egress through the publication's already-selected public queue.
+Release, drain and refill share one local gate; a previously unseen ending
+permits authoritative retirement validation, never a terminal-derived refund.
+The existing absolute deadlines, keyless retries and PB materialization recovery
+remain unchanged. See [the local handshake and CPU evidence](design/keyed_egress_owner_2789.md).
+
 Re-stamped 2026-10-02 (Refs PQ #1293, PB #1453): the reviewed PrismaBuild
 reader and client SDK pin is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`,
 with exact SDK version 4. The existing sealed-root resolver, test-only
@@ -3706,6 +3856,18 @@ The SDK refuses a result without a native producer context in both modes.
 `tests/test_no_new_seals.py` counts the two kinds of join in each function.
 Tests: `tests/test_original_source_admission.py` and
 `tests/test_held_producer_sdk5_smoke_2152.py`.
+
+Re-stamped 2026-10-27 (PQ #2826): this release smoke authenticates a private
+CPU native-carrier fixture under `tmp_path`, using the installed SDK5 reader
+with `require_native_producer_context=True`, the standard-capture binder and
+the real consumer join. Certified matching identity reaches the helper-tree
+seal; foreign nonce and scope identities refuse, while D32 dev controls join
+and stamp. It proves contract integration only. Historical retained-producer
+evidence recovery and PB #1485 native qualification remain separate.
+The current x86 CPU interpreter is
+`/home/rob/venvs/pq-pin-aaa41700-pb20261016-git/bin/python`; it carries the
+reviewed SDK5 and current Tessera development pins. The October 9 task-suite
+layer above predates the current Tessera pin and refuses in pbtest preflight.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -9679,6 +9841,17 @@ checked against the pre-change functions on a GB10 through PB action
 `e2b14fa8a90c` and matched the CPU rows. The original random-input table
 remains as historical evidence. No default, stage, format, lane, gate or byte
 changes.
+
+Token-owner integration (#2638/#3012) adds exactly one recipe to that owner:
+`token_ids_int32_sha256`, caller-ordered per-batch int32 bytes without shape/dtype
+headers or delimiters. The owner now also imports hashlib.
+`tessera_hessian.token_ids_sha256` delegates once with the original batches
+object; sampling and existing digest values are unchanged. Stage A's payload
+feed, both production-cache identities and export capture remain local
+retentions, not additional owner recipes. See
+[audit](audits/tensor_digest_token_2638_integration.md) for current-source
+admission, qualification and the one-site primitive-baseline reduction; the
+census remains historical.
 
 Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
 anchors that survive a kill** (PQ #1403, P2).
@@ -31875,6 +32048,13 @@ requirement set; the first makes the four agree on what a unit is *called*,
 the second would make them agree on which units *exist*.
 
 #### 8.8.1 The shared name-projection layer
+
+`production_cache_name_candidates` owns rendered-cache compatibility spelling
+for `ProductionWeightCache.resolve_key` and native export's fallback lookup.
+It yields the original name, an optional `.weight` removal, then an optional
+`model.language_model.` to `model.` projection of the original, deduplicated
+in order. It does not compose those rewrites or choose a format alias.
+This compatibility lookup does not replace the strict profile API below.
 
 `prismaquant/name_projection.py` (2026-08-22, `walker/name-projection`)
 lands the ONE projection between the pipeline's parameter-name namespaces
