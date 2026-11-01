@@ -50,9 +50,11 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-Budget enforcement is disabled during the initial hosted measurements. Qualification
-must record both architectures before enabling it. The hang timeout remains 600
-seconds per test while measuring. No measured exception is claimed yet.
+The initial full hosted trial, run 41275735452, measured Python 3.12 CPU tests
+on x64 and arm64. Its 50 exception limits are twice the largest observed test
+time, rounded up. Enforcement is enabled for the next trials. Each file has one
+architecture sample so far; swapped reruns extend that coverage before handoff.
+The separate hang timeout remains 600 seconds per test.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
 At main `8d72e303e2f070925077ce9e072b254df3856909`, the legacy list has 54 active
