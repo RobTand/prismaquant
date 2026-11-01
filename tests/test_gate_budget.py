@@ -19,10 +19,10 @@ def isolate_job_summary(monkeypatch):
     monkeypatch.delenv('GITHUB_STEP_SUMMARY', raising=False)
 
 
-def policy(root, seconds=20, slow=None):
+def policy(root, seconds=20, slow=None, file_seconds=None):
     target = root / 'tools/ci/gate_budget.json'
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps({'seconds': seconds, 'slow': slow or {}}))
+    target.write_text(json.dumps({'seconds': seconds, 'slow': slow or {}, 'file_seconds': file_seconds or {}}))
 
 
 def budget_run(tmp_path, xml, *, base=None, pytest_code=0):
@@ -242,3 +242,54 @@ def test_inconsistent_collected_identity_cannot_supply_a_verdict(tmp_path, ident
         '"/></properties></testcase></testsuite>')
     code, result = budget_run(tmp_path, xml)
     assert code == 75 and result['verdict'] is None
+
+
+@pytest.mark.parametrize('first,second,expected', [(55, 1, 0), (1, 55, 0), (46, 45, 1)])
+def test_shared_fixture_file_cost_is_independent_of_the_first_test(tmp_path, first, second, expected):
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 60})
+    xml = case(str(first)).replace('</testsuite>',
+        '<testcase file="tests/test_sample.py" classname="tests.test_sample" '
+        f'name="test_other" time="{second}"/></testsuite>')
+    code, result = budget_run(tmp_path, xml)
+    assert code == expected
+    if expected:
+        assert result['budget']['overruns'] == [
+            {'nodeid': 'tests/test_sample.py', 'seconds': 91, 'budget_seconds': 60}]
+    else:
+        assert result['budget']['overruns'] == []
+
+
+def test_shared_fixture_file_warning_retains_the_complete_cost(tmp_path):
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 40})
+    code, result = budget_run(tmp_path, case('55'))
+    assert code == 0
+    assert result['budget']['warnings'] == [
+        {'nodeid': 'tests/test_sample.py', 'seconds': 55, 'budget_seconds': 40}]
+
+
+@pytest.mark.parametrize('baseline,current', [({}, {'tests/test_sample.py': 40}),
+                                            ({'tests/test_sample.py': 40}, {'tests/test_sample.py': 41})])
+def test_file_budget_additions_and_growth_are_rejected_against_base(tmp_path, baseline, current):
+    policy(tmp_path, file_seconds=baseline)
+    base = commit_target(tmp_path)
+    policy(tmp_path, file_seconds=current)
+    code, result = budget_run(tmp_path, case('1'), base=base)
+    assert code == 1 and result['budget']['status'] == 'fail'
+
+
+def test_file_budget_can_shrink_or_be_removed(tmp_path):
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 40})
+    base = commit_target(tmp_path)
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 30})
+    assert budget_run(tmp_path, case('25'), base=base)[0] == 0
+    policy(tmp_path)
+    assert budget_run(tmp_path, case('10'), base=base)[0] == 0
+
+
+@pytest.mark.parametrize('file_seconds', [{'tests/test_sample.py': 0},
+    {'tests/test_sample.py': True}, {'tests/test_sample.py': float('nan')},
+    {'../outside.py': 40}, {'tests/test_sample.py::test_cost': 40}])
+def test_invalid_file_budget_is_a_policy_failure(tmp_path, file_seconds):
+    policy(tmp_path, file_seconds=file_seconds)
+    code, result = budget_run(tmp_path, case('1'))
+    assert code == 1 and result['budget']['status'] == 'fail'
