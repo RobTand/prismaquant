@@ -4,81 +4,97 @@
   "slow": {
     "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": 41,
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": 44,
-    "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": 118,
+    "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": 140,
     "tests/test_duplication_baseline.py::test_primitive_digest_sites_only_shrink": 124,
-    "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": 85,
+    "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": 152,
     "tests/test_fused_fold_enumeration_2287.py::test_dense_gate_up_refuses_in_complete_combination_mode": 173,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[changed_config]": 43,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[hf_id]": 50,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": 45,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": 63,
-    "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": 46,
+    "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": 51,
     "tests/test_measure_quant_cost_packed_experts.py::test_packed_experts_measure_output_mse_from_expert_activation_cache": 46,
-    "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 45,
+    "tests/test_native_followup_intake_audit.py::test_real_producer_rows_pass_pipeline_and_offline_stock_intake": 47,
+    "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 64,
     "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": 49,
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 71,
+    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": 43,
+    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": 41,
+    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 74,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
+    "tests/test_packed_score_storage_identity_audit.py::test_packed_retained_weight_cost_prices_stored_candidate[fresh-batched-fp32]": 46,
     "tests/test_perturbed_x_cache.py::test_perturbed_cache_captures_then_quantizes_for_forward": 56,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": 63,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[measure]": 72,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_run_owned_cost_keeps_existing_additivity_provenance_stamp": 52,
     "tests/test_pq1588_predispatch_packet.py::test_packet_cell_state_matches_the_pinned_contract": 101,
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 135,
-    "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 60,
+    "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 62,
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": 43,
-    "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 135,
-    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 90,
+    "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 158,
+    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 111,
+    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": 52,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": 59,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": 59,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 92,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": 56,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": 93,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 99,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": 58,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": 98,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": 92,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": 76,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": 64,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": 86,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": 99,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": 83,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": 56,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": 59,
+    "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-base-solver-seconds]": 41,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": 42,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-unchanged]": 41,
-    "tests/test_run_pipeline_gates_execute.py::test_lm_head_policy_resolver_failure_fires": 81,
+    "tests/test_run_pipeline_gates_execute.py::test_lm_head_policy_resolver_failure_fires": 85,
+    "tests/test_sample_parallel_artifacts.py::test_the_sample_parallel_worker_entry_refuses_the_retired_mode": 41,
+    "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": 41,
+    "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": 42,
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": 48,
     "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": 41,
     "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": 60,
     "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": 42,
+    "tests/test_tessera_cell_measurement.py::test_direct_measurement_never_loads_the_serving_runtime_in_a_cold_process": 46,
     "tests/test_tessera_footprint.py::test_every_family_prices_at_the_bounds_it_advertises": 49,
     "tests/test_tessera_forest_bytes.py::test_every_realisable_rung_of_every_family_prices_what_tessera_prices": 83,
     "tests/test_tessera_forest_bytes.py::test_no_tessera_rung_has_a_rate_without_a_shape": 51,
-    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": 50,
+    "tests/test_tessera_formats.py::test_a_second_pass_over_the_family_space_recomputes_nothing": 48,
+    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": 52,
     "tests/test_tessera_formats.py::test_continuity_every_offered_rung_is_encodable": 41,
     "tests/test_tessera_formats.py::test_the_rung_sets_the_size_and_the_completion_depth_is_the_other_axis": 68,
-    "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal": 106,
-    "tests/test_tessera_legal_domain.py::test_boundary_witnesses_take_the_previous_legal_neighbour": 61,
+    "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal": 119,
+    "tests/test_tessera_legal_domain.py::test_boundary_witnesses_take_the_previous_legal_neighbour": 68,
     "tests/test_tessera_legal_domain.py::test_every_candidate_carries_its_own_table_width": 282,
-    "tests/test_tessera_legal_domain.py::test_main_prints_the_counts_and_the_audit_verdict": 257,
-    "tests/test_tessera_legal_domain.py::test_native_qualification_is_exactly_the_reviewed_primary_cells": 89,
-    "tests/test_tessera_legal_domain.py::test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control": 181,
+    "tests/test_tessera_legal_domain.py::test_main_prints_the_counts_and_the_audit_verdict": 285,
+    "tests/test_tessera_legal_domain.py::test_native_qualification_is_exactly_the_reviewed_primary_cells": 90,
+    "tests/test_tessera_legal_domain.py::test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control": 205,
     "tests/test_tessera_legal_domain.py::test_provider_returns_the_full_sorted_unique_domain[TESSERA_BF16_K1-3841]": 61,
-    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_BF16_K1-4096-window-channel]": 97,
-    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E2M1_K2-896-tcq-lut16]": 90,
-    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E4M3_K1-1024-window-channel]": 91,
-    "tests/test_tessera_legal_domain.py::test_the_five_facts_disagree_on_a_natively_qualified_candidate": 266,
-    "tests/test_tessera_legal_domain.py::test_the_inventory_carries_its_drift_report": 134,
-    "tests/test_tessera_legal_domain.py::test_the_native_set_does_not_shrink_the_legal_domain": 111,
-    "tests/test_tessera_legal_domain.py::test_the_report_names_the_source_state_the_numbers_came_from": 251,
+    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_BF16_K1-4096-window-channel]": 117,
+    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E2M1_K2-896-tcq-lut16]": 104,
+    "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E4M3_K1-1024-window-channel]": 102,
+    "tests/test_tessera_legal_domain.py::test_the_five_facts_disagree_on_a_natively_qualified_candidate": 285,
+    "tests/test_tessera_legal_domain.py::test_the_inventory_carries_its_drift_report": 148,
+    "tests/test_tessera_legal_domain.py::test_the_native_set_does_not_shrink_the_legal_domain": 112,
+    "tests/test_tessera_legal_domain.py::test_the_report_names_the_source_state_the_numbers_came_from": 252,
+    "tests/test_tessera_menu.py::test_bytes_are_exact_and_monotone_in_rate": 75,
     "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[dense-column]": 271,
     "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[dense-row]": 196,
-    "tests/test_tessera_menu.py::test_tp_degree_is_a_per_unit_legality_input_and_knows_the_direction": 78,
+    "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[routed-column]": 44,
+    "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[routed-row]": 43,
+    "tests/test_tessera_menu.py::test_tp_degree_is_a_per_unit_legality_input_and_knows_the_direction": 79,
     "tests/test_tessera_menu_real_table.py::test_the_readable_menu_is_exactly_the_published_reader_ranges": 62,
-    "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades": 316,
-    "tests/test_tessera_routed_e2m1_admission.py::test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap": 89,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": 167,
+    "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades": 425,
+    "tests/test_tessera_routed_e2m1_admission.py::test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap": 164,
+    "tests/test_tessera_side_bytes.py::test_the_price_covers_the_container_and_fused_wire_and_is_tight[TESSERA_E4M3_K1-R1024]": 53,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": 221,
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[2-none]": 200,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[False]": 106,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": 102,
-    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut": 243,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[False]": 290,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": 136,
+    "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut": 273,
     "tests/test_tessera_tp_exact_pin.py::test_menu_expansion_reads_tp_facts_from_its_one_capture": 65,
-    "tests/test_tessera_tp_exact_pin.py::test_tp2_menu_keeps_only_the_same_scoped_native_rungs": 251
+    "tests/test_tessera_tp_exact_pin.py::test_tp2_menu_keeps_only_the_same_scoped_native_rungs": 251,
+    "tests/test_tessera_tp_loader_axes.py::test_a_refused_cut_axis_refuses_the_rung_at_tp2": 60
   },
   "evidence": {
     "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": {
@@ -96,11 +112,11 @@
       "artifact": "gate-final-1/effective/5/junit.xml"
     },
     "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": {
-      "seconds": 58.76,
-      "run": 41277228478,
+      "seconds": 69.63,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/5/junit.xml"
+      "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_duplication_baseline.py::test_primitive_digest_sites_only_shrink": {
       "seconds": 61.507,
@@ -110,11 +126,11 @@
       "artifact": "gate-final-1/effective/5/junit.xml"
     },
     "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": {
-      "seconds": 42.407,
-      "run": 41277228478,
+      "seconds": 75.858,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/11/junit.xml"
+      "artifact": "gate-final-1/effective/5/junit.xml"
     },
     "tests/test_fused_fold_enumeration_2287.py::test_dense_gate_up_refuses_in_complete_combination_mode": {
       "seconds": 86.21,
@@ -152,11 +168,11 @@
       "artifact": "gate-final-1/effective/13/junit.xml"
     },
     "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": {
-      "seconds": 22.666,
-      "run": 41278311643,
+      "seconds": 25.118,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/3/junit.xml"
+      "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_measure_quant_cost_packed_experts.py::test_packed_experts_measure_output_mse_from_expert_activation_cache": {
       "seconds": 22.847,
@@ -165,9 +181,16 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
+    "tests/test_native_followup_intake_audit.py::test_real_producer_rows_pass_pipeline_and_offline_stock_intake": {
+      "seconds": 23.266,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/8/junit.xml"
+    },
     "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": {
-      "seconds": 22.092,
-      "run": 41277228478,
+      "seconds": 31.721,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/5/junit.xml"
@@ -179,9 +202,23 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
+    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": {
+      "seconds": 21.022,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/8/junit.xml"
+    },
+    "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": {
+      "seconds": 20.485,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/8/junit.xml"
+    },
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
-      "seconds": 35.404,
-      "run": 41277228478,
+      "seconds": 36.932,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
@@ -199,6 +236,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
+    },
+    "tests/test_packed_score_storage_identity_audit.py::test_packed_retained_weight_cost_prices_stored_candidate[fresh-batched-fp32]": {
+      "seconds": 22.95,
+      "run": 41278869921,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_perturbed_x_cache.py::test_perturbed_cache_captures_then_quantizes_for_forward": {
       "seconds": 27.784,
@@ -236,18 +280,18 @@
       "artifact": "gate-final-1/effective/8/junit.xml"
     },
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": {
-      "seconds": 67.141,
-      "run": 41278311643,
+      "seconds": 67.42,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/10/junit.xml"
     },
     "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": {
-      "seconds": 29.543,
-      "run": 41275735452,
+      "seconds": 30.649,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/3/junit.xml"
+      "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": {
       "seconds": 21.205,
@@ -257,15 +301,22 @@
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": {
-      "seconds": 67.368,
-      "run": 41277228478,
+      "seconds": 78.596,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": {
-      "seconds": 44.892,
-      "run": 41277228478,
+      "seconds": 55.134,
+      "run": 41278869921,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/9/junit.xml"
+    },
+    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": {
+      "seconds": 25.9,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
@@ -285,22 +336,22 @@
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": {
-      "seconds": 45.573,
-      "run": 41278311643,
+      "seconds": 49.065,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": {
-      "seconds": 27.673,
-      "run": 41278311643,
+      "seconds": 28.987,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": {
-      "seconds": 46.095,
-      "run": 41278311643,
+      "seconds": 48.776,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
@@ -313,32 +364,39 @@
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": {
-      "seconds": 37.908,
-      "run": 41278311643,
+      "seconds": 42.845,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": {
-      "seconds": 31.732,
-      "run": 41278311643,
+      "seconds": 49.252,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": {
-      "seconds": 41.287,
-      "run": 41278311643,
+      "seconds": 41.474,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": {
-      "seconds": 27.802,
-      "run": 41278311643,
+      "seconds": 29.33,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
+    },
+    "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-base-solver-seconds]": {
+      "seconds": 20.437,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/4/junit.xml"
     },
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": {
       "seconds": 20.623,
@@ -355,11 +413,32 @@
       "artifact": "gate-final-1/effective/11/junit.xml"
     },
     "tests/test_run_pipeline_gates_execute.py::test_lm_head_policy_resolver_failure_fires": {
-      "seconds": 40.38,
-      "run": 41277228478,
+      "seconds": 42.088,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/5/junit.xml"
+    },
+    "tests/test_sample_parallel_artifacts.py::test_the_sample_parallel_worker_entry_refuses_the_retired_mode": {
+      "seconds": 20.146,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/6/junit.xml"
+    },
+    "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": {
+      "seconds": 20.165,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/6/junit.xml"
+    },
+    "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": {
+      "seconds": 20.813,
+      "run": 41278869921,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": {
       "seconds": 23.517,
@@ -389,6 +468,13 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
+    "tests/test_tessera_cell_measurement.py::test_direct_measurement_never_loads_the_serving_runtime_in_a_cold_process": {
+      "seconds": 22.794,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/6/junit.xml"
+    },
     "tests/test_tessera_footprint.py::test_every_family_prices_at_the_bounds_it_advertises": {
       "seconds": 24.373,
       "run": 41278311643,
@@ -410,12 +496,19 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/11/junit.xml"
     },
-    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": {
-      "seconds": 24.52,
-      "run": 41278311643,
-      "attempt": 1,
+    "tests/test_tessera_formats.py::test_a_second_pass_over_the_family_space_recomputes_nothing": {
+      "seconds": 23.976,
+      "run": 41278869921,
+      "attempt": 2,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/11/junit.xml"
+      "artifact": "gate-final-2/effective/8/junit.xml"
+    },
+    "tests/test_tessera_formats.py::test_a_second_unit_asks_neither_rung_keyed_memo_again": {
+      "seconds": 25.884,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/8/junit.xml"
     },
     "tests/test_tessera_formats.py::test_continuity_every_offered_rung_is_encodable": {
       "seconds": 20.36,
@@ -432,18 +525,18 @@
       "artifact": "gate-final-1/effective/11/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal": {
-      "seconds": 52.852,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 59.217,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_boundary_witnesses_take_the_previous_legal_neighbour": {
-      "seconds": 30.092,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 33.508,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_every_candidate_carries_its_own_table_width": {
       "seconds": 140.97,
@@ -453,25 +546,25 @@
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_main_prints_the_counts_and_the_audit_verdict": {
-      "seconds": 128.158,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 142.393,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_native_qualification_is_exactly_the_reviewed_primary_cells": {
-      "seconds": 44.298,
-      "run": 41277228478,
+      "seconds": 44.526,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control": {
-      "seconds": 90.093,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 102.084,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_provider_returns_the_full_sorted_unique_domain[TESSERA_BF16_K1-3841]": {
       "seconds": 30.386,
@@ -481,53 +574,60 @@
       "artifact": "gate-final-1/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_BF16_K1-4096-window-channel]": {
-      "seconds": 48.129,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 58.436,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E2M1_K2-896-tcq-lut16]": {
-      "seconds": 44.878,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 51.599,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E4M3_K1-1024-window-channel]": {
-      "seconds": 45.365,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 50.809,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_five_facts_disagree_on_a_natively_qualified_candidate": {
-      "seconds": 132.537,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 142.008,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_inventory_carries_its_drift_report": {
-      "seconds": 66.623,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/0/junit.xml"
+      "seconds": 73.848,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_native_set_does_not_shrink_the_legal_domain": {
-      "seconds": 55.145,
-      "run": 41278311643,
+      "seconds": 55.725,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/0/junit.xml"
     },
     "tests/test_tessera_legal_domain.py::test_the_report_names_the_source_state_the_numbers_came_from": {
-      "seconds": 125.412,
-      "run": 41278311643,
+      "seconds": 125.544,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04-arm",
       "artifact": "gate-final-1/effective/0/junit.xml"
+    },
+    "tests/test_tessera_menu.py::test_bytes_are_exact_and_monotone_in_rate": {
+      "seconds": 37.386,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/2/junit.xml"
     },
     "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[dense-column]": {
       "seconds": 135.466,
@@ -543,12 +643,26 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/11/junit.xml"
     },
-    "tests/test_tessera_menu.py::test_tp_degree_is_a_per_unit_legality_input_and_knows_the_direction": {
-      "seconds": 38.839,
-      "run": 41275735452,
-      "attempt": 1,
+    "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[routed-column]": {
+      "seconds": 21.906,
+      "run": 41278869921,
+      "attempt": 2,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/11/junit.xml"
+      "artifact": "gate-final-2/effective/2/junit.xml"
+    },
+    "tests/test_tessera_menu.py::test_tp2_keeps_every_rung_the_contract_attests_at_tp1[routed-row]": {
+      "seconds": 21.084,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/2/junit.xml"
+    },
+    "tests/test_tessera_menu.py::test_tp_degree_is_a_per_unit_legality_input_and_knows_the_direction": {
+      "seconds": 39.489,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/2/junit.xml"
     },
     "tests/test_tessera_menu_real_table.py::test_the_readable_menu_is_exactly_the_published_reader_ranges": {
       "seconds": 30.788,
@@ -558,25 +672,32 @@
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades": {
-      "seconds": 157.979,
-      "run": 41277228478,
+      "seconds": 212.124,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_tessera_routed_e2m1_admission.py::test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap": {
-      "seconds": 44.191,
-      "run": 41277228478,
+      "seconds": 81.533,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/4/junit.xml"
+    },
+    "tests/test_tessera_side_bytes.py::test_the_price_covers_the_container_and_fused_wire_and_is_tight[TESSERA_E4M3_K1-R1024]": {
+      "seconds": 26.256,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[1-column]": {
-      "seconds": 83.26,
-      "run": 41278311643,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/1/junit.xml"
+      "seconds": 110.212,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04-arm",
+      "artifact": "gate-final-2/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_is_not_asked_without_a_cut[2-none]": {
       "seconds": 99.946,
@@ -586,22 +707,22 @@
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[False]": {
-      "seconds": 52.644,
-      "run": 41277228478,
+      "seconds": 144.744,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_refused_axis_refuses_a_tp2_column_cut[True]": {
-      "seconds": 50.837,
-      "run": 41278311643,
+      "seconds": 67.768,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
     "tests/test_tessera_tp_exact_pin.py::test_exact_pin_tp2_menu_drops_only_the_refused_cut": {
-      "seconds": 121.242,
-      "run": 41277228478,
+      "seconds": 136.204,
+      "run": 41278869921,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
@@ -619,12 +740,20 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
+    },
+    "tests/test_tessera_tp_loader_axes.py::test_a_refused_cut_axis_refuses_the_rung_at_tp2": {
+      "seconds": 29.919,
+      "run": 41278869921,
+      "attempt": 2,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-2/effective/2/junit.xml"
     }
   },
   "hosted_runs": [
     41275735452,
     41277228478,
-    41278311643
+    41278311643,
+    41278869921
   ],
   "enforced": true,
   "enforcement_tolerance": 1.5
