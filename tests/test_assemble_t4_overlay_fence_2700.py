@@ -82,6 +82,35 @@ def test_corruption_gate_exercises_real_rehash_without_clock_progress(release_ga
     assert jce.FENCE_REHASHED == {}, "a refused wire is never counted as an admitted rehash"
 
 
+@pytest.mark.parametrize(
+    "gate_name",
+    [
+        "test_assemble_accepts_a_wire_whose_ctime_moved_under_a_new_hardlink",
+        "test_assemble_refuses_a_same_size_wire_with_different_bytes",
+    ],
+    ids=["hardlink", "corruption"],
+)
+def test_release_gate_restores_existing_rehash_report(release_gate, monkeypatch, request, gate_name):
+    """Running either gate must not erase or add to another caller's report.
+
+    The outer fixture protects the suite's real report. The inner scope models
+    teardown of the gate's own monkeypatch fixture, including when the gate is
+    invoked by the frozen-clock regression tests above.
+    """
+    existing_report = {"an earlier catalog fence": 7}
+    monkeypatch.setattr(jce, "FENCE_REHASHED", existing_report)
+    gate = getattr(release_gate, gate_name)
+    with pytest.MonkeyPatch.context() as gate_patch:
+        fixtures = {
+            name: gate_patch if name == "monkeypatch" else request.getfixturevalue(name)
+            for name in inspect.signature(gate).parameters
+        }
+        gate(**fixtures)
+
+    assert jce.FENCE_REHASHED is existing_report, "gate teardown must restore the incoming report object"
+    assert existing_report == {"an earlier catalog fence": 7}, "gate must not mutate the incoming report"
+
+
 def test_corruption_gate_does_not_mistake_unrelated_errors_for_content_refusal(release_gate, monkeypatch, request):
     real_tool = release_gate._tool
 

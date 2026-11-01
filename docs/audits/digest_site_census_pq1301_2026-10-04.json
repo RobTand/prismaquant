@@ -138396,5 +138396,130 @@
     "k3": 57
    }
   }
- }
+ },
+  "reconciliation_2635": {
+    "schema": "prismaquant.digest_reconciliation_2635.v1",
+    "inspected_commit": "05b62b4742793a2188abd4ed041fc4d46fd6c2c0",
+    "issue": "prismaquant#2635",
+    "root": "prismaquant#1301",
+    "coverage": "Only the three refresh_2540 primitive shipcard calls. Supplemental JSON and all other root calls remain outside this reconciliation.",
+    "historical_source": {
+      "commit": "30b6231df000726beda55fb6706e641a5cb2ccb0",
+      "git_blob": "acf1b46ab0802eada0512a22b78828bd9420bd8a"
+    },
+    "current_source": {
+      "path": "prismaquant/shipcard.py",
+      "sha256": "6b01cb2839c3ea7dbc8fcd3e9030a29f90c55325e2875b150923e1908dad763f"
+    },
+    "fixture_provenance": {
+      "source_commit": "a9d2c77ce8bcf7cccec5d246dbd655e80db9d44d",
+      "source_pr": "prismaquant#2643",
+      "new_rows": 40,
+      "keys": [
+        "test_file_digest_site[b0]#28",
+        "test_file_digest_site[b0]#29",
+        "test_file_digest_site[b1048575]#28",
+        "test_file_digest_site[b1048575]#29",
+        "test_file_digest_site[b1048576]#28",
+        "test_file_digest_site[b1048576]#29",
+        "test_file_digest_site[b1048577]#28",
+        "test_file_digest_site[b1048577]#29",
+        "test_file_digest_site[b16777215]#28",
+        "test_file_digest_site[b16777215]#29",
+        "test_file_digest_site[b16777216]#28",
+        "test_file_digest_site[b16777216]#29",
+        "test_file_digest_site[b16777217]#28",
+        "test_file_digest_site[b16777217]#29",
+        "test_file_digest_site[b1]#28",
+        "test_file_digest_site[b1]#29",
+        "test_file_digest_site[b262143]#28",
+        "test_file_digest_site[b262143]#29",
+        "test_file_digest_site[b262144]#28",
+        "test_file_digest_site[b262144]#29",
+        "test_file_digest_site[b262145]#28",
+        "test_file_digest_site[b262145]#29",
+        "test_file_digest_site[b4194303]#28",
+        "test_file_digest_site[b4194303]#29",
+        "test_file_digest_site[b4194304]#28",
+        "test_file_digest_site[b4194304]#29",
+        "test_file_digest_site[b4194305]#28",
+        "test_file_digest_site[b4194305]#29",
+        "test_file_digest_site[b8388607]#28",
+        "test_file_digest_site[b8388607]#29",
+        "test_file_digest_site[b8388608]#28",
+        "test_file_digest_site[b8388608]#29",
+        "test_file_digest_site[b8388609]#28",
+        "test_file_digest_site[b8388609]#29",
+        "test_file_digest_site[directory]#28",
+        "test_file_digest_site[directory]#29",
+        "test_file_digest_site[link]#28",
+        "test_file_digest_site[link]#29",
+        "test_file_digest_site[missing]#28",
+        "test_file_digest_site[missing]#29"
+      ],
+      "replay": "tests/test_digest_profiles_1301_files.py",
+      "original_recipe_check": "test_shipcard_successors_match_the_original_file_recipe",
+      "limitation": "The historical recording receipt is not re-attested. The retained rows are unchanged, and replay also executes the original recipe copied from the recorded source blob."
+    },
+    "calls": [
+      {
+        "historical_id": "hashlib:prismaquant/shipcard.py::_file_content_sha256@519:13",
+        "classification": "load-bearing",
+        "disposition": "existing-owner-successors",
+        "implementation_commit": "60060a69c04e5d8e8d1970eca9746093b25c0d4e",
+        "owner_route": "prismaquant.digests.file_sha256hex",
+        "current_binding": "prismaquant.shipcard.file_sha256hex",
+        "consumer_scopes": [
+          "compute_model_sha",
+          "build_weight_content_manifest",
+          "file_sha256"
+        ],
+        "read_boundary": {
+          "historical_block_bytes": 1048576,
+          "current_block_bytes": 8388608,
+          "reason": "60060a69c0 already selected the existing owner default. This reconciliation preserves that choice and changes no runtime code.",
+          "opens_per_call": 1
+        },
+        "wrapper": "file_sha256 still returns None for Exception; direct consumers retain read exceptions.",
+        "evidence": [
+          "tests/test_digest_profiles_1301_files.py::test_file_digest_site",
+          "tests/test_digest_profiles_1301_files.py::test_shipcard_successors_match_the_original_file_recipe",
+          "tests/test_shipcard_digest_routing_2635.py::test_file_wrapper_uses_one_owner_stream",
+          "tests/test_shipcard_digest_routing_2635.py::test_model_and_manifest_consumers_use_the_file_owner"
+        ]
+      },
+      {
+        "historical_id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@771:18",
+        "classification": "load-bearing",
+        "disposition": "retained-exact-descriptor-contract",
+        "current_scope": "prismaquant.shipcard._verify_open_safetensors_fd",
+        "owner_route": null,
+        "reason": "One caller-owned descriptor supplies prefix, header and contiguous tensor spans in one forward traversal. Container and per-span digests consume the same reads, followed by one stat fence. A path-opening file owner cannot reproduce this contract.",
+        "source_ast_sha256": "a2ed987c3e1c086641efa173b19db1832b46b34286a35c9d473bb87d9a0345ac",
+        "matches_historical_ast": true,
+        "evidence": [
+          "tests/test_shipcard_digest_routing_2635.py::test_retained_descriptor_verifier_keeps_its_read_contract"
+        ]
+      },
+      {
+        "historical_id": "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd@792:24",
+        "classification": "load-bearing",
+        "disposition": "retained-exact-descriptor-contract",
+        "current_scope": "prismaquant.shipcard._verify_open_safetensors_fd",
+        "owner_route": null,
+        "reason": "One caller-owned descriptor supplies prefix, header and contiguous tensor spans in one forward traversal. Container and per-span digests consume the same reads, followed by one stat fence. A path-opening file owner cannot reproduce this contract.",
+        "source_ast_sha256": "a2ed987c3e1c086641efa173b19db1832b46b34286a35c9d473bb87d9a0345ac",
+        "matches_historical_ast": true,
+        "evidence": [
+          "tests/test_shipcard_digest_routing_2635.py::test_retained_descriptor_verifier_keeps_its_read_contract"
+        ]
+      }
+    ],
+    "baseline": {
+      "path": "tests/fixtures/duplication_baseline.json",
+      "sha256": "065dce7aec135b604514ed7acf30b9384c33d82a7af7292c74b1650e2b8743ae",
+      "change": "None. The removed helper scope is already absent; the retained descriptor scope remains."
+    },
+    "admission": "Pending independent review of this reconciliation; no native issue closure or root completion is inferred."
+  }
 }

@@ -91,6 +91,7 @@ except ModuleNotFoundError:
 from safetensors.torch import save_file
 
 from . import io_spans
+from . import name_projection
 from . import nvfp4_activation_contract as _nvfp4_activation_contract
 from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from prismaquant.allocator_candidates import (
@@ -246,15 +247,6 @@ def _production_cache_format_candidates(fmt: str) -> tuple[str, ...]:
     return (fmt_u,)
 
 
-def _production_cache_name_candidates(name: str) -> tuple[str, ...]:
-    names = [name]
-    if name.endswith(".weight"):
-        names.append(name[:-len(".weight")])
-    if name.startswith("model.language_model."):
-        names.append("model." + name[len("model.language_model."):])
-    return tuple(dict.fromkeys(names))
-
-
 def _production_cache_lookup_key(name: str, fmt: str):
     cache = _PRODUCTION_WEIGHT_CACHE
     if cache is None:
@@ -264,7 +256,7 @@ def _production_cache_lookup_key(name: str, fmt: str):
         if key is not None:
             return key
     weights = getattr(cache, "weights", {}) or {}
-    for cand_name in _production_cache_name_candidates(name):
+    for cand_name in name_projection.production_cache_name_candidates(name):
         for cand_fmt in _production_cache_format_candidates(fmt):
             key = (cand_name, cand_fmt)
             if key in weights:

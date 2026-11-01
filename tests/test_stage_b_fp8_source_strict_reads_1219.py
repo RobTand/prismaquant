@@ -213,6 +213,7 @@ def _dsv4_model(root: Path) -> tuple[Path, dict, dict]:
     return model, raw, config
 
 
+@pytest.mark.own_process
 def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path, monkeypatch):
     from prismaquant.model_profiles import detect_profile
     from prismaquant import streaming_model as sm
@@ -326,3 +327,16 @@ def test_a_strict_run_over_an_fp8_source_never_opens_its_config_or_index_in_the_
     in_pool = sorted(path for path in opened
                      if path.startswith(str(model) + os.sep))
     assert not in_pool, f"read at their pool paths: {in_pool}"
+
+
+def test_stage_b_fp8_profile_survives_a_native_dsv4_import(tmp_path):
+    """The real staged-read oracle must survive the suite's native-import predecessor."""
+    from test_layer_streaming_mxfp4_isolation import native_dsv4_session
+
+    proc, output, outcomes, _ = native_dsv4_session(
+        tmp_path,
+        '../test_stage_b_fp8_source_strict_reads_1219.py::'
+        'test_deepseek_v4_pairs_its_scales_from_the_callers_index')
+    assert proc.returncode == 0, output
+    assert outcomes['test_deepseek_v4_pairs_its_scales_from_the_callers_index'][0] == 'passed', output
+    assert outcomes['test_native_dsv4_import_still_refuses_the_vendored_override'][0] == 'passed', output

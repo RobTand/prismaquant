@@ -6,3 +6,13 @@
 # 5.16.1 ships. transformers 5.17.0 ships another file, so tests of the
 # derivative cannot run on it (#1419).
 transformers==5.16.1
+#
+# pytest: CI installed the newest pytest, which moved from 9.1.1 to 9.2.0 on
+# 2026-10-28. In 9.2.0, MonkeyPatch.setattr on an instance takes the value to
+# restore from the instance __dict__ unless the class defines a data
+# descriptor. torch.backends.cuda.matmul serves
+# allow_bf16_reduced_precision_reduction through __getattr__ and __setattr__,
+# so undo() calls delattr() and raises AttributeError, and 22 stage A tests
+# that patch that flag fail. Every hosted run behind
+# .github/hosted-known-failures.txt used 9.1.1 (#3140).
+pytest==9.1.1

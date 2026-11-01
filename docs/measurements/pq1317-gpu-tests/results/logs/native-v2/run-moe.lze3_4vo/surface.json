@@ -1,0 +1,44 @@
+{
+  "schema": "tessera.test_surface.v3",
+  "role": "population",
+  "worker_id": null,
+  "xdist_workers": 2,
+  "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "source_identity": {
+    "schema": "tessera.suite_source.v1",
+    "snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+    "sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+    "verification": "verified",
+    "excluded_metadata": [],
+    "files_verified": 2005,
+    "measurement_span": {
+      "entry_sha256": "980a9718a3ff28714794ce2d3c04cea79e045318f9f16f566db361e9db42d627",
+      "entry_snapshot_commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+      "entry_verification": "verified",
+      "agrees": true
+    },
+    "workers": {
+      "gw0": "agrees",
+      "gw1": "agrees"
+    }
+  },
+  "cuda": true,
+  "device": "torch 2.13.0+cu130, 1 CUDA device(s), device 0 = NVIDIA GB10",
+  "strict_cuda": true,
+  "counts": {
+    "passed": 71,
+    "failed": 0,
+    "error": 0,
+    "skipped": 0,
+    "xfailed": 0,
+    "xpassed": 0
+  },
+  "skip_reasons": {},
+  "cuda_surface": {
+    "executed": 38,
+    "measured_by": "tests during whose call torch's CUDA allocator recorded a new allocation",
+    "is_a_floor": true,
+    "box_artifact_skips": {}
+  },
+  "not_collected": []
+}
