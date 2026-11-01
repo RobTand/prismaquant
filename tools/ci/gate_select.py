@@ -210,7 +210,7 @@ def helper_importers(index: dict, changed: list[str], existing: dict | None = No
     return reverse
 
 
-def estimate(files: list[str], durations: dict, workers: int = 5) -> dict:
+def estimate(files: list[str], durations: dict, workers: int = 4) -> dict:
     values = durations['files']
     missing = sorted(set(files) - values.keys())
     if missing:
@@ -220,7 +220,7 @@ def estimate(files: list[str], durations: dict, workers: int = 5) -> dict:
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) or
            not math.isfinite(value) or value < 0 for value in costs):
         raise ValueError('file durations must be finite nonnegative seconds')
-    # Conservative file-level packing. xdist loadfile never splits a test file.
+    # Conservative file-level estimate; work stealing may split long files.
     slots = [0.0] * workers
     for cost in sorted(costs, reverse=True):
         heapq.heappush(slots, heapq.heappop(slots) + cost)
@@ -360,7 +360,7 @@ def summary(plan: dict) -> str:
     counts = Counter(reason.split(':', 1)[0] for row in plan['selected'] for reason in row['reasons'])
     lines = ['## Merge gate selection', '', f"Population `{cell(plan['population']['version'])}`",
              f"Selected {len(plan['selected'])} of {plan['population']['size']} files.",
-             f"Estimated test wall seconds at 5 workers: {plan['estimate']['wall_seconds']!s}.",
+             f"Conservative single-job test seconds at 4 workers: {plan['estimate']['wall_seconds']!s}.",
              'Runner pickup and setup are additional. Missing durations mean an unknown estimate.',
              'Complete selection, reasons and exclusions are in the plan.json artifact.', '',
              'Selection reasons: ' + '; '.join(f'{cell(reason)}: {count}' for reason, count in sorted(counts.items())[:50]), '',

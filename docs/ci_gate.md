@@ -25,7 +25,8 @@ commit, and `pip install -c .github/ci-constraints.txt -e '.[test]'` preserve th
 existing CPU installation. Pip caches include dependency declarations, constraints,
 and the Tessera pin. Native libraries get one thread each. Pytest workers are
 bounded by inherited CPU affinity and two GiB per worker after reserving one GiB
-for the runner. A file stays on one worker to preserve module fixtures.
+for the runner. Work stealing shares long files across those workers, as in the
+post-merge suite; each file still belongs to exactly one hosted shard.
 
 Tests marked `own_cgroup` run after their shard's ordinary tests, without xdist,
 in a transient systemd scope containing only that pytest process. Both phases

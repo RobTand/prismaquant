@@ -162,7 +162,7 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
         environment['PYTHONPATH'] = str(Path(__file__).resolve().parent) + os.pathsep + environment.get('PYTHONPATH', '')
         junit.parent.mkdir(parents=True, exist_ok=True)
         profile = ['-X', 'importtime'] if os.environ.get('GATE_PROFILE_STARTUP') == '1' else []
-        command = [sys.executable, *profile, '-m', 'pytest', '-n', str(workers), '--dist=loadfile',
+        command = [sys.executable, *profile, '-m', 'pytest', '-n', str(workers), '--dist=worksteal',
                    '-q', '-ra', '--timeout=600', '-m', 'not own_cgroup', '-p', 'gate_collect', '--rootdir=' + str(root), '--junitxml=' + str(junit), '-o', 'junit_family=xunit1',
                    *('--deselect=' + target for target in plan['deselect']
                      if target.split('::', 1)[0] in files), str(root)]

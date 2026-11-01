@@ -102,7 +102,7 @@ def replay_selection(root: Path, history: dict) -> dict:
             'source': {key: value for key, value in history.items() if key != 'pulls'},
             'population': population,
             'method': 'latest merged PR files against current population, nearest-rank percentiles, '
-                      'five-worker file-level longest-first packing, excluding pickup and setup',
+                      'four-worker conservative single-job file-level packing, excluding pickup and setup',
             'summary': summarize_replay(rows), 'large_modules': modules, 'pulls': rows}
 
 
