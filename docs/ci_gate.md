@@ -4,6 +4,8 @@ Every PR push runs `pr-gate`. The selector follows reverse imports, relative imp
 test helpers, and literal repository paths. A change it cannot explain selects the
 full population. Changes to gate tooling, workflows, conftest files, pytest configuration,
 constraints, dependency declarations, or the Tessera pin select the full population.
+Non-Python runtime files under `prismaquant/` or `tools/`, and `run-pipeline.sh`,
+also select the full population. Wildcard-only path references explain nothing.
 Documentation changes can select no tests. The plan records every selected file and reason.
 
 A same-repository Mergify batch draft runs `gate` on its integrated head SHA.
@@ -43,7 +45,11 @@ The retry planner retries only missing or invalid verdicts, once, in another job
 A test failure survives a later pass and is never retried. Lost runners and setup
 failures can retry. Every record binds the base SHA, head SHA, population version,
 mode, and assigned files. The final check requires complete, unique coverage.
-Artifacts are separated by workflow attempt, shard, and execution attempt.
+Artifacts are separated by workflow attempt, shard, and execution attempt. Use
+"Re-run all jobs" to rerun a workflow. "Re-run failed jobs" cannot reuse the old
+plan artifact under the new attempt number and therefore cannot produce a verdict.
+Full reruns swap every shard's architecture. Pytest failures, including xdist
+worker crash reports, remain final failures. There is no automatic test retry.
 
 ## Time budgets and quarantine
 
@@ -54,22 +60,43 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-Hosted trials 41275735452, 41277228478, 41278311643, 41278869921, and 41280260494 measured Python 3.12 CPU tests
-on x64 and arm64. The 103 bootstrap exceptions are twice the largest observed
-test time, rounded up. Enforcement remains enabled. Work stealing can move
-shared-fixture setup between testcases, so the exception evidence includes both
-schedulers. Swapped reruns extend architecture coverage before handoff.
-The separate hang timeout remains 600 seconds per test.
+The initial policy uses eight calibration attempts: 41275735452/1,
+41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
+41281908452/1, and 41282567022/1. Both architecture-swapped attempts and
+successful heads after the first review contribute to its 108 exceptions.
+It retains total JUnit setup, call, and teardown time. Fixture setup can move
+between the first tests on xdist workers, so both architectures and swapped
+placements contribute maxima rather than successful runs alone. Slow tests keep
+measured exceptions. [Issue #3200](https://github.com/RobTand/prismaquant/issues/3200)
+owns reducing these costs; a higher measured limit does not make a test faster.
+The separate hang timeout remains 600 seconds per test. The budget file records
+its exact run evidence. Scheduling costs in `gate_durations.json` remain from
+three earlier hosted runs and do not set test budgets.
+
+After bootstrap, a budget cannot be raised by editing the JSON, adding a label,
+or rerunning a failed job. First fix the expensive test or fixture and remeasure.
+If a verified runner or dependency change invalidates the baseline, the readiness
+lead must review an explicit policy migration in tooling plus a new hosted
+baseline and final-head qualification. The current runner offers no override.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
-At main `8d72e303e2f070925077ce9e072b254df3856909`, the legacy list has 54 active
-entries. Each now names an open owning issue and its inherited failure reason.
-The gate ignores whole-file entries before import and deselects node entries.
-The ARM exit-ownership failure found in canary 41277228478 adds one exact-node
-entry owned by #3197. Its unchanged production code passed an earlier hosted
-sample, then classified its own exiting child as a foreign PID. Quarantine owners
-reproduce and repair the failures, then remove their entries.
-The post-merge full suite uses the same quarantine.
+The legacy file at main `8d72e303e2f070925077ce9e072b254df3856909` had 54 active
+entries, not 72. The initial policy carries those entries plus the observed ARM
+exit-ownership race owned by #3197. As with budgets, a base predating this policy
+permits initial setup. Once present, quarantine can only shrink against the PR
+base during an ordinary code change. A whole-file exclusion may narrow to an
+exact node owned by the same issue. New targets, broader targets, or owner changes
+require a PR touching only the quarantine file and optional documentation.
+A fix can always remove an entry alongside its code changes.
+
+Planning checks each distinct owner using GitHub's public REST API. Owners must
+be open issues, not PR numbers. Closed or missing owners fail. An unavailable,
+rate-limited, malformed, or timed-out API returns exit 75, never a pass.
+Whole-file exclusions happen before import. Node exclusions use exact collected
+IDs, so excluding `test_a` never excludes `test_a_more` or an unlisted parameter.
+The post-merge full suite uses the same exact exclusion hook. Cgroup membership
+comes from collected pytest markers, including aliases and hooks, rather than
+source substrings. Quarantine owners repair their failures and remove entries.
 
 ## Reproduce a shard
 
@@ -131,15 +158,13 @@ Both retain their hosted run evidence.
 The fixed-main inventory at `8d72e303e2f070925077ce9e072b254df3856909`
 completed three 32-shard repeats. It observed 22,509 nodes and measured 1,312
 files, with no incomplete outcome records. All 96 effective actions have public
-terminal evidence across x64 dl380g10 and ARM sparky and sparklina. The 37 passing
+terminal evidence across x64 and ARM workers. The 37 passing
 actions have CAS receipts; the other 59 actions contain final test failures.
 
 There are 76 nodes that failed all three repeats, 228 that changed between pass
 and fail, and 39 that changed between pass and skip. Worker architecture, filesystems, and
 installed dependency availability vary across repeats. These are observed
 outcome changes, not evidence that every affected test fails randomly.
-The exact node lists and file costs are in the retained
-`/home/rob/tmp/pqt-lead/agents/pq-gate-inventory-summary.json`.
 [The inventory evidence comment](https://github.com/RobTand/prismaquant/issues/3180#issuecomment-6554113772)
 records the action and exclusion evidence.
 
@@ -150,42 +175,51 @@ used. The maximum measured aggregate cgroup peak was 3,058,761,728 bytes.
 The six manifest-dependent exclusions and skipped CUDA bodies remain unqualified.
 Fleet Python 3.14.4 and torch 2.11 differ from hosted Python 3.12 and torch 2.15.
 
-A replay of the latest 20 merged PRs selected p50 87 files and p90 1,181 files.
-Eight selections exceeded 300 files. These sizes come from replaying captured
-REST file lists against the gate population, without executing those tests.
-Missing timings for nine collection-skipped files prevent wall estimates.
+The captured 20-PR replay at `3072020a` selected p50 68 files and p90 1,178
+files from a 1,328-file population. Nine selections exceeded 600 files. These
+counts measure work selected, not selection accuracy. Shadow selections are uploaded but are not yet
+compared automatically against full-gate failures. String-based production module
+or subprocess references can remain outside the import graph, so that comparison
+is still needed before making stronger accuracy claims.
 
-Hosted qualification has two successful full samples so far. Both used x64 and
-arm64 and required no retries:
+Calibration history includes successful and failed runs across different heads
+and layouts. Those runs set initial budgets and are not final-head qualification.
+The earlier successful 16-shard sample was 523 seconds and a 12-shard sample was
+506 seconds, both measured from workflow start. A swapped 12-shard sample took
+822 seconds and failed its budget verdict. These samples do not establish a
+latency guarantee or a shard-count speed advantage. Issue #3200 owns the long
+legal-domain derivation tail. No CPU profile was captured on that slow hosted VM,
+so its cause remains unproven.
 
-| Run and attempt | Head | Shards | Setup per shard | Test steps | Workflow start to final gate |
-| --- | --- | --- | --- | --- | --- |
-| [41278311643 / 1](https://github.com/RobTand/prismaquant/actions/runs/41278311643/attempts/1) | `80e90280adecad9955759b7acf9fcaa0e5d009bc` | 16 | 58–82s | 88–389s | 523s |
-| [41278869921 / 1](https://github.com/RobTand/prismaquant/actions/runs/41278869921/attempts/1) | `8af50f585ec458514ed91f9b624c154546fb17b4` | 12 | 58–83s | 116–389s | 506s |
+Final qualification requires at least three passing full `gate` attempts on one
+unchanged head, including a passing swapped rerun, with budgets enforced. Record
+run ID, full head, attempt, architecture layout, and wall time from run creation
+or the timestamp immediately before the REST rerun request to the final `gate`
+verdict. Include failing attempts when assessing reliability. The target is p90
+at most ten minutes, with five minutes preferred. Measure 14 or 16 shards if the
+12-shard layout cannot meet that reliably. The PR body carries the final-head
+table, so recording a completed canary does not itself change the qualified head.
 
-Successful-only p50 is 514.5 seconds and nearest-rank p90 is 523 seconds, pending
-the required third successful full sample. Keep 12 shards: these comparable walls
-do not establish statistical speed superiority, and 12 uses four fewer concurrent
-hosted jobs. The measured 1,318-file duration partition stays frozen through
-qualification.
+Of the PB inventory's 228 pass/fail flips, 223 were in 19 files that passed all
+observed hosted executions. Likewise 75 of its 76 consistently failing nodes
+remain in the hosted population. Fleet Python 3.14 and torch 2.11 differ from the
+hosted environment. These observations justify keeping those tests covered;
+they do not prove an absence of flakes. No dedicated five-repeat per-architecture
+hosted experiment was performed.
 
-Failed measurement runs 41275735452 and 41277228478 took 927 and 748 seconds to the final verdict.
-The first used file scheduling, with a 742-second longest test step. Work stealing
-reduced that step to 390 seconds in the second run. Setup ranged from 57 to 86
-seconds. The second wall time includes the parser-induced retry. These failed
-runs do not contribute to successful-canary p50 or p90.
+Ordinary draft PRs run `pr-gate` too. Mergify drafts need the full gate and the
+current workflow deliberately keeps feedback on other drafts. This can consume
+up to the full shard matrix; account capacity is shared. Existing PR heads that
+predate the gate tooling fail with a message to merge `main` and push again.
 
-The opposite-architecture calibration also passed pytest throughout but exposed
-new default-budget cases. A later x64 sample took 685 seconds on the legal-domain
-file with four workers and 822 seconds to the final failed budget verdict.
-[Issue #3200](https://github.com/RobTand/prismaquant/issues/3200) owns profiling
-and reducing that variability without weakening the independent derivation
-oracles. The gate agent does not own those production and non-gate test files. No CPU model
-or in-process profile was captured on that slow VM, so its cause is unproven.
-The gate does not yet demonstrate a ten-minute bound for every placement.
+The queue configuration lands in the same PR as this gate. Landing order:
 
-After the gate merges and its checks pass, the readiness lead removes
-`tests (py3.12, cpu)` from classic branch protection, leaving `linked issue`.
-The tests job retains its name and runs on main pushes and manual dispatches.
-The Mergify queue requires `pr-gate` to queue and the integrated `gate` to merge.
-The `import surface` and `boundary allowlists only shrink` jobs remain in CI.
+1. Wait until PQ's queue is empty.
+2. The lead changes classic branch protection to require `linked issue` only.
+3. The lead queues this PR with `@mergifyio queue` using the old in-place queue,
+   which then needs only `linked issue`.
+4. Once merged, the new `.mergify.yml` queues by label with `pr-gate` and `gate`.
+
+The post-merge tests job keeps its name and runs on main pushes and manual
+dispatches. PR import and boundary checks remain in `ci.yml`. Only the lead changes
+branch protection or queues this PR. See [the merge queue guide](merge_queue.md).

@@ -62,3 +62,28 @@ def test_owner_api_failure_is_no_verdict():
         raise TimeoutError('GitHub unavailable')
     with pytest.raises(RuntimeError, match='no verdict'):
         select.check_quarantine_owners([entry()], fetch=unavailable)
+
+
+def test_owner_rate_limit_and_server_error_are_no_verdict():
+    import urllib.error
+    for status in (403, 429, 500, 503):
+        def fetch(issue):
+            raise urllib.error.HTTPError('https://api.github.com', status, 'unavailable', {}, None)
+        with pytest.raises(RuntimeError, match='no verdict'):
+            select.check_quarantine_owners([entry()], fetch=fetch)
+
+
+@pytest.mark.parametrize('problem,code', [(ValueError('closed owner'), 1), (RuntimeError('no verdict'), 75)])
+def test_plan_preserves_policy_failure_or_api_unavailability(tmp_path, monkeypatch, problem, code):
+    import json
+    (tmp_path / 'tools/ci').mkdir(parents=True)
+    (tmp_path / QUARANTINE).write_text(json.dumps({'entries': [entry()]}))
+    monkeypatch.setattr(select, 'changed_files', lambda *args: [QUARANTINE])
+    monkeypatch.setattr(select, 'base_quarantine', lambda *args: None)
+    def owners(*args):
+        raise problem
+    monkeypatch.setattr(select, 'check_quarantine_owners', owners)
+    output = tmp_path / 'plan.json'
+    assert select.main(['--root', str(tmp_path), '--base', 'a' * 40, '--head', 'b' * 40,
+                        '--output', str(output)]) == code
+    assert not output.exists()
