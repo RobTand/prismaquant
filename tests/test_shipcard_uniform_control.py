@@ -17,6 +17,8 @@ import pathlib
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
     pytest.skip("requires a repo checkout (tools/ scripts)",
                 allow_module_level=True)
@@ -321,6 +323,12 @@ def _close_base_slots(model_dir, candidate_kl=_ALLOCATED_KL):
     for slot in REQUIRED_SLOTS:
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(sha, source=str(model_dir)))
+            continue
+        if slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(model_dir)
+            fill_slot(path, slot, record)
             continue
         if slot.startswith("native_export."):
             fill_slot(path, slot, _native_record(slot, sha))

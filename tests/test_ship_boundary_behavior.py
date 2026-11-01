@@ -20,6 +20,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 import prismaquant.validate_quantized_model as vqm
 
 _REFUSED_URL = "http://127.0.0.1:1"
@@ -410,6 +412,11 @@ def _full_card(tmp_path, **record_kwargs):
         if slot == "ship_gate":
             fill_slot(path, slot, _ship_gate_record(
                 sha, source=str(model_dir), **record_kwargs))
+        elif slot == "native_export.graph":
+            from tests.graph_receipt_fixtures import graph_fixture
+
+            record, _ = graph_fixture(model_dir)
+            fill_slot(path, slot, record)
         elif slot.startswith("native_export."):
             arm = slot.split(".")[1]
             fill_slot(path, slot, make_record(
