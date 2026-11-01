@@ -78,11 +78,11 @@ def test_killed_pytest_leaves_no_verdict(tmp_path):
     assert json.loads((tmp_path / 'output').read_text())['verdict'] is None
 
 
-def test_empty_selection_cannot_default_to_running_the_entire_suite(tmp_path):
+def test_empty_selection_passes_without_launching_pytest(tmp_path):
     result = runner.run_plan({'selected': [], 'deselect': []}, root=tmp_path,
                         output=tmp_path / 'output', junit=tmp_path / 'junit.xml',
                         execute=lambda *a, **k: pytest.fail('must not start pytest'), affinity={1})
-    assert result == 75
+    assert result == 0
 
 
 def test_runner_uses_assigned_files_and_job_cpus_with_portable_junit(tmp_path):

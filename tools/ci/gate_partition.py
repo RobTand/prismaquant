@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Deterministic duration-balanced shards shared by gate and nightly CI."""
+from __future__ import annotations
+
+import argparse
+from collections.abc import Mapping, Sequence
+import json
+import math
+from pathlib import Path, PurePosixPath
+
+
+def _cost(value: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        raise ValueError('durations must be finite nonnegative numbers, not booleans')
+    return float(value)
+
+
+def default_unknown_seconds(durations: Mapping[str, float]) -> float:
+    """Nearest-rank p90; empty or all-zero inventories use one second."""
+    costs = sorted(_cost(value) for value in durations.values())
+    return (costs[math.ceil(len(costs) * .9) - 1] or 1.0) if costs else 1.0
+
+
+def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
+           *, unknown_seconds: float) -> list[dict]:
+    """Assign longest files first, breaking cost ties by path and shard index."""
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError('count must be a positive integer')
+    if len(files) != len(set(files)):
+        raise ValueError('duplicate files')
+    costs = {path: _cost(value) for path, value in durations.items()}
+    unknown = _cost(unknown_seconds)
+    result = [{'index': index, 'files': [], 'estimated_seconds': 0.0, 'unknown_files': []}
+              for index in range(count)]
+    for path in sorted(files, key=lambda path: (-costs.get(path, unknown), path)):
+        row = min(result, key=lambda row: (row['estimated_seconds'], row['index']))
+        row['files'].append(path)
+        row['estimated_seconds'] += costs.get(path, unknown)
+        if path not in costs:
+            row['unknown_files'].append(path)
+    for row in result:
+        row['files'].sort()
+        row['unknown_files'].sort()
+    return result
+
+
+
+
+def selection_shard_count(files: Sequence[str], durations: Mapping[str, float], maximum: int,
+                          *, workers: int, single_shard_seconds: float) -> int:
+    """Keep small PRs on one slot; larger selections share the full gate matrix."""
+    unknown = default_unknown_seconds(durations)
+    # Reuse partition validation so an unknown file or invalid cost cannot be free.
+    packed = shards(files, durations, workers, unknown_seconds=unknown)
+    wall = max(row['estimated_seconds'] for row in packed)
+    useful = sum(durations.get(path, unknown) > 0 for path in files)
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ValueError('workers must be a positive integer')
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 1:
+        raise ValueError('maximum must be a positive integer')
+    threshold = _cost(single_shard_seconds)
+    return 1 if wall <= threshold else min(maximum, max(1, useful))
+
+
+def main(argv: list[str] | None = None) -> int:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('--files-from', type=Path, required=True)
+    common.add_argument('--durations', type=Path, required=True)
+    common.add_argument('--shards', type=int, required=True)
+    common.add_argument('--unknown-seconds', type=float)
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    matrix = commands.add_parser('matrix', parents=[common])
+    matrix.add_argument('--runners', required=True)
+    matrix.add_argument('--single-shard-seconds', type=float, help='selection only: keep cheap work in one job')
+    matrix.add_argument('--workers', type=int, default=4)
+    matrix.add_argument('--output', type=Path, required=True)
+    shard = commands.add_parser('shard', parents=[common])
+    shard.add_argument('--index', type=int, required=True)
+    shard.add_argument('--output-files', type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        files = [line.strip() for line in args.files_from.read_text().splitlines() if line.strip()]
+        if any(PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts for path in files):
+            raise ValueError('files must be repository-relative paths without traversal')
+        durations = json.loads(args.durations.read_text())['files']
+        if not isinstance(durations, dict):
+            raise ValueError('duration files must be a mapping')
+        unknown = default_unknown_seconds(durations) if args.unknown_seconds is None else args.unknown_seconds
+        if args.command == 'matrix' and args.single_shard_seconds is not None:
+            args.shards = selection_shard_count(files, durations, args.shards, workers=args.workers,
+                                                single_shard_seconds=args.single_shard_seconds)
+        result = shards(files, durations, args.shards, unknown_seconds=unknown)
+        if args.command == 'matrix':
+            runners = [name.strip() for name in args.runners.split(',')]
+            if not all(runners):
+                raise ValueError('runners must be nonempty comma-separated names')
+            output = {'schema': 'prismaquant.gate_matrix.v1', 'shards': args.shards,
+                      'total_estimated_seconds': sum(row['estimated_seconds'] for row in result),
+                      'include': [{'index': row['index'], 'runner': runners[row['index'] % len(runners)],
+                                   'files': len(row['files']), 'estimated_seconds': row['estimated_seconds']}
+                                  for row in result]}
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(output, indent=2) + '\n')
+        else:
+            if not 0 <= args.index < args.shards:
+                raise ValueError('index is outside the shard range')
+            args.output_files.parent.mkdir(parents=True, exist_ok=True)
+            args.output_files.write_text(''.join(path + '\n' for path in result[args.index]['files']))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        parser.error(str(error))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
