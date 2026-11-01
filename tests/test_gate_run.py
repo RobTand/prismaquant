@@ -349,3 +349,24 @@ def test_module_skip_is_a_complete_verdict(tmp_path):
 def test_memory_and_affinity_bound_workers():
     assert runner.worker_count(8, affinity={2, 4, 6, 8}, available_bytes=5 * 1024**3) == 2
     assert runner.worker_count(8, affinity={2}, available_bytes=12 * 1024**3) == 1
+
+
+def test_cgroup_tail_is_serial_scoped_and_its_failure_is_final(tmp_path):
+    path = 'tests/test_scoped.py'
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / path).write_text('import pytest\npytestmark = pytest.mark.own_cgroup\n')
+    calls = []
+    def execute(command, **kwargs):
+        calls.append(command)
+        xml_path = next(value.split('=', 1)[1] for value in command if value.startswith('--junitxml='))
+        Path(xml_path).write_text('<testsuites><testsuite><testcase '
+            'file="tests/test_scoped.py" classname="tests.test_scoped" name="test_scope" time="1">'
+            + ('<failure>scope defect</failure>' if command[0] == 'sudo' else '')
+            + '</testcase></testsuite></testsuites>')
+        return SimpleNamespace(returncode=1 if command[0] == 'sudo' else 0)
+    code = runner.run_plan({'selected': [{'path': path}], 'deselect': []}, root=tmp_path,
+        output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml', execute=execute, affinity={1, 2})
+    assert code == 1
+    assert calls[1][:4] == ['sudo', '-n', 'systemd-run', '--scope']
+    assert '-n' not in calls[1][4:]
+    assert calls[1][calls[1].index('-m', calls[1].index('pytest')) + 1] == 'own_cgroup'

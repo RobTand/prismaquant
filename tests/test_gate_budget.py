@@ -209,3 +209,15 @@ def test_warning_summary_has_a_bounded_preview_but_junit_keeps_every_warning(tmp
     assert 'test_0000_' in text and 'test_1999_' not in text
     assert 'junit.xml' in text
     assert 'test_1999_' in junit.read_text()
+
+
+def test_enabled_enforcement_cannot_be_disabled_against_base(tmp_path):
+    policy(tmp_path)
+    base = commit_target(tmp_path)
+    path = tmp_path / 'tools/ci/gate_budget.json'
+    payload = json.loads(path.read_text())
+    payload['enforced'] = False
+    path.write_text(json.dumps(payload))
+    code, result = budget_run(tmp_path, case('1'), base=base)
+    assert code == 1
+    assert result['verdict'] == 'fail'
