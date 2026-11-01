@@ -221,3 +221,24 @@ def test_enabled_enforcement_cannot_be_disabled_against_base(tmp_path):
     code, result = budget_run(tmp_path, case('1'), base=base)
     assert code == 1
     assert result['verdict'] == 'fail'
+
+
+def test_imported_test_budget_uses_collected_node_not_definition(tmp_path):
+    policy(tmp_path, slow={'tests/test_sample.py::test_cost': 42})
+    xml = case('41').replace('file="tests/test_sample.py"', 'file="tests/helpers.py"')
+    xml = xml.replace('/></testsuite>', '><properties><property name="gate_nodeid" '
+        'value="tests/test_sample.py::test_cost"/></properties></testcase></testsuite>')
+    code, result = budget_run(tmp_path, xml)
+    assert code == 0
+    assert result['budget']['warnings'][0]['nodeid'] == 'tests/test_sample.py::test_cost'
+
+
+@pytest.mark.parametrize('identity', ['tests/foreign.py::test_cost',
+                                      'tests/test_sample.py::other', ''])
+def test_inconsistent_collected_identity_cannot_supply_a_verdict(tmp_path, identity):
+    policy(tmp_path)
+    xml = case('1').replace('/></testsuite>',
+        '><properties><property name="gate_nodeid" value="' + identity +
+        '"/></properties></testcase></testsuite>')
+    code, result = budget_run(tmp_path, xml)
+    assert code == 75 and result['verdict'] is None

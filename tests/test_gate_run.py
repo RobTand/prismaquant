@@ -371,3 +371,19 @@ def test_cgroup_tail_is_serial_scoped_and_its_failure_is_final(tmp_path):
     assert calls[1][:4] == ['sudo', '-n', 'systemd-run', '--scope']
     assert '-n' not in calls[1][4:]
     assert calls[1][calls[1].index('-m', calls[1].index('pytest')) + 1] == 'own_cgroup'
+
+
+def test_imported_tests_keep_their_collected_budget_identity(tmp_path):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    (tmp_path / 'tests/helpers.py').write_text('def test_imported(): assert True\n')
+    path = 'tests/test_consumer.py'
+    (tmp_path / path).write_text('from helpers import test_imported\n')
+    code = runner.run_plan({'selected': [{'path': path}], 'deselect': []},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        workers=1)
+    assert code == 0
+    case = next(ET.parse(tmp_path / 'junit.xml').iter('testcase'))
+    assert case.get('file') == 'tests/helpers.py'
+    assert [(p.get('name'), p.get('value')) for p in case.findall('properties/property')] == [
+        ('gate_nodeid', path + '::test_imported')]
