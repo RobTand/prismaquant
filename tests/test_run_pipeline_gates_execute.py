@@ -375,3 +375,27 @@ def _producer_status(policy: str, platform: str, contract: str) -> int:
     )
 
 
+
+
+def test_scratch_owners_cannot_delete_each_others_models():
+    first = scratch.__wrapped__()
+    second = scratch.__wrapped__()
+    try:
+        next(first)
+        second_root = next(second)
+        model = second_root / 'other-worker-model'
+        model.mkdir(exist_ok=True)
+        config = model / 'config.json'
+        config.write_text('{}')
+        first.close()
+        assert config.is_file(), 'another worker removed the active model'
+    finally:
+        first.close()
+        second.close()
+
+
+def test_gate_subprocess_has_bounded_native_threads():
+    condition = ' && '.join('${' + key + ':-} == 1' for key in (
+        'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS',
+        'NUMEXPR_NUM_THREADS', 'TORCHINDUCTOR_COMPILE_THREADS', 'MAX_JOBS'))
+    assert run_block('if [[ ' + condition + ' ]]; then :; else exit 2; fi', {}) == PASSED
