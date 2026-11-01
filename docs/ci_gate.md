@@ -108,10 +108,10 @@ Plan and inspect the files without executing tests:
 python tools/ci/gate_select.py --base "$BASE_SHA" --head "$HEAD_SHA" --mode full \
   --output plan.json --files-output files.txt
 python tools/ci/gate_partition.py matrix --files-from files.txt \
-  --durations tools/ci/gate_durations.json --shards 12 \
+  --durations tools/ci/gate_durations.json --shards 16 \
   --runners ubuntu-24.04,ubuntu-24.04-arm --output matrix.json
 python tools/ci/gate_partition.py shard --files-from files.txt \
-  --durations tools/ci/gate_durations.json --shards 12 --index 0 \
+  --durations tools/ci/gate_durations.json --shards 16 --index 0 \
   --output-files assigned.txt
 ```
 

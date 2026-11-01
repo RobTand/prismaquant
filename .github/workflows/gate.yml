@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 env:
   # Test execution destinations. Control jobs bootstrap on the hosted x64 image.
-  GATE_SHARDS: '12'
+  GATE_SHARDS: '16'
   GATE_PR_SINGLE_SECONDS: '90'
   GATE_RUNNERS: '["ubuntu-24.04-arm","ubuntu-24.04"]'
   PYTHONPATH: .
