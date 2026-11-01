@@ -31,6 +31,7 @@ def test_full_gate_uses_effective_retry_artifact_once(tmp_path):
     report = evidence.hosted([tmp_path], 20)
     node = 'tests/test_sample.py::test_cost'
     assert report['durations'] == {'tests/test_sample.py': 21}
+    assert report['node_durations'] == {'tests/test_sample.py::test_cost': 21}
     assert report['failures'] == {}
     assert report['budget']['slow'] == {node: 42}
     assert report['budget']['evidence'][node]['runner'] == 'ubuntu-24.04-arm'
@@ -139,3 +140,20 @@ def test_file_budget_calibration_uses_full_cost_when_fixture_charge_moves(tmp_pa
     assert report['budget']['file_evidence']['tests/test_sample.py'] == {
         'seconds': 60, 'run': 2, 'attempt': 1, 'runner': 'ubuntu-24.04',
         'artifact': 'gate-result-1-a1-0/junit.xml'}
+
+
+def test_split_file_duration_is_summed_per_run_before_architecture_medians(tmp_path):
+    (tmp_path / 'run.json').write_text(json.dumps({'id': 123, 'run_attempt': 1,
+        'head_sha': 'a' * 40, 'conclusion': 'success'}))
+    (tmp_path / 'jobs.json').write_text('{"jobs": []}')
+    plan = tmp_path / 'gate-plan-1'; plan.mkdir()
+    (plan / 'job-matrix.json').write_text(json.dumps({'include': [
+        {'index': 0, 'runner': 'ubuntu-24.04-arm'}, {'index': 1, 'runner': 'ubuntu-24.04-arm'}]}))
+    for index, seconds in enumerate([30, 70]):
+        target = tmp_path / f'gate-final-1/effective/{index}'; target.mkdir(parents=True)
+        (target / 'junit.xml').write_text('<testsuites>' +
+            f'<testcase file="tests/test_sample.py" classname="tests.test_sample" '
+            f'name="test_{index}" time="{seconds}"/></testsuites>')
+    report = evidence.hosted([tmp_path], 20)
+    assert report['durations'] == {'tests/test_sample.py': 100}
+    assert report['node_durations'] == {'tests/test_sample.py::test_0': 30, 'tests/test_sample.py::test_1': 70}
