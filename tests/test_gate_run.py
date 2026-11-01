@@ -333,3 +333,19 @@ def pytest_generate_tests(metafunc):
     plain, assigned = collected
     assert len(plain) == 14
     assert assigned == plain
+
+
+def test_module_skip_is_a_complete_verdict(tmp_path):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    path = 'tests/test_optional.py'
+    (tmp_path / path).write_text('import pytest\npytest.skip("optional dependency", allow_module_level=True)\n')
+    code = runner.run_plan({'selected': [{'path': path}], 'deselect': []},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml', workers=1)
+    assert code == 0
+    assert json.loads((tmp_path / 'result.json').read_text())['verdict'] == 'pass'
+
+
+def test_memory_and_affinity_bound_workers():
+    assert runner.worker_count(8, affinity={2, 4, 6, 8}, available_bytes=5 * 1024**3) == 2
+    assert runner.worker_count(8, affinity={2}, available_bytes=12 * 1024**3) == 1
