@@ -155,8 +155,21 @@ Eight selections exceeded 300 files. These sizes come from replaying captured
 REST file lists against the gate population, without executing those tests.
 Missing timings for nine collection-skipped files prevent wall estimates.
 
-Hosted 12-versus-16-shard qualification remains in progress. Failed measurement
-runs 41275735452 and 41277228478 took 927 and 748 seconds to the final verdict.
+Hosted qualification has two successful full samples so far. Both used x64 and
+arm64 and required no retries:
+
+| Run and attempt | Head | Shards | Setup per shard | Test steps | Workflow start to final gate |
+| --- | --- | --- | --- | --- | --- |
+| [41278311643 / 1](https://github.com/RobTand/prismaquant/actions/runs/41278311643/attempts/1) | `80e90280adecad9955759b7acf9fcaa0e5d009bc` | 16 | 58–82s | 88–389s | 523s |
+| [41278869921 / 1](https://github.com/RobTand/prismaquant/actions/runs/41278869921/attempts/1) | `8af50f585ec458514ed91f9b624c154546fb17b4` | 12 | 58–83s | 116–389s | 506s |
+
+Successful-only p50 is 514.5 seconds and nearest-rank p90 is 523 seconds, pending
+the required third successful full sample. Keep 12 shards: these comparable walls
+do not establish statistical speed superiority, and 12 uses four fewer concurrent
+hosted jobs. The measured 1,318-file duration partition stays frozen through
+qualification.
+
+Failed measurement runs 41275735452 and 41277228478 took 927 and 748 seconds to the final verdict.
 The first used file scheduling, with a 742-second longest test step. Work stealing
 reduced that step to 390 seconds in the second run. Setup ranged from 57 to 86
 seconds. The second wall time includes the parser-induced retry. These failed
@@ -167,7 +180,9 @@ new default-budget cases. A later x64 sample took 685 seconds on the legal-domai
 file with four workers and 822 seconds to the final failed budget verdict.
 [Issue #3200](https://github.com/RobTand/prismaquant/issues/3200) owns profiling
 and reducing that variability without weakening the independent derivation
-oracles. The gate agent does not own those production and non-gate test files.
+oracles. The gate agent does not own those production and non-gate test files. No CPU model
+or in-process profile was captured on that slow VM, so its cause is unproven.
+The gate does not yet demonstrate a ten-minute bound for every placement.
 
 After the gate merges and its checks pass, the readiness lead removes
 `tests (py3.12, cpu)` from classic branch protection, leaving `linked issue`.

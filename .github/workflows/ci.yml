@@ -5,7 +5,7 @@ name: CI
   push:
     branches: [main]
   pull_request:
-    # ready_for_review starts the full suite when a draft is marked ready.
+    # ready_for_review starts the PR import and boundary checks.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
