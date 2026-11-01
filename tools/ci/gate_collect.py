@@ -34,9 +34,11 @@ class GateCollection:
         if report.failed:
             self.collection_failed = True
 
+    @pytest.hookimpl(optionalhook=True)
     def pytest_xdist_node_collection_finished(self, node, ids):
         self.collected.update(ids)
 
+    @pytest.hookimpl(optionalhook=True)
     def pytest_testnodedown(self, node, error):
         coverage = node.workeroutput.get('gate_coverage', {})
         self.seen.update(coverage.get('seen', []))
