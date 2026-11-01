@@ -10,8 +10,9 @@
 # The read has to happen INSIDE the container: the measuring client cannot see
 # the server's address space, which is exactly why that drift stayed invisible.
 # `tools/serve_fingerprint.py` walks the server's /proc/<pid>/maps, records the
-# launch argv / image / versions / GPU, and hashes the stack into
-# `serve_fingerprint`, which `tools/kl_ab.py` refuses to compare across.
+# launch argv / image / versions / GPU, and records both fingerprints.
+# `tools/kl_ab.py` validates each arm's `serve_fingerprint` and compares
+# `performance_stack_fingerprint` across arms.
 #
 # Never fatal: a serve that came up must not be torn down because a JSON could
 # not be written. The refusal lives in the comparator, not here.
