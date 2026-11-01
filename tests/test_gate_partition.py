@@ -57,3 +57,24 @@ def test_every_shard_recomputes_weighted_assignment_from_the_actual_matrix(tmp_p
         assert partition.main(['shard', *common, '--matrix', str(matrix), '--index', str(index),
             '--output-files', str(tmp_path / 'assigned.txt'), '--output-assignment', str(output)]) == 0
         assert json.loads(output.read_text()) == expected[index]
+
+
+def test_one_heavy_selected_file_can_use_its_recorded_node_parallelism():
+    path = 'tests/test_heavy.py'
+    nodes = {f'{path}::test_case[{i}]': 100 for i in range(4)}
+    assert partition.selection_shard_count([path], {path: 400}, 12,
+        workers=4, single_shard_seconds=90, node_durations=nodes) == 4
+
+
+def test_selection_matrix_splits_a_single_heavy_file(tmp_path):
+    import json
+    path = 'tests/test_heavy.py'
+    population = tmp_path / 'files.txt'; population.write_text(path + '\n')
+    durations = tmp_path / 'costs.json'; durations.write_text(json.dumps({
+        'files': {path: 400}, 'nodes': {f'{path}::test_case[{i}]': 100 for i in range(4)}}))
+    output = tmp_path / 'matrix.json'
+    assert partition.main(['matrix', '--files-from', str(population), '--durations', str(durations),
+        '--shards', '12', '--single-shard-seconds', '90', '--runners',
+        'ubuntu-24.04-arm,ubuntu-24.04', '--output', str(output)]) == 0
+    matrix = json.loads(output.read_text())
+    assert matrix['shards'] == 4
