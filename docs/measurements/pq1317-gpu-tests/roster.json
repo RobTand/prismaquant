@@ -1,0 +1,1784 @@
+{
+ "schema": "pq1317.roster.v2",
+ "candidate": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+ "derivation": "Each fix PR changed whole test files and validated those whole files: tessera#642 changed three MoE files, tessera#643 changed two dense files. The roster is every node that pytest collects from those five files at the candidate commit. Fields id, suite, file, function, params come from the collected node ids. Fields line, cuda_gated and purpose come from an AST parse of the candidate test files. Tier 'correction' marks a node that carries an element of a correction (see corrections.json). Tier 'regression' marks every other node of the same files.",
+ "owner_roster": {
+  "published": false,
+  "note": "Neither tessera#610, tessera#611, tessera#642 nor tessera#643 names a node list for the candidate. The issue bodies name 4 and 39 failing nodes at master f587d5b62. The roster extends those to the five whole files at the candidate. A Tessera owner can supersede it; the harness refuses any run whose collected nodes differ from it."
+ },
+ "suites": {
+  "moe": {
+   "issue": 610,
+   "files": [
+    "tests/test_native_window_moe.py",
+    "tests/test_native_window_moe_method.py",
+    "tests/test_serving_moe_tp2.py"
+   ],
+   "node_count": 71
+  },
+  "dense": {
+   "issue": 611,
+   "files": [
+    "tests/test_serving_bf16_gemv.py",
+    "tests/test_serving_fp8_gemv.py"
+   ],
+   "node_count": 65
+  }
+ },
+ "required_node_count": 136,
+ "nodes": [
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_accepts_the_models_limit_and_still_refuses_alpha_beta",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_accepts_the_models_limit_and_still_refuses_alpha_beta",
+   "params": null,
+   "line": 221,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_call_captures_in_a_graph",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_call_captures_in_a_graph",
+   "params": null,
+   "line": 244,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-False]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "e4m3-epilogue-False",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-True]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "e4m3-epilogue-True",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.A",
+    "610.B"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-False]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "value-epilogue-False",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-True]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "value-epilogue-True",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.A",
+    "610.B"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-False]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "value-folded-False",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-True]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_matches_the_oracle_fused_and_split",
+   "params": "value-folded-True",
+   "line": 66,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.D",
+    "610.A",
+    "610.B"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[0.0]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "0.0",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[-1.0]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "-1.0",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[bad5]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "bad5",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[inf]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "inf",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[nan]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "nan",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[ten]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_an_unusable_clamp_limit",
+   "params": "ten",
+   "line": 214,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Not a number, or not finite and positive: refuse, never arm a clamp that cannot saturate anything."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_native_window_moe_refuses_unsupported_activations_and_families",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_native_window_moe_refuses_unsupported_activations_and_families",
+   "params": null,
+   "line": 228,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_packed_window_units_prepare_matches_the_direct_adapter",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_packed_window_units_prepare_matches_the_direct_adapter",
+   "params": null,
+   "line": 123,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The loader-facing bundle: packed units in, adapter out, fused and split spellings, with the per-expert bytes accounted."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_silu_and_mul_applies_the_models_swiglu_clamp_in_fp32",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_silu_and_mul_applies_the_models_swiglu_clamp_in_fp32",
+   "params": null,
+   "line": 166,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "``swiglu_limit`` saturates the gate at ``+limit`` and the up branch at ``+-limit``, in fp32, before the activation -- vLLM's ``gemm1_clamp_limit`` (config.py: \"backends that do not implement the ..."
+  },
+  {
+   "id": "tests/test_native_window_moe.py::test_the_adapter_carries_the_clamp_limit_to_the_activation",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe.py",
+   "function": "test_the_adapter_carries_the_clamp_limit_to_the_activation",
+   "params": null,
+   "line": 202,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The limit reaches the activation from the call, not from a constant."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_folded_native_route_matches_folded_reference",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_folded_native_route_matches_folded_reference",
+   "params": null,
+   "line": 274,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-1]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "1-triton-0-1",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "1-triton-0-2",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-1-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "1-triton-1-2",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-1]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "8-torch-0-1",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "8-torch-0-2",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-1-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_and_research_owners_are_bit_identical",
+   "params": "8-torch-1-2",
+   "line": 408,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The owner the operator bench prices is the served one (tessera#613)."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-1]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_route_is_folded_compact_and_matches_the_reference",
+   "params": "0-1",
+   "line": 319,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The PRODUCTION BF16 expert stack (tessera#609): no research config."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_route_is_folded_compact_and_matches_the_reference",
+   "params": "0-2",
+   "line": 319,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The PRODUCTION BF16 expert stack (tessera#609): no research config."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[1-2]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_bf16_production_route_is_folded_compact_and_matches_the_reference",
+   "params": "1-2",
+   "line": 319,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The PRODUCTION BF16 expert stack (tessera#609): no research config."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference",
+   "params": null,
+   "line": 176,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[0]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_fp8_native_method_tp2_shard_shapes_are_rank_local",
+   "params": "0",
+   "line": 207,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Both shard axes on one GPU: a component check of the rank-local geometry/arithmetic, not a two-node result."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[1]",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_fp8_native_method_tp2_shard_shapes_are_rank_local",
+   "params": "1",
+   "line": 207,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Both shard axes on one GPU: a component check of the rank-local geometry/arithmetic, not a two-node result."
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_native_method_refuses_missing_duplicate_and_wrong_rung",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_native_method_refuses_missing_duplicate_and_wrong_rung",
+   "params": null,
+   "line": 482,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement",
+   "suite": "moe",
+   "file": "tests/test_native_window_moe_method.py",
+   "function": "test_router_weight_on_input_matches_actual_stock_placement",
+   "params": null,
+   "line": 443,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.A"
+   ],
+   "purpose": "At topk=1, compare to the actual STOCK MODULAR prepare/kernel."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_bresenham_mix_inside_the_supported_set_is_eligible",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_bresenham_mix_inside_the_supported_set_is_eligible",
+   "params": null,
+   "line": 116,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Rates are per column: a schedule mixing supported rates is in range even though no uniform rung sits between them."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_mixed_schedule_with_one_unsupported_column_is_not_eligible",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_mixed_schedule_with_one_unsupported_column_is_not_eligible",
+   "params": null,
+   "line": 137,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "q256=896 mixes 3 and 4: the 4-columns are readable, the unit is not -- dispatch is per module, so one unsupported column keeps the torch path."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[1792]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_rate_outside_the_supported_set_is_not_eligible",
+   "params": "1792",
+   "line": 131,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "R = 3 has no lane here, and neither does R = 7: the torch path serves."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_rate_outside_the_supported_set_is_not_eligible[768]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_rate_outside_the_supported_set_is_not_eligible",
+   "params": "768",
+   "line": 131,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "R = 3 has no lane here, and neither does R = 7: the torch path serves."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_shard_start_state_is_not_eligible",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_shard_start_state_is_not_eligible",
+   "params": null,
+   "line": 149,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "A TP row shard starts mid-stream; the kernel supplies state_{-1} = 0 itself, so a shard keeps the torch lane that threads the state."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_a_window_outside_the_supported_set_is_not_eligible",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_a_window_outside_the_supported_set_is_not_eligible",
+   "params": null,
+   "line": 145,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_is_gemv_is_the_m_rule_in_one_place",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_is_gemv_is_the_m_rule_in_one_place",
+   "params": null,
+   "line": 251,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "M past the lane's max is prefill; M >= 4 over a rate-1 column has no 8-row lane; everything else in the decode regime is the GEMV."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "1-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[1-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "1-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "2-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[2-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "2-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "3-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[3-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "3-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "4-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[4-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "4-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "5-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[5-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "5-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-fused]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "8-fused",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_decode_regime_serves_the_folded_native_window_gemm[8-triton]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_decode_regime_serves_the_folded_native_window_gemm",
+   "params": "8-triton",
+   "line": 491,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Keep the dtype-derived error bar, against the current folded weights, on both dense lanes: the fused window kernel's identity (the default for this 64-row module since the N-tail) and the Triton ..."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_eligibility_is_derived_from_the_kernel_constants",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_eligibility_is_derived_from_the_kernel_constants",
+   "params": null,
+   "line": 92,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The rule, not a roster: every rate and window THE KERNEL DECLARES is eligible."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_gemv_and_torch_agree_with_measured_differences",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_gemv_and_torch_agree_with_measured_differences",
+   "params": null,
+   "line": 528,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "Same bytes, two engines: the decode-regime GEMV against the torch decode + torch.mm on the same module, with the exact max absolute and relative differences reported."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_gemv_max_m_is_the_kernel_build_limit",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_gemv_max_m_is_the_kernel_build_limit",
+   "params": null,
+   "line": 177,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "A wider kernel widens this route with no edit: one place to remember."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_gemv_symbol_and_module_name_are_the_kernel_and_contract_values",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_gemv_symbol_and_module_name_are_the_kernel_and_contract_values",
+   "params": null,
+   "line": 183,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The record's symbol is the op the lane invokes; the module name is the contract table's constant, not a second literal."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[1024]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_low_rungs_are_eligible",
+   "params": "1024",
+   "line": 123,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Real BF16 units at rate 1, 2 and 4: the kernel reads all three."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[256]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_low_rungs_are_eligible",
+   "params": "256",
+   "line": 123,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Real BF16 units at rate 1, 2 and 4: the kernel reads all three."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_low_rungs_are_eligible[512]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_low_rungs_are_eligible",
+   "params": "512",
+   "line": 123,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "Real BF16 units at rate 1, 2 and 4: the kernel reads all three."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_m_tile_is_the_kernel_build_rule",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_m_tile_is_the_kernel_build_rule",
+   "params": null,
+   "line": 229,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The telemetry's tile is the lane's rule, off the lane itself."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+   "params": null,
+   "line": 643,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "The old reference extension cannot select a materialized serve fallback."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[16]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_prefill_keeps_the_folded_native_window_path",
+   "params": "16",
+   "line": 514,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "purpose": "Prefill runs the same packed op without materializing a weight tile."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_prefill_keeps_the_folded_native_window_path[64]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_prefill_keeps_the_folded_native_window_path",
+   "params": "64",
+   "line": 514,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "purpose": "Prefill runs the same packed op without materializing a weight tile."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_rate1_columns_keep_dense_dispatch_across_decode_sizes",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_rate1_columns_keep_dense_dispatch_across_decode_sizes",
+   "params": null,
+   "line": 559,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "The current dense reader does not inherit the reference GEMV's M limit."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_resident_also_holds_only_the_packed_native_bundle",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_resident_also_holds_only_the_packed_native_bundle",
+   "params": null,
+   "line": 481,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_rung_outside_reference_gemv_range_uses_dense_native",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_rung_outside_reference_gemv_range_uses_dense_native",
+   "params": null,
+   "line": 428,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "R=7 is outside the old GEMV range, not the native reader's range."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_streamed_apply_routes_by_m_and_rate_one",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_streamed_apply_routes_by_m_and_rate_one",
+   "params": null,
+   "line": 267,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The custom op's dispatch, with the kernel behind fakes: the GEMV branch in the decode regime, the kernel-decode + GEMM branch past the lane's max and over a rate-1 column at M >= 4."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_streamed_prepares_folded_native_without_materialized_planes",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_streamed_prepares_folded_native_without_materialized_planes",
+   "params": null,
+   "line": 418,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_supported_rungs_declare_the_same_dense_compile_graph",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_supported_rungs_declare_the_same_dense_compile_graph",
+   "params": null,
+   "line": 447,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "Both rungs now choose the same packed op, not a per-unit GEMV fallback."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_the_census_expectations_come_from_the_route",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_the_census_expectations_come_from_the_route",
+   "params": null,
+   "line": 191,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "What each REGIME may report, and since tessera#538 it is ONE launch."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+   "params": null,
+   "line": 661,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.E"
+   ],
+   "purpose": "One folded native graph serves M = 1..8 and M = 64 without recompile."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[prefill-m16]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_the_materialised_branch_survives_cuda_graph_capture",
+   "params": "prefill-m16",
+   "line": 601,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#203's consequence, measured: the two materialised branches -- M past the lane's max, and M >= 4 over a rate-1 column -- capture into a ``torch.cuda.CUDAGraph`` and replay to the right numbers."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_the_materialised_branch_survives_cuda_graph_capture[rate1-fallback-m4]",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_the_materialised_branch_survives_cuda_graph_capture",
+   "params": "rate1-fallback-m4",
+   "line": 601,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#203's consequence, measured: the two materialised branches -- M past the lane's max, and M >= 4 over a rate-1 column -- capture into a ``torch.cuda.CUDAGraph`` and replay to the right numbers."
+  },
+  {
+   "id": "tests/test_serving_bf16_gemv.py::test_the_retained_run_descriptor_lives_on_the_host",
+   "suite": "dense",
+   "file": "tests/test_serving_bf16_gemv.py",
+   "function": "test_the_retained_run_descriptor_lives_on_the_host",
+   "params": null,
+   "line": 575,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#203: ``runs`` is host-read metadata -- ``ext.window_decode`` moves it to the CPU and reads its scalars through ``.item()`` to build the kernel launches -- so the holder keeps it on CPU from ..."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[1]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "1",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[2]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "2",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[3]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "3",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[4]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "4",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[5]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "5",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_decode_regime_serves_the_native_window_gemm[8]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_decode_regime_serves_the_native_window_gemm",
+   "params": "8",
+   "line": 189,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.A"
+   ],
+   "purpose": "Decode keeps the same activation/numerical bar on the current launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[1]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_gemv_and_materialised_agree_within_fp32_summation_order",
+   "params": "1",
+   "line": 220,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "Same weights (their DECODED BYTES bit-exact) and the same A codes."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_gemv_and_materialised_agree_within_fp32_summation_order[4]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_gemv_and_materialised_agree_within_fp32_summation_order",
+   "params": "4",
+   "line": 220,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "Same weights (their DECODED BYTES bit-exact) and the same A codes."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_does_not_change_dense_compile_identity",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_optional_gemv_extension_does_not_change_dense_compile_identity",
+   "params": null,
+   "line": 322,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "Issue #91's invariant survives: record the op the current graph runs."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_optional_gemv_extension_is_not_needed_by_dense_dispatch",
+   "params": null,
+   "line": 301,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.D"
+   ],
+   "purpose": "A missing reference GEMV extension cannot select an obsolete serve path."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[32]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_prefill_keeps_the_native_window_path",
+   "params": "32",
+   "line": 205,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "purpose": "Prefill runs the same packed launch, with no materialized fallback."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[64]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_prefill_keeps_the_native_window_path",
+   "params": "64",
+   "line": 205,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "purpose": "Prefill runs the same packed launch, with no materialized fallback."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_prefill_keeps_the_native_window_path[9]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_prefill_keeps_the_native_window_path",
+   "params": "9",
+   "line": 205,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.B"
+   ],
+   "purpose": "Prefill runs the same packed launch, with no materialized fallback."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_rate1_columns_fall_back_inside_the_decode_regime",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_rate1_columns_fall_back_inside_the_decode_regime",
+   "params": null,
+   "line": 392,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "M >= 4 over a rate-1 column has no 8-row lane: the dispatch serves it materialised instead of raising, at M <= 8."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_resident_also_holds_only_the_packed_native_bundle",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_resident_also_holds_only_the_packed_native_bundle",
+   "params": null,
+   "line": 180,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_streamed_prepares_native_without_materialized_planes",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_streamed_prepares_native_without_materialized_planes",
+   "params": null,
+   "line": 170,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.C"
+   ],
+   "purpose": "The served state is the packed native bundle, not either retired holder."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_census_expectations_come_from_the_route",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_census_expectations_come_from_the_route",
+   "params": null,
+   "line": 521,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "What each REGIME may report, and since tessera#538 it is ONE launch."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_dispatch_survives_a_compiled_forward_with_a_dynamic_token_dim",
+   "params": null,
+   "line": 433,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.E"
+   ],
+   "purpose": "One packed native graph serves M = 1..8 and M = 64 without recompile."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_gemv_prefix_is_the_constant_the_load_path_asks_for",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_gemv_prefix_is_the_constant_the_load_path_asks_for",
+   "params": null,
+   "line": 460,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The published prefix IS the module name the JIT load asks for."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[1]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand",
+   "params": "1",
+   "line": 257,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#110: ``a_scale`` belongs on the fp32 output, never folded into bf16."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[2]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand",
+   "params": "2",
+   "line": 257,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#110: ``a_scale`` belongs on the fp32 output, never folded into bf16."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[4]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand",
+   "params": "4",
+   "line": 257,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#110: ``a_scale`` belongs on the fp32 output, never folded into bf16."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand[8]",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_lane_multiplies_the_codes_and_scales_the_output_not_the_operand",
+   "params": "8",
+   "line": 257,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "611.F"
+   ],
+   "purpose": "#110: ``a_scale`` belongs on the fp32 output, never folded into bf16."
+  },
+  {
+   "id": "tests/test_serving_fp8_gemv.py::test_the_published_source_is_the_file_the_loader_compiles",
+   "suite": "dense",
+   "file": "tests/test_serving_fp8_gemv.py",
+   "function": "test_the_published_source_is_the_file_the_loader_compiles",
+   "params": null,
+   "line": 505,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The contract's ``native_extensions[].source`` for the window GEMV names the file ``kernel_window_gemv._ext`` hands the JIT -- the same inode, not a second copy that happened to be byte-identical ..."
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_cpu_created_tp2_intake_uses_current_cuda_device_before_first_parse",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_cpu_created_tp2_intake_uses_current_cuda_device_before_first_parse",
+   "params": null,
+   "line": 559,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_deferred_finalize_refuses_at_construction_and_before_decode",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_deferred_finalize_refuses_at_construction_and_before_decode",
+   "params": null,
+   "line": 311,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_native_loader_shape_produces_rank_local_packed_tiles",
+   "params": "0",
+   "line": 226,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.A",
+    "610.B",
+    "610.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_native_loader_shape_produces_rank_local_packed_tiles",
+   "params": "1",
+   "line": 226,
+   "cuda_gated": true,
+   "tier": "correction",
+   "elements": [
+    "610.A",
+    "610.B",
+    "610.C"
+   ],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_native_tp2_refuses_unsupported_activation_and_swiglu_modifiers",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_native_tp2_refuses_unsupported_activation_and_swiglu_modifiers",
+   "params": null,
+   "line": 360,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "0",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "2",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[2.0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "2.0",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[3]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "3",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[4]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "4",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[True]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_only_explicit_tp1_or_tp2_config_is_accepted",
+   "params": "True",
+   "line": 293,
+   "cuda_gated": false,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices",
+   "params": "0",
+   "line": 383,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices",
+   "params": "1",
+   "line": 383,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging",
+   "params": "0",
+   "line": 417,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging",
+   "params": "1",
+   "line": 417,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_each_load_keeps_only_rank_local_packed_projection[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_each_load_keeps_only_rank_local_packed_projection",
+   "params": "0",
+   "line": 437,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_each_load_keeps_only_rank_local_packed_projection[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_each_load_keeps_only_rank_local_packed_projection",
+   "params": "1",
+   "line": 437,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_finishing_the_load_copies_no_packed_expert[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_finishing_the_load_copies_no_packed_expert",
+   "params": "0",
+   "line": 630,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_finishing_the_load_copies_no_packed_expert[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_finishing_the_load_copies_no_packed_expert",
+   "params": "1",
+   "line": 630,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[corrupt]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_preserves_original_integrity_gates",
+   "params": "corrupt",
+   "line": 500,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[missing]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_preserves_original_integrity_gates",
+   "params": "missing",
+   "line": 500,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[rung]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_preserves_original_integrity_gates",
+   "params": "rung",
+   "line": 500,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[stride]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_preserves_original_integrity_gates",
+   "params": "stride",
+   "line": 500,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[wrong_role]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_preserves_original_integrity_gates",
+   "params": "wrong_role",
+   "line": 500,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_refuses_duplicate_wrong_parameter_and_late_wires",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_incremental_intake_refuses_duplicate_wrong_parameter_and_late_wires",
+   "params": null,
+   "line": 541,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_intake_refuses_device_change_after_first_packed_projection",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_intake_refuses_device_change_after_first_packed_projection",
+   "params": null,
+   "line": 588,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_refuses_runtime_padding_and_original_wire_shape_disagreement",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_refuses_runtime_padding_and_original_wire_shape_disagreement",
+   "params": null,
+   "line": 327,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_tp2_requires_stock_final_reduction",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_tp2_requires_stock_final_reduction",
+   "params": null,
+   "line": 352,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[dp_size-2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "dp_size-2",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[enable_eplb-True]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "enable_eplb-True",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[ep_size-2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "ep_size-2",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[pcp_size-2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "pcp_size-2",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[sp_size-2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "sp_size-2",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[tp_rank-2]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "tp_rank-2",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[tp_size-1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "tp_size-1",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[use_ep-True]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_unmeasured_parallel_contracts_refuse_before_allocation",
+   "params": "use_ep-True",
+   "line": 302,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": null
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_window_intake_reuses_one_body_staging_buffer_across_experts",
+   "params": "0",
+   "line": 88,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The real loader callback must share BODY and word-reversal staging."
+  },
+  {
+   "id": "tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[1]",
+   "suite": "moe",
+   "file": "tests/test_serving_moe_tp2.py",
+   "function": "test_window_intake_reuses_one_body_staging_buffer_across_experts",
+   "params": "1",
+   "line": 88,
+   "cuda_gated": true,
+   "tier": "regression",
+   "elements": [],
+   "purpose": "The real loader callback must share BODY and word-reversal staging."
+  }
+ ]
+}

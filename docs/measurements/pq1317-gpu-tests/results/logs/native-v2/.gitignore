@@ -1,0 +1,2 @@
+# Retained measurement evidence, not disposable application logs.
+!*/pytest.log

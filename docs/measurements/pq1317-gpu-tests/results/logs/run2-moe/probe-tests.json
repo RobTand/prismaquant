@@ -1,0 +1,1286 @@
+[
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_accepts_the_models_limit_and_still_refuses_alpha_beta",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0009,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_call_captures_in_a_graph",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0333,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 1,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-False]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.7158,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "2097152.0 < 277830696.965"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "524288.0 < 198642237.445"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[e4m3-epilogue-True]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.609,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "2097152.0 < 246960619.525"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "0.0 < 194615705.605"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-False]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.5684,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "0.0 < 0.0125"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "0.0009765625 < 0.00953125"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-epilogue-True]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.5763,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "0.0 < 0.00779296875"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "2.384185791015625e-07 < 0.00779296875"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-False]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.6237,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "0.000244140625 < 0.0125"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "0.000244140625 < 0.009550781250000001"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_matches_the_oracle_fused_and_split[value-folded-True]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.5938,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 111,
+    "assertion": "float((out_f.float() - ref_f.float()).abs().max()) < _tol(ref_f)",
+    "evaluated": "0.00048828125 < 0.00779296875"
+   },
+   {
+    "line": 113,
+    "assertion": "float((out_s.float() - ref_s.float()).abs().max()) < _tol(ref_s)",
+    "evaluated": "0.0 < 0.00779296875"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[-1.0]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0007,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[0.0]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0006,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[bad5]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0005,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[inf]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0005,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[nan]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0005,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_an_unusable_clamp_limit[ten]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0006,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_native_window_moe_refuses_unsupported_activations_and_families",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0207,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_packed_window_units_prepare_matches_the_direct_adapter",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.6683,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 2,
+   "boolean reductions": 0,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_silu_and_mul_applies_the_models_swiglu_clamp_in_fp32",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.0025,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe.py::test_the_adapter_carries_the_clamp_limit_to_the_activation",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 1,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_folded_native_route_matches_folded_reference",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.6613,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 313,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.0 < (0.05 + (0.02 * 154.0))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 3
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-1]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.6636,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-0-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1868,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[1-triton-1-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1886,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-1]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1951,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-0-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1868,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_and_research_owners_are_bit_identical[8-torch-1-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.188,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 4,
+   "boolean reductions": 0,
+   "other": 4
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-1]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1408,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 380,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.0 < (0.05 + (0.02 * 209.0))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[0-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1352,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 380,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.0 < (0.05 + (0.02 * 153.0))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_bf16_production_route_is_folded_compact_and_matches_the_reference[1-2]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 0.1368,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 380,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.0 < (0.05 + (0.02 * 148.0))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp1_loads_compacts_and_matches_the_reference",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 5.7871,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 201,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "2.288818359375e-05 < (0.05 + (0.02 * 0.0011749267578125))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 8
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[0]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.3941,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 223,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.33514404296875e-05 < (0.05 + (0.02 * 0.000766754150390625))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 7
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_fp8_native_method_tp2_shard_shapes_are_rank_local[1]",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.3902,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 223,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(ref.float().abs().max())",
+    "evaluated": "1.52587890625e-05 < (0.05 + (0.02 * 0.00170135498046875))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 7
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_native_method_refuses_missing_duplicate_and_wrong_rung",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 1.2829,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_native_window_moe_method.py::test_router_weight_on_input_matches_actual_stock_placement",
+  "worker": "gw0",
+  "outcome": "passed",
+  "duration_s": 3.2059,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw0",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 477,
+    "assertion": "float(diff.max()) < 5e-3 + 1e-2 * float(stock.float().abs().max())",
+    "evaluated": "1.71661376953125e-05 < (0.005 + (0.01 * 0.0009918212890625))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 6
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_cpu_created_tp2_intake_uses_current_cuda_device_before_first_parse",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0018,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_deferred_finalize_refuses_at_construction_and_before_decode",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0012,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 1.8134,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 270,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(expected.float().abs().max())",
+    "evaluated": "1.1205673217773438e-05 < (0.05 + (0.02 * 0.000644683837890625))"
+   },
+   {
+    "line": 282,
+    "assertion": "float(diff.max()) < 5e-3 + 1e-2 * float(expected_wi.float().abs().max())",
+    "evaluated": "1.239776611328125e-05 < (0.005 + (0.01 * 0.000225067138671875))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 12,
+   "boolean reductions": 0,
+   "other": 14
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_native_loader_shape_produces_rank_local_packed_tiles[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.4623,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 270,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(expected.float().abs().max())",
+    "evaluated": "1.9073486328125e-06 < (0.05 + (0.02 * 0.0003147125244140625))"
+   },
+   {
+    "line": 282,
+    "assertion": "float(diff.max()) < 5e-3 + 1e-2 * float(expected_wi.float().abs().max())",
+    "evaluated": "4.0531158447265625e-06 < (0.005 + (0.01 * 0.00020313262939453125))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 12,
+   "boolean reductions": 0,
+   "other": 14
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_native_tp2_refuses_unsupported_activation_and_swiglu_modifiers",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0128,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 9
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[2.0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0007,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0007,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[3]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0008,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[4]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0008,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_only_explicit_tp1_or_tp2_config_is_accepted[True]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0008,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1475,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 411,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(expected.float().abs().max())",
+    "evaluated": "9.5367431640625e-07 < (0.05 + (0.02 * 0.000385284423828125))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 9,
+   "boolean reductions": 0,
+   "other": 11
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_ordinary_fp8_native_tp2_uses_the_same_rank_local_slices[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1508,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [
+   {
+    "line": 411,
+    "assertion": "float(diff.max()) < 5e-2 + 2e-2 * float(expected.float().abs().max())",
+    "evaluated": "4.76837158203125e-06 < (0.05 + (0.02 * 0.0004119873046875))"
+   }
+  ],
+  "other_assertions_counted": {
+   "torch.equal": 9,
+   "boolean reductions": 0,
+   "other": 11
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0015,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_construction_does_not_allocate_checkpoint_sized_wire_staging[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0018,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_each_load_keeps_only_rank_local_packed_projection[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1834,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 9,
+   "boolean reductions": 0,
+   "other": 11
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_each_load_keeps_only_rank_local_packed_projection[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.1862,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 9,
+   "boolean reductions": 0,
+   "other": 10
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_finishing_the_load_copies_no_packed_expert[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0129,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 9
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_finishing_the_load_copies_no_packed_expert[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0139,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 9
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[corrupt]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0017,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[missing]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0014,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[rung]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0016,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[stride]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0085,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_preserves_original_integrity_gates[wrong_role]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0012,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_incremental_intake_refuses_duplicate_wrong_parameter_and_late_wires",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0026,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_intake_refuses_device_change_after_first_packed_projection",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0023,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_refuses_runtime_padding_and_original_wire_shape_disagreement",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0852,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 1
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_tp2_requires_stock_final_reduction",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0012,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[dp_size-2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0009,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[enable_eplb-True]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[ep_size-2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0015,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[pcp_size-2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[sp_size-2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.001,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[tp_rank-2]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0017,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[tp_size-1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0011,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_unmeasured_parallel_contracts_refuse_before_allocation[use_ep-True]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0013,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 0,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[0]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 3.9394,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 11,
+   "boolean reductions": 0,
+   "other": 2
+  },
+  "assertions_dropped": 0
+ },
+ {
+  "nodeid": "tests/test_serving_moe_tp2.py::test_window_intake_reuses_one_body_staging_buffer_across_experts[1]",
+  "worker": "gw1",
+  "outcome": "passed",
+  "duration_s": 0.0678,
+  "native_modules_mapped": [],
+  "extensions_dir": "gw1",
+  "launch_pairs": [],
+  "float_comparisons": [],
+  "other_assertions_counted": {
+   "torch.equal": 11,
+   "boolean reductions": 0,
+   "other": 0
+  },
+  "assertions_dropped": 0
+ }
+]
