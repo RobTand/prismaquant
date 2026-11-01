@@ -18,6 +18,8 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
+from tools.resolve_tessera_dev_pin import resolve_tessera_dev_pin
+
 from prismaquant import tessera_plan_writer as writer
 from prismaquant.cost_stage_checkpoint import write_unit
 from prismaquant.layer_config import LAYER_CONFIG_META_KEY
@@ -244,7 +246,11 @@ def test_source_header_geometry_must_agree_with_selected_visual_receipt(tmp_path
     assert name in str(error.value)
 
 
-def test_installed_pin_exports_real_bf16_source_names_not_visual_lowbit_claims(tmp_path):
+def test_installed_pin_exports_real_bf16_source_names_not_visual_lowbit_claims(
+        tmp_path, monkeypatch):
+    # Directory installs in hosted CI have no Git commit in direct_url.json.
+    # Supply the reviewed pin for the producer stamp in its fresh subprocess.
+    monkeypatch.setenv("TESSERA_GIT", resolve_tessera_dev_pin())
     pin = load_tessera_serving_runtime_pin()
     assert pin.producer_commit == "aaa417003f0ee690e8ace138acd18df7f9531369"
     contract_path = packaged_contract_path()
