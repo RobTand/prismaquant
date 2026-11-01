@@ -61,7 +61,10 @@ The separate hang timeout remains 600 seconds per test.
 At main `8d72e303e2f070925077ce9e072b254df3856909`, the legacy list has 54 active
 entries. Each now names an open owning issue and its inherited failure reason.
 The gate ignores whole-file entries before import and deselects node entries.
-Quarantine owners reproduce and repair the failures, then remove their entries.
+The ARM exit-ownership failure found in canary 41277228478 adds one exact-node
+entry owned by #3197. Its unchanged production code passed an earlier hosted
+sample, then classified its own exiting child as a foreign PID. Quarantine owners
+reproduce and repair the failures, then remove their entries.
 The post-merge full suite uses the same quarantine.
 
 ## Reproduce a shard

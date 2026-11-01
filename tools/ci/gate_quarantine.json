@@ -29,6 +29,15 @@
       }
     },
     {
+      "target": "tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh",
+      "issue": 3183,
+      "reason": "FileNotFoundError: missing /mnt/shared/pq2253-acquisition-cli-*",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 22
+      }
+    },
+    {
       "target": "tests/test_checkpoint_staged_readset_1366.py::test_claim_digest_and_pb_decoder_are_used",
       "issue": 3182,
       "reason": "ModuleNotFoundError: No module named 'prismabuild'",
@@ -38,39 +47,13 @@
       }
     },
     {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
+      "target": "tests/test_cluster_campaign_runner.py::test_an_exiting_helper_is_never_called_ambiguous",
+      "issue": 3197,
+      "reason": "An owned exiting helper was classified as mismatch on hosted ARM; process-ownership fix belongs to its owner.",
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 73
-      }
-    },
-    {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_publication_binds_all_actual_node_sidecars",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 74
-      }
-    },
-    {
-      "target": "tests/test_original_cuda_control_artifacts.py::test_retained_artifact_refuses_replaced_granted_bytes",
-      "issue": 3182,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 75
-      }
-    },
-    {
-      "target": "tests/test_campaign_acquisition_d32.py::test_actual_cli_plans_acquisition_after_producer_refresh",
-      "issue": 3183,
-      "reason": "FileNotFoundError: missing /mnt/shared/pq2253-acquisition-cli-*",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 22
+        "hosted_pass": 41275735452,
+        "hosted_failure": 41277228478
       }
     },
     {
@@ -107,15 +90,6 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 33
-      }
-    },
-    {
-      "target": "tests/test_spaced_lax_tools_routing_1301.py::test_source_adoption_batch_reaches_only_its_actual_input_boundary",
-      "issue": 3184,
-      "reason": "AssertionError",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 97
       }
     },
     {
@@ -182,6 +156,24 @@
       }
     },
     {
+      "target": "tests/test_g3_manifest_validator_2699.py::test_g3_release_oracle_reaches_current_manifest_validator",
+      "issue": 3185,
+      "reason": "Failed: G3 manifest contract must be validated, not skipped: PrismaBuild runtime source is not ...",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 45
+      }
+    },
+    {
+      "target": "tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication",
+      "issue": 3186,
+      "reason": "AssertionError: Tensor-likes are not close!",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 48
+      }
+    },
+    {
       "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
@@ -224,24 +216,6 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 55
-      }
-    },
-    {
-      "target": "tests/test_g3_manifest_validator_2699.py::test_g3_release_oracle_reaches_current_manifest_validator",
-      "issue": 3185,
-      "reason": "Failed: G3 manifest contract must be validated, not skipped: PrismaBuild runtime source is not ...",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 45
-      }
-    },
-    {
-      "target": "tests/test_glm_attention_measurement.py::test_full_draw_attention_measurement_and_publication",
-      "issue": 3186,
-      "reason": "AssertionError: Tensor-likes are not close!",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 48
       }
     },
     {
@@ -323,6 +297,33 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 70
+      }
+    },
+    {
+      "target": "tests/test_original_cuda_control_artifacts.py::test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports",
+      "issue": 3182,
+      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 73
+      }
+    },
+    {
+      "target": "tests/test_original_cuda_control_artifacts.py::test_publication_binds_all_actual_node_sidecars",
+      "issue": 3182,
+      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 74
+      }
+    },
+    {
+      "target": "tests/test_original_cuda_control_artifacts.py::test_retained_artifact_refuses_replaced_granted_bytes",
+      "issue": 3182,
+      "reason": "ModuleNotFoundError: No module named 'prismabuild'",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 75
       }
     },
     {
@@ -458,6 +459,15 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 94
+      }
+    },
+    {
+      "target": "tests/test_spaced_lax_tools_routing_1301.py::test_source_adoption_batch_reaches_only_its_actual_input_boundary",
+      "issue": 3184,
+      "reason": "AssertionError",
+      "evidence": {
+        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
+        "legacy_line": 97
       }
     },
     {
