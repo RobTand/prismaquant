@@ -6,6 +6,7 @@ import argparse
 from collections import Counter
 import importlib.util
 import json
+import math
 from pathlib import Path
 import shutil
 import sys
@@ -19,6 +20,17 @@ def _node_coverage(partition, record, excluded):
     if record.get('node_partition') != partition:
         return False
     coverage = record.get('node_coverage', {})
+    if not isinstance(coverage, dict):
+        return False
+    complete = record.get('execution_coverage', {})
+    if not isinstance(complete, dict):
+        return False
+    selected, ran = complete.get('selected'), complete.get('executed')
+    if (not isinstance(selected, list) or not isinstance(ran, list) or
+            any(not isinstance(node, str) or node.split('::', 1)[0] not in record['files']
+                for node in selected + ran) or len(selected) != len(set(selected)) or
+            sorted(selected) != sorted(ran)):
+        return False
     collected, executed = coverage.get('collected'), coverage.get('executed')
     if not isinstance(collected, dict) or set(collected) != set(partition['owners']):
         return False
@@ -27,7 +39,8 @@ def _node_coverage(partition, record, excluded):
                 not node.startswith(path + '::') for node in nodes) or len(nodes) != len(set(nodes))):
             return False
     return (isinstance(executed, list) and all(isinstance(node, str) for node in executed) and
-            sorted(executed) == assigned_nodes(collected, partition, excluded))
+            sorted(executed) == assigned_nodes(collected, partition, excluded) and
+            sorted(executed) == sorted(node for node in ran if node.split('::', 1)[0] in partition['owners']))
 
 def _verdict(plan, files, record, partition=None):
     if not isinstance(record, dict):
@@ -54,7 +67,9 @@ def _verdict(plan, files, record, partition=None):
         return verdict
     if (verdict, code) != ('pass', 0):
         return None
-    if partition and not _node_coverage(partition, record, plan.get('deselect', [])):
+    if partition and (not isinstance(budget, dict) or budget.get('enforced') is not True or
+                      budget.get('status') != 'pass' or
+                      not _node_coverage(partition, record, plan.get('deselect', []))):
         return None
     return verdict
 
@@ -74,6 +89,7 @@ def assess_attempts(plan, assignments, attempts):
     assigned = Counter(path for row in assignments for path in row['files'] if path not in split_files)
     selected = [row['path'] for row in plan['selected']]
     if (len(indices) != len(set(indices)) or len(selected) != len(set(selected)) or
+            any(len(row['files']) != len(set(row['files'])) for row in assignments) or
             set(assigned) | split_files != set(selected) or any(count != 1 for count in assigned.values())):
         raise ValueError('assignments must cover every selected file exactly once, with unique indices')
     retry, failed, missing, effective = [], [], [], {}
@@ -97,6 +113,7 @@ def assess_attempts(plan, assignments, attempts):
             if verdict == 'fail':
                 failed.append(index)
     coverage = None
+    file_overruns, file_warnings = [], []
     if split_files and not missing and not failed:
         records = {index: attempts[attempt][index] for index, attempt in effective.items()}
         reference = next(iter(records.values()))['node_coverage']['collected']
@@ -112,8 +129,27 @@ def assess_attempts(plan, assignments, attempts):
                 missing.extend(indices)
             else:
                 coverage = {'split_files': len(split_files), 'nodes': len(expected), 'exactly_once': True}
+                limits = next(iter(records.values()))['budget'].get('file_limits', {})
+                if any(record['budget'].get('file_limits', {}) != limits for record in records.values()):
+                    missing.extend(indices)
+                for path, limit in limits.items():
+                    totals = [record['budget'].get('file_totals', {}).get(path) for record in records.values()]
+                    if (path not in split_files or type(limit) not in (float, int) or
+                            not math.isfinite(limit) or limit <= 0 or
+                            any(type(value) not in (float, int) or not math.isfinite(value) or value < 0
+                                for value in totals)):
+                        missing.extend(indices)
+                        continue
+                    seconds = sum(totals)
+                    if seconds > limit:
+                        (file_overruns if seconds > limit * 1.5 else file_warnings).append(
+                            {'file': path, 'seconds': seconds, 'budget_seconds': limit})
+                if file_overruns:
+                    failed.extend(indices)
     return {'schema': 'prismaquant.gate_aggregate.v1', 'retry_indices': sorted(retry),
-            'failed_indices': sorted(failed), 'missing_indices': sorted(missing),
+            'failed_indices': sorted(set(failed)), 'missing_indices': sorted(set(missing)),
+            **({'file_budget_overruns': file_overruns} if file_overruns else {}),
+            **({'file_budget_warnings': file_warnings} if file_warnings else {}),
             'effective_attempts': effective, **({'node_coverage': coverage} if coverage else {}),
             'exit_code': 1 if failed else 75 if missing else 0}
 

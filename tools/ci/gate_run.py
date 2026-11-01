@@ -301,8 +301,24 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                 collected = collection.get('split_collected', {})
                 if set(collected) != set(partition['owners']):
                     raise ValueError('split-file collection does not match the partition')
-                executed = [node for case in ET.parse(junit).iter('testcase')
-                            for path, node in [gate_junit_identity(case, files)]
+                identities = [(gate_junit_identity(case, files), float(case.get('time', 0)))
+                              for case in ET.parse(junit).iter('testcase')]
+                all_executed = sorted(node for (path, node), seconds in identities if node is not None)
+                selected = collection['selected'][:]
+                if own_files:
+                    scoped_coverage = json.loads(scoped_collection.read_text())
+                    if scoped_coverage['collection_failed']:
+                        raise ValueError('serial-phase collection is incomplete')
+                    selected.extend(scoped_coverage['selected'])
+                record['execution_coverage'] = {'selected': sorted(selected), 'executed': all_executed}
+                if sorted(selected) != all_executed:
+                    raise ValueError('selected nodes did not execute exactly once')
+                file_limits = {path: limit for path, limit in config.get('file_seconds', {}).items()
+                               if path in partition['owners']}
+                record['budget'].update(file_limits=file_limits, file_totals={
+                    path: sum(seconds for (filename, node), seconds in identities if filename == path)
+                    for path in file_limits})
+                executed = [node for (path, node), seconds in identities
                             if path in partition['owners'] and node is not None]
                 record['node_coverage'] = {'collected': collected, 'executed': sorted(executed)}
                 if sorted(executed) != assigned_nodes(collected, partition, plan['deselect']):

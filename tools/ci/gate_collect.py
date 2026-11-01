@@ -17,7 +17,7 @@ class GateCollection:
         self.partition = json.loads(os.environ.get('GATE_NODE_PARTITION', 'null'))
         self.split_collected = {path: set() for path in self.partition['owners']} if self.partition else {}
         self.own_cgroup_files = set()
-        self.seen, self.collected = set(), set()
+        self.seen, self.collected, self.selected = set(), set(), set()
         self.collection_failed = False
         self.ranks = {root / path: rank for rank, path in enumerate(files)}
         self.directories = {parent for path in self.ranks for parent in path.parents
@@ -45,6 +45,7 @@ class GateCollection:
             if removed:
                 removed[0].config.hook.pytest_deselected(items=removed)
         yield
+        self.selected.update(item.nodeid for item in items)
 
     def pytest_deselected(self, items):
         self.own_cgroup_files.update(item.nodeid.split('::', 1)[0] for item in items
@@ -69,12 +70,14 @@ class GateCollection:
         self.seen.update(coverage.get('seen', []))
         self.own_cgroup_files.update(coverage.get('own_cgroup_files', []))
         self.collected.update(coverage.get('collected', []))
+        self.selected.update(coverage.get('selected', []))
         for path, nodes in coverage.get('split_collected', {}).items():
             self.split_collected[path].update(nodes)
         self.collection_failed |= bool(error) or coverage.get('collection_failed', True)
 
     def pytest_sessionfinish(self, session, exitstatus):
         coverage = {'seen': sorted(self.seen), 'collected': sorted(self.collected),
+                    'selected': sorted(self.selected),
                     'split_collected': {path: sorted(nodes) for path, nodes in self.split_collected.items()},
                     'own_cgroup_files': sorted(self.own_cgroup_files),
                     'collection_failed': self.collection_failed, 'exitstatus': int(exitstatus)}
