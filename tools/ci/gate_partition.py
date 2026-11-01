@@ -56,17 +56,22 @@ def validate_node_partition(partition: dict, files: Sequence[str]) -> None:
 
 
 def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
-           *, unknown_seconds: float, node_durations: Mapping[str, float] | None = None) -> list[dict]:
+           *, unknown_seconds: float, node_durations: Mapping[str, float] | None = None,
+           runner_factors: Sequence[float] | None = None) -> list[dict]:
     """Pack longest units first; split files larger than total/count by live node ID.
 
     Every shard collects split files. Recorded nodes use LPT placement and new
     nodes use a stable hash, so a stale inventory cannot drop or duplicate tests.
     Without node data this retains the original whole-file partition contract.
+    Runner factors convert the recorded costs into expected runner time.
     """
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
         raise ValueError('count must be a positive integer')
     if len(files) != len(set(files)):
         raise ValueError('duplicate files')
+    factors = [1.0] * count if runner_factors is None else [_cost(value) for value in runner_factors]
+    if len(factors) != count or any(value == 0 for value in factors):
+        raise ValueError('runner factors must give one positive cost multiplier per shard')
     costs = {path: _cost(value) for path, value in durations.items()}
     unknown = _cost(unknown_seconds)
     nodes = {} if node_durations is None else {node: _cost(value) for node, value in node_durations.items()}
@@ -89,17 +94,17 @@ def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
     result = [{'index': index, 'files': sorted(split), 'estimated_seconds': 0.0, 'unknown_files': []}
               for index in range(count)]
     for cost, path, node in sorted(units, key=lambda unit: (-unit[0], unit[1], unit[2])):
-        row = min(result, key=lambda row: (row['estimated_seconds'], row['index']))
+        row = min(result, key=lambda row: (row['estimated_seconds'] + cost * factors[row['index']], row['index']))
         if node:
             split[path][node] = row['index']
         else:
             row['files'].append(path)
             if path not in costs:
                 row['unknown_files'].append(path)
-        row['estimated_seconds'] += cost
+        row['estimated_seconds'] += cost * factors[row['index']]
     for row in result:
         # Without recorded nodes, live collection still splits the file by hash.
-        row['estimated_seconds'] += sum(costs.get(path, unknown) / count
+        row['estimated_seconds'] += sum(costs.get(path, unknown) * factors[row['index']] / count
                                         for path, owners in split.items() if not owners)
         row['files'].sort()
         row['unknown_files'].sort()
@@ -139,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     matrix.add_argument('--workers', type=int, default=4)
     matrix.add_argument('--output', type=Path, required=True)
     shard = commands.add_parser('shard', parents=[common])
+    shard.add_argument('--matrix', type=Path, help='recorded runner factors from the planning job')
     shard.add_argument('--index', type=int, required=True)
     shard.add_argument('--output-files', type=Path, required=True)
     shard.add_argument('--output-assignment', type=Path)
@@ -155,13 +161,22 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == 'matrix' and args.single_shard_seconds is not None:
             args.shards = selection_shard_count(files, durations, args.shards, workers=args.workers,
                                                 single_shard_seconds=args.single_shard_seconds)
-        result = shards(files, durations, args.shards, unknown_seconds=unknown,
-                        node_durations=recorded.get('nodes'))
         if args.command == 'matrix':
             runners = [name.strip() for name in args.runners.split(',')]
             if not all(runners):
                 raise ValueError('runners must be nonempty comma-separated names')
-            output = {'schema': 'prismaquant.gate_matrix.v1', 'shards': args.shards,
+            # Hosted paired-file median x64/ARM ratio is 1.716; use 1.6.
+            factors = [1 / 1.6 if runners[index % len(runners)] == 'ubuntu-24.04-arm' else 1.0
+                       for index in range(args.shards)]
+        else:
+            matrix = json.loads(args.matrix.read_text()) if args.matrix else {}
+            if matrix and matrix['shards'] != args.shards:
+                raise ValueError('matrix shard count does not match requested count')
+            factors = matrix.get('runner_cost_factors')
+        result = shards(files, durations, args.shards, unknown_seconds=unknown,
+                        node_durations=recorded.get('nodes'), runner_factors=factors)
+        if args.command == 'matrix':
+            output = {'schema': 'prismaquant.gate_matrix.v1', 'shards': args.shards, 'runner_cost_factors': factors,
                       'total_estimated_seconds': sum(row['estimated_seconds'] for row in result),
                       'include': [{'index': row['index'], 'runner': runners[row['index'] % len(runners)],
                                    'files': len(row['files']), 'estimated_seconds': row['estimated_seconds']}

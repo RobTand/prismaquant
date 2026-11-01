@@ -183,7 +183,7 @@ def main(argv=None):
         costs = recorded['files']
         assignments = partition.shards([row['path'] for row in plan['selected']], costs,
                               matrix['shards'], unknown_seconds=partition.default_unknown_seconds(costs),
-                              node_durations=recorded.get('nodes'))
+                              node_durations=recorded.get('nodes'), runner_factors=matrix.get('runner_cost_factors'))
         if (len(matrix['include']) != len(assignments) or
                 sorted(row['index'] for row in matrix['include']) != list(range(len(assignments)))):
             raise ValueError('matrix indices do not match the complete partition')
