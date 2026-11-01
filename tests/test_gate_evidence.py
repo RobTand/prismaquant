@@ -101,3 +101,15 @@ def test_hosted_imported_test_costs_follow_collection_identity(tmp_path):
     report = evidence.hosted([tmp_path], 20)
     assert report['durations'] == {'tests/test_sample.py': 21}
     assert report['budget']['slow'] == {'tests/test_sample.py::test_cost': 42}
+
+
+def test_canary_wall_starts_at_creation_or_explicit_rerun_request(tmp_path):
+    for attempt, requested, expected in [(1, None, 120), (2, '2026-11-01T00:00:15Z', 105)]:
+        (tmp_path / 'run.json').write_text(json.dumps({
+            'id': 123, 'run_attempt': attempt, 'head_sha': 'a' * 40, 'conclusion': 'success',
+            'created_at': '2026-11-01T00:00:00Z', 'run_started_at': '2026-11-01T00:00:30Z',
+            **({'requested_at': requested} if requested else {})}))
+        (tmp_path / 'jobs.json').write_text(json.dumps({'jobs': [
+            {'name': 'gate', 'conclusion': 'success', 'completed_at': '2026-11-01T00:02:00Z'}]}))
+        report = evidence.hosted([tmp_path], 20)
+        assert report['runs'][0]['wall_seconds'] == expected
