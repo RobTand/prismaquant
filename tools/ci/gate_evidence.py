@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import file_sha256hex
 
 
-def inventory(reports):
+def inventory(reports, *, action_evidence=None):
+    """Reduce pbtest reports with optional exported public pb_action responses."""
+    action_evidence = {} if action_evidence is None else action_evidence
     outcomes = defaultdict(dict)
     timings = defaultdict(list)
     actions = []
@@ -24,15 +26,17 @@ def inventory(reports):
     for repeat, path in enumerate(reports, 1):
         for row in json.loads(path.read_text()):
             key = row['action_key']
-            terminal = next((candidate for state in ('done', 'failed')
-                if (candidate := Path('/mnt/shared/prismabuild-fleet/pb-queue') / state / (key + '.json')).is_file()), None)
-            record = json.loads(terminal.read_text()) if terminal else {}
+            record = action_evidence.get(key, {})
             receipt = Path(row['receipt_path']) if row.get('receipt_path') else None
+            complete = record.get('complete') is True and not record.get('timed_out') and not record.get('unavailable')
             actions.append({'repeat': repeat, 'key': key, 'exit': row['returncode'],
-                'summary': row.get('summary'), 'terminal': str(terminal) if terminal else None,
-                'host': record.get('finished_host'), 'receipt': str(receipt) if receipt else None,
+                'summary': row.get('summary'), 'terminal_state': record.get('state') if complete else None,
+                'evidence_complete': complete,
+                'host': record.get('outcome', {}).get('finished_host') if complete else None,
+                'receipt': str(receipt) if receipt else None,
                 'receipt_exists': bool(receipt and receipt.is_file()),
-                'memory_peak_bytes': record.get('detail', {}).get('resource_telemetry', {}).get('memory_peak_bytes')})
+                'memory_peak_bytes': record.get('resource_profile', {}).get('scope', {}).get('memory_peak_bytes')
+                    if complete and record.get('resource_profile') else None})
             parsed = None
             for line in row.get('output', '').splitlines():
                 if line.startswith('pbtest-outcomes: '):
@@ -77,7 +81,8 @@ def hosted(directories, default):
                          ('name', 'started_at', 'completed_at', 'conclusion', 'labels', 'steps')}
                          for job in jobs]})
         # The final artifact exports only effective attempts. Do not count retries twice.
-        effective = list(directory.glob('gate-*-final-*/effective/*/junit.xml'))
+        effective = list(directory.glob('gate-final-*/effective/*/junit.xml'))
+        effective += list(directory.glob('gate-pr-final-*/effective/*/junit.xml'))
         if not effective:
             effective = list(directory.glob('gate-result-*-a1-*/junit.xml'))
         matrices = list(directory.glob('gate-plan-*/job-matrix.json'))
@@ -129,8 +134,10 @@ def main():
     parser.add_argument('inputs', nargs='+', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--default-seconds', type=float, default=20)
+    parser.add_argument('--action-evidence', type=Path, help='mapping of action keys to exported public pb_action responses')
     args = parser.parse_args()
-    result = inventory(args.inputs) if args.kind == 'inventory' else hosted(args.inputs, args.default_seconds)
+    actions = json.loads(args.action_evidence.read_text()) if args.action_evidence else None
+    result = inventory(args.inputs, action_evidence=actions) if args.kind == 'inventory' else hosted(args.inputs, args.default_seconds)
     args.output.write_text(json.dumps(result, indent=2) + '\n')
 
 

@@ -102,6 +102,20 @@ terminal evidence without a success receipt. A submission acknowledgement is not
 a pass. Six fleet-data files require a declared manifest and are recorded as
 excluded from the undeclared-data development inventory; CUDA bodies remain skipped.
 
+## Reduce qualification evidence
+
+`gate_evidence.py inventory` reads the three `pbtest --json` reports. Export
+public `pb_action` MCP responses as a JSON object keyed by action key, then pass
+that file with `--action-evidence`. The reducer records aggregate cgroup memory
+peaks only from complete responses. It does not read PrismaBuild's internal
+queue or receipt schemas. Missing telemetry remains unknown.
+
+`gate_evidence.py hosted` reads downloaded REST run metadata, job metadata and
+gate artifacts. The final aggregate's effective shard artifacts take precedence
+over individual attempts. Duration costs use the largest architecture median;
+exception candidates use twice the largest observed test duration, rounded up.
+Both retain their hosted run evidence.
+
 ## Qualification measurements
 
 The fixed-main PrismaBuild inventory and hosted 12-versus-16-shard trials are in
