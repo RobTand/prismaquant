@@ -53,6 +53,7 @@ def test_changed_test_and_literal_path(tmp_path):
     '.github/ci-constraints.txt', '.github/workflows/ci.yml', '.github/workflows/gate.yml',
     'tools/ci/gate_run.py', 'tools/resolve_tessera_dev_pin.py',
     'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json',
+    'prismaquant/tessera_runtime_contract.py',
     'prismaquant/new_unknown.py', 'assets/new-model.json',
 ])
 def test_uncertain_changes_select_full_population(tmp_path, path):

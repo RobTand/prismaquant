@@ -36,3 +36,25 @@ def test_cpu_full_suite_only_runs_after_merge_and_keeps_its_name():
     assert workflow['jobs']['imports']['name'] == 'import surface'
     assert workflow['jobs']['allowlists']['name'] == 'boundary allowlists only shrink'
     assert not (ROOT / '.github/hosted-known-failures.txt').exists()
+
+
+def test_gate_pin_resolution_refuses_a_failed_resolver(tmp_path):
+    import os
+    import subprocess
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    for job in ('shards', 'retry-shards'):
+        command = next(step['run'] for step in workflow['jobs'][job]['steps']
+                       if step.get('name') == 'Resolve Tessera development pin')
+        (tmp_path / 'tools').mkdir(exist_ok=True)
+        (tmp_path / 'tools/resolve_tessera_dev_pin.py').write_text('raise SystemExit(9)\n')
+        output = tmp_path / 'github-output'
+        result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', command], cwd=tmp_path,
+            env={**os.environ, 'GITHUB_OUTPUT': str(output)}, capture_output=True, text=True)
+        assert result.returncode != 0
+        assert not output.exists() or not output.read_text()
+
+
+def test_gate_uses_owned_temporary_space_for_both_attempts():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    for job in ('shards', 'retry-shards'):
+        assert workflow['jobs'][job].get('env', {}).get('TMPDIR') == '${{ runner.temp }}'
