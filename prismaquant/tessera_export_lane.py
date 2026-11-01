@@ -453,7 +453,7 @@ def require_declared_structure(model_path: str | Path) -> str:
     Reading the vocabulary alone would have let a MoE checkpoint past this
     gate on the strength of a structure name whose every cell the runtime
     itself reported as generating incorrectly.  Nothing here bans a structure
-    (principle 1), and v21 (the pinned commit, Tessera #313) is that clause
+    (principle 1), and v21 (then pinned, Tessera #313) is that clause
     exercised: the runtime re-measured the smoke through the checkpoint's own
     chat template, both cells read ``recorded``, and the refusal lifted with
     no change to this gate -- re-pinning that contract was the review event.

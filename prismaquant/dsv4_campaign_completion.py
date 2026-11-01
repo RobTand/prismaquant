@@ -543,12 +543,12 @@ def _atomic_publish_new(path: Path, encoded: bytes) -> None:
             f"completion receipt already exists and will not be replaced: {path}"
         )
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    descriptor = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
     try:
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(encoded)
             handle.flush()
