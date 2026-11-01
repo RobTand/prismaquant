@@ -6,6 +6,8 @@ name: Merge gate
     types: [opened, synchronize, reopened]
 permissions:
   contents: read
+  # The planner reads quarantine owner issues with the job token.
+  issues: read
 concurrency:
   group: merge-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -64,6 +66,8 @@ jobs:
     - name: Plan coverage and balanced shards
       id: plan
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: planning infrastructure failed"; exit 75' ERR

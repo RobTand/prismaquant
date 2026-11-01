@@ -9,6 +9,7 @@ import importlib.util
 import heapq
 import json
 import math
+import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -272,9 +273,13 @@ def quarantine_policy(current: dict, baseline: dict | None, changed: list[str]) 
 
 
 def fetch_quarantine_owner(issue: int) -> dict:
+    headers = {'Accept': 'application/vnd.github+json', 'User-Agent': 'prismaquant-gate'}
+    # Anonymous REST shares a small per-IP limit across hosted runners; the
+    # workflow's read-only job token has its own allowance.
+    if token := os.environ.get('GITHUB_TOKEN'):
+        headers['Authorization'] = f'Bearer {token}'
     request = urllib.request.Request(
-        f'https://api.github.com/repos/RobTand/prismaquant/issues/{issue}',
-        headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'prismaquant-gate'})
+        f'https://api.github.com/repos/RobTand/prismaquant/issues/{issue}', headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
