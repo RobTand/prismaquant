@@ -62,11 +62,11 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial policy uses nine calibration attempts: 41275735452/1,
+The initial policy uses eleven calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
-41281908452/1, 41282567022/1, and 41284744088/1. Both architecture-swapped attempts and
-successful heads after the first review contribute to its 111 exceptions.
-It retains total JUnit setup, call, and teardown time. Fixture setup can move
+41281908452/1, 41282567022/1, 41284744088/1, and 41285636094/1 and /2. All architecture-swapped attempts and
+successful heads after the first review contribute to its 116 exceptions.
+The native-import predecessor regression measured 36.245 seconds on x64 and keeps an exact 73-second exception. It retains total JUnit setup, call, and teardown time. Fixture setup can move
 between the first tests on xdist workers, so both architectures and swapped
 placements contribute maxima rather than successful runs alone. Slow tests keep
 measured exceptions. [Issue #3200](https://github.com/RobTand/prismaquant/issues/3200)
