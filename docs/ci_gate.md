@@ -5,7 +5,9 @@ test helpers, and literal repository paths. A change it cannot explain selects t
 full population. Changes to gate tooling, workflows, conftest files, pytest configuration,
 constraints, dependency declarations, or the Tessera pin select the full population.
 Non-Python runtime files under `prismaquant/` or `tools/`, and `run-pipeline.sh`,
-also select the full population. Wildcard-only path references explain nothing.
+also select the full population. Missing or deleted non-documentation paths select
+the full population even when a test names a same-named temporary fixture.
+Wildcard-only path references explain nothing.
 Documentation changes can select no tests. The plan records every selected file and reason.
 
 A same-repository Mergify batch draft runs `gate` on its integrated head SHA.

@@ -320,6 +320,8 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         path.startswith(('.github/', 'tools/ci/gate_', 'tests/test_gate_')) or
         'constraints' in path or 'requirements' in path or
         path == 'run-pipeline.sh' or
+        not (root / path).is_file() and not (path.startswith('docs/') and path.endswith(('.md', '.rst'))) and
+        path not in {'README.md', 'CHANGELOG.md', 'LICENSE'} or
         path.startswith(('prismaquant/', 'tools/')) and not path.endswith(('.py', '.md', '.rst')))
     if mode == 'full' or triggers:
         names = index if index is not None else (
