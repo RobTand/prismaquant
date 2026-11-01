@@ -54,21 +54,47 @@ def _budget_policy(root, base_sha):
     return current
 
 
-def _budget_timings(junit, files, config, collected_files=None):
-    observed, seconds = set(), {}
-    for case in ET.parse(junit).iter('testcase'):
-        filename, name = case.get('file', '').removeprefix('./'), case.get('name', '')
-        classname = case.get('classname', '')
-        if filename not in files or not name:
+def gate_junit_identity(case, files=None):
+    """Read collection identity even when pytest reports an imported definition."""
+    identities = [prop.get('value', '') for prop in case.findall('properties/property')
+                  if prop.get('name') == 'gate_nodeid']
+    name, classname = case.get('name', ''), case.get('classname', '')
+    filename = case.get('file', '').removeprefix('./')
+    if identities:
+        if len(identities) != 1 or not identities[0] or '::' not in identities[0]:
+            raise ValueError('JUnit has invalid collected test identity')
+        nodeid = identities[0]
+        filename = nodeid.split('::', 1)[0]
+        if not name or not nodeid.endswith('::' + name):
+            raise ValueError('JUnit collected test name is inconsistent')
+        prefix = nodeid[:-(len(name) + 2)]
+        module = filename.removesuffix('.py').replace('/', '.')
+        expected_class = module + prefix[len(filename):].replace('::', '.')
+        if classname != expected_class:
+            raise ValueError('JUnit collected test class is inconsistent')
+    else:
+        if not filename or not name:
             raise ValueError('JUnit timing has missing or unexpected test identity')
         module = filename.removesuffix('.py').replace('/', '.')
         if case.find('skipped') is not None and not classname:
-            observed.add(filename)
+            nodeid = None
+        else:
+            if classname != module and not classname.startswith(module + '.'):
+                raise ValueError('JUnit timing cannot resolve test class: ' + classname)
+            classes = classname[len(module):].lstrip('.').replace('.', '::')
+            nodeid = filename + '::' + (classes + '::' if classes else '') + name
+    if files is not None and filename not in files:
+        raise ValueError('JUnit timing has missing or unexpected test identity')
+    return filename, nodeid
+
+
+def _budget_timings(junit, files, config, collected_files=None):
+    observed, seconds = set(), {}
+    for case in ET.parse(junit).iter('testcase'):
+        filename, nodeid = gate_junit_identity(case, files)
+        observed.add(filename)
+        if nodeid is None:
             continue
-        if classname != module and not classname.startswith(module + '.'):
-            raise ValueError('JUnit timing cannot resolve test class: ' + classname)
-        classes = classname[len(module):].lstrip('.').replace('.', '::')
-        nodeid = filename + '::' + (classes + '::' if classes else '') + name
         try:
             elapsed = float(case.attrib['time'])
         except (KeyError, ValueError) as error:

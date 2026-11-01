@@ -26,6 +26,8 @@ class GateCollection:
     def pytest_collection_modifyitems(self, items):
         items.sort(key=lambda item: self.ranks[item.path])
         self.collected.update(item.nodeid for item in items)
+        for item in items:
+            item.user_properties.append(('gate_nodeid', item.nodeid))
 
     def pytest_collectreport(self, report):
         path = report.nodeid.split('::', 1)[0]
