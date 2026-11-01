@@ -42,7 +42,7 @@ def _self_compare(left: ast.AST, right: ast.AST) -> bool:
     )
 
 
-def _literal(node: ast.AST) -> object:
+def _assertion_literal(node: ast.AST) -> object:
     try:
         return ast.literal_eval(node)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -51,7 +51,7 @@ def _literal(node: ast.AST) -> object:
 
 def _assertion_rule(node: ast.AST) -> str | None:
     if isinstance(node, ast.Assert):
-        value = _literal(node.test)
+        value = _assertion_literal(node.test)
         if value is not _NONLITERAL and value:
             return "constant"
         condition = node.test
@@ -66,12 +66,12 @@ def _assertion_rule(node: ast.AST) -> str | None:
             if _self_compare(left, right):
                 return "self_compare"
             if name in {"assertEqual", "assertEquals"}:
-                left_value, right_value = _literal(left), _literal(right)
+                left_value, right_value = _assertion_literal(left), _assertion_literal(right)
                 if (left_value is not _NONLITERAL and right_value is not _NONLITERAL
                         and left_value == right_value):
                     return "constant"
         elif node.args:
-            value = _literal(node.args[0])
+            value = _assertion_literal(node.args[0])
             if value is not _NONLITERAL and (
                 (name == "assertTrue" and bool(value))
                 or (name == "assertFalse" and not value)
@@ -105,7 +105,7 @@ def _swallowed(try_node: ast.Try) -> list[int]:
     return lines
 
 
-def scan(root: str | Path) -> list[Finding]:
+def scan_tautologies(root: str | Path) -> list[Finding]:
     root = Path(root)
     findings = []
     for path in root.rglob("*.py"):
@@ -137,7 +137,7 @@ def scan(root: str | Path) -> list[Finding]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Find mechanical tautologies in Python tests.")
     parser.add_argument("root")
-    findings = scan(parser.parse_args(argv).root)
+    findings = scan_tautologies(parser.parse_args(argv).root)
     for finding in findings:
         print(json.dumps(asdict(finding)))
     print(json.dumps({"total": len(findings)}), file=sys.stderr)

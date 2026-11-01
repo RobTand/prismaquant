@@ -1,7 +1,7 @@
 # Static tautology guard (D-32)
 
 Decision D-32 forbids tautological tests, including historical tests. The
-standard-library-only scanner is vendored unchanged as
+standard-library-only scanner is adapted as
 `prismaquant/tautology.py` from `RobTand/prismagraph`:
 
 - Work: `PG-UPLIFT-001-SB156`.
@@ -13,9 +13,11 @@ standard-library-only scanner is vendored unchanged as
 The source issue names
 `docs/prismagraph/bootstrap/contracts/SB156-static-tautology-guard.md`.
 That contract was not available at the source revision or on upstream main
-when retrieved on 2026-10-28; it is not reconstructed here. The scanner bytes
-and source revision above, rather than an independently rewritten detector,
-are the vendoring provenance.
+when retrieved on 2026-10-28; it is not reconstructed here. The source revision and blob above identify the imported implementation.
+PrismaQuant renames `scan` to `scan_tautologies` and `_literal` to
+`_assertion_literal` to avoid collisions with semantically different helpers
+under its existing duplication guard. Callers migrate in the same commit;
+the detection rules and traversal behavior are unchanged.
 
 `tests/test_no_tautological_tests.py` scans the entire repository, including
 archived test trees, using the upstream filename and test-function discovery
@@ -34,7 +36,7 @@ python -I -S prismaquant/tautology.py .
 
 The three mechanical rules are `self_compare`, `constant`, and `swallowed`.
 They are not a semantic proof of test quality: repeated calls may intentionally
-observe changing behavior, and the unchanged scanner does not inspect embedded
+observe changing behavior, and the scanner does not inspect embedded
 source strings, non-test functions, or files that fail its parse/read checks.
 Passing this guard does not replace independent review or the separate semantic
 repair work referenced by the source issue.

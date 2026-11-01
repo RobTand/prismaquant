@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from prismaquant.tautology import Finding, main, scan
+from prismaquant.tautology import Finding, main, scan_tautologies
 from tests import test_no_tautological_tests as guard
 
 
@@ -42,7 +42,7 @@ def test_scan_mechanical_tautologies(tmp_path, body, rule, line):
     source = "def test_sample():\n" + textwrap.indent(body, "    ") + "\n"
     (tmp_path / "test_sample.py").write_text(source, encoding="utf-8")
     expected = [] if rule is None else [Finding("test_sample.py", line, "test_sample", rule)]
-    assert scan(tmp_path) == expected
+    assert scan_tautologies(tmp_path) == expected
 
 
 def test_scan_nested_test_trees_without_executing_source(tmp_path):
@@ -58,7 +58,7 @@ def test_scan_nested_test_trees_without_executing_source(tmp_path):
         "def test_fixture():\n    source = 'assert True'\n",
         encoding="utf-8",
     )
-    assert scan(tmp_path) == [
+    assert scan_tautologies(tmp_path) == [
         Finding("archive/old/tests/sample_test.py", 3, "test_sample", "constant")
     ]
 
