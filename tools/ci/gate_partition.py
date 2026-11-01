@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 import json
-import hashlib
+import sys
 import math
 from pathlib import Path, PurePosixPath
 
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import text_sha256hex
 
 def _cost(value: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
@@ -27,7 +30,7 @@ def node_owner(nodeid: str, partition: dict) -> int:
     owners = partition['owners'][nodeid.split('::', 1)[0]]
     if nodeid in owners:
         return owners[nodeid]
-    return int.from_bytes(hashlib.sha256(nodeid.encode('utf-8')).digest()[:8], 'big') % partition['count']
+    return int(text_sha256hex(nodeid)[:16], 16) % partition['count']
 
 
 def assigned_nodes(collected: Mapping[str, Sequence[str]], partition: dict,
@@ -172,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output_files.write_text(''.join(path + '\n' for path in result[args.index]['files']))
             if args.output_assignment:
                 args.output_assignment.parent.mkdir(parents=True, exist_ok=True)
-                args.output_assignment.write_text(json.dumps(result[args.index], sort_keys=True) + '\n')
+                args.output_assignment.write_text(json.dumps(result[args.index]) + '\n')
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(str(error))
     return 0
