@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,6 @@ DEFAULT_SCRIPT = REPO / "prismaquant" / "run-pipeline.sh"
 # turns it into the gate's own `exit 2`, making every FIRED control pass for the
 # wrong reason while the PASSED controls fail.
 VENV_BIN = str(Path(sys.executable).parent)
-SCRATCH = REPO / "scratch" / "run_pipeline_gate_tests"  # gitignored; never /tmp
 
 
 def _script_path() -> Path:
@@ -116,6 +116,12 @@ def run_block(block: str, env: dict, preamble: str = "") -> int:
         "PYTHONPATH": str(REPO),
         "CUDA_VISIBLE_DEVICES": "",
         "LC_ALL": "C",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "TORCHINDUCTOR_COMPILE_THREADS": "1",
+        "MAX_JOBS": "1",
     }
     full_env.update(env)
     proc = subprocess.run(
@@ -156,9 +162,10 @@ def test_gate_python_path_preserves_pytest_virtual_environment():
 
 @pytest.fixture(scope="module")
 def scratch() -> Path:
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    yield SCRATCH
-    shutil.rmtree(SCRATCH, ignore_errors=True)
+    parent = REPO / "scratch"
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="run_pipeline_gate_tests-", dir=parent) as owned:
+        yield Path(owned)
 
 
 # --------------------------------------------------------------------------

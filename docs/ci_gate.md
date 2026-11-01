@@ -224,7 +224,13 @@ Ordinary draft PRs run `pr-gate` too. Mergify drafts need the full gate and the
 current workflow deliberately keeps feedback on other drafts. This can consume
 up to the full shard matrix; account capacity is shared. The staged FP8 DSv4 oracle now uses the existing `own_process` boundary. A real
 native-import predecessor regression verifies its staged-read assertions and
-retains the parent process's native-override refusal guard. Existing PR heads that
+retains the parent process's native-override refusal guard.
+
+The shell-gate fixture in `tests/test_run_pipeline_gates_execute.py` owns a unique
+scratch directory per worker. Finishing one worker cannot delete another worker's
+active model. Its controlled subprocess environment also bounds native threads.
+Both regressions failed through PrismaBuild before the fixture repair.
+Existing PR heads that
 predate the gate tooling fail with a message to merge `main` and push again.
 
 The queue configuration lands in the same PR as this gate. Landing order:
