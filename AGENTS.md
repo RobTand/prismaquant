@@ -306,7 +306,10 @@ When writing tests:
 - Fix the cause of a failing test. Never retry, quarantine, skip (including
   isolation skips), enlarge tolerances, or weaken a failing assertion to obtain
   a pass. Retries and isolation skips fix neither an ambient-total oracle nor
-  an ownership-publication race.
+  an ownership-publication race. The one exception is the merge gate's
+  quarantine list (`docs/ci_gate.md`): a test that already fails or flakes on
+  `main` may be listed there only with an open issue that owns its fix, so the
+  queue keeps moving while the cause is fixed.
 - Require substantive independent review of the guidance and existing positive
   regression coverage. Mechanical checks and passing commands alone cannot
   establish their quality.
