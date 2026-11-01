@@ -1,4 +1,36 @@
-# Full post-merge CPU suite plus PR import and boundary checks.
+# PrismaQuant CI — full hosted suite on main and manual runs; PR import and boundary checks.
+#
+# WHY THIS EXISTS: five substantial pull requests (#13-#17) sat open for eleven
+# days with nothing to run them, while `main` itself carried three failing
+# doc-staleness tests that the project had deliberately written to catch exactly
+# that kind of drift. Nobody was ignoring a red signal — there was no signal.
+#
+# WHAT IT CAN AND CANNOT COVER. Re-measured 2026-09-05 ON THE RUNNER, which is
+# the number that matters here: the suite is ~4840 tests (4698 passed, 136
+# skipped, 3 xfailed at `main` 8a77b0ad) and the `tests` JOB — install plus
+# suite, which is what `timeout-minutes` bounds — took 15 to 29.5 min across
+# the ten completed runs of 2026-09-05 (job 33973973959 finished at 29m30s
+# against the then 30 min limit; hosted-runner speed is the variable, not
+# the suite). The previous note here, measured 2026-08-03, said ~2762 tests
+# in 10.5-14 min with a ~2x margin and that a further doubling of the suite
+# "should raise `timeout-minutes` in the same PR"; the suite has since grown
+# 1.75x, so this is that PR: 60 min gives ~2x on the worst observed job. A
+# job that reaches the limit is a timeout, not a slow build — re-measure and
+# raise it here again rather than retrying. Re-measured 2026-10-28 from the
+# main runs of 2026-10-22 to 2026-10-26: ~22,500 tests, pytest took 29 to 56
+# min and the worst job 58 min against that 60 min limit. The job now also
+# historically gated pull requests in the Mergify queue (#3140), where a
+# timeout dequeued the pull request. The post-merge suite retains that 90 min
+# limit. PRs and batches now use the separate gate workflow. The skips are the CUDA-gated
+# tests. GitHub-hosted runners have no GPU, so
+# kernel numerics, real-checkpoint streaming and anything touching a served
+# artifact remain a manual gate on the Spark — this is a correctness net for
+# the allocator/solver/footprint/profile logic, which is where the PRs live and
+# where a silent regression is hardest to notice.
+#
+# Action pins are immutable commit SHAs: a re-pointable ref
+# is a supply-chain surface, and CI runs on every contributor's branch.
+
 name: CI
 
 'on':
@@ -17,8 +49,7 @@ name: CI
 # group of their own (the run id), because a shared group without
 # cancel-in-progress still keeps only ONE pending run and silently cancels the
 # others queued behind it; a unique group is what gives every merge a complete
-# run. Making `tests (py3.12, cpu)` a required check on main is the other half
-# of #962 and is a branch-protection setting, not something this file can do.
+# run. The separate gate workflow supplies pre-merge test verdicts.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -49,9 +80,9 @@ jobs:
         # Widen only when a version is actually exercised somewhere.
         python: ["3.12"]
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -72,7 +103,7 @@ jobs:
       # cross-repo credential the issue deliberately avoided, and it would not
       # reach fork PRs anyway.
       - name: Check out pinned Tessera
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: RobTand/tessera
           ref: ${{ steps.tessera-pin.outputs.commit }}
@@ -174,7 +205,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: Refuse lines added to a shrink-only allowlist
@@ -203,8 +234,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
           cache: pip
@@ -214,7 +245,7 @@ jobs:
           tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
           printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
       - name: Check out pinned Tessera
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: RobTand/tessera
           ref: ${{ steps.tessera-pin.outputs.commit }}

@@ -39,7 +39,7 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       compatible: ${{ steps.head-contract.outputs.compatible }}
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
@@ -57,7 +57,7 @@ jobs:
           fi
         done
         echo 'compatible=true' >> "$GITHUB_OUTPUT"
-    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
     - name: Plan coverage and balanced shards
@@ -96,12 +96,12 @@ jobs:
             output.write('matrix=' + json.dumps({'include': matrix['include']}, separators=(',', ':')) + '\n')
             output.write('shards=' + str(matrix['shards']) + '\n')
         PYTHON
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
         retention-days: 7
-    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-shadow-selection-${{ github.run_attempt }}
         path: gate-artifacts/plan.json
@@ -121,12 +121,12 @@ jobs:
       shell: bash
       run: |
         printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
         persist-credentials: false
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
@@ -136,7 +136,7 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
         python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt
-    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
         cache: pip
@@ -150,7 +150,7 @@ jobs:
         tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
         printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: RobTand/tessera
         ref: ${{ steps.tessera-pin.outputs.commit }}
@@ -188,7 +188,7 @@ jobs:
         exit "$code"
     - name: Upload verdict and JUnit
       if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a1-${{ matrix.index }}
         path: |
@@ -208,19 +208,19 @@ jobs:
       retry: ${{ steps.retry.outputs.retry }}
       matrix: ${{ steps.retry.outputs.matrix }}
     steps:
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 1
         persist-credentials: false
         sparse-checkout: tools/ci
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
     - name: Download first attempt verdicts
       continue-on-error: true
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         pattern: gate-result-${{ github.run_attempt }}-a1-*
         path: verdicts
@@ -248,12 +248,12 @@ jobs:
       shell: bash
       run: |
         printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
         persist-credentials: false
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
@@ -263,7 +263,7 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
         python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt
-    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
         cache: pip
@@ -277,7 +277,7 @@ jobs:
         tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
         printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: RobTand/tessera
         ref: ${{ steps.tessera-pin.outputs.commit }}
@@ -315,7 +315,7 @@ jobs:
         exit "$code"
     - name: Upload verdict and JUnit
       if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a2-${{ matrix.index }}
         path: |
@@ -347,19 +347,19 @@ jobs:
           echo 'NO_VERDICT: gate plan did not complete'
           exit 75
         fi
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 1
         persist-credentials: false
         sparse-checkout: tools/ci
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
     - name: Download attempt verdicts
       continue-on-error: true
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         pattern: gate-result-${{ github.run_attempt }}-*
         path: verdicts
@@ -367,7 +367,7 @@ jobs:
       run: |
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-pr-final-${{ github.run_attempt }}
         path: gate-artifacts
@@ -397,19 +397,19 @@ jobs:
           echo 'NO_VERDICT: gate plan did not complete'
           exit 75
         fi
-    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 1
         persist-credentials: false
         sparse-checkout: tools/ci
-    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
     - name: Download attempt verdicts
       continue-on-error: true
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         pattern: gate-result-${{ github.run_attempt }}-*
         path: verdicts
@@ -417,7 +417,7 @@ jobs:
       run: |
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - if: always()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-final-${{ github.run_attempt }}
         path: gate-artifacts
