@@ -87,3 +87,39 @@ def test_plan_preserves_policy_failure_or_api_unavailability(tmp_path, monkeypat
     assert select.main(['--root', str(tmp_path), '--base', 'a' * 40, '--head', 'b' * 40,
                         '--output', str(output)]) == code
     assert not output.exists()
+
+
+def _captured_request(monkeypatch, token):
+    import io
+    import json
+    seen = {}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def urlopen(request, timeout):
+        seen['headers'] = {key.lower(): value for key, value in request.header_items()}
+        return Response(json.dumps({'state': 'open'}).encode())
+
+    if token is None:
+        monkeypatch.delenv('GITHUB_TOKEN', raising=False)
+    else:
+        monkeypatch.setenv('GITHUB_TOKEN', token)
+    monkeypatch.setattr(select.urllib.request, 'urlopen', urlopen)
+    assert select.fetch_quarantine_owner(3201) == {'state': 'open'}
+    return seen['headers']
+
+
+def test_owner_lookup_authenticates_with_the_workflow_token(monkeypatch):
+    # Unauthenticated REST shares a small per-IP limit across hosted runners
+    # and returned HTTP 403 in run 41289555169; the job token avoids that.
+    headers = _captured_request(monkeypatch, 'job-token')
+    assert headers['authorization'] == 'Bearer job-token'
+
+
+def test_owner_lookup_without_a_token_stays_anonymous(monkeypatch):
+    assert 'authorization' not in _captured_request(monkeypatch, None)
