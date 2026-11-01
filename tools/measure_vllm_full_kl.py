@@ -108,8 +108,8 @@ def _provenance(args) -> dict:
 
     This tool builds its own in-process `LLM`, so the measuring process *is*
     the server and `/proc/self/maps` is the authoritative residency read. Two
-    result JSONs whose `serve_fingerprint` differs are not comparable as a
-    delta (`tools/kl_ab.py` refuses them).
+    result JSONs need matching `performance_stack_fingerprint` values for a
+    comparable delta. `tools/kl_ab.py` validates `serve_fingerprint` per arm.
     """
     return gold_provenance(
         "measure_vllm_full_kl", args, engine_kwargs=_ENGINE_KWARGS,
