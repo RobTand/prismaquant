@@ -143,11 +143,6 @@ This is CPU-verifiable diagnostic engineering, not a native numerical repair.
 Historical full25 remains measured but incomparable while #468 is unresolved.
 See `docs/experiments/exl3_grouped_down_replay_driver.md`.
 
-As of: 2026-10-26, retained GGUF status correction.
-Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `prismaquant-1295-pri226-publication`).
-Section 1.1 records the 2026-10-17 GGUF deprecation in AGENTS.md.
-This corrects prose only; retained GGUF code and serving gates are unchanged.
-
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
 Sections 3.4, 4.1 and 4.3 name the current assignment readers, reuse anchors and evidence owners.
@@ -972,6 +967,11 @@ Re-stamped 2026-10-17: native export takes visual namespaces from the same
 model profile as visual allocation. Gemma vision-tower and vision-projector
 assignments now reach the native codec before shard and quantization-config
 publication. Unassigned visual tensors and audio retain source passthrough.
+
+As of: 2026-10-26, retained GGUF status correction.
+Source commit: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0` (base of `prismaquant-1295-pri226-publication`).
+Section 1.1 records the 2026-10-17 GGUF deprecation in AGENTS.md.
+This corrects prose only; retained GGUF code and serving gates are unchanged.
 
 Re-stamped 2026-10-17: Rob deprecated GGUF support. Its code, format registry
 entries and existing commands remain available as deprecated paths, with no
