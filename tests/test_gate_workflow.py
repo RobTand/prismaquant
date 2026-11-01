@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 
 import yaml
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,3 +71,24 @@ def test_gate_uses_owned_temporary_space_for_both_attempts(tmp_path):
         subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', steps[configured]['run']],
             env={**os.environ, 'GITHUB_ENV': str(exported), 'RUNNER_TEMP': str(tmp_path)}, check=True)
         assert exported.read_text() == 'TMPDIR=' + str(tmp_path) + '\n'
+
+
+@pytest.mark.parametrize('mode,attempt,first', [
+    ('selection', 1, 'ubuntu-24.04-arm'),
+    ('selection', 2, 'ubuntu-24.04-arm'),
+    ('full', 1, 'ubuntu-24.04-arm'),
+    ('full', 2, 'ubuntu-24.04'),
+])
+def test_initial_placement_prefers_arm_and_full_reruns_swap(mode, attempt, first):
+    import json
+    import os
+    import subprocess
+    import sys
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    command = next(step['run'] for step in workflow['jobs']['plan']['steps']
+                   if 'runners=$(' in step.get('run', ''))
+    script = command.split("runners=$(python - <<'PYTHON'\n", 1)[1].split('\nPYTHON\n', 1)[0]
+    result = subprocess.check_output([sys.executable, '-c', script], text=True,
+        env={**os.environ, 'GATE_MODE': mode, 'GITHUB_RUN_ATTEMPT': str(attempt),
+             'GATE_RUNNERS': workflow['env']['GATE_RUNNERS']})
+    assert result.strip().split(',')[0] == first
