@@ -63,10 +63,6 @@
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": 48,
     "tests/test_streamed_cost_checkpoints.py::test_production_anchor_resolves_raw_named_expert_activation_cache": 47,
     "tests/test_striped_render_row_identity.py::test_the_reservoir_is_actually_selecting": 44,
-    "tests/test_tessera_campaign.py::test_e2m1_costs_price_the_served_static_ue4m3_contract": 42,
-    "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": 59,
-    "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": 60,
-    "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": 50,
     "tests/test_tessera_cell_measurement.py::test_direct_measurement_never_loads_the_serving_runtime_in_a_cold_process": 46,
     "tests/test_tessera_footprint.py::test_every_family_prices_at_the_bounds_it_advertises": 49,
     "tests/test_tessera_forest_bytes.py::test_every_realisable_rung_of_every_family_prices_what_tessera_prices": 83,
@@ -531,34 +527,6 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/5/junit.xml"
     },
-    "tests/test_tessera_campaign.py::test_e2m1_costs_price_the_served_static_ue4m3_contract": {
-      "seconds": 20.926,
-      "run": 41287142037,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/13/junit.xml"
-    },
-    "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": {
-      "seconds": 29.452,
-      "run": 41280260494,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/10/junit.xml"
-    },
-    "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": {
-      "seconds": 29.905,
-      "run": 41278311643,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/13/junit.xml"
-    },
-    "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": {
-      "seconds": 24.7,
-      "run": 41285636094,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/10/junit.xml"
-    },
     "tests/test_tessera_cell_measurement.py::test_direct_measurement_never_loads_the_serving_runtime_in_a_cold_process": {
       "seconds": 22.794,
       "run": 41278869921,
@@ -767,15 +735,17 @@
     41284744088,
     41285636094,
     41287142037,
-    41292593909
+    41292593909,
+    41293449843
   ],
   "schema": "prismaquant.gate_budget.v1",
   "enforced": true,
   "cost_owner_issue": 3200,
   "file_seconds": {
     "tests/test_duplication_baseline.py": 308,
-    "tests/test_tessera_legal_domain.py": 4469,
-    "tests/test_quality_prefill_dry_run.py": 355
+    "tests/test_tessera_legal_domain.py": 4927,
+    "tests/test_quality_prefill_dry_run.py": 446,
+    "tests/test_tessera_campaign.py": 293
   },
   "file_evidence": {
     "tests/test_duplication_baseline.py": {
@@ -786,19 +756,27 @@
       "artifact": "gate-final-1/effective/15/junit.xml"
     },
     "tests/test_tessera_legal_domain.py": {
-      "seconds": 2234.087,
-      "run": 41280260494,
-      "attempt": 2,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-2/effective/0/junit.xml",
+      "seconds": 2463.3800000000006,
+      "run": 41293449843,
+      "attempt": 1,
+      "runner": "mixed",
+      "artifact": "gate-final-1/effective/0/junit.xml,gate-final-1/effective/1/junit.xml,gate-final-1/effective/10/junit.xml,gate-final-1/effective/11/junit.xml,gate-final-1/effective/2/junit.xml,gate-final-1/effective/3/junit.xml,gate-final-1/effective/4/junit.xml,gate-final-1/effective/5/junit.xml,gate-final-1/effective/6/junit.xml,gate-final-1/effective/7/junit.xml,gate-final-1/effective/8/junit.xml,gate-final-1/effective/9/junit.xml",
       "shared_setup": "Module fixture or cached legal-domain derivation can be charged to different first nodes on different xdist workers; sum the complete file across all shards."
     },
     "tests/test_quality_prefill_dry_run.py": {
-      "seconds": 177.065,
-      "run": 41284744088,
+      "seconds": 222.95000000000002,
+      "run": 41293449843,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml",
+      "shared_setup": "Module fixture or cached legal-domain derivation can be charged to different first nodes on different xdist workers; sum the complete file across all shards."
+    },
+    "tests/test_tessera_campaign.py": {
+      "seconds": 146.43400000000003,
+      "run": 41293449843,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/11/junit.xml",
       "shared_setup": "Module fixture or cached legal-domain derivation can be charged to different first nodes on different xdist workers; sum the complete file across all shards."
     }
   },
@@ -853,6 +831,10 @@
     },
     {
       "run": 41292593909,
+      "attempt": 1
+    },
+    {
+      "run": 41293449843,
       "attempt": 1
     }
   ]

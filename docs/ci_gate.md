@@ -81,11 +81,11 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial policy uses thirteen calibration attempts: 41275735452/1,
+The initial policy uses fourteen calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
-41281908452/1, 41282567022/1, 41284744088/1, 41285636094/1 and /2, 41287142037/1, and 41292593909/1. Both passing and failed attempts contribute
-to 94 node exceptions and three file exceptions. The last attempt exposed
-moving legal-domain setup charges after node splitting. This remains initial
+41281908452/1, 41282567022/1, 41284744088/1, 41285636094/1 and /2, 41287142037/1, 41292593909/1, and 41293449843/1. Both passing and failed attempts contribute
+to 90 node exceptions and four file exceptions. The last two attempts exposed
+moving legal-domain and campaign setup charges after node splitting. This remains initial
 bootstrap calibration because the PR base has no gate budget policy. Once
 installed, the same shrink-only checks prevent adding or enlarging exceptions.
 The native-import predecessor regression measured 36.245 seconds on x64 and keeps an exact 73-second exception. It retains total JUnit setup, call, and teardown time. Fixture setup can move
@@ -96,8 +96,13 @@ owns reducing these costs; a higher measured limit does not make a test faster.
 The separate hang timeout remains 600 seconds per test. The budget file records
 its exact run evidence. Scheduling costs in `gate_durations.json` use 41285636094 attempts 1 and 2,
 and 41290209398 attempt 2. Each file and node uses its largest architecture
-median. This balances every shard to the slower observed runner class, so a
-full rerun can swap architectures without changing node ownership. These
+median. The matrix applies cost factors of 1.0 for x64 and 0.625 for ARM. The paired
+hosted median x64/ARM ratio across 135 files above five seconds is 1.716;
+1.6 is a conservative scheduling ratio. Each longest-first placement minimizes
+projected finish time on the actual runner. The recorded matrix carries the
+factors into assignment, retry planning and aggregation. A full rerun swaps
+factors with the runner order; every shard recomputes the same owners within
+that attempt. New unmeasured nodes still use the stable hash owner. These
 scheduling estimates do not set test budgets.
 
 After bootstrap, a budget cannot be raised by editing the JSON, adding a label,
@@ -243,9 +248,14 @@ tail was 269 seconds. It failed the primitive-digest inventory and four budget
 attributions, so it does not qualify. The digest repair uses the shared owner.
 Moving legal-domain setup charges use the existing complete-file budget
 mechanism. Calibration retains the larger historical complete-file maxima:
-2,234.087 seconds from 41280260494/2 for the legal-domain file and 177.065
-seconds from 41284744088/1 for the quality-prefill file. Their initial limits
-are 4,469 and 355 seconds, respectively. Splitting removes the whole-file
+2,463.380 seconds for legal-domain, 222.950 seconds for quality-prefill, and
+146.434 seconds for campaign, all from 41293449843/1. Their initial limits
+are 4,927, 446, and 293 seconds, respectively. Campaign uses a cached menu
+build whose charge moves among its first consumers. The second split-file
+candidate, `1440db9983e609eb075d3a7a3794036045057f10`, failed run
+41293449843/1 after 512 seconds because of that charge. Its test tail was
+367 seconds on x64 versus 262 seconds on ARM. Runner weighting is qualified
+against that measured unweighted tail before it is retained. Splitting removes the whole-file
 scheduling constraint; issue #3200 still owns reducing these tests themselves.
 
 Final-head node-split qualification is recorded in PR #3192 with exact heads,
