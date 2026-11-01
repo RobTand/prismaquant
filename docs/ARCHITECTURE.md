@@ -2,6 +2,14 @@
 
 As of: 2026-11-01, integration 3 for PQ #3180.
 Source commit: `8b3fc3401ac2398112e5455263678871c9b51bf2` (five reviewed member merges).
+Source base for the checkpoint-name follow-up:
+`b753a660178dbeeb074e4b6e4391762f2b67930e` (regression tests, before repair).
+Export assignment projection maps the profile's body prefix through its
+existing source-tensor naming accessor before comparing checkpoint keys.
+This preserves wrapper and native-causal Qwen body names without changing
+profile lane declarations or the independent scope, geometry and serving-cell
+checks. The wrapper regression fails before this repair; the native-causal
+control passes. This is source-name recognition, not serving qualification.
 The sections below preserve the member text for #2575, #2789, #2826 and
 #3134. Their dated evidence retains its original source and qualification
 limits. This integration combines those contracts; its fresh PrismaBuild

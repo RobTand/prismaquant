@@ -2419,10 +2419,11 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
     if model_path is not None:
         source_names = set()
         _source_unit_shapes(model_path, profile, source_names=source_names)
-    # The profile owns the decoder root. This is a namespace boundary, not
-    # another Linear classifier: existing serving-cell/geometry validation
-    # still owns admission within that root (including expert projections).
-    body_root = profile.body_layer_prefix() + "."
+    # Compare checkpoint assignment keys in the source namespace. Profiles
+    # with recipe/source rewrites may retain the default recipe body prefix.
+    # Existing serving-cell/geometry validation still owns admission within
+    # that root (including expert projections).
+    body_root = profile.source_tensor_name(profile.body_layer_prefix() + ".")
     mtp = metadata.get('mtp_selection')
     mtp_selected = (mtp.get('mtp_expert_wires') if isinstance(mtp, Mapping) else None)
     mtp_scope = None
