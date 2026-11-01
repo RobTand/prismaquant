@@ -10,9 +10,8 @@ import pytest
 
 
 class GateCollection:
-    def __init__(self, root, files, excluded=()):
+    def __init__(self, root, files):
         self.files = set(files)
-        self.excluded = set(excluded)
         self.own_cgroup_files = set()
         self.seen, self.collected = set(), set()
         self.collection_failed = False
@@ -25,12 +24,7 @@ class GateCollection:
             return True
         return None
 
-    @pytest.hookimpl(tryfirst=True)
-    def pytest_collection_modifyitems(self, items, config):
-        excluded = [item for item in items if item.nodeid in self.excluded]
-        items[:] = [item for item in items if item.nodeid not in self.excluded]
-        if excluded:
-            config.hook.pytest_deselected(items=excluded)
+    def pytest_collection_modifyitems(self, items):
         items.sort(key=lambda item: self.ranks[item.path])
         self.collected.update(item.nodeid for item in items)
         for item in items:
@@ -71,6 +65,8 @@ class GateCollection:
 
 @pytest.hookimpl(specname='pytest_configure')
 def pytest_gate_configure(config):
+    if 'GATE_ASSIGNED_FILES' not in os.environ:
+        return  # Post-merge CI uses the exact exclusion hook without a gate assignment.
     try:
         files = json.loads(os.environ['GATE_ASSIGNED_FILES'])
         if (not isinstance(files, list) or not files or
@@ -88,7 +84,22 @@ def pytest_gate_configure(config):
     for filename in sorted({Path(path).name for path in files}):
         if not any(fnmatch(filename, pattern) for pattern in config.getini('python_files')):
             config.addinivalue_line('python_files', filename)
-    excluded = json.loads(os.environ.get('GATE_DESELECT_NODEIDS', '[]'))
+    config.pluginmanager.register(GateCollection(root, files), 'gate-assigned-collection')
+
+
+@pytest.hookimpl(specname='pytest_collection_modifyitems', tryfirst=True)
+def pytest_gate_exact_exclusions(config, items):
+    raw = os.environ.get('GATE_DESELECT_NODEIDS')
+    if raw is None:
+        quarantine = Path(config.rootpath) / 'tools/ci/gate_quarantine.json'
+        excluded = [row['target'] for row in json.loads(quarantine.read_text())['entries']
+                    if '::' in row['target']]
+    else:
+        excluded = json.loads(raw)
     if not isinstance(excluded, list) or any(not isinstance(node, str) for node in excluded):
         raise pytest.UsageError('invalid gate exact exclusions')
-    config.pluginmanager.register(GateCollection(root, files, excluded), 'gate-assigned-collection')
+    targets = set(excluded)
+    deselected = [item for item in items if item.nodeid in targets]
+    items[:] = [item for item in items if item.nodeid not in targets]
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)

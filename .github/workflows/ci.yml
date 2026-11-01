@@ -133,8 +133,7 @@ jobs:
           from pathlib import Path
           entries = json.loads(Path('tools/ci/gate_quarantine.json').read_text())['entries']
           Path(os.environ['RUNNER_TEMP'], 'known-failure-args').write_text(''.join(
-              ('--deselect=' if '::' in row['target'] else '--ignore=') + row['target'] + '\n'
-              for row in entries))
+              '--ignore=' + row['target'] + '\n' for row in entries if '::' not in row['target']))
           PYTHON
 
       # CUDA_VISIBLE_DEVICES is belt-and-braces: hosted runners have no GPU, but
@@ -172,7 +171,7 @@ jobs:
           # 300 s limit on 2026-10-28. 600 s keeps ~2x over the worst (#3140).
           python -m pytest -c pytest.ini tests/ -q --timeout=600 \
             -m "not own_cgroup" \
-            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider \
+            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider -p tools.ci.gate_collect \
             "${known[@]}"
 
       # Tests with the own_cgroup mark hold this process's cgroup readings to
@@ -193,7 +192,7 @@ jobs:
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
-              -q --timeout=300 -ra -p no:cacheprovider "${known[@]}"
+              -q --timeout=300 -ra -p no:cacheprovider -p tools.ci.gate_collect "${known[@]}"
 
   # The boundary allowlists only shrink (decoupling step 0, #1534). The
   # tests hold each list equal to the code; this job refuses a pull request
