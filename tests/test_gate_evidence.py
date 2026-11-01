@@ -86,3 +86,18 @@ def test_hosted_wall_percentiles_use_completed_successful_full_gates(tmp_path):
     assert shard['setup_seconds'] == 10
     assert shard['test_seconds'] == 9
     assert shard['install_seconds'] == 5
+
+
+def test_hosted_imported_test_costs_follow_collection_identity(tmp_path):
+    (tmp_path / 'run.json').write_text(json.dumps({
+        'id': 123, 'run_attempt': 1, 'head_sha': 'a' * 40, 'conclusion': 'success'}))
+    (tmp_path / 'jobs.json').write_text('{"jobs": []}')
+    target = tmp_path / 'gate-result-1-a1-0'
+    target.mkdir()
+    (target / 'junit.xml').write_text(
+        '<testsuites><testcase file="tests/helpers.py" classname="tests.test_sample" '
+        'name="test_cost" time="21"><properties><property name="gate_nodeid" '
+        'value="tests/test_sample.py::test_cost"/></properties></testcase></testsuites>')
+    report = evidence.hosted([tmp_path], 20)
+    assert report['durations'] == {'tests/test_sample.py': 21}
+    assert report['budget']['slow'] == {'tests/test_sample.py::test_cost': 42}
