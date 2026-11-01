@@ -5,6 +5,8 @@ import contextlib
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 from test_publish_artifact import (
     _FakeHubState,
     _argv,

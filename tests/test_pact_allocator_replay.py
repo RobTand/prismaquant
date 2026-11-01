@@ -29,6 +29,8 @@ from test_shape_runtime_prices import checker_sdk_fixture  # noqa: F401
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
+
 from prismaquant import prefill_frontier, shipcard, tessera_export_lane
 from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY, load_assignment, prefill_frontier_replay_claim,

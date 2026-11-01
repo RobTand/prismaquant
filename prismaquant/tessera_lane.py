@@ -836,6 +836,62 @@ def serving_runtime_contract_path():
     return contract_path()
 
 
+def graph_equality_verify(receipt: Mapping[str, Any], scope: Mapping[str, Any]) -> str | None:
+    """Replay the shared population, numerical and capture/replay rules."""
+    try:
+        from tessera import graph_receipt
+    except ImportError as exc:
+        return f"compatible tessera.graph_receipt is unavailable: {exc}"
+    if receipt.get("schema") != graph_receipt.SCHEMA:
+        return f"graph receipt schema {receipt.get('schema')!r} is not {graph_receipt.SCHEMA}"
+    population = getattr(graph_receipt, "population_refusal", None)
+    if not callable(population):
+        return "compatible graph receipt verifier is unavailable: missing shared population_refusal"
+    try:
+        reason = population(dict(receipt)) or graph_receipt.verify(dict(receipt), dict(scope))
+        if reason is not None:
+            return f"graph equality receipt refused: {reason}"
+        arms = [arm for arm in receipt["arms"] if arm["name"] == scope.get("arm")]
+        if len(arms) != 1:
+            return "graph equality receipt has no unique producer-linked arm"
+        selected = graph_receipt.attestation(dict(receipt), arms[0])
+        differ = [field for field in graph_receipt.SCOPE_FIELDS
+                  if graph_receipt.canonical(selected[field]) != graph_receipt.canonical(scope[field])]
+        if differ:
+            return f"producer-linked equality arm differs in {differ}"
+    except Exception as exc:
+        return f"graph receipt unreadable: {type(exc).__name__}: {exc}"
+    return None
+
+
+def graph_tessera_source_sha256() -> str:
+    """Hash installed Python sources using Tessera's equality producer recipe."""
+    from pathlib import Path
+    from .dev_mode import NOT_COMPUTED, seal_check
+    from .digests import bytes_sha256hex, file_sha256hex
+
+    try:
+        from tessera import graph_receipt
+        from .tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
+
+        package = Path(graph_receipt.__file__).resolve().parent
+        seal_check("tessera_runtime_pin",
+                   load_tessera_serving_runtime_pin().contract_sha256,
+                   file_sha256hex(package / "serving" / "runtime_contract.json"),
+                   where="native_export.graph")
+        sources = sorted(package.rglob("*.py"),
+                         key=lambda path: path.relative_to(package).as_posix())
+        if not sources:
+            raise ValueError("installed Tessera has no Python source files")
+        lines = (f"{file_sha256hex(path)}  src/tessera/{path.relative_to(package).as_posix()}\n"
+                 for path in sources)
+        return bytes_sha256hex("".join(lines).encode())
+    except (ImportError, OSError, ValueError, TypeError, AttributeError) as exc:
+        seal_check("tessera_src_sha256", "installed Tessera Python source digest",
+                   NOT_COMPUTED, where=f"native_export.graph: {exc}")
+        return NOT_COMPUTED
+
+
 # -- the ship record (shipcard, shipcard_cli) --------------------------------
 
 def shipcard_slot_verifiers() -> dict:

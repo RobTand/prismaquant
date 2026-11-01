@@ -264,6 +264,166 @@ def _route_sweep_path(args, arm: str) -> Path | None:
     return Path(args.route_sweep_out)
 
 
+def _graph_image() -> str:
+    """Observe the container image, stamping unavailable identity evidence per D32."""
+    import re
+    from .dev_mode import NOT_COMPUTED, seal_check
+
+    try:
+        observed = (Path("/proc/self/cgroup").read_text()
+                    + Path("/proc/self/mountinfo").read_text())
+        containers = set(re.findall(r"/docker(?:/containers/|/|-)([0-9a-f]{64})(?:/|\.scope|$)",
+                                    observed, re.MULTILINE))
+        if len(containers) != 1:
+            raise ValueError("cannot identify this process's Docker container")
+        container_id = containers.pop()
+        container = json.loads(subprocess.check_output(
+            ["docker", "container", "inspect", container_id], text=True))[0]
+        seal_check("container_id", container_id, container["Id"],
+                   where="native_export.graph")
+        if not container["State"]["Running"]:
+            raise ValueError("observed container is not running")
+        image = json.loads(subprocess.check_output(
+            ["docker", "image", "inspect", container["Image"]], text=True))[0]
+        seal_check("image_id", container["Image"], image["Id"],
+                   where="native_export.graph")
+        digests = {ref for ref in image.get("RepoDigests", [])
+                   if re.fullmatch(r".+@sha256:[0-9a-f]{64}", ref)}
+        reference = container["Config"]["Image"]
+        if reference in digests:
+            return reference
+        if len(digests) == 1:
+            return digests.pop()
+        raise ValueError("container image has no unique observed manifest digest")
+    except (OSError, ValueError, KeyError, IndexError, TypeError,
+            subprocess.CalledProcessError) as exc:
+        seal_check("image", "observed container manifest digest", NOT_COMPUTED,
+                   where=f"native_export.graph: {exc}")
+        return NOT_COMPUTED
+
+
+def _graph_tessera_source_sha256() -> str:
+    """Hash installed Python sources using Tessera #702's sha256sum recipe."""
+    from .lane_spec import single_lane_hook
+
+    hook = single_lane_hook("graph_tessera_source_sha256")
+    if hook is None:
+        from .dev_mode import NOT_COMPUTED, seal_check
+
+        seal_check(
+            "tessera_src_sha256",
+            "installed Tessera Python source digest",
+            NOT_COMPUTED,
+            where="native_export.graph: no lane provides graph_tessera_source_sha256",
+        )
+        return NOT_COMPUTED
+    return hook()
+
+
+def _graph_config_json(value):
+    """Keep observed config values, including enum values, as strict JSON data."""
+    from dataclasses import asdict, is_dataclass
+    from enum import Enum
+    from collections.abc import Mapping
+    from .digests import canonical_json
+
+    if is_dataclass(value):
+        value = asdict(value)
+    if isinstance(value, Enum):
+        return _graph_config_json(value.value)
+    if isinstance(value, Mapping):
+        return {key: _graph_config_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_graph_config_json(item) for item in value]
+    return canonical_json(value, where="native_export.graph: observed config")
+
+
+def _graph_rank_observation(model, *, model_dir: str) -> dict:
+    """Read the worker's image and TP group; never infer NCCL transport."""
+    from vllm.distributed import get_tp_group
+    from .digests import file_sha256hex
+
+    group = get_tp_group()
+    size, rank = group.world_size, group.rank_in_group
+    if type(size) is not int or size < 1 or type(rank) is not int or not 0 <= rank < size:
+        raise ValueError("cannot observe the worker's tensor-parallel group")
+    if size != 1:
+        raise ValueError("observed fabric is unavailable above one rank; an NCCL environment request is not transport evidence")
+    return {"rank": rank, "tensor_parallel_size": size,
+            "image": _graph_image(), "fabric": "none",
+            "tessera_src_sha256": _graph_tessera_source_sha256(),
+            "model_config_sha256": file_sha256hex(Path(model_dir) / "config.json")}
+
+
+def _graph_serve_scope(llm, model_dir: Path, supplied: dict, *, image: str,
+                       source_sha256: str, config_sha256: str) -> tuple[dict, dict, list]:
+    """Observe the actual loaded engine, separately from its supplied config."""
+    import re
+    from collections.abc import Mapping
+    from functools import partial
+    from .digests import canonical_json_bytes, file_sha256hex
+
+    config = getattr(getattr(llm, "llm_engine", None), "vllm_config", None)
+    model = getattr(config, "model_config", None)
+    loaded = getattr(model, "model", None)
+    if not isinstance(loaded, str) or Path(loaded).resolve() != model_dir.resolve():
+        raise ValueError("the observed loaded model differs from the requested artifact")
+    if file_sha256hex(model_dir / "config.json") != config_sha256:
+        raise ValueError("the artifact config.json bytes changed during load")
+    if not isinstance(image, str) or re.fullmatch(r".+@sha256:[0-9a-f]{64}", image) is None:
+        raise ValueError("the graph smoke has no observed content-addressed image")
+    if not isinstance(source_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", source_sha256) is None:
+        raise ValueError("the graph smoke has no observed Tessera source digest")
+    scope = {"image": image, "model_config_sha256": config_sha256,
+             "tessera_src_sha256": source_sha256, "compilation_config": supplied}
+    for name, parent, attribute in (
+        ("max_model_len", "model_config", "max_model_len"),
+        ("max_num_seqs", "scheduler_config", "max_num_seqs"),
+        ("tensor_parallel_size", "parallel_config", "tensor_parallel_size"),
+        ("speculative_tokens", "speculative_config", "num_speculative_tokens"),
+    ):
+        owner = getattr(config, parent, None)
+        value = (0 if name == "speculative_tokens" and config is not None
+                 and hasattr(config, parent) and owner is None
+                 else getattr(owner, attribute, None))
+        if type(value) is not int or value < (0 if name == "speculative_tokens" else 1):
+            raise ValueError(f"cannot derive {name} from the observed engine config")
+        scope[name] = value
+    compilation = _graph_config_json(getattr(config, "compilation_config", None))
+    priority = _graph_config_json(getattr(getattr(config, "kernel_config", None), "ir_op_priority", None))
+    if not isinstance(compilation, Mapping) or not isinstance(compilation.get("custom_ops"), list) or not all(isinstance(item, str) for item in compilation["custom_ops"]):
+        raise ValueError("missing observed resolved compilation/custom_ops settings")
+    if not isinstance(priority, (Mapping, list, str)):
+        raise ValueError("missing observed ir_op_priority settings")
+    if any(name not in compilation or canonical_json_bytes(compilation[name], where="observed compilation") != canonical_json_bytes(value, where="supplied compilation")
+           for name, value in supplied.items()):
+        raise ValueError("observed resolved compilation_config differs from the supplied input")
+    resolved = {"compilation_config": compilation, "ir_op_priority": priority}
+    apply_model = getattr(llm, "apply_model", None)
+    if not callable(apply_model):
+        raise ValueError("cannot observe graph smoke ranks through LLM.apply_model")
+    ranks = apply_model(partial(_graph_rank_observation, model_dir=str(model_dir)))
+    size = scope["tensor_parallel_size"]
+    if not isinstance(ranks, list) or len(ranks) != size:
+        raise ValueError("missing every-rank graph smoke observation")
+    seen = set()
+    for row in ranks:
+        if not isinstance(row, Mapping) or type(row.get("rank")) is not int or not 0 <= row["rank"] < size or row["rank"] in seen or row.get("tensor_parallel_size") != size:
+            raise ValueError("malformed graph smoke rank observation")
+        seen.add(row["rank"])
+        for name in ("image", "model_config_sha256", "tessera_src_sha256"):
+            if row.get(name) != scope[name]:
+                raise ValueError(f"rank {row['rank']} observed {name} disagrees with the engine")
+        fabric = row.get("fabric")
+        allowed = ("none",) if size == 1 else ("socket", "roce")
+        if not isinstance(fabric, str) or fabric not in allowed:
+            raise ValueError(f"rank {row['rank']} has no observed fabric")
+    scope["fabric"] = ranks[0]["fabric"]
+    if any(row["fabric"] != scope["fabric"] for row in ranks):
+        raise ValueError("rank fabric observations disagree")
+    return scope, resolved, ranks
+
+
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
@@ -276,10 +436,44 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         # archived Gridbook probe learned to do and it keeps the sweep's
         # objects the same objects the generate ran on.
         os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
-    from vllm import LLM, SamplingParams
-
     llm = None
     try:
+        import copy
+        from .digests import bytes_sha256hex, canonical_json, file_sha256hex
+
+        graph_metrics = {}
+        compilation = None
+        if not enforce_eager:
+            path = getattr(args, "graph_receipt", None)
+            if not path:
+                raise ValueError("graph_receipt_path is required (--graph-receipt)")
+            path = Path(path).resolve(strict=True)
+            with path.open("rb") as handle:
+                raw = handle.read(128 * 1024 * 1024 + 1)
+            if len(raw) > 128 * 1024 * 1024:
+                raise ValueError("graph receipt exceeds 128 MiB")
+            graph_metrics = {"graph_receipt_path": str(path),
+                             "graph_receipt_sha256": bytes_sha256hex(raw)}
+            compilation = canonical_json(json.loads(args.compilation_config),
+                                         where="native_export.graph: supplied compilation_config")
+            if not isinstance(compilation, dict):
+                raise ValueError("compilation_config must be an explicit JSON object")
+            image = _graph_image()
+            source_sha256 = _graph_tessera_source_sha256()
+            config_sha256 = file_sha256hex(model_dir / "config.json")
+            from .shipcard import (
+                assert_weight_stat_attestation, compute_model_sha, load_shipcard,
+                weight_stat_attestation,
+            )
+
+            identity = load_shipcard(model_dir / "shipcard.json")
+            assert_weight_stat_attestation(identity, model_dir)
+            model_sha_before = compute_model_sha(model_dir)
+            if identity.get("model_sha") != model_sha_before:
+                raise ValueError("artifact identity differs from its shipcard before the graph smoke")
+            identity = {"weight_stat_attestation": weight_stat_attestation(model_dir)}
+        from vllm import LLM, SamplingParams
+
         llm = LLM(
             model=str(model_dir),
             quantization=NATIVE_QUANTIZATION,
@@ -287,9 +481,18 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             enforce_eager=enforce_eager,
             gpu_memory_utilization=args.gpu_memory_utilization,
             max_model_len=args.max_model_len,
-            max_num_seqs=1,
+            max_num_seqs=getattr(args, "max_num_seqs", 1),
+            tensor_parallel_size=getattr(args, "tensor_parallel_size", 1),
             speculative_config=spec,
+            **({"compilation_config": copy.deepcopy(compilation)} if not enforce_eager else {}),
         )
+        if not enforce_eager:
+            scope, resolved, ranks = _graph_serve_scope(
+                llm, model_dir, compilation, image=image,
+                source_sha256=source_sha256, config_sha256=config_sha256)
+            graph_metrics["serve_scope"] = scope
+            graph_metrics["graph_smoke_observation"] = {"resolved": resolved, "ranks": ranks,
+                                                       "model_sha_before": model_sha_before}
         hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
@@ -301,6 +504,14 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             print(f"  prompt: {o.prompt!r}", flush=True)
             print(f"  output: {text!r}", flush=True)
         produced = sum(len(t) for t in texts)
+        if not enforce_eager:
+            assert_weight_stat_attestation(identity, model_dir)
+            model_sha_after = compute_model_sha(model_dir)
+            if model_sha_after != model_sha_before or file_sha256hex(model_dir / "config.json") != config_sha256:
+                raise ValueError("artifact/config identity changed during the graph smoke")
+            graph_metrics["graph_smoke_observation"].update(
+                model_sha_after=model_sha_after,
+                generation={"prompt": args.prompt, "outputs": texts})
         sweep_written = _write_route_sweep(
             llm, sweep_path, hooks,
             model_dir=model_dir, spec=spec, enforce_eager=enforce_eager,
@@ -308,6 +519,7 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         metrics = {"arm": arm, "generated_chars": produced,
                    "enforce_eager": enforce_eager,
                    "max_new_tokens": args.max_new_tokens}
+        metrics.update(graph_metrics)
         if sweep_written is not None:
             metrics["route_sweep"] = str(sweep_written)
         return {
@@ -360,7 +572,9 @@ def _record_arm(args, model_dir: Path, spec: dict | None, verdict: dict) -> None
         model_sha=model_sha,
         metrics=verdict["metrics"],
         detail=verdict["detail"],
-        spec_decode_detected=spec is not None,
+        spec_decode_detected=(verdict["metrics"]["serve_scope"]["speculative_tokens"] > 0
+                              if arm == "graph" and "serve_scope" in verdict["metrics"]
+                              else spec is not None),
         git_commit=git_provenance().get("commit"),
     )
     fill_if_requested(args.shipcard, f"native_export.{arm}", record)
@@ -376,6 +590,13 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.55)
     ap.add_argument("--max-model-len", type=int, default=2048)
+    ap.add_argument("--max-num-seqs", type=int, default=1)
+    ap.add_argument("--tensor-parallel-size", type=int, default=1)
+    ap.add_argument("--compilation-config", default=None,
+                    help="Exact JSON object supplied to the graph arm's vLLM engine.")
+    ap.add_argument("--graph-receipt", default=None,
+                    help="Existing equality receipt to retain with graph smoke observations. "
+                         "A later smoke does not create original equality-producer linkage.")
     ap.add_argument("--target-profile", default=None,
                     choices=serving_profile_names(),
                     help="Serving profile whose runtime package pins should "
@@ -415,6 +636,20 @@ def main():
                          "verdict is appended to native_export.<arm> "
                          "(see python -m prismaquant.shipcard_cli).")
     args = ap.parse_args()
+    if args.max_num_seqs < 1 or args.tensor_parallel_size < 1:
+        ap.error("--max-num-seqs and --tensor-parallel-size must be positive")
+    if args.both_arms or args.no_enforce_eager:
+        if not args.graph_receipt or args.compilation_config is None:
+            ap.error("the graph arm requires --graph-receipt and --compilation-config")
+        try:
+            from .digests import canonical_json
+
+            compilation = canonical_json(json.loads(args.compilation_config),
+                                         where="--compilation-config")
+            if not isinstance(compilation, dict):
+                raise ValueError("expected a JSON object")
+        except (TypeError, ValueError) as exc:
+            ap.error(f"invalid --compilation-config: {exc}")
 
     model_dir = Path(args.model)
     target_profile = _resolve_validation_target_profile(
