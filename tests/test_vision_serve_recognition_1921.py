@@ -62,6 +62,34 @@ def _source(tmp_path):
     return source, detect_profile(source), tensors
 
 
+
+@pytest.mark.parametrize(("architecture", "source_unit"), [
+    ("Qwen3_5MoeForConditionalGeneration",
+     "model.language_model.layers.0.mlp.down_proj"),
+    ("Qwen3_5MoeForCausalLM", "model.layers.0.mlp.down_proj"),
+])
+def test_checkpoint_body_names_survive_export_projection(
+        tmp_path, architecture, source_unit):
+    source = tmp_path / "checkpoint"
+    source.mkdir()
+    (source / "config.json").write_text(json.dumps({
+        "model_type": "qwen3_5_moe", "architectures": [architecture],
+        "text_config": {"hidden_size": 2, "num_hidden_layers": 1,
+                        "intermediate_size": 2, "num_experts": 1},
+    }))
+    save_file({source_unit + ".weight": torch.ones(2, 2, dtype=torch.bfloat16)},
+              str(source / "model.safetensors"))
+    profile = detect_profile(source)
+    assignment = {source_unit: FMT}
+
+    result = _plan(tmp_path, profile, source, assignment)
+
+    projected = json.loads(Path(result["plan_assignment"]).read_text())
+    assert projected[source_unit] == FMT
+    assert projected["__prismaquant__"]["tessera_export_assignment"][
+        "source_precision_outside_graph"] == []
+
+
 def _vision_cache(tmp_path):
     names, experts, records, cost, roster, shapes, assignment, metadata = _control(tmp_path)
     # Replace the text dense fixture by two independent visual dense receipts;
