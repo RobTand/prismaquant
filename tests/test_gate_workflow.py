@@ -54,7 +54,19 @@ def test_gate_pin_resolution_refuses_a_failed_resolver(tmp_path):
         assert not output.exists() or not output.read_text()
 
 
-def test_gate_uses_owned_temporary_space_for_both_attempts():
+def test_gate_uses_owned_temporary_space_for_both_attempts(tmp_path):
+    import os
+    import subprocess
     workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
     for job in ('shards', 'retry-shards'):
-        assert workflow['jobs'][job].get('env', {}).get('TMPDIR') == '${{ runner.temp }}'
+        definition = workflow['jobs'][job]
+        assert 'runner.temp' not in str(definition.get('env', {}))
+        steps = definition['steps']
+        configured = next(index for index, step in enumerate(steps)
+                          if step.get('name') == 'Configure owned temporary space')
+        assert configured < next(index for index, step in enumerate(steps)
+                                 if step.get('name') == 'Run assigned gate tests')
+        exported = tmp_path / (job + '-env')
+        subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', steps[configured]['run']],
+            env={**os.environ, 'GITHUB_ENV': str(exported), 'RUNNER_TEMP': str(tmp_path)}, check=True)
+        assert exported.read_text() == 'TMPDIR=' + str(tmp_path) + '\n'
