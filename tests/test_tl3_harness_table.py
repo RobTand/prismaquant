@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -30,9 +29,7 @@ def full_match(name: str, pattern: str) -> bool:
 
 
 def python_files() -> list[str]:
-    return subprocess.check_output(
-        ["git", "ls-files", "-z", "--", "*.py"], cwd=ROOT
-    ).decode().rstrip("\0").split("\0")
+    return sorted(path.relative_to(ROOT).as_posix() for path in ROOT.rglob("*.py"))
 
 
 def test_command_is_the_pytest_module():
@@ -63,4 +60,3 @@ def test_no_production_file_is_a_test_edit():
     production = [name for name in python_files() if not name.startswith("tests/")]
     assert production
     assert [name for name in production if any(full_match(name, p) for p in patterns)] == []
-
