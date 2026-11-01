@@ -51,3 +51,32 @@ def test_inventory_reads_aggregate_scope_peak_and_repeat_outcomes(tmp_path):
     assert report['changed_outcomes'] == {
         'tests/test_sample.py::test_cost': {1: 'fail', 2: 'pass', 3: 'fail'}}
     assert report['files'] == {'tests/test_sample.py': 3}
+
+
+def test_hosted_wall_percentiles_use_completed_successful_full_gates(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    directories = []
+    for index, (seconds, conclusion) in enumerate([(100, 'success'), (200, 'success'),
+                                                  (300, 'success'), (900, 'failure')]):
+        directory = tmp_path / str(index)
+        directory.mkdir()
+        stamp = lambda offset: (start + timedelta(seconds=offset)).isoformat()
+        (directory / 'run.json').write_text(json.dumps({
+            'id': index, 'run_attempt': 1, 'head_sha': 'a' * 40,
+            'conclusion': conclusion, 'run_started_at': stamp(0)}))
+        (directory / 'jobs.json').write_text(json.dumps({'jobs': [
+            {'name': 'shard-0-a1', 'started_at': stamp(10), 'completed_at': stamp(30),
+             'conclusion': 'success', 'labels': ['ubuntu-24.04-arm'], 'steps': [
+                 {'name': 'Install CPU test environment', 'started_at': stamp(12), 'completed_at': stamp(17)},
+                 {'name': 'Run assigned gate tests', 'started_at': stamp(20), 'completed_at': stamp(29)}]},
+            {'name': 'gate', 'started_at': stamp(seconds - 5), 'completed_at': stamp(seconds),
+             'conclusion': conclusion}]}))
+        directories.append(directory)
+    report = evidence.hosted(directories, 20)
+    assert report['full_gate_wall_seconds'] == {'samples': 3, 'p50': 200, 'p90': 300}
+    assert [run['wall_seconds'] for run in report['runs']] == [100, 200, 300, 900]
+    shard = report['runs'][0]['jobs'][0]
+    assert shard['setup_seconds'] == 10
+    assert shard['test_seconds'] == 9
+    assert shard['install_seconds'] == 5
