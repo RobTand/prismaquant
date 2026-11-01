@@ -105,3 +105,11 @@ def test_model_profile_spec_selects_all_profile_references(tmp_path):
     index['tests/test_wildcard.py'] = (set(), {'**'})
     assert {'tests/test_profile.py', 'tests/test_profile_path.py'} <= selected(
         plan(root, ['prismaquant/model_profiles/specs/qwen3.json'], index=index))
+
+
+def test_nonexistent_literal_in_a_test_does_not_explain_a_repository_change(tmp_path):
+    root = project(tmp_path)
+    unknown = 'totally/unknown/place/file.xyz'
+    index = select.dependency_index(root)
+    index['tests/test_regression_example.py'] = (set(), {unknown})
+    assert selected(plan(root, [unknown], index=index)) == selected(plan(root, [], mode='full', index=index))
