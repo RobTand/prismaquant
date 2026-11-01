@@ -47,7 +47,7 @@ def test_completed_pytest_writes_a_final_verdict(tmp_path, code, verdict):
     assert '--deselect=tests/test_one.py::test_bad' in command
     assert json.loads(kwargs['env']['GATE_ASSIGNED_FILES']) == ['tests/test_one.py']
     assert command[-1] == str(tmp_path)
-    assert kwargs['env']['PRISMABUILD_TEST_TIMEOUT_S'] == '300'
+    assert '--timeout=600' in command
     assert kwargs['env']['OMP_NUM_THREADS'] == kwargs['env']['OPENBLAS_NUM_THREADS'] == '1'
 
 

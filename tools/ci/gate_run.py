@@ -149,8 +149,7 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
         record['budget'] = {'status': 'pending', 'baseline_sha': plan.get('base_sha')}
         workers = worker_count(workers, affinity=affinity)
         record['workers'] = workers
-        environment = dict(os.environ, PRISMABUILD_TEST_TIMEOUT_S='300',
-                           OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+        environment = dict(os.environ, OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                            NUMEXPR_NUM_THREADS='1', TORCHINDUCTOR_COMPILE_THREADS='1', MAX_JOBS='1',
                            CUDA_VISIBLE_DEVICES='')
         # setup-python exports loader overrides; proof capture must see the actual
