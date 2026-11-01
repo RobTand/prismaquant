@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import file_sha256hex
+from tools.ci.gate_run import gate_junit_identity
 
 
 def inventory(reports, *, action_evidence=None):
@@ -115,18 +116,21 @@ def hosted(directories, default):
             runner = runners.get(index, 'unknown')
             sums = defaultdict(float)
             for case in ET.parse(path).iter('testcase'):
-                filename = case.get('file', '')
+                try:
+                    filename, node = gate_junit_identity(case)
+                except ValueError:
+                    if any(prop.get('name') == 'gate_nodeid'
+                           for prop in case.findall('properties/property')):
+                        raise
+                    # Older reports have definition locations for imported tests.
+                    filename, node = case.get('file', ''), None
                 if not filename.endswith('.py'):
                     continue
                 elapsed = float(case.get('time', '0'))
                 if not math.isfinite(elapsed) or elapsed < 0:
                     raise ValueError('invalid JUnit timing')
                 sums[filename] += elapsed
-                classname = case.get('classname', '')
-                module = filename[:-3].replace('/', '.')
-                if classname == module or classname.startswith(module + '.'):
-                    classes = classname[len(module):].lstrip('.').replace('.', '::')
-                    node = filename + '::' + (classes + '::' if classes else '') + case.get('name', '')
+                if node is not None:
                     tests[node].append({'seconds': elapsed, 'run': metadata['id'],
                                         'attempt': metadata['run_attempt'], 'runner': runner, 'artifact': str(path.relative_to(directory))})
                     if case.find('failure') is not None or case.find('error') is not None:
