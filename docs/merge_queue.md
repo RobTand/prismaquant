@@ -9,17 +9,16 @@ through PrismaBuild; cite their action keys and results in the PR body.
 
 1. Name your branch `prismaquant-<issue>` or `prismaquant-<issue>-<word>`.
    Suffixes use lowercase letters, digits and hyphens, for example
-   `prismaquant-3180-tl3-node-7`.
+   `prismaquant-<issue>-tl3-<node>`.
 2. Reference the same issue in the PR body. A partial change uses
-   `Refs #3180.` with an open parent issue in this repository. A completed
-   issue uses a supported closing reference such as `Closes #3180`.
+   `Refs #<issue>.` with an open parent issue in this repository. A completed
+   issue uses a supported closing reference such as `Closes #<issue>`.
    The `linked issue` check verifies both the reference and branch number.
 3. Wait for `linked issue` and `pr-gate` to pass.
 
-Classic branch protection also applies. At preparation time it requires
-`linked issue` and `tests (py3.12, cpu)`. The gate rollout owner must migrate
-that legacy test requirement before this queue configuration goes live;
-Mergify injects required checks into the queue's conditions.
+Classic branch protection requires `linked issue` only. Mergify does not
+inject it into the queues; the queue conditions name `linked issue` and
+`pr-gate` themselves, and the batch draft is judged by `gate` alone.
 
 ## Queue and dequeue
 

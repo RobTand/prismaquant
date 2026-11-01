@@ -18,6 +18,12 @@
 # queue_conditions and pull_request_rules. This change reserves that work.
 # TL3's App needs an explicit command allowance because installation does not
 # grant a human collaborator's write permission.
+# Mergify does not inject classic branch protection here
+# (branch_protection_injection_mode: none). The queue conditions name
+# "linked issue" themselves, so a required check that runs tests on the PR
+# head can never hold a pull request outside the queue, and no required
+# check is demanded of the batch draft, whose mergify/merge-queue/ branch
+# and body cannot pass the issue rule. Tests are judged by "gate".
 commands_restrictions:
   queue:
     conditions:
@@ -46,9 +52,11 @@ queue_rules:
       - label = queue
       - label = release
       - -draft
+      - check-success = linked issue
       - check-success = pr-gate
     merge_conditions:
       - check-success = gate
+    branch_protection_injection_mode: none
     merge_method: merge
     batch_size: 1
     max_checks_retries: 0
@@ -58,9 +66,11 @@ queue_rules:
       - base = main
       - label = queue
       - -draft
+      - check-success = linked issue
       - check-success = pr-gate
     merge_conditions:
       - check-success = gate
+    branch_protection_injection_mode: none
     merge_method: merge
     batch_size:
       min: 1
