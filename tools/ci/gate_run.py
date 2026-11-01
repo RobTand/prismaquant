@@ -22,11 +22,19 @@ class BudgetFailure(ValueError):
 def _budget_limits(config):
     if not isinstance(config, dict) or not isinstance(config.get('slow'), dict):
         raise BudgetFailure('Test budget requires seconds and a slow map')
-    limits = [config.get('seconds'), *config['slow'].values()]
+    file_limits = config.get('file_seconds', {})
+    if not isinstance(file_limits, dict):
+        raise BudgetFailure('File budgets require a map')
+    limits = [config.get('seconds'), *config['slow'].values(), *file_limits.values()]
     if (any(isinstance(limit, bool) or not isinstance(limit, (int, float)) or
             not math.isfinite(limit) or limit <= 0 for limit in limits) or
             any(not isinstance(name, str) or not name for name in config['slow'])):
         raise BudgetFailure('Test budget limits must be finite positive seconds')
+    if (any(not isinstance(name, str) or not name.startswith('tests/') or
+            not name.endswith('.py') or '::' in name or '..' in Path(name).parts
+            for name in file_limits) or
+            any(name.split('::', 1)[0] in file_limits for name in config['slow'])):
+        raise BudgetFailure('File budgets must name test files without overlapping node exceptions')
     return config
 
 
@@ -49,7 +57,10 @@ def _budget_policy(root, base_sha):
     if (baseline.get('enforced', True) and not current.get('enforced', True) or
             current['seconds'] > baseline['seconds'] or
             not current['slow'].keys() <= baseline['slow'].keys() or
-            any(limit > baseline['slow'][name] for name, limit in current['slow'].items())):
+            any(limit > baseline['slow'][name] for name, limit in current['slow'].items()) or
+            not current.get('file_seconds', {}).keys() <= baseline.get('file_seconds', {}).keys() or
+            any(limit > baseline['file_seconds'][name]
+                for name, limit in current.get('file_seconds', {}).items())):
         raise BudgetFailure('Test budgets and the explicit slow list may not grow versus the target')
     return current
 
@@ -89,7 +100,7 @@ def gate_junit_identity(case, files=None):
 
 
 def _budget_timings(junit, files, config, collected_files=None):
-    observed, seconds = set(), {}
+    observed, seconds, file_seconds = set(), {}, {}
     for case in ET.parse(junit).iter('testcase'):
         filename, nodeid = gate_junit_identity(case, files)
         observed.add(filename)
@@ -102,13 +113,21 @@ def _budget_timings(junit, files, config, collected_files=None):
         if not math.isfinite(elapsed) or elapsed < 0:
             raise ValueError('JUnit timing must be finite nonnegative seconds: ' + nodeid)
         observed.add(filename)
-        seconds[nodeid] = seconds.get(nodeid, 0) + elapsed
+        if filename in config.get('file_seconds', {}):
+            file_seconds[filename] = file_seconds.get(filename, 0) + elapsed
+        else:
+            seconds[nodeid] = seconds.get(nodeid, 0) + elapsed
     if (observed if collected_files is None else set(collected_files)) != set(files):
         raise ValueError('JUnit timings do not cover every assigned file')
-    return [{'nodeid': nodeid, 'seconds': elapsed,
+    rows = [{'nodeid': nodeid, 'seconds': elapsed,
              'budget_seconds': config['slow'].get(nodeid, config['seconds'])}
             for nodeid, elapsed in sorted(seconds.items())
             if elapsed > config['slow'].get(nodeid, config['seconds'])]
+    rows.extend({'nodeid': filename, 'seconds': elapsed,
+                 'budget_seconds': config['file_seconds'][filename]}
+                for filename, elapsed in sorted(file_seconds.items())
+                if elapsed > config['file_seconds'][filename])
+    return rows
 
 
 def _write_budget_warnings(junit, warnings):
@@ -130,7 +149,7 @@ def _write_budget_warnings(junit, warnings):
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
         with Path(summary).open('a') as handle:
-            handle.write('\n## Per-test budget warnings\n\n' +
+            handle.write('\n## Gate time budget warnings\n\n' +
                          f'{len(messages)} warnings; complete list in junit.xml and result.json.\n\n' +
                          '\n'.join('- ' + message[:1000] for message in messages[:25]) + '\n' +
                          (f'{len(messages) - 25} more warnings in junit.xml.\n' if len(messages) > 25 else ''))
@@ -269,7 +288,7 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
             if overruns:
                 if enforced:
                     record['verdict'] = 'fail'
-                print('Per-test time budget exceeded:')
+                print('Gate time budget exceeded:')
                 for row in overruns:
                     limit = row['budget_seconds'] * BUDGET_ENFORCEMENT_TOLERANCE
                     print(f"{row['nodeid']}: {row['seconds']:.3f}s > {limit:.3f}s "

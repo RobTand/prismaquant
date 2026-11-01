@@ -69,8 +69,10 @@ def inventory(reports, *, action_evidence=None):
         'observed_nodes': len(outcomes)}
 
 
-def hosted(directories, default):
+def hosted(directories, default, *, file_budgets=()):
+    file_budgets = set(file_budgets)
     tests = defaultdict(list)
+    file_tests = defaultdict(list)
     files = defaultdict(lambda: defaultdict(list))
     runs = []
     failures = defaultdict(set)
@@ -140,16 +142,29 @@ def hosted(directories, default):
                         failures[node].add(metadata['id'])
             for filename, seconds in sums.items():
                 files[filename][runner].append(seconds)
+                file_tests[filename].append({'seconds': seconds, 'run': metadata['id'],
+                    'attempt': metadata['run_attempt'], 'runner': runner,
+                    'artifact': str(path.relative_to(directory))})
     slow = {}
     evidence = {}
     for node, values in sorted(tests.items()):
         largest = max(values, key=lambda value: value['seconds'])
-        if largest['seconds'] > default:
+        if largest['seconds'] > default and node.split('::', 1)[0] not in file_budgets:
             slow[node] = math.ceil(2 * largest['seconds'])
             evidence[node] = largest
     successful = sorted(run['wall_seconds'] for run in runs
                         if run['final_check'] == 'gate' and run['final_conclusion'] == 'success'
                         and run['wall_seconds'] is not None)
+    budget = {'seconds': default, 'slow': slow, 'evidence': evidence,
+              'hosted_runs': sorted({run['id'] for run in runs})}
+    if file_budgets:
+        if file_budgets - file_tests.keys():
+            raise ValueError('file budget has no hosted timing evidence')
+        file_evidence = {name: max(file_tests[name], key=lambda value: value['seconds'])
+                         for name in sorted(file_budgets)}
+        budget.update(file_seconds={name: math.ceil(2 * row['seconds'])
+                                    for name, row in file_evidence.items()},
+                      file_evidence=file_evidence)
     return {'schema': 'prismaquant.gate_hosted_evidence.v1', 'runs': runs,
         'full_gate_wall_seconds': {'samples': len(successful),
             'p50': statistics.median(successful) if successful else None,
@@ -159,8 +174,7 @@ def hosted(directories, default):
                       for name, values in sorted(files.items())},
         'architecture_durations': {name: {runner: statistics.median(samples) for runner, samples in sorted(values.items())}
                                    for name, values in sorted(files.items())},
-        'budget': {'seconds': default, 'slow': slow, 'evidence': evidence,
-                   'hosted_runs': sorted({run['id'] for run in runs})}}
+        'budget': budget}
 
 
 def main():
@@ -169,10 +183,13 @@ def main():
     parser.add_argument('inputs', nargs='+', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--default-seconds', type=float, default=20)
+    parser.add_argument('--file-budget', action='append', default=[],
+                        help='test file with shared fixture cost; calibrate its complete JUnit total')
     parser.add_argument('--action-evidence', type=Path, help='mapping of action keys to exported public pb_action responses')
     args = parser.parse_args()
     actions = json.loads(args.action_evidence.read_text()) if args.action_evidence else None
-    result = inventory(args.inputs, action_evidence=actions) if args.kind == 'inventory' else hosted(args.inputs, args.default_seconds)
+    result = inventory(args.inputs, action_evidence=actions) if args.kind == 'inventory' else hosted(
+        args.inputs, args.default_seconds, file_budgets=args.file_budget)
     args.output.write_text(json.dumps(result, indent=2) + '\n')
 
 
