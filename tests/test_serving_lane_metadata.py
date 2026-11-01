@@ -75,17 +75,18 @@ from test_footprint import _write_safetensors
 # The two "loads on a legal N" tests (nine cases) and the native-carrier one
 # were still GREEN at deletion --- ten of the thirteen this file still passed
 # --- which is exactly why they had to go too:
-# ``check_serving_shape`` catches ``FileNotFoundError`` and silently resolves
-# an unknown profile id to ``research``, which permits every shape.  They were
+# At deletion, ``check_serving_shape`` caught ``FileNotFoundError`` and resolved
+# an unknown profile id to ``research``, which permitted every shape. They were
 # passing on permit-all, not on a gate --- a tautology wearing a gate's
 # docstring.
 #
 # The tail of test_the_load_gates_are_declared_per_grid_from_the_family_table
 # also asserted the ladder partition
 # (``NVFP4_CB_FORMAT_NAMES | FP8_CB_FORMAT_NAMES == CB_FORMAT_NAMES``, and the
-# two disjoint).  That is still covered: tests/test_cb_layout.py pins each
-# family against the registry (``list_producer_formats("fp8_cb")`` /
-# ``("nvfp4_cb")``) and their union against ``cb_layout.CB_FORMAT_NAMES``.
+# two disjoint). Historical coverage is preserved in
+# archive/gridbook_lane_2026-09-02/tests/test_cb_layout.py, which pinned each
+# family against the retired registry and their union against
+# ``cb_layout.CB_FORMAT_NAMES``. It is not part of the active test suite.
 
 
 # ---------------------------------------------------------------------------

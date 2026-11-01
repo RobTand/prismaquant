@@ -85,3 +85,7 @@ prismaquant = [
     "tessera_runtime/reviewed_answer.json",
     "tessera_runtime/tessera_serving_runtime_pin.json",
 ]
+
+[tool.tl3.harness]
+command = ["python", "-m", "pytest"]
+test-files = ["tests/**/*.py"]

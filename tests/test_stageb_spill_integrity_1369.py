@@ -234,18 +234,40 @@ def test_transient_read_ahead_corruption_is_terminal_without_reread(tmp_path, mo
 def test_checksum_writes_run_on_existing_writer_thread(tmp_path, monkeypatch):
     import xxhash
 
-    consumer = threading.get_ident()
+    consumer = threading.current_thread()
     observed = []
+    writing = threading.local()
     real_hash = xxhash.xxh3_64_intdigest
+    real_write = spill.StageBReplaySpill._write_arena
+
+    def traced_write(session, arena):
+        assert threading.current_thread() is session._writer
+        writing.active = True
+        try:
+            return real_write(session, arena)
+        finally:
+            writing.active = False
 
     def traced_hash(payload):
-        observed.append(threading.get_ident())
-        return real_hash(payload)
+        checksum = real_hash(payload)
+        if getattr(writing, "active", False):
+            observed.append((threading.current_thread(), len(payload), checksum))
+        return checksum
 
+    monkeypatch.setattr(spill.StageBReplaySpill, "_write_arena", traced_write)
     monkeypatch.setattr(xxhash, "xxh3_64_intdigest", traced_hash)
-    with _captured(tmp_path, monkeypatch, threads=True):
+    with _captured(tmp_path, monkeypatch, threads=True) as session:
+        assert xxhash.xxh3_64_intdigest(b"unrelated checksum") == real_hash(
+            b"unrelated checksum")
         assert len(observed) == 6
-        assert all(thread != consumer for thread in observed)
+        assert all(thread is not consumer for thread, _, _ in observed)
+        assert [size for _, size, _ in observed] == [64] * 6
+        window = session._windows[0]
+        stored = [entry.checksum for entry in window.entries["a"]]
+        stored.extend(checksum for probe in window.g_checksums.values()
+                      for checksum in probe)
+        assert sorted(checksum for _, _, checksum in observed) == sorted(stored)
+        assert session.telemetry["checksum_bytes_written"] == 6 * 64
 
 
 @pytest.mark.parametrize("threads", [False, True])
