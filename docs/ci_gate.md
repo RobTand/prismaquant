@@ -31,7 +31,19 @@ existing CPU installation. Pip caches include dependency declarations, constrain
 and the Tessera pin. Native libraries get one thread each. Pytest workers are
 bounded by inherited CPU affinity and two GiB per worker after reserving one GiB
 for the runner. Work stealing shares long files across those workers, as in the
-post-merge suite; each file still belongs to exactly one hosted shard.
+post-merge suite. Ordinary files belong to one hosted shard. A file above the
+per-shard target, total estimated time divided by shard count, splits by collected
+pytest node ID. Recorded node durations drive longest-first assignment. Every
+shard collects split files and executes only its assigned nodes. A new node uses
+SHA-256 of its exact node ID modulo the shard count. Deleted nodes disappear at
+collection. Module fixtures run once per worker on each shard that executes part
+of the file.
+
+The matrix, each shard, and the aggregator recompute the same assignment from
+committed durations. Split-file collection must match across architectures.
+JUnit must match each shard's selected nodes exactly once; the aggregate proves
+unique execution across shards too. Collection differences or missing evidence
+produce exit 75. A shared file budget still applies to the sum across shards.
 
 Tests marked `own_cgroup` run after their shard's ordinary tests, without xdist,
 in a transient systemd scope containing only that pytest process. Both phases
@@ -46,7 +58,7 @@ Exit 0 is a pass, 1 is a test or budget failure, and 75 means no verdict.
 The retry planner retries only missing or invalid verdicts, once, in another job.
 A test failure survives a later pass and is never retried. Lost runners and setup
 failures can retry. Every record binds the base SHA, head SHA, population version,
-mode, and assigned files. The final check requires complete, unique coverage.
+mode, assigned files, and the node partition. The final check requires complete, unique coverage.
 Artifacts are separated by workflow attempt, shard, and execution attempt. Use
 "Re-run all jobs" to rerun a workflow. "Re-run failed jobs" cannot reuse the old
 plan artifact under the new attempt number and therefore cannot produce a verdict.
@@ -78,8 +90,11 @@ placements contribute maxima rather than successful runs alone. Slow tests keep
 measured exceptions. [Issue #3200](https://github.com/RobTand/prismaquant/issues/3200)
 owns reducing these costs; a higher measured limit does not make a test faster.
 The separate hang timeout remains 600 seconds per test. The budget file records
-its exact run evidence. Scheduling costs in `gate_durations.json` remain from
-three earlier hosted runs and do not set test budgets.
+its exact run evidence. Scheduling costs in `gate_durations.json` use 41285636094 attempts 1 and 2,
+and 41290209398 attempt 2. Each file and node uses its largest architecture
+median. This balances every shard to the slower observed runner class, so a
+full rerun can swap architectures without changing node ownership. These
+scheduling estimates do not set test budgets.
 
 After bootstrap, a budget cannot be raised by editing the JSON, adding a label,
 or rerunning a failed job. First fix the expensive test or fixture and remeasure.
@@ -118,7 +133,7 @@ python tools/ci/gate_partition.py matrix --files-from files.txt \
   --runners ubuntu-24.04,ubuntu-24.04-arm --output matrix.json
 python tools/ci/gate_partition.py shard --files-from files.txt \
   --durations tools/ci/gate_durations.json --shards 12 --index 0 \
-  --output-files assigned.txt
+  --output-files assigned.txt --output-assignment assignment.json
 ```
 
 Agents submit development tests through PrismaBuild from a committed, detached
@@ -138,7 +153,7 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
 Inside an admitted action or the hosted job, run the assignment directly:
 
 ```sh
-python tools/ci/gate_run.py --plan plan.json --files-from assigned.txt \
+python tools/ci/gate_run.py --plan plan.json --assignment assignment.json \
   --workers 4 --result result.json --junitxml junit.xml
 ```
 
@@ -212,6 +227,22 @@ verdict. Include failing attempts when assessing reliability. The target is p90
 at most ten minutes, with five minutes preferred. Measure 14 or 16 shards if the
 12-shard layout cannot meet that reliably. The PR body carries the final-head
 table, so recording a completed canary does not itself change the qualified head.
+
+Before node splitting, run 41290209398 at
+`f5c1cb933b83d6cc7ffe5f1aa3921afc903825a7` passed twice. The lead measured
+526 seconds on attempt 1 and about 628 seconds on swapped attempt 2. Shard 0
+held the legal-domain file and took 458 seconds on ARM and 576 seconds on x64.
+The retained swapped JUnit sums to 1,561.842 seconds for that file. Increasing
+the shard count could not divide it. Node splitting removes that whole-file
+constraint; issue #3200 still owns reducing the expensive tests themselves.
+
+Final-head node-split qualification is recorded in PR #3192 with exact heads,
+attempts, budgets, and node coverage. Elapsed intervals use run creation for
+attempt 1 and a UTC timestamp immediately before each full rerun request.
+Actions occasionally reports job timestamps one hour off across an hour
+boundary. The evidence reducer uses elapsed seconds modulo 3,600 and checks
+them against actual request and completion-observation times. It retains raw
+REST timestamps and never counts an incomplete attempt as a pass.
 
 Of the PB inventory's 228 pass/fail flips, 223 were in 19 files that passed all
 observed hosted executions. Likewise 75 of its 76 consistently failing nodes
