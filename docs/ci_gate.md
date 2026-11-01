@@ -17,7 +17,8 @@ Both gates use the same duration-balanced matrix. Small selections can use one
 job; a large selection fans out. The partitioner assigns the longest files to the
 least-loaded shard first. Unknown files cost the nearest-rank p90 of recorded
 file times, or one second before the first inventory. Every selected file occurs
-exactly once. Workflow reruns swap the architecture assigned to each shard.
+exactly once. Initial placements start on ARM in both modes; full workflow reruns
+swap the architecture assigned to every shard.
 
 The runners are GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`. CI uses no
 PrismaBuild admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
@@ -53,8 +54,8 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-Hosted trials 41275735452, 41277228478, 41278311643, and 41278869921 measured Python 3.12 CPU tests
-on x64 and arm64. The 93 bootstrap exceptions are twice the largest observed
+Hosted trials 41275735452, 41277228478, 41278311643, 41278869921, and 41280260494 measured Python 3.12 CPU tests
+on x64 and arm64. The 103 bootstrap exceptions are twice the largest observed
 test time, rounded up. Enforcement remains enabled. Work stealing can move
 shared-fixture setup between testcases, so the exception evidence includes both
 schedulers. Swapped reruns extend architecture coverage before handoff.
@@ -152,7 +153,7 @@ Fleet Python 3.14.4 and torch 2.11 differ from hosted Python 3.12 and torch 2.15
 A replay of the latest 20 merged PRs selected p50 87 files and p90 1,181 files.
 Eight selections exceeded 300 files. These sizes come from replaying captured
 REST file lists against the gate population, without executing those tests.
-Missing timings for ten collection-skipped files prevent wall estimates.
+Missing timings for nine collection-skipped files prevent wall estimates.
 
 Hosted 12-versus-16-shard qualification remains in progress. Failed measurement
 runs 41275735452 and 41277228478 took 927 and 748 seconds to the final verdict.
@@ -160,6 +161,13 @@ The first used file scheduling, with a 742-second longest test step. Work steali
 reduced that step to 390 seconds in the second run. Setup ranged from 57 to 86
 seconds. The second wall time includes the parser-induced retry. These failed
 runs do not contribute to successful-canary p50 or p90.
+
+The opposite-architecture calibration also passed pytest throughout but exposed
+new default-budget cases. A later x64 sample took 685 seconds on the legal-domain
+file with four workers and 822 seconds to the final failed budget verdict.
+[Issue #3200](https://github.com/RobTand/prismaquant/issues/3200) owns profiling
+and reducing that variability without weakening the independent derivation
+oracles. The gate agent does not own those production and non-gate test files.
 
 After the gate merges and its checks pass, the readiness lead removes
 `tests (py3.12, cpu)` from classic branch protection, leaving `linked issue`.
