@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-01, integration 3 refresh after integration 2, PQ #3180.
+Source parents: integration 3 `e852147953db361a4b01e962f3cdb5f08e3da399` and
+main `5e240896bf96c970ab513a04e9f2fb9ad7d7cb2b`.
+The merge retains both parents' architecture text, including their original
+provenance and evidence limits. No pipeline default, stage, format, plugin,
+serving lane or ship gate changes in this refresh.
+
 As of: 2026-11-01, integration 3 for PQ #3180.
 Source commit: `8b3fc3401ac2398112e5455263678871c9b51bf2` (five reviewed member merges).
 Source base for the checkpoint-name follow-up:
@@ -104,6 +111,37 @@ The standalone completion-receipt publisher acquires its exclusive staging
 file before entering cleanup. An occupied staging file or symlink refuses
 without removal. Successfully acquired stages retain the existing hard-link
 publication, mode 0600, fsync order and cleanup on success or later failure.
+
+As of: 2026-10-27, PRI-226 cache-name compatibility consolidation.
+Source provenance: base `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`,
+characterization parent `b8c72f601499d7372e2b4e7f3ff0b7cce20c91c8`.
+The shared name-projection module owns ordered rendered-cache name candidates
+for ProductionWeightCache and native export's weights-only fallback. Each
+consumer retains its format grammar and lookup precedence. Section 8.8.1
+records this compatibility helper separately from strict profile projection.
+
+As of: 2026-10-27, PRI-226 native export argument parsing.
+Source base: `05b62b4742793a2188abd4ed041fc4d46fd6c2c0`.
+The native export branch in `run-pipeline.sh` uses one local
+`append_export_tristate_arg` parser for `EXPORT_GPTQ` and
+`EXPORT_SCALE_SWEEP`. It appends to the existing export argument array in
+GPTQ-then-scale-sweep order. Both settings retain their `auto` default,
+exact accepted spellings and setting-specific exit-2 refusal.
+
+As of: 2026-10-27, EXL3 diagnostic replay repair, Refs #2769 and #468.
+Source commit: `3ec8fcad`.
+The opt-in `experiments.diagnose_exl3_grouped_down_replay` driver reuses the
+native scorer's authenticated loaders, capture, configuration and alignment
+owners for one sealed window. Diagnostic reports bind complete runtime/source
+identities and reject malformed worker evidence. Probe schema `/3` snapshots
+arguments before the real call and starts each replay from the original
+accumulator input, which can contain thin-expert contributions. It checks the
+nine read-only inputs separately from served-output preservation. Valid evidence
+publishes after owned native capture and replay cleanup. The ordinary scorer, qualification
+predicate, format menu, plugin pin, stage graph and shipping gates are unchanged.
+This is CPU-verifiable diagnostic engineering, not a native numerical repair.
+Historical full25 remains measured but incomparable while #468 is unresolved.
+See `docs/experiments/exl3_grouped_down_replay_driver.md`.
 
 As of: 2026-10-18, architecture audit resume, final documentation pass.
 Source commit: `dc574b5eee1ca8159761114fb5eb74f32a435e69` (final integration head; later edits are documentation only).
@@ -9790,6 +9828,17 @@ checked against the pre-change functions on a GB10 through PB action
 `e2b14fa8a90c` and matched the CPU rows. The original random-input table
 remains as historical evidence. No default, stage, format, lane, gate or byte
 changes.
+
+Token-owner integration (#2638/#3012) adds exactly one recipe to that owner:
+`token_ids_int32_sha256`, caller-ordered per-batch int32 bytes without shape/dtype
+headers or delimiters. The owner now also imports hashlib.
+`tessera_hessian.token_ids_sha256` delegates once with the original batches
+object; sampling and existing digest values are unchanged. Stage A's payload
+feed, both production-cache identities and export capture remain local
+retentions, not additional owner recipes. See
+[audit](audits/tensor_digest_token_2638_integration.md) for current-source
+admission, qualification and the one-site primitive-baseline reduction; the
+census remains historical.
 
 Re-stamped (2026-09-26, `claude/stream-head-adoptable-1403`) for **stream-head
 anchors that survive a kill** (PQ #1403, P2).
@@ -31962,6 +32011,13 @@ requirement set; the first makes the four agree on what a unit is *called*,
 the second would make them agree on which units *exist*.
 
 #### 8.8.1 The shared name-projection layer
+
+`production_cache_name_candidates` owns rendered-cache compatibility spelling
+for `ProductionWeightCache.resolve_key` and native export's fallback lookup.
+It yields the original name, an optional `.weight` removal, then an optional
+`model.language_model.` to `model.` projection of the original, deduplicated
+in order. It does not compose those rewrites or choose a format alias.
+This compatibility lookup does not replace the strict profile API below.
 
 `prismaquant/name_projection.py` (2026-08-22, `walker/name-projection`)
 lands the ONE projection between the pipeline's parameter-name namespaces

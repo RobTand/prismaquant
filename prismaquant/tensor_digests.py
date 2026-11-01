@@ -14,12 +14,16 @@ Profiles:
 - ``tensor_hash_update``: feeds ``str(tuple(shape))``, ``str(dtype)`` and the
   bytes into a running hash object (the calibration content hash).
 - ``tensor_host_bytes``: the bytes alone, for a site that frames them itself.
+- ``token_ids_int32_sha256``: caller-ordered int32 batches with no delimiter,
+  shape or dtype header (PQ #2638). The cast and per-batch fold stay here.
 
-This module imports only torch and ``digests``, so any module can own a call
+This module imports only torch, hashlib and ``digests``, so any module can own a call
 to it without widening its import surface. ``digests`` stays stdlib-only.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+import hashlib
 from typing import Any
 
 import torch
@@ -71,3 +75,11 @@ def tensor_hash_update(digest: Any, tensor: torch.Tensor) -> None:
     digest.update(str(tuple(host.shape)).encode())
     digest.update(str(host.dtype).encode())
     digest.update(_raw(host))
+
+
+def token_ids_int32_sha256(batches: Sequence[torch.Tensor]) -> str:
+    """SHA-256 over caller-ordered batches cast to int32 (PQ #2638)."""
+    digest = hashlib.sha256()
+    for batch in batches:
+        digest.update(batch.to(dtype=torch.int32).cpu().numpy().tobytes())
+    return digest.hexdigest()
