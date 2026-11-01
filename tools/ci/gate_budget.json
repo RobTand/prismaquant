@@ -12,42 +12,45 @@
     "tests/test_joint_cost_quantum_runtime.py::test_comparison_tool_on_a_synthetic_pair": 42,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[changed_config]": 43,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[hf_id]": 50,
-    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": 45,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[malformed_binding]": 47,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": 46,
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": 63,
     "tests/test_m4_frontier_expert_selection.py::test_force_format_renders_all_packed_experts_without_assignment": 51,
     "tests/test_measure_quant_cost_packed_experts.py::test_packed_experts_measure_output_mse_from_expert_activation_cache": 46,
     "tests/test_native_followup_intake_audit.py::test_real_producer_rows_pass_pipeline_and_offline_stock_intake": 47,
     "tests/test_native_receipt_table_routed.py::test_a_glm_288_owner_prices_two_ranks_end_to_end": 60,
+    "tests/test_native_receipt_table_routed.py::test_the_cli_refuses_a_forged_or_changed_rank_report": 60,
     "tests/test_native_receipt_table_routed.py::test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members": 64,
     "tests/test_native_render_levers_explicit.py::test_every_live_call_site_names_the_recipe": 49,
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[all]": 43,
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": 44,
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": 43,
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 74,
+    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
+    "tests/test_packed_qdq_dispatch_r9_audit.py::test_grouped_dispatch_refuses_missing_or_repeated_qdq[copied_gate_up_proj-batched_mm-qwen3_moe]": 43,
     "tests/test_packed_score_storage_identity_audit.py::test_packed_retained_weight_cost_prices_stored_candidate[fresh-batched-fp32]": 46,
     "tests/test_perturbed_x_cache.py::test_perturbed_cache_captures_then_quantizes_for_forward": 56,
-    "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": 67,
+    "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": 82,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[measure]": 86,
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_run_owned_cost_keeps_existing_additivity_provenance_stamp": 52,
     "tests/test_pq1588_predispatch_packet.py::test_packet_cell_state_matches_the_pinned_contract": 150,
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 281,
     "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 62,
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": 43,
-    "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 158,
-    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 111,
-    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": 52,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": 59,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": 59,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 100,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": 59,
+    "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 169,
+    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 129,
+    "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": 57,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": 60,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": 60,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 101,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": 60,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": 101,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": 92,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": 98,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[held-out-selection]": 86,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[many-additivity]": 99,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": 83,
-    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": 59,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": 99,
+    "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": 60,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[validated_frontier_kl.json]": 41,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-base-solver-seconds]": 41,
     "tests/test_run_pipeline_frontier_identity_audit.py::test_inplace_point_reuse_binds_current_assignment[flat-rewritten-metadata]": 42,
@@ -188,12 +191,19 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/13/junit.xml"
     },
-    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": {
-      "seconds": 22.113,
-      "run": 41277228478,
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[malformed_binding]": {
+      "seconds": 23.094,
+      "run": 41284744088,
       "attempt": 1,
-      "runner": "ubuntu-24.04-arm",
-      "artifact": "gate-final-1/effective/10/junit.xml"
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/5/junit.xml"
+    },
+    "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[missing_binding]": {
+      "seconds": 22.78,
+      "run": 41284744088,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/5/junit.xml"
     },
     "tests/test_lfm_aura_cache_source_attachment_audit.py::test_lfm_cost_main_binds_independent_cache_before_pricing[unchanged]": {
       "seconds": 31.068,
@@ -226,6 +236,13 @@
     "tests/test_native_receipt_table_routed.py::test_a_glm_288_owner_prices_two_ranks_end_to_end": {
       "seconds": 29.552,
       "run": 41282567022,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/5/junit.xml"
+    },
+    "tests/test_native_receipt_table_routed.py::test_the_cli_refuses_a_forged_or_changed_rank_report": {
+      "seconds": 29.846,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/5/junit.xml"
@@ -266,8 +283,8 @@
       "artifact": "gate-final-2/effective/8/junit.xml"
     },
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
-      "seconds": 36.932,
-      "run": 41278869921,
+      "seconds": 37.814,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
@@ -286,6 +303,13 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
+    "tests/test_packed_qdq_dispatch_r9_audit.py::test_grouped_dispatch_refuses_missing_or_repeated_qdq[copied_gate_up_proj-batched_mm-qwen3_moe]": {
+      "seconds": 21.332,
+      "run": 41284744088,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/5/junit.xml"
+    },
     "tests/test_packed_score_storage_identity_audit.py::test_packed_retained_weight_cost_prices_stored_candidate[fresh-batched-fp32]": {
       "seconds": 22.95,
       "run": 41278869921,
@@ -301,8 +325,8 @@
       "artifact": "gate-final-1/effective/15/junit.xml"
     },
     "tests/test_pipeline_prepriced_additivity_tail_audit.py::test_external_prepriced_input_is_not_rewritten_by_later_report[auto]": {
-      "seconds": 33.243,
-      "run": 41282567022,
+      "seconds": 40.909,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/11/junit.xml"
@@ -350,64 +374,64 @@
       "artifact": "gate-final-1/effective/7/junit.xml"
     },
     "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": {
-      "seconds": 78.596,
-      "run": 41278869921,
+      "seconds": 84.337,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": {
-      "seconds": 55.134,
-      "run": 41278869921,
+      "seconds": 64.353,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": {
-      "seconds": 25.9,
-      "run": 41278869921,
+      "seconds": 28.364,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": {
-      "seconds": 29.229,
-      "run": 41275735452,
+      "seconds": 29.845,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": {
-      "seconds": 29.251,
-      "run": 41275735452,
+      "seconds": 29.999,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
+      "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": {
-      "seconds": 49.812,
-      "run": 41282567022,
+      "seconds": 50.468,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[True]": {
-      "seconds": 29.38,
-      "run": 41282567022,
+      "seconds": 29.723,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[additivity]": {
-      "seconds": 50.085,
-      "run": 41282567022,
+      "seconds": 50.352,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[changed-additivity]": {
-      "seconds": 45.825,
-      "run": 41278311643,
+      "seconds": 48.912,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
@@ -427,15 +451,15 @@
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_request_runs_real_validator_intake[selection]": {
-      "seconds": 41.474,
-      "run": 41278869921,
+      "seconds": 49.309,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_bound_assignment_and_draw_reuses_measurement[aura_additivity_kl.json]": {
-      "seconds": 29.33,
-      "run": 41278869921,
+      "seconds": 29.569,
+      "run": 41284744088,
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/3/junit.xml"
@@ -875,7 +899,8 @@
     41278869921,
     41280260494,
     41281908452,
-    41282567022
+    41282567022,
+    41284744088
   ],
   "schema": "prismaquant.gate_budget.v1",
   "enforced": true,
