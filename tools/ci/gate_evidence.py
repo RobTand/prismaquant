@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from datetime import datetime
 import json
 import math
 from pathlib import Path
@@ -72,20 +73,41 @@ def hosted(directories, default):
     files = defaultdict(lambda: defaultdict(list))
     runs = []
     failures = defaultdict(set)
+    def gate_elapsed_seconds(start, end):
+        if not start or not end:
+            return None
+        seconds = (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+        if seconds < 0:
+            raise ValueError('hosted timestamps run backwards')
+        return seconds
     for directory in directories:
         metadata = json.loads((directory / 'run.json').read_text())
         jobs = json.loads((directory / 'jobs.json').read_text())['jobs']
+        final = next((job for job in jobs if job['name'] == 'gate' and job.get('conclusion') != 'skipped'), None)
+        if final is None:
+            final = next((job for job in jobs if job['name'] == 'pr-gate' and job.get('conclusion') != 'skipped'), {})
+        job_times = []
+        for job in jobs:
+            steps = {step['name']: step for step in job.get('steps', [])}
+            testing = steps.get('Run assigned gate tests', {})
+            install = steps.get('Install CPU test environment', {})
+            job_times.append({**{key: job.get(key) for key in
+                ('name', 'started_at', 'completed_at', 'conclusion', 'labels', 'steps')},
+                'setup_seconds': gate_elapsed_seconds(job.get('started_at'), testing.get('started_at')),
+                'test_seconds': gate_elapsed_seconds(testing.get('started_at'), testing.get('completed_at')),
+                'install_seconds': gate_elapsed_seconds(install.get('started_at'), install.get('completed_at'))})
         runs.append({'id': metadata['id'], 'attempt': metadata['run_attempt'],
                      'head_sha': metadata['head_sha'], 'conclusion': metadata['conclusion'],
-                     'jobs': [{key: job.get(key) for key in
-                         ('name', 'started_at', 'completed_at', 'conclusion', 'labels', 'steps')}
-                         for job in jobs]})
+                     'final_check': final.get('name'), 'final_conclusion': final.get('conclusion'),
+                     'wall_seconds': gate_elapsed_seconds(metadata.get('run_started_at'), final.get('completed_at')),
+                     'jobs': job_times})
         # The final artifact exports only effective attempts. Do not count retries twice.
-        effective = list(directory.glob('gate-final-*/effective/*/junit.xml'))
-        effective += list(directory.glob('gate-pr-final-*/effective/*/junit.xml'))
+        attempt = metadata['run_attempt']
+        effective = list(directory.glob(f'gate-final-{attempt}/effective/*/junit.xml'))
+        effective += list(directory.glob(f'gate-pr-final-{attempt}/effective/*/junit.xml'))
         if not effective:
-            effective = list(directory.glob('gate-result-*-a1-*/junit.xml'))
-        matrices = list(directory.glob('gate-plan-*/job-matrix.json'))
+            effective = list(directory.glob(f'gate-result-{attempt}-a1-*/junit.xml'))
+        matrices = list(directory.glob(f'gate-plan-{attempt}/job-matrix.json'))
         matrix = json.loads(matrices[0].read_text()) if matrices else {'include': []}
         runners = {row['index']: row['runner'] for row in matrix['include']}
         for path in effective:
@@ -118,7 +140,13 @@ def hosted(directories, default):
         if largest['seconds'] > default:
             slow[node] = math.ceil(2 * largest['seconds'])
             evidence[node] = largest
+    successful = sorted(run['wall_seconds'] for run in runs
+                        if run['final_check'] == 'gate' and run['final_conclusion'] == 'success'
+                        and run['wall_seconds'] is not None)
     return {'schema': 'prismaquant.gate_hosted_evidence.v1', 'runs': runs,
+        'full_gate_wall_seconds': {'samples': len(successful),
+            'p50': statistics.median(successful) if successful else None,
+            'p90': successful[math.ceil(.9 * len(successful)) - 1] if successful else None},
         'failures': {node: sorted(ids) for node, ids in sorted(failures.items())},
         'durations': {name: max(statistics.median(samples) for samples in values.values())
                       for name, values in sorted(files.items())},
