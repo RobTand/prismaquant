@@ -98,8 +98,9 @@ rather than package behaviour — the pinned recipe defaults in
 — and several tests read prismaquant's own `.py` files as source text from a
 repo-relative path. Those cannot pass from outside a checkout by construction,
 and making them pass would mean weakening them. Main and manual CI runs cover
-the full checkout suite. Pull requests use the required composed PrismaBuild
-`pb-tests` gate. The release job proves the *artifact* is complete and usable.
+the full checkout suite. PR pushes run selected tests through `pr-gate`; Mergify
+batch drafts run the full `gate`. The release job proves the *artifact* is complete
+and usable.
 (Three tests that drive repo-root `tools/` scripts now skip cleanly
 outside a checkout instead of failing collection.)
 
