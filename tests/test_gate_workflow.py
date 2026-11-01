@@ -92,3 +92,13 @@ def test_initial_placement_prefers_arm_and_full_reruns_swap(mode, attempt, first
         env={**os.environ, 'GATE_MODE': mode, 'GITHUB_RUN_ATTEMPT': str(attempt),
              'GATE_RUNNERS': workflow['env']['GATE_RUNNERS']})
     assert result.strip().split(',')[0] == first
+
+
+def test_control_jobs_include_the_shared_digest_owner_in_sparse_checkout():
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    for job in ('retry-plan', 'pr-gate', 'gate'):
+        checkout = next(step for step in workflow['jobs'][job]['steps']
+                        if step.get('uses', '').startswith('actions/checkout@'))
+        paths = checkout['with']['sparse-checkout'].splitlines()
+        assert 'tools/ci' in paths
+        assert 'prismaquant' in paths, 'node ownership uses prismaquant.digests before dependency setup'
