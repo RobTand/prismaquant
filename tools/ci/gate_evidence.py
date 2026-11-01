@@ -116,6 +116,7 @@ def hosted(directories, default, *, file_budgets=()):
         matrices = list(directory.glob(f'gate-plan-{attempt}/job-matrix.json'))
         matrix = json.loads(matrices[0].read_text()) if matrices else {'include': []}
         runners = {row['index']: row['runner'] for row in matrix['include']}
+        run_files = defaultdict(lambda: {'seconds': 0.0, 'runners': set(), 'artifacts': []})
         for path in effective:
             index = int(path.parent.name) if path.parent.name.isdigit() else int(path.parent.name.rsplit('-', 1)[1])
             runner = runners.get(index, 'unknown')
@@ -141,10 +142,15 @@ def hosted(directories, default, *, file_budgets=()):
                     if case.find('failure') is not None or case.find('error') is not None:
                         failures[node].add(metadata['id'])
             for filename, seconds in sums.items():
-                files[filename][runner].append(seconds)
-                file_tests[filename].append({'seconds': seconds, 'run': metadata['id'],
-                    'attempt': metadata['run_attempt'], 'runner': runner,
-                    'artifact': str(path.relative_to(directory))})
+                run_files[filename]['seconds'] += seconds
+                run_files[filename]['runners'].add(runner)
+                run_files[filename]['artifacts'].append(str(path.relative_to(directory)))
+        for filename, row in run_files.items():
+            runner = next(iter(row['runners'])) if len(row['runners']) == 1 else 'mixed'
+            files[filename][runner].append(row['seconds'])
+            file_tests[filename].append({'seconds': row['seconds'], 'run': metadata['id'],
+                'attempt': metadata['run_attempt'], 'runner': runner,
+                'artifact': ','.join(sorted(row['artifacts']))})
     slow = {}
     evidence = {}
     for node, values in sorted(tests.items()):
@@ -172,6 +178,9 @@ def hosted(directories, default, *, file_budgets=()):
         'failures': {node: sorted(ids) for node, ids in sorted(failures.items())},
         'durations': {name: max(statistics.median(samples) for samples in values.values())
                       for name, values in sorted(files.items())},
+        'node_durations': {node: max(statistics.median(
+            row['seconds'] for row in values if row['runner'] == runner)
+            for runner in {row['runner'] for row in values}) for node, values in sorted(tests.items())},
         'architecture_durations': {name: {runner: statistics.median(samples) for runner, samples in sorted(values.items())}
                                    for name, values in sorted(files.items())},
         'budget': budget}
