@@ -48,6 +48,7 @@ def test_completed_pytest_writes_a_final_verdict(tmp_path, code, verdict):
     assert json.loads(kwargs['env']['GATE_ASSIGNED_FILES']) == ['tests/test_one.py']
     assert command[-1] == str(tmp_path)
     assert '--timeout=600' in command
+    assert '--dist=worksteal' in command
     assert kwargs['env']['OMP_NUM_THREADS'] == kwargs['env']['OPENBLAS_NUM_THREADS'] == '1'
 
 
