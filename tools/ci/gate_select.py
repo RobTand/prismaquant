@@ -12,6 +12,8 @@ import math
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import urllib.error
+import urllib.request
 
 import sys
 
@@ -249,6 +251,64 @@ def exclusion_entries(quarantine: dict) -> list[dict]:
     return entries
 
 
+QUARANTINE_PATH = 'tools/ci/gate_quarantine.json'
+
+
+def quarantine_policy(current: dict, baseline: dict | None, changed: list[str]) -> None:
+    entries = exclusion_entries(current)
+    if baseline is None:
+        return  # Initial policy, like the budget bootstrap, is reviewed with the gate.
+    previous = {row['target']: row for row in exclusion_entries(baseline)}
+    def covered(row):
+        target = row['target']
+        old = previous.get(target, previous.get(target.split('::', 1)[0]))
+        return old is not None and row['issue'] == old['issue']
+    growth = [row['target'] for row in entries if not covered(row)]
+    isolated = QUARANTINE_PATH in changed and all(
+        path == QUARANTINE_PATH or path.startswith('docs/') and path.endswith(('.md', '.rst')) or
+        path in {'README.md', 'CHANGELOG.md'} for path in changed)
+    if growth and not isolated:
+        raise ValueError('Quarantine growth requires a quarantine-only PR with optional docs: ' + ', '.join(growth))
+
+
+def fetch_quarantine_owner(issue: int) -> dict:
+    request = urllib.request.Request(
+        f'https://api.github.com/repos/RobTand/prismaquant/issues/{issue}',
+        headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'prismaquant-gate'})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code in (404, 410):
+            raise ValueError(f'Quarantine owner #{issue} must be an open issue') from error
+        raise
+
+
+def check_quarantine_owners(entries: list[dict], *, fetch=fetch_quarantine_owner) -> None:
+    for issue in sorted({row['issue'] for row in entries}):
+        try:
+            owner = fetch(issue)
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, GitHub HTTP {error.code}') from error
+        except (OSError, TimeoutError, json.JSONDecodeError) as error:
+            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, GitHub unavailable: {error}') from error
+        if not isinstance(owner, dict) or owner.get('state') not in {'open', 'closed'}:
+            raise RuntimeError(f'Quarantine owner #{issue}: no verdict, invalid GitHub response')
+        if owner['state'] != 'open' or 'pull_request' in owner:
+            raise ValueError(f'Quarantine owner #{issue} must be an open issue')
+
+
+def base_quarantine(root: Path, base: str) -> dict | None:
+    subprocess.run(['git', 'cat-file', '-e', f'{base}^{{commit}}'], cwd=root,
+                   capture_output=True, check=True)
+    tree = subprocess.run(['git', 'ls-tree', base, '--', QUARANTINE_PATH], cwd=root,
+                          capture_output=True, text=True, check=True)
+    if not tree.stdout.strip():
+        return None
+    return json.loads(subprocess.check_output(['git', 'show', f'{base}:{QUARANTINE_PATH}'],
+                                             cwd=root, text=True))
+
+
 def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: dict,
                 index: dict | None = None, mode: str = 'selection', helper_graph: dict | None = None) -> dict:
     root = Path(root)
@@ -389,9 +449,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--summary', type=Path)
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    plan = create_plan(root, changed_files(root, args.base, args.head),
-                       durations=load_gate_json(root / 'tools/ci/gate_durations.json'),
-                       quarantine=load_gate_json(root / 'tools/ci/gate_quarantine.json'), mode=args.mode)
+    try:
+        changed = changed_files(root, args.base, args.head)
+        quarantine = load_gate_json(root / QUARANTINE_PATH)
+        quarantine_policy(quarantine, base_quarantine(root, args.base), changed)
+        check_quarantine_owners(exclusion_entries(quarantine))
+    except ValueError as error:
+        print('GATE_POLICY_FAILURE: ' + str(error), file=sys.stderr)
+        return 1
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print('NO_VERDICT: ' + str(error), file=sys.stderr)
+        return 75
+    plan = create_plan(root, changed, durations=load_gate_json(root / 'tools/ci/gate_durations.json'),
+                       quarantine=quarantine, mode=args.mode)
     plan.update(base_sha=args.base, head_sha=args.head)
     output = json.dumps(plan, indent=2) + '\n'
     if args.output:

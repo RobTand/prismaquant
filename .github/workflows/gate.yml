@@ -38,6 +38,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       shards: ${{ steps.plan.outputs.shards }}
       compatible: ${{ steps.head-contract.outputs.compatible }}
+      policy_exit: ${{ steps.plan.outputs.policy_exit }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -67,9 +68,15 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: planning infrastructure failed"; exit 75' ERR
         mkdir -p gate-artifacts
-        python tools/ci/gate_select.py --base "$GATE_BASE" --head "$GATE_HEAD" \
+        if python tools/ci/gate_select.py --base "$GATE_BASE" --head "$GATE_HEAD" \
           --mode "$GATE_MODE" --output gate-artifacts/plan.json \
-          --files-output gate-artifacts/population.txt --summary "$GITHUB_STEP_SUMMARY"
+          --files-output gate-artifacts/population.txt --summary "$GITHUB_STEP_SUMMARY"; then
+          echo 'policy_exit=0' >> "$GITHUB_OUTPUT"
+        else
+          code=$?
+          echo "policy_exit=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+        fi
         runners=$(python - <<'PYTHON'
         import json, os
         labels = json.loads(os.environ['GATE_RUNNERS'])
@@ -338,9 +345,14 @@ jobs:
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
         HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
+        POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
       run: |
         if [ "$HEAD_COMPATIBLE" = false ]; then
           echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
+          exit 1
+        fi
+        if [ "$POLICY_EXIT" = 1 ]; then
+          echo 'GATE_POLICY_FAILURE: quarantine policy rejected the plan'
           exit 1
         fi
         if [ "$PLAN_RESULT" != success ]; then
@@ -388,9 +400,14 @@ jobs:
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
         HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
+        POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
       run: |
         if [ "$HEAD_COMPATIBLE" = false ]; then
           echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
+          exit 1
+        fi
+        if [ "$POLICY_EXIT" = 1 ]; then
+          echo 'GATE_POLICY_FAILURE: quarantine policy rejected the plan'
           exit 1
         fi
         if [ "$PLAN_RESULT" != success ]; then
