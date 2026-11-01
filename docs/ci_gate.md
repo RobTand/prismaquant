@@ -1,0 +1,115 @@
+# Hosted merge gate
+
+Every PR push runs `pr-gate`. The selector follows reverse imports, relative imports,
+test helpers, and literal repository paths. A change it cannot explain selects the
+full population. Changes to gate tooling, workflows, conftest files, pytest configuration,
+constraints, dependency declarations, or the Tessera pin select the full population.
+Documentation changes can select no tests. The plan records every selected file and reason.
+
+A same-repository Mergify batch draft runs `gate` on its integrated head SHA.
+Its branch starts `mergify/merge-queue/`, and its author must be `mergify[bot]`
+with numeric ID 37929162. A same-repository PR with `gate-canary` also runs the
+full gate. Labels take effect on the next push or reopen. Label events do not
+trigger this workflow, so Mergify's queue labels cannot restart `pr-gate`.
+
+`GATE_SHARDS` in `.github/workflows/gate.yml` is the full-population shard count.
+Both gates use the same duration-balanced matrix. Small selections can use one
+job; a large selection fans out. The partitioner assigns the longest files to the
+least-loaded shard first. Unknown files cost the nearest-rank p90 of recorded
+file times, or one second before the first inventory. Every selected file occurs
+exactly once. Workflow reruns swap the architecture assigned to each shard.
+
+The runners are GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`. CI uses no
+PrismaBuild admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
+commit, and `pip install -c .github/ci-constraints.txt -e '.[test]'` preserve the
+existing CPU installation. Pip caches include dependency declarations, constraints,
+and the Tessera pin. Native libraries get one thread each. Pytest workers are
+bounded by inherited CPU affinity and two GiB per worker after reserving one GiB
+for the runner. A file stays on one worker to preserve module fixtures.
+
+Tests marked `own_cgroup` run after their shard's ordinary tests, without xdist,
+in a transient systemd scope containing only that pytest process. Both phases
+contribute JUnit evidence and the shard verdict. Optional-dependency module skips
+and complete deselections are recorded separately from incomplete collection.
+
+## Verdicts and retries
+
+Exit 0 is a pass, 1 is a test or budget failure, and 75 means no verdict.
+The retry planner retries only missing or invalid verdicts, once, in another job.
+A test failure survives a later pass and is never retried. Lost runners and setup
+failures can retry. Every record binds the base SHA, head SHA, population version,
+mode, and assigned files. The final check requires complete, unique coverage.
+Artifacts are separated by workflow attempt, shard, and execution attempt.
+
+## Time budgets and quarantine
+
+`tools/ci/gate_budget.json` defines the default and exact-node exceptions.
+A test above its limit warns through 1.5 times that limit and fails above it.
+The default, exception list, and each exception can only decrease against the PR
+base. An absent base policy permits initial setup; an unavailable base commit
+produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
+hosted run IDs. PrismaBuild inventory times do not set hosted limits.
+
+Budget enforcement is disabled during the initial hosted measurements. Qualification
+must record both architectures before enabling it. The hang timeout remains 600
+seconds per test while measuring. No measured exception is claimed yet.
+
+`tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
+At main `8d72e303e2f070925077ce9e072b254df3856909`, the legacy list has 54 active
+entries. Each now names an open owning issue and its inherited failure reason.
+The gate ignores whole-file entries before import and deselects node entries.
+Quarantine owners reproduce and repair the failures, then remove their entries.
+The post-merge full suite uses the same quarantine.
+
+## Reproduce a shard
+
+Plan and inspect the files without executing tests:
+
+```sh
+python tools/ci/gate_select.py --base "$BASE_SHA" --head "$HEAD_SHA" --mode full \
+  --output plan.json --files-output files.txt
+python tools/ci/gate_partition.py matrix --files-from files.txt \
+  --durations tools/ci/gate_durations.json --shards 12 \
+  --runners ubuntu-24.04,ubuntu-24.04-arm --output matrix.json
+python tools/ci/gate_partition.py shard --files-from files.txt \
+  --durations tools/ci/gate_durations.json --shards 12 --index 0 \
+  --output-files assigned.txt
+```
+
+Agents submit development tests through PrismaBuild from a committed, detached
+worktree, at priority -10. The interpreter must match `tools/resolve_tessera_dev_pin.py`.
+For example, submit the gate contracts with the published client:
+
+```sh
+python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
+  --checkout "$CLEAN_WORKTREE" --python "$PINNED_PYTHON" \
+  --shards 6 --workers-per-shard 1 --threads-per-shard 1 \
+  --cpus-per-shard 1 --mem-gb 2 --priority -10 \
+  --json "$REPORT" tests/test_gate_actions.py tests/test_gate_budget.py \
+  tests/test_gate_partition.py tests/test_gate_run.py tests/test_gate_select.py \
+  tests/test_gate_workflow.py
+```
+
+Inside an admitted action or the hosted job, run the assignment directly:
+
+```sh
+python tools/ci/gate_run.py --plan plan.json --files-from assigned.txt \
+  --workers 4 --result result.json --junitxml junit.xml
+```
+
+Check the terminal record, logs, and CAS receipt. Failed actions normally have
+terminal evidence without a success receipt. A submission acknowledgement is not
+a pass. Six fleet-data files require a declared manifest and are recorded as
+excluded from the undeclared-data development inventory; CUDA bodies remain skipped.
+
+## Qualification measurements
+
+The fixed-main PrismaBuild inventory and hosted 12-versus-16-shard trials are in
+progress. There is no p50, p90, architecture qualification, or budget-enforcement
+claim until the observed runs are recorded here.
+
+After the gate merges and its checks pass, the readiness lead removes
+`tests (py3.12, cpu)` from classic branch protection, leaving `linked issue`.
+The tests job retains its name and runs on main pushes and manual dispatches.
+The Mergify queue requires `pr-gate` to queue and the integrated `gate` to merge.
+The `import surface` and `boundary allowlists only shrink` jobs remain in CI.
