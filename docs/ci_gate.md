@@ -69,8 +69,8 @@ worker crash reports, remain final failures. There is no automatic test retry.
 
 `tools/ci/gate_budget.json` defines the default and exact-node exceptions.
 A test above its limit warns through 1.5 times that limit and fails above it.
-Three files have measured `file_seconds` exceptions: the duplication baseline,
-`tessera_legal_domain`, and `quality_prefill_dry_run`. Their module fixtures or
+Four files have measured `file_seconds` exceptions: the duplication baseline,
+`tessera_legal_domain`, `quality_prefill_dry_run`, and `tessera_campaign`. Their module fixtures or
 cached derivations charge setup to whichever test runs first on a worker. Each
 file limit covers the sum of all JUnit setup, call, and teardown durations across
 all shards, with the same 1.5 tolerance. The hosted maximum and source attempt
@@ -139,9 +139,9 @@ python tools/ci/gate_select.py --base "$BASE_SHA" --head "$HEAD_SHA" --mode full
   --output plan.json --files-output files.txt
 python tools/ci/gate_partition.py matrix --files-from files.txt \
   --durations tools/ci/gate_durations.json --shards 12 \
-  --runners ubuntu-24.04,ubuntu-24.04-arm --output matrix.json
+  --runners ubuntu-24.04-arm,ubuntu-24.04 --output matrix.json
 python tools/ci/gate_partition.py shard --files-from files.txt \
-  --durations tools/ci/gate_durations.json --shards 12 --index 0 \
+  --durations tools/ci/gate_durations.json --shards 12 --matrix matrix.json --index 0 \
   --output-files assigned.txt --output-assignment assignment.json
 ```
 
@@ -153,10 +153,10 @@ For example, submit the gate contracts with the published client:
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --checkout "$CLEAN_WORKTREE" --python "$PINNED_PYTHON" \
   --shards 6 --workers-per-shard 1 --threads-per-shard 1 \
-  --cpus-per-shard 1 --mem-gb 2 --priority -10 \
+  --cpus-per-shard 1 --mem-gb 1 --priority -10 \
   --json "$REPORT" tests/test_gate_actions.py tests/test_gate_budget.py \
   tests/test_gate_partition.py tests/test_gate_run.py tests/test_gate_select.py \
-  tests/test_gate_workflow.py
+  tests/test_gate_workflow.py tests/test_gate_node_partition.py tests/test_gate_evidence.py
 ```
 
 Inside an admitted action or the hosted job, run the assignment directly:
