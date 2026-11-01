@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Token digest owner integration (#2638/#3012)
+
+- Add exactly one tensor-owner recipe, `token_ids_int32_sha256`, and route
+  `tessera_hessian.token_ids_sha256` through it once with the original batches.
+  Caller-ordered, unframed int32 bytes and existing digest values are preserved.
+- Admit the additive owner source through its current integration pin, preserving
+  historical pins and guarded-read retention contracts. Remove only the token
+  consumer's primitive-baseline scope (277 to 276 sites); leave other local
+  retentions and census evidence unchanged. Qualification and limitations are
+  recorded in `docs/audits/tensor_digest_token_2638_integration.md`.
+
 ### Added
 - External quantum completions retain original descriptors without base64 bytes (#2625).
   The shared reader enforces explicit limits on local reads, memo hits, and staged reads.
