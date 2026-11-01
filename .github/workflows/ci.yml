@@ -144,7 +144,8 @@ jobs:
           # Charged-root fixtures intentionally refuse container overlay /tmp.
           # Use this job's owned runner workspace without relaxing that guard.
           TMPDIR: ${{ runner.temp }}
-          PYTHONPATH: .
+          # tools/ci holds the gate's collection plugin and its sibling modules.
+          PYTHONPATH: .:tools/ci
           CUDA_VISIBLE_DEVICES: ""
           OMP_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
@@ -171,7 +172,7 @@ jobs:
           # 300 s limit on 2026-10-28. 600 s keeps ~2x over the worst (#3140).
           python -m pytest -c pytest.ini tests/ -q --timeout=600 \
             -m "not own_cgroup" \
-            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider -p tools.ci.gate_collect \
+            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider -p gate_collect \
             "${known[@]}"
 
       # Tests with the own_cgroup mark hold this process's cgroup readings to
@@ -188,11 +189,11 @@ jobs:
           mapfile -t known < "$RUNNER_TEMP/known-failure-args"
           sudo -n systemd-run --scope --quiet -- \
             setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
-            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
+            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=.:tools/ci CUDA_VISIBLE_DEVICES= \
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
-              -q --timeout=300 -ra -p no:cacheprovider -p tools.ci.gate_collect "${known[@]}"
+              -q --timeout=300 -ra -p no:cacheprovider -p gate_collect "${known[@]}"
 
   # The boundary allowlists only shrink (decoupling step 0, #1534). The
   # tests hold each list equal to the code; this job refuses a pull request
