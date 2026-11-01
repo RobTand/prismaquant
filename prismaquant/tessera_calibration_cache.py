@@ -899,6 +899,35 @@ class CaptureSourceAuthentication:
         seal_check('capture source pathname stat', expected, pathname, where=name,
             refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
+    def _verify_held_content(self, name, state):
+        """Reread held bytes once and refuse on digest mismatch (PQ #2010).
+
+        Only the owner close calls this, once per file, so the extra bytes
+        read are bounded by the admission bytes whatever the lease count.
+        Lease exits and JSON reads keep the cheap stat fence only. The
+        admission digest comes from the read that consumes the file
+        (:meth:`_authenticate`), so no separate read happens at admission.
+        The close reread runs on the CPU caller thread, off the GPU hot
+        path. It checks bytes against their own digest, a correctness
+        check. Only ``fresh_descriptor_sha256`` rows verify: adopted and
+        recorded rows keep their zero-read proof optimization and refuse
+        by stat. The reread keeps the owner's resource guard and configured
+        blockwise page release, including files released during traversal:
+        no consumer needs these pages again. The close runs its stat fence
+        before this loop.
+        """
+        if self._original is not None:
+            return
+        if state.get('sha256') is None:
+            return
+        if state.get('sha256_source') != 'fresh_descriptor_sha256':
+            return
+        with state['lock']:
+            observed = sha256(self.root/name, file_descriptor=state['fd'],
+                resource_check=self.resource_check, release_read_pages=self.release_read_pages)
+            if observed != state['sha256']:
+                raise RuntimeError(f'authenticated source changed during consumption: {name}')
+
     def require_unchanged(self):
         with self._lock:
             self._require_open()
@@ -1319,14 +1348,16 @@ class CaptureSourceAuthentication:
     def _finish_close_locked(self):
         try:
             self.require_unchanged()
+            for name, state in self._files.items():
+                self._verify_held_content(name, state)
         finally:
             self._closed = True
-            for name, state in self._files.items():
-                if (self.is_recording and self.release_read_pages
-                        and name not in self._released):
-                    # The bounded page policy's last word: nothing this
-                    # owner retained outlives it. Advice only, so a
-                    # failure to advise never leaks a descriptor.
+            for state in self._files.values():
+                if self.release_read_pages:
+                    # The terminal reread can reload previously released
+                    # pages. Cover every held file (and partial hash on an
+                    # exceptional exit), including its trailing partial page.
+                    # Advice only, so a failure never leaks a descriptor.
                     try:
                         os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
                     except OSError:

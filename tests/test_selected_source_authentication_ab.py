@@ -89,8 +89,14 @@ def test_pair_real_owner_readers_full_identity_and_payload_parity(pair_source,tm
     full = [r for r in recorder.rows if r['arm']=='full' and r['name'].endswith('.safetensors')]
     selected = [r for r in recorder.rows if r['arm']=='selected' and r['name'].endswith('.safetensors')]
     assert sorted(r['name'] for r in full)==['head.safetensors','selected.safetensors','unused.safetensors']
-    assert sorted(r['name'] for r in selected)==['head.safetensors','selected.safetensors']
+    # Selected payloads are hashed at admission and reread once at terminal
+    # close on the held descriptors; the unused shard is still never hashed.
+    names = ['head.safetensors','selected.safetensors']
+    assert sorted(r['name'] for r in selected)==sorted(names*2)
     assert all(r['held_fd'] is not None for r in selected)
+    receipt = after[1]['source_authentication']
+    assert [r['name'] for r in receipt['verified_files'] if r['name'].endswith('.safetensors')]==names
+    assert receipt['payload_bytes_hashed']==sum((f.root/name).stat().st_size for name in names)
     rows = [json.loads(line) for line in (tmp_path/'source-events.jsonl').read_text().splitlines()]
     consumed=[r for r in rows if r['arm']=='selected' and r['operation'].startswith('payload_')]
     assert consumed and all(r['held_fd_alias'] for r in consumed)

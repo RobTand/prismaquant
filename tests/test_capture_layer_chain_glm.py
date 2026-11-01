@@ -7,6 +7,7 @@ CLI, the pinned Tessera producer.
 import json
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -272,9 +273,10 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
             '--capture-chain', 'quantum', '--capture-layer-range', f'{start}:{stop}']) == 0
         consumed = {"model-head.safetensors",
                     *(f"model-layer-{layer:03d}.safetensors" for layer in range(start, stop))}
-        # Each file the quantum reads is hashed once, by that read; nothing else is.
+        # Fresh files are hashed by admission and once at owner close (#2010).
         assert {name for name in hashed if name.endswith('.safetensors')} == consumed
-        assert set(hashed) <= roster and len(hashed) == len(set(hashed))
+        assert set(hashed) <= roster
+        assert set(Counter(hashed).values()) == {2}
         fragment = json.loads(chain.fragment_path(root, start, stop).read_text())
         receipt = fragment["source_authentication"]
         assert receipt["schema"] == cache.RECORDING_RECEIPT_SCHEMA
@@ -295,8 +297,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     hashed.clear()
     assert campaign.main([*chained, '--cache-dir', str(tmp_path / 'join-cache'),
                           '--capture-chain', 'join']) == 0
-    # The join hashes only what no quantum read (the vision tower here), once.
-    assert sorted(hashed) == sorted(roster - read_by_quanta)
+    # The join admits and closes only files no quantum read, including vision.
+    assert sorted(hashed) == sorted(list(roster - read_by_quanta) * 2)
     assert "model-visual.safetensors" in hashed
     record = json.loads(chain.join_path(root).read_text())
     assert record["retired_boundary_entries"] == passed
