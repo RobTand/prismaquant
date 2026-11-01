@@ -87,3 +87,17 @@ def test_quarantine_requires_a_specific_owner(tmp_path, issue):
 
 def test_docs_only_can_select_nothing(tmp_path):
     assert selected(plan(project(tmp_path), ['docs/guide.md'])) == set()
+
+
+def test_bare_wildcard_does_not_explain_an_unknown_file(tmp_path):
+    root = project(tmp_path)
+    (root / 'tests/test_wildcard.py').write_text('from pathlib import Path\np = Path("**")\n')
+    assert selected(plan(root, ['totally/unknown/place/file.xyz'])) == selected(plan(root, [], mode='full'))
+
+
+def test_model_profile_spec_selects_all_profile_references(tmp_path):
+    root = project(tmp_path)
+    (root / 'tests/test_profile.py').write_text('from prismaquant.model_profiles import registry\n')
+    (root / 'tests/test_profile_path.py').write_text('from pathlib import Path\np = Path("prismaquant/model_profiles")\n')
+    assert {'tests/test_profile.py', 'tests/test_profile_path.py'} <= selected(
+        plan(root, ['prismaquant/model_profiles/specs/qwen3.json']))
