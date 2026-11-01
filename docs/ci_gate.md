@@ -57,15 +57,21 @@ worker crash reports, remain final failures. There is no automatic test retry.
 
 `tools/ci/gate_budget.json` defines the default and exact-node exceptions.
 A test above its limit warns through 1.5 times that limit and fails above it.
-The default, exception list, and each exception can only decrease against the PR
+The duplication baseline has a measured `file_seconds` exception: its module
+fixture scans the repository once per worker, and pytest charges that shared
+setup to whichever test runs first. Its file limit covers the sum of every
+JUnit setup, call, and teardown duration in that file, with the same 1.5
+tolerance. The hosted maximum and source run remain in `file_evidence`.
+It has no overlapping node exceptions. All other tests retain per-test limits.
+The default, node/file exception lists, and each exception can only decrease against the PR
 base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial policy uses eleven calibration attempts: 41275735452/1,
+The initial policy uses twelve calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
-41281908452/1, 41282567022/1, 41284744088/1, and 41285636094/1 and /2. All architecture-swapped attempts and
-successful heads after the first review contribute to its 116 exceptions.
+41281908452/1, 41282567022/1, 41284744088/1, 41285636094/1 and /2, and 41287142037/1. All architecture-swapped attempts and
+successful heads after the first review contribute to 118 node exceptions and one file exception.
 The native-import predecessor regression measured 36.245 seconds on x64 and keeps an exact 73-second exception. It retains total JUnit setup, call, and teardown time. Fixture setup can move
 between the first tests on xdist workers, so both architectures and swapped
 placements contribute maxima rather than successful runs alone. Slow tests keep
@@ -108,10 +114,10 @@ Plan and inspect the files without executing tests:
 python tools/ci/gate_select.py --base "$BASE_SHA" --head "$HEAD_SHA" --mode full \
   --output plan.json --files-output files.txt
 python tools/ci/gate_partition.py matrix --files-from files.txt \
-  --durations tools/ci/gate_durations.json --shards 16 \
+  --durations tools/ci/gate_durations.json --shards 12 \
   --runners ubuntu-24.04,ubuntu-24.04-arm --output matrix.json
 python tools/ci/gate_partition.py shard --files-from files.txt \
-  --durations tools/ci/gate_durations.json --shards 16 --index 0 \
+  --durations tools/ci/gate_durations.json --shards 12 --index 0 \
   --output-files assigned.txt
 ```
 
@@ -186,6 +192,11 @@ is still needed before making stronger accuracy claims.
 
 Calibration history includes successful and failed runs across different heads
 and layouts. Those runs set initial budgets and are not final-head qualification.
+The first repaired 16-shard trial, run 41287142037/1, took 511 seconds and
+failed only the shared-fixture budget attribution described above. The matching
+12-shard attempt took 514 seconds; both were limited by one legal-domain file
+with the same four workers. That is no demonstrated speed advantage for 16,
+so this configuration retains 12 shards and leaves more capacity for other gates.
 The earlier successful 16-shard sample was 523 seconds and a 12-shard sample was
 506 seconds, both measured from workflow start. A swapped 12-shard sample took
 822 seconds and failed its budget verdict. These samples do not establish a

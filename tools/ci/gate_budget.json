@@ -2,10 +2,8 @@
   "seconds": 20,
   "slow": {
     "tests/test_aqua_activation_cost.py::test_price_activation_only_follows_the_explicit_predicate[NVFP4-True]": 41,
-    "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": 44,
+    "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": 47,
     "tests/test_col_weights_render_identity.py::test_col_weights_is_bit_identical_for_non_weighted_formats[MXFP4]": 43,
-    "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": 140,
-    "tests/test_duplication_baseline.py::test_primitive_digest_sites_only_shrink": 124,
     "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": 153,
     "tests/test_fused_fold_enumeration_2287.py::test_dense_gate_up_refuses_in_complete_combination_mode": 197,
     "tests/test_incremental_measure_quant_cost.py::TestIncrementalMeasureQuantCost::test_batched_cost_matches_unbatched_for_grouped_linears": 41,
@@ -27,6 +25,7 @@
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": 43,
     "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
+    "tests/test_packed_expert_cross_domain_gate.py::test_default_path_keeps_in_domain_holdout": 42,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
     "tests/test_packed_grouped_qdq_audit.py::test_real_hf_row_local_qdq_keeps_grouped_boundary[batched_mm-qwen3_moe]": 46,
     "tests/test_packed_qdq_dispatch_r9_audit.py::test_grouped_dispatch_refuses_missing_or_repeated_qdq[copied_gate_up_proj-batched_mm-qwen3_moe]": 43,
@@ -43,6 +42,7 @@
     "tests/test_quality_prefill_dry_run.py::test_one_rate_domain_class_and_the_payload_still_joins_through_it": 169,
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_BF16_K1]": 129,
     "tests/test_quality_prefill_dry_run.py::test_the_reported_dry_run_row_is_what_the_code_produces[TESSERA_E4M3_K1]": 57,
+    "tests/test_resident_packed_stripe_scope_audit.py::test_resident_format_menu_include_selects_one_packed_projection[False]": 43,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": 61,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[validated-surrogate]": 61,
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_remeasures_old_single_assignment[False]": 101,
@@ -61,10 +61,12 @@
     "tests/test_sample_parallel_artifacts.py::test_the_sample_parallel_worker_entry_refuses_the_retired_mode": 41,
     "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": 41,
     "tests/test_served_activation_contract.py::test_stock_nvfp4_hook_keeps_its_screen_default_and_opt_in": 45,
-    "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": 43,
+    "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": 44,
     "tests/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": 73,
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": 48,
     "tests/test_streamed_cost_checkpoints.py::test_production_anchor_resolves_raw_named_expert_activation_cache": 47,
+    "tests/test_striped_render_row_identity.py::test_the_reservoir_is_actually_selecting": 44,
+    "tests/test_tessera_campaign.py::test_e2m1_costs_price_the_served_static_ue4m3_contract": 42,
     "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": 59,
     "tests/test_tessera_campaign.py::test_measured_and_interpolated_rows_are_told_apart": 60,
     "tests/test_tessera_campaign.py::test_the_priced_scale_travels_into_the_cost_rows": 50,
@@ -127,11 +129,11 @@
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_bit_exact_cost_pricing.py::test_registry_act_bits_declaration_matches_activation_callable": {
-      "seconds": 21.969,
-      "run": 41275735452,
+      "seconds": 23.174,
+      "run": 41287142037,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/5/junit.xml"
+      "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_col_weights_render_identity.py::test_col_weights_is_bit_identical_for_non_weighted_formats[MXFP4]": {
       "seconds": 21.054,
@@ -139,20 +141,6 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/11/junit.xml"
-    },
-    "tests/test_duplication_baseline.py::test_near_duplicate_pairs_only_shrink": {
-      "seconds": 69.63,
-      "run": 41278869921,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/7/junit.xml"
-    },
-    "tests/test_duplication_baseline.py::test_primitive_digest_sites_only_shrink": {
-      "seconds": 61.507,
-      "run": 41277228478,
-      "attempt": 1,
-      "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/5/junit.xml"
     },
     "tests/test_exact_mckp.py::test_identity_with_the_unbounded_runtime_solver_on_a_glm53_prefix[20-edge-0.5]": {
       "seconds": 76.154,
@@ -301,6 +289,13 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
     },
+    "tests/test_packed_expert_cross_domain_gate.py::test_default_path_keeps_in_domain_holdout": {
+      "seconds": 20.608,
+      "run": 41287142037,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/7/junit.xml"
+    },
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": {
       "seconds": 26.026,
       "run": 41275735452,
@@ -412,6 +407,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
+    },
+    "tests/test_resident_packed_stripe_scope_audit.py::test_resident_format_menu_include_selects_one_packed_projection[False]": {
+      "seconds": 21.335,
+      "run": 41287142037,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/11/junit.xml"
     },
     "tests/test_run_pipeline_additivity_identity_audit.py::test_additivity_does_not_reuse_old_frontier_in_surrogate_run[surrogate]": {
       "seconds": 30.407,
@@ -540,11 +542,11 @@
       "artifact": "gate-final-2/effective/10/junit.xml"
     },
     "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": {
-      "seconds": 21.447,
-      "run": 41281908452,
+      "seconds": 21.592,
+      "run": 41287142037,
       "attempt": 1,
       "runner": "ubuntu-24.04",
-      "artifact": "gate-final-1/effective/1/junit.xml"
+      "artifact": "gate-final-1/effective/9/junit.xml"
     },
     "tests/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": {
       "seconds": 36.245,
@@ -566,6 +568,20 @@
       "attempt": 2,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-2/effective/8/junit.xml"
+    },
+    "tests/test_striped_render_row_identity.py::test_the_reservoir_is_actually_selecting": {
+      "seconds": 21.871,
+      "run": 41287142037,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/5/junit.xml"
+    },
+    "tests/test_tessera_campaign.py::test_e2m1_costs_price_the_served_static_ue4m3_contract": {
+      "seconds": 20.926,
+      "run": 41287142037,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/13/junit.xml"
     },
     "tests/test_tessera_campaign.py::test_every_cost_row_carries_the_captures_digest": {
       "seconds": 29.452,
@@ -941,9 +957,22 @@
     41281908452,
     41282567022,
     41284744088,
-    41285636094
+    41285636094,
+    41287142037
   ],
   "schema": "prismaquant.gate_budget.v1",
   "enforced": true,
-  "cost_owner_issue": 3200
+  "cost_owner_issue": 3200,
+  "file_seconds": {
+    "tests/test_duplication_baseline.py": 308
+  },
+  "file_evidence": {
+    "tests/test_duplication_baseline.py": {
+      "seconds": 153.945,
+      "run": 41287142037,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-final-1/effective/15/junit.xml"
+    }
+  }
 }
