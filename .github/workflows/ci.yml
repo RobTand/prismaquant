@@ -1,4 +1,4 @@
-# PrismaQuant CI — full hosted suite on main, manual runs and ready PRs.
+# PrismaQuant CI — full hosted suite on main and manual runs; PR import and boundary checks.
 #
 # WHY THIS EXISTS: five substantial pull requests (#13-#17) sat open for eleven
 # days with nothing to run them, while `main` itself carried three failing
@@ -19,25 +19,25 @@
 # raise it here again rather than retrying. Re-measured 2026-10-28 from the
 # main runs of 2026-10-22 to 2026-10-26: ~22,500 tests, pytest took 29 to 56
 # min and the worst job 58 min against that 60 min limit. The job now also
-# gates pull requests in the Mergify queue (#3140), where a timeout dequeues
-# the pull request, so the limit is 90 min, inside the queue's 2 hour
-# `checks_timeout`. The skips are the CUDA-gated
+# historically gated pull requests in the Mergify queue (#3140), where a
+# timeout dequeued the pull request. The post-merge suite retains that 90 min
+# limit. PRs and batches now use the separate gate workflow. The skips are the CUDA-gated
 # tests. GitHub-hosted runners have no GPU, so
 # kernel numerics, real-checkpoint streaming and anything touching a served
 # artifact remain a manual gate on the Spark — this is a correctness net for
 # the allocator/solver/footprint/profile logic, which is where the PRs live and
 # where a silent regression is hardest to notice.
 #
-# Action pins are exact patch tags, not floating major refs: a re-pointable ref
+# Action pins are immutable commit SHAs: a re-pointable ref
 # is a supply-chain surface, and CI runs on every contributor's branch.
 
 name: CI
 
-on:
+'on':
   push:
     branches: [main]
   pull_request:
-    # ready_for_review starts the full suite when a draft is marked ready.
+    # ready_for_review starts the PR import and boundary checks.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
@@ -49,8 +49,7 @@ on:
 # group of their own (the run id), because a shared group without
 # cancel-in-progress still keeps only ONE pending run and silently cancels the
 # others queued behind it; a unique group is what gives every merge a complete
-# run. Making `tests (py3.12, cpu)` a required check on main is the other half
-# of #962 and is a branch-protection setting, not something this file can do.
+# run. The separate gate workflow supplies pre-merge test verdicts.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -59,15 +58,9 @@ permissions:
   contents: read
 
 jobs:
-  # Every main tree, manual dispatch and ready PR runs the complete Python
-  # 3.12 CPU suite. `tests (py3.12, cpu)` is the required pre-merge check in
-  # place of the PrismaBuild pb-tests status, which nothing posts any more
-  # (#3140). Mergify's in-place queue update pushes the integrated head to the
-  # PR, so this job tests exactly what merges. Drafts skip it until marked
-  # ready. Tests that already fail on main on hosted runners are excluded by
-  # .github/hosted-known-failures.txt, so the check fails on new failures only.
+  # Post-merge full CPU suite. The hosted merge gate covers PRs and batches.
   tests:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'pull_request'
     name: tests (py${{ matrix.python }}, cpu)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -87,9 +80,9 @@ jobs:
         # Widen only when a version is actually exercised somewhere.
         python: ["3.12"]
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -110,7 +103,7 @@ jobs:
       # cross-repo credential the issue deliberately avoided, and it would not
       # reach fork PRs anyway.
       - name: Check out pinned Tessera
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: RobTand/tessera
           ref: ${{ steps.tessera-pin.outputs.commit }}
@@ -133,19 +126,15 @@ jobs:
         # The constraints pin what CI tests to what the campaign runs (#1419).
         run: python -m pip install -c .github/ci-constraints.txt -e '.[test]'
 
-      # One pytest argument per line for both test steps below: an entry with
-      # `::` is deselected, and a bare path is a module that fails at import,
-      # so it is ignored before collection.
-      - name: Exclude known hosted failures
+      - name: Exclude owned hosted quarantine entries
         run: |
-          while IFS= read -r entry; do
-            case "$entry" in
-              ''|'#'*) ;;
-              *::*) printf -- '--deselect=%s\n' "$entry" ;;
-              *) printf -- '--ignore=%s\n' "$entry" ;;
-            esac
-          done < .github/hosted-known-failures.txt > "$RUNNER_TEMP/known-failure-args"
-          echo "excluding $(wc -l < "$RUNNER_TEMP/known-failure-args") known hosted failures"
+          python - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          entries = json.loads(Path('tools/ci/gate_quarantine.json').read_text())['entries']
+          Path(os.environ['RUNNER_TEMP'], 'known-failure-args').write_text(''.join(
+              '--ignore=' + row['target'] + '\n' for row in entries if '::' not in row['target']))
+          PYTHON
 
       # CUDA_VISIBLE_DEVICES is belt-and-braces: hosted runners have no GPU, but
       # this makes a local reproduction of a CI failure one env var away, and
@@ -155,7 +144,8 @@ jobs:
           # Charged-root fixtures intentionally refuse container overlay /tmp.
           # Use this job's owned runner workspace without relaxing that guard.
           TMPDIR: ${{ runner.temp }}
-          PYTHONPATH: .
+          # tools/ci holds the gate's collection plugin and its sibling modules.
+          PYTHONPATH: .:tools/ci
           CUDA_VISIBLE_DEVICES: ""
           OMP_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
@@ -182,7 +172,7 @@ jobs:
           # 300 s limit on 2026-10-28. 600 s keeps ~2x over the worst (#3140).
           python -m pytest -c pytest.ini tests/ -q --timeout=600 \
             -m "not own_cgroup" \
-            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider \
+            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider -p gate_collect \
             "${known[@]}"
 
       # Tests with the own_cgroup mark hold this process's cgroup readings to
@@ -199,11 +189,11 @@ jobs:
           mapfile -t known < "$RUNNER_TEMP/known-failure-args"
           sudo -n systemd-run --scope --quiet -- \
             setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
-            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
+            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=.:tools/ci CUDA_VISIBLE_DEVICES= \
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
-              -q --timeout=300 -ra -p no:cacheprovider "${known[@]}"
+              -q --timeout=300 -ra -p no:cacheprovider -p gate_collect "${known[@]}"
 
   # The boundary allowlists only shrink (decoupling step 0, #1534). The
   # tests hold each list equal to the code; this job refuses a pull request
@@ -215,7 +205,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
       - name: Refuse lines added to a shrink-only allowlist
@@ -244,8 +234,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
           cache: pip
@@ -255,7 +245,7 @@ jobs:
           tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
           printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
       - name: Check out pinned Tessera
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: RobTand/tessera
           ref: ${{ steps.tessera-pin.outputs.commit }}
