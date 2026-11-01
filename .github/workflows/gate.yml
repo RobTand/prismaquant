@@ -13,7 +13,7 @@ env:
   # Test execution destinations. Control jobs bootstrap on the hosted x64 image.
   GATE_SHARDS: '12'
   GATE_PR_SINGLE_SECONDS: '90'
-  GATE_RUNNERS: '["ubuntu-24.04","ubuntu-24.04-arm"]'
+  GATE_RUNNERS: '["ubuntu-24.04-arm","ubuntu-24.04"]'
   PYTHONPATH: .
   OMP_NUM_THREADS: '1'
   MKL_NUM_THREADS: '1'
@@ -73,7 +73,7 @@ jobs:
         runners=$(python - <<'PYTHON'
         import json, os
         labels = json.loads(os.environ['GATE_RUNNERS'])
-        if os.environ['GATE_MODE'] == 'full' and int(os.environ['GITHUB_RUN_ATTEMPT']) % 2:
+        if os.environ['GATE_MODE'] == 'full' and int(os.environ['GITHUB_RUN_ATTEMPT']) % 2 == 0:
             labels.reverse()
         print(','.join(labels))
         PYTHON
