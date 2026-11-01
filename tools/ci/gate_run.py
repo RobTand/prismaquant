@@ -46,7 +46,8 @@ def _budget_policy(root, base_sha):
             blob = subprocess.run(['git', 'show', f'{base_sha}:{path}'], cwd=root,
                                   text=True, capture_output=True, check=True)
             baseline = _budget_limits(json.loads(blob.stdout))
-    if (current['seconds'] > baseline['seconds'] or
+    if (baseline.get('enforced', True) and not current.get('enforced', True) or
+            current['seconds'] > baseline['seconds'] or
             not current['slow'].keys() <= baseline['slow'].keys() or
             any(limit > baseline['slow'][name] for name, limit in current['slow'].items())):
         raise BudgetFailure('Test budgets and the explicit slow list may not grow versus the target')
