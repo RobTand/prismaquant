@@ -26,6 +26,12 @@ line. This scanner compares structure and names instead:
 ``--write-baseline`` rewrites the baseline after a consolidation removes
 entries.
 
+``--coverage-report PATH`` instead audits every Git-tracked path. It lists
+non-Python and excluded paths, analyzes the remaining Python files, and
+includes same-file pairs. These are candidates for semantic reading, not
+proof of equivalent behavior or complete semantic coverage. The default
+gate's population, exclusions and baseline remain unchanged.
+
 A pair that must stay two implementations is recorded in the baseline's
 ``must_differ`` list with its reason (PQ #1302): for example, an independent
 reference oracle, or a sealed module whose bytes are bound into receipts.
@@ -38,6 +44,7 @@ import ast
 import hashlib
 import json
 import random
+import subprocess
 from collections import defaultdict, deque
 from pathlib import Path
 
@@ -199,27 +206,36 @@ def digest_sites(root: Path = ROOT) -> list[str]:
     for path in _files(root):
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for call, scope, aliases in _iter_scoped_calls(tree):
-            callee = _resolved_callee(call.func, aliases)
-            if callee is None:
-                continue
-            if callee.startswith("hashlib."):
-                sites.add(f"hashlib:{rel}::{scope}")
-            elif callee in ("json.dumps", "json.JSONEncoder") and any(
-                    keyword.arg == "sort_keys"
-                    and isinstance(keyword.value, ast.Constant)
-                    and keyword.value.value is True
-                    for keyword in call.keywords):
-                sites.add(f"sorted-json:{rel}::{scope}")
+        sites.update(_digest_sites(rel, tree))
     return sorted(sites)
 
 
-def scan(root: Path = ROOT) -> dict:
+def _digest_sites(rel: str, tree: ast.Module) -> set[str]:
+    sites = set()
+    for call, scope, aliases in _iter_scoped_calls(tree):
+        callee = _resolved_callee(call.func, aliases)
+        if callee is None:
+            continue
+        if callee.startswith("hashlib."):
+            sites.add(f"hashlib:{rel}::{scope}")
+        elif callee in ("json.dumps", "json.JSONEncoder") and any(
+                keyword.arg == "sort_keys"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in call.keywords):
+            sites.add(f"sorted-json:{rel}::{scope}")
+    return sites
+
+
+def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool) -> dict:
     fingerprints = []
+    functions = {}
+    sites = set()
     names: dict[str, set[str]] = defaultdict(set)
-    for path in _files(root):
+    for path in paths:
         rel = path.relative_to(root).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        sites.update(_digest_sites(rel, tree))
         for top in tree.body:
             if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef)) and not top.name.startswith("__") and top.name not in ENTRY_POINTS:
                 names[top.name].add(rel)
@@ -228,6 +244,12 @@ def scan(root: Path = ROOT) -> dict:
             for child in ast.iter_child_nodes(node):
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     qual = scope + [child.name]
+                    location = f"{rel}:{child.lineno}" if include_same_file else rel
+                    identity = f"{location}::{'.'.join(qual)}"
+                    if not isinstance(child, ast.ClassDef):
+                        functions[identity] = {
+                            "line": child.lineno, "end_line": child.end_lineno,
+                        }
                     if not isinstance(child, ast.ClassDef) and child.end_lineno - child.lineno >= MIN_LINES:
                         body = child.body
                         if (body and isinstance(body[0], ast.Expr)
@@ -236,7 +258,7 @@ def scan(root: Path = ROOT) -> dict:
                             body = body[1:]
                         shingles = _shingles([t for stmt in body for t in _tokens(stmt)])
                         if len(shingles) >= MIN_SHINGLES:
-                            fingerprints.append((f"{rel}::{'.'.join(qual)}", shingles))
+                            fingerprints.append((identity, shingles))
                     walk(child, qual)
                 else:
                     walk(child, scope)
@@ -256,7 +278,7 @@ def scan(root: Path = ROOT) -> dict:
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
                 a, b = fingerprints[members[i]], fingerprints[members[j]]
-                if a[0].split("::")[0] == b[0].split("::")[0]:
+                if not include_same_file and a[0].split("::")[0] == b[0].split("::")[0]:
                     continue
                 if len(a[1] & b[1]) / len(a[1] | b[1]) >= THRESHOLD:
                     pairs.add(tuple(sorted((a[0], b[0]))))
@@ -264,15 +286,73 @@ def scan(root: Path = ROOT) -> dict:
         "near_duplicates": sorted([list(p) for p in pairs]),
         "same_name_helpers": {n: sorted(m) for n, m in sorted(names.items()) if len(m) > 1},
         # The ratcheted set: every primitive digest site outside the owners.
-        "primitive_digest_sites": [s for s in digest_sites(root)
+        "primitive_digest_sites": [s for s in sorted(sites)
                                    if s.split(":", 1)[1].split("::", 1)[0] not in DIGEST_OWNERS],
+        "functions": dict(sorted(functions.items())),
+    }
+
+
+def scan(root: Path = ROOT) -> dict:
+    live = _scan_paths(root, list(_files(root)), include_same_file=False)
+    del live["functions"]
+    return live
+
+
+def coverage_report(root: Path = ROOT) -> dict:
+    """Account for tracked paths and report expanded structural candidates.
+
+    Git metadata and readable, valid Python are required. Failure refuses
+    the report instead of silently dropping paths. Exclusions are the
+    existing scanner's, not new exemptions. Deprecated GGUF may appear as
+    read-only evidence; its preservation policy still applies.
+    """
+    tracked = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", "--cached", "-z"])
+    files = []
+    paths = []
+    for rel in sorted(set(tracked.decode("utf-8").split("\0")) - {""}):
+        path = root / rel
+        excluded = sorted(EXCLUDED_PARTS.intersection(path.relative_to(root).parts))
+        row = {"path": rel, "in_default_gate": not excluded and rel.endswith(".py")
+               and path.relative_to(root).parts[0] in SCANNED}
+        if excluded:
+            row.update(analysis="excluded", excluded_parts=excluded)
+        elif path.suffix != ".py":
+            row["analysis"] = "not_python"
+        else:
+            if path.is_symlink():
+                raise ValueError(f"refusing tracked Python symlink: {rel}")
+            row["analysis"] = "python"
+            paths.append(path)
+        files.append(row)
+    candidates = _scan_paths(root, paths, include_same_file=True)
+    functions = candidates.pop("functions")
+    return {
+        "schema": "prismaquant.duplication_coverage.v1",
+        "source_commit": subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip(),
+        "tracked_dirty": bool(subprocess.check_output(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no", "-z"])),
+        "files": files,
+        "functions": functions,
+        "candidates": candidates,
     }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--write-baseline", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write-baseline", action="store_true")
+    mode.add_argument("--coverage-report", type=Path)
     args = parser.parse_args()
+    if args.coverage_report:
+        report = coverage_report(ROOT)
+        args.coverage_report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",
+                                        encoding="utf-8")
+        print(f"tracked paths: {len(report['files'])}; "
+              f"Python paths analyzed: {sum(row['analysis'] == 'python' for row in report['files'])}; "
+              f"candidate pairs: {len(report['candidates']['near_duplicates'])}")
+        return 0
     live = scan()
     old = json.loads(BASELINE.read_text(encoding="utf-8")) if BASELINE.exists() else {}
     pairs = {tuple(p) for p in live["near_duplicates"]}

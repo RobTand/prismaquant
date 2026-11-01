@@ -24,13 +24,14 @@ ordinal. Fewer dispatch nodes, not fewer asserted outcomes.
 from __future__ import annotations
 
 import importlib
+import hashlib
 import os
 from pathlib import Path
 
 import pytest
 
 from prismaquant import digests
-from tests.golden_table import GoldenTable
+from tests.golden_table import GoldenTable, outcome
 
 GOLDEN = GoldenTable("digest_profiles_1301_files")
 
@@ -76,6 +77,8 @@ FILE_SITES = [
     ("prismaquant.tessera_materialization._sha", True, {}),
     ("prismaquant.union_production_cache._file_sha256", False, {}),
     ("tools.measure_vllm_full_kl._file_sha256", True, {}),
+    # #2635's private helper was removed by 60060a69c0; its callers use this binding.
+    ("prismaquant.shipcard.file_sha256hex", True, {}),
 ]
 _FILE_INPUTS = [f"b{size}" for size in _SIZES] + ["missing", "directory", "link"]
 
@@ -88,6 +91,26 @@ def test_file_digest_site(files, name):
         GOLDEN.call(lambda: site(path, **kwargs), tmp=files)
         if takes_str:
             GOLDEN.call(lambda: site(str(path), **kwargs), tmp=files)
+
+
+def _original_shipcard_file_sha256(path):
+    # refresh_2540 shipcard blob acf1b46ab0802eada0512a22b78828bd9420bd8a.
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+@pytest.mark.parametrize("name", _FILE_INPUTS)
+def test_shipcard_successors_match_the_original_file_recipe(files, name):
+    from prismaquant import shipcard
+
+    for path in (files / name, str(files / name)):
+        original = outcome(lambda: _original_shipcard_file_sha256(path), tmp=files)
+        assert outcome(lambda: shipcard.file_sha256hex(path), tmp=files) == original
+        wrapped = original if "returned" in original else {"returned": "None"}
+        assert outcome(lambda: shipcard.file_sha256(path), tmp=files) == wrapped
 
 
 @pytest.mark.parametrize("chunk", [1, 7, _MIB])
