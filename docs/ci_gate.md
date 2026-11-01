@@ -69,21 +69,25 @@ worker crash reports, remain final failures. There is no automatic test retry.
 
 `tools/ci/gate_budget.json` defines the default and exact-node exceptions.
 A test above its limit warns through 1.5 times that limit and fails above it.
-The duplication baseline has a measured `file_seconds` exception: its module
-fixture scans the repository once per worker, and pytest charges that shared
-setup to whichever test runs first. Its file limit covers the sum of every
-JUnit setup, call, and teardown duration in that file, with the same 1.5
-tolerance. The hosted maximum and source run remain in `file_evidence`.
-It has no overlapping node exceptions. All other tests retain per-test limits.
+Three files have measured `file_seconds` exceptions: the duplication baseline,
+`tessera_legal_domain`, and `quality_prefill_dry_run`. Their module fixtures or
+cached derivations charge setup to whichever test runs first on a worker. Each
+file limit covers the sum of all JUnit setup, call, and teardown durations across
+all shards, with the same 1.5 tolerance. The hosted maximum and source attempt
+remain in `file_evidence`. File exceptions have no overlapping node exceptions.
+All other tests retain per-test limits.
 The default, node/file exception lists, and each exception can only decrease against the PR
 base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial policy uses twelve calibration attempts: 41275735452/1,
+The initial policy uses thirteen calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
-41281908452/1, 41282567022/1, 41284744088/1, 41285636094/1 and /2, and 41287142037/1. All architecture-swapped attempts and
-successful heads after the first review contribute to 118 node exceptions and one file exception.
+41281908452/1, 41282567022/1, 41284744088/1, 41285636094/1 and /2, 41287142037/1, and 41292593909/1. Both passing and failed attempts contribute
+to 94 node exceptions and three file exceptions. The last attempt exposed
+moving legal-domain setup charges after node splitting. This remains initial
+bootstrap calibration because the PR base has no gate budget policy. Once
+installed, the same shrink-only checks prevent adding or enlarging exceptions.
 The native-import predecessor regression measured 36.245 seconds on x64 and keeps an exact 73-second exception. It retains total JUnit setup, call, and teardown time. Fixture setup can move
 between the first tests on xdist workers, so both architectures and swapped
 placements contribute maxima rather than successful runs alone. Slow tests keep
@@ -233,8 +237,16 @@ Before node splitting, run 41290209398 at
 526 seconds on attempt 1 and about 628 seconds on swapped attempt 2. Shard 0
 held the legal-domain file and took 458 seconds on ARM and 576 seconds on x64.
 The retained swapped JUnit sums to 1,561.842 seconds for that file. Increasing
-the shard count could not divide it. Node splitting removes that whole-file
-constraint; issue #3200 still owns reducing the expensive tests themselves.
+the shard count could not divide it. The first split-file attempt, 41292593909/1 at
+`b762e75702a2baccdecd7d9be0d5b210fe504e5e`, ended after 409 seconds. Its test
+tail was 269 seconds. It failed the primitive-digest inventory and four budget
+attributions, so it does not qualify. The digest repair uses the shared owner.
+Moving legal-domain setup charges use the existing complete-file budget
+mechanism. Calibration retains the larger historical complete-file maxima:
+2,234.087 seconds from 41280260494/2 for the legal-domain file and 177.065
+seconds from 41284744088/1 for the quality-prefill file. Their initial limits
+are 4,469 and 355 seconds, respectively. Splitting removes the whole-file
+scheduling constraint; issue #3200 still owns reducing these tests themselves.
 
 Final-head node-split qualification is recorded in PR #3192 with exact heads,
 attempts, budgets, and node coverage. Elapsed intervals use run creation for
