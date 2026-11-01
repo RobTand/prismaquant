@@ -7,7 +7,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from prismaquant.joint_aura import arithmetic_identity, identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura import arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
 from prismaquant.native_moe_panel import (EXECUTION, FORMAT, INPUT_SCHEMA, ROLES, consume_moe_receipt,
     freeze_moe_panel, packed_reference, validate_routing, validate_transport, _validate_phase_tensors)
@@ -63,7 +64,7 @@ def joined():
              "checkpoint_weight_map": source["tensors"],
              "shards": [{"path": "/fixture/fixture.safetensors", "size": 1, "sha256": "8" * 64}]}
     model = {"schema": "prismaquant.streamed_model.identity.v1", "source": "/fixture", "resolved_commit": None,
-             "content_sha256": identity_sha256(value), **value}
+             "content_sha256": joint_identity_sha256(value), **value}
     arithmetic = arithmetic_identity(torch.bfloat16)
     probe = {"schema": "prismaquant.joint_aura.probes.v2", "source_model": model,
         "calibration_sha256": "1" * 64, "calibration_shape": [1, 2], "calibration_dtype": "torch.int64",
@@ -74,7 +75,7 @@ def joined():
     for member in members:
         joint = {"schema": "prismaquant.joint_aura.operator.v2", "qname": member["unit"], "format": FORMAT,
             **{key: member[key] for key in ("source_weight", "rendered_weight", "activation")},
-            "arithmetic": arithmetic, "probe_identity_sha256": identity_sha256(probe)}
+            "arithmetic": arithmetic, "probe_identity_sha256": joint_identity_sha256(probe)}
         rows[member["unit"]] = make_joint_aura_entry(operator_identity=joint, probe_identity=probe,
             signed_components=[{"weight": v, "activation": 0., "mixed": 0., "total": v} for v in (.1, -.2, .3)])
     values, transport = phase_tensors()
@@ -95,14 +96,14 @@ def joined():
                                                                    "transformers": "fixture-transformers"}}
     inputs = {"schema": INPUT_SCHEMA, "unit": unit, "format": FORMAT, "shape": shape, "members": members,
         "profile_role_order": list(ROLES), "routing": routing(), "execution": dict(EXECUTION),
-        "calibration": calibration, "routing_capture": capture, "routing_capture_sha256": identity_sha256(capture),
+        "calibration": calibration, "routing_capture": capture, "routing_capture_sha256": joint_identity_sha256(capture),
         "runtime_image": "fixture/image@sha256:" + "a" * 64, "serving_config_sha256": "b" * 64, "numerics": {"atol": .015625, "rtol": .015625},
         "phases": phases, "probe_request": {
             **{key: probe[key] for key in ("n_probes", "seed_base", "token_scope", "temperature", "distribution", "normalization")},
             "source_model": "/fixture", "source_shards": source["files"], "source_config_sha256": source["config_sha256"],
             "source_auxiliary_sha256": source["auxiliary_sha256"]}}
     native_members = [{**{key: member[key] for key in ("unit", "expert", "role", "format", "shape", "source_weight", "rendered_weight")},
-        "wire_sha256": member["wire"]["blob_sha256"], "wire_record_sha256": identity_sha256(member["wire"]["record"])} for member in members]
+        "wire_sha256": member["wire"]["blob_sha256"], "wire_record_sha256": joint_identity_sha256(member["wire"]["record"])} for member in members]
     native = {"members": native_members, "shape": shape, "routing": routing(), "profile_role_order": list(ROLES),
         "routing_capture_sha256": inputs["routing_capture_sha256"], "serving_config_sha256": "b" * 64, "native_tensors": {"fixture": tensor_fields["input"]},
         "scheme": {"fixture": True}, "config": {"fixture": "actual MoE config"},
@@ -110,7 +111,7 @@ def joined():
         "declared_route": {"kind": "moe", "policy": "TESSERA_FP8:resident",
             "symbol": "vllm.fused_moe.modular_kernel:fixture", "decoder": "torch_materialize_stock",
             "contract": "fp8_per_token_dynamic"}}
-    native["config_sha256"] = identity_sha256(native["config"])
+    native["config_sha256"] = joint_identity_sha256(native["config"])
     runtime = {"schema": "tessera.native_moe_runtime.v1", "execution": dict(EXECUTION),
         "image": inputs["runtime_image"], "resource_collector": {"library_sha256": "5" * 64}}
     workspace = {"schema": "tessera.native_moe_workspace.v1", "owner": "vllm.WorkspaceManager",
@@ -118,9 +119,9 @@ def joined():
             "dtype": "torch.uint8", "device": "cuda:0", "storage_bytes": 64, "logical_bytes": 64,
             "stride": [1], "storage_offset": 0}], "resident_bytes": 64}
     preflight = {"schema": "tessera.native_moe_preflight.v1", "status": "untimed_preparation", "operator": native,
-        "runtime": runtime, "runtime_sha256": identity_sha256(runtime), "workspace": workspace,
-        "workspace_sha256": identity_sha256(workspace), "native_tensors_sha256": identity_sha256(native["native_tensors"]),
-        "scheme_sha256": identity_sha256(native["scheme"])}
+        "runtime": runtime, "runtime_sha256": joint_identity_sha256(runtime), "workspace": workspace,
+        "workspace_sha256": joint_identity_sha256(workspace), "native_tensors_sha256": joint_identity_sha256(native["native_tensors"]),
+        "scheme_sha256": joint_identity_sha256(native["scheme"])}
     return inputs, preflight, rows
 
 
@@ -139,12 +140,12 @@ def test_freeze_rejects_changed_or_unrecorded_source_backend(joined, change):
     elif change == "missing_probe":
         for row in rows.values():
             row["probe_identity"].pop("source_execution", None)
-            row["probe_identity_sha256"] = identity_sha256(row["probe_identity"])
+            row["probe_identity_sha256"] = joint_identity_sha256(row["probe_identity"])
             row["joint_operator_identity"]["probe_identity_sha256"] = row["probe_identity_sha256"]
-            row["joint_operator_identity_sha256"] = identity_sha256(row["joint_operator_identity"])
+            row["joint_operator_identity_sha256"] = joint_identity_sha256(row["joint_operator_identity"])
     else:
         inputs["routing_capture"]["source_execution"]["modules"][inputs["unit"]][change] = "eager" if change == "experts" else "sdpa"
-    digest = identity_sha256(inputs["routing_capture"])
+    digest = joint_identity_sha256(inputs["routing_capture"])
     inputs["routing_capture_sha256"] = digest
     preflight["operator"]["routing_capture_sha256"] = digest
     with pytest.raises(ValueError, match="source execution"):
@@ -157,7 +158,7 @@ def test_retained_boundary_requires_independent_exact_source_qualification(joine
     inputs, preflight, rows = joined
     capture = inputs["routing_capture"]
     execution = capture.pop("source_execution")
-    inputs["routing_capture_sha256"] = identity_sha256(capture)
+    inputs["routing_capture_sha256"] = joint_identity_sha256(capture)
     preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
     inputs["source_capture"] = {"routing_boundary_sha256": "f" * 64}
     inputs["calibration"]["artifact_sha256"] = "a" * 64
@@ -294,19 +295,19 @@ def test_changed_or_partial_stack_cannot_freeze(joined, change):
         inputs["probe_request"]["source_shards"] = {"fixture.safetensors": "0" * 64}
     elif change == "config":
         inputs["routing_capture"]["runtime_config"] = {"model_type": "different"}
-        inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
+        inputs["routing_capture_sha256"] = joint_identity_sha256(inputs["routing_capture"])
     elif change == "route":
         preflight["operator"]["declared_route"]["kind"] = "dense"
     elif change == "runtime":
         preflight["runtime"]["execution"]["expert_parallel"] = 2
-        preflight["runtime_sha256"] = identity_sha256(preflight["runtime"])
+        preflight["runtime_sha256"] = joint_identity_sha256(preflight["runtime"])
     elif change == "capture":
         inputs["routing_capture_sha256"] = "0" * 64
     elif change == "transport":
         inputs["phases"]["prefill"]["transport"]["topk_weights"]["operation"] = "renormalized"
     else:
         preflight["workspace"]["locked"] = False
-        preflight["workspace_sha256"] = identity_sha256(preflight["workspace"])
+        preflight["workspace_sha256"] = joint_identity_sha256(preflight["workspace"])
     with pytest.raises((ValueError, RuntimeError)):
         freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
 
@@ -380,12 +381,12 @@ def receipt_fixture(joined, complete=True):
              "full_model_fixed_resources_complete": False, "peak_scratch_bytes": 128,
              "external_native_peak_bytes": 64, "torch_peak_increment_bytes": 64}
     receipt = {"schema": "tessera.native_moe_operator_receipt.v1", "status": "timing_admissible",
-        "panel": panel, "panel_sha256": identity_sha256(panel), "operator": preflight["operator"],
+        "panel": panel, "panel_sha256": joint_identity_sha256(panel), "operator": preflight["operator"],
         "runtime": preflight["runtime"], "runtime_sha256": preflight["runtime_sha256"],
         "phases": phases,
         "resources": {"status": "complete_operator_bound" if complete else "incomplete", "resident_bytes": 100,
             "workspace_resident_bytes": 64, "workspace_sha256": preflight["workspace_sha256"],
-            "trace_sha256": identity_sha256(trace), "phases": {
+            "trace_sha256": joint_identity_sha256(trace), "phases": {
                 phase: {"bound": copy.deepcopy(bound)} if complete else {} for phase in ("prefill", "decode")}}}
     return panel, receipt, trace
 
@@ -422,15 +423,15 @@ def test_whole_receipt_cannot_replace_frozen_inputs_or_resources(joined, tmp_pat
     elif change == "workspace":
         receipt["panel"] = copy.deepcopy(receipt["panel"])
         receipt["panel"]["workspace"]["slots"][0]["shape"] = [32]
-        receipt["panel"]["workspace_sha256"] = identity_sha256(receipt["panel"]["workspace"])
-        receipt["panel_sha256"] = identity_sha256(receipt["panel"])
+        receipt["panel"]["workspace_sha256"] = joint_identity_sha256(receipt["panel"]["workspace"])
+        receipt["panel_sha256"] = joint_identity_sha256(receipt["panel"])
     elif change == "workspace_digest":
         receipt["resources"]["workspace_sha256"] = "0" * 64
     elif change == "workspace_bytes":
         receipt["resources"]["workspace_resident_bytes"] = 0
     elif change == "resource_trace":
         trace["capture"]["collector_library_sha256"] = "0" * 64
-        receipt["resources"]["trace_sha256"] = identity_sha256(trace)
+        receipt["resources"]["trace_sha256"] = joint_identity_sha256(trace)
     elif change == "scalar_leaf_sum":
         receipt["phases"]["decode"]["measurement"]["sample_unit"] = "sum_of_leaf_medians"
     elif change == "tolerance":
@@ -441,7 +442,7 @@ def test_whole_receipt_cannot_replace_frozen_inputs_or_resources(joined, tmp_pat
         receipt["phases"]["decode"]["route"]["shape"] = "M2:N3:K4"
     elif change == "config":
         receipt["operator"]["config"] = {"different": "MoE config"}
-        receipt["operator"]["config_sha256"] = identity_sha256(receipt["operator"]["config"])
+        receipt["operator"]["config_sha256"] = joint_identity_sha256(receipt["operator"]["config"])
     else:
         receipt["phases"]["decode"]["transport"] = copy.deepcopy(receipt["phases"]["decode"]["transport"])
         receipt["phases"]["decode"]["transport"]["topk_ids"]["source"]["content_sha256"] = "0" * 64
@@ -464,7 +465,7 @@ def test_quarantined_capture_cannot_qualify_native_panel(joined, change):
         capture["attention_implementation"] = "sdpa"
     else:
         capture["capture_runtime"]["transformers"] = "different-transformers"
-    inputs["routing_capture_sha256"] = identity_sha256(capture)
+    inputs["routing_capture_sha256"] = joint_identity_sha256(capture)
     with pytest.raises(ValueError):
         freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
 
@@ -553,14 +554,14 @@ def test_subset_joint_panel_retains_both_calibration_scopes(joined):
                                                   subset_calibration=inputs["probe_calibration"])
     for key, value in (("calibration_shape", [2, 2]), ("calibration_sha256", inputs["calibration"]["calibration_sha256"])):
         inputs["routing_capture"][key] = value
-    inputs["routing_capture_sha256"] = identity_sha256(inputs["routing_capture"])
+    inputs["routing_capture_sha256"] = joint_identity_sha256(inputs["routing_capture"])
     preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
     rows = {}
     for name, row in old_rows.items():
         probe = copy.deepcopy(row["probe_identity"])
         probe.update(calibration_shape=[1, 2], calibration_sha256=inputs["probe_calibration"]["calibration_sha256"])
         operator = copy.deepcopy(row["joint_operator_identity"])
-        operator["probe_identity_sha256"] = identity_sha256(probe)
+        operator["probe_identity_sha256"] = joint_identity_sha256(probe)
         rows[name] = make_joint_aura_entry(operator_identity=operator, probe_identity=probe,
             signed_components=[{"weight": v, "activation": 0., "mixed": 0., "total": v} for v in (.1, -.2, .3)])
     panel = freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
@@ -620,12 +621,12 @@ def test_a_world_of_one_binds_no_separate_full_quality_preparation(joined):
 
 
 def test_late_whole_owner_binding_preserves_router_and_member_execution(joined):
-    from prismaquant.native_moe_execution_binding import (
-        execution_panel_from_joint,bind_execution_receipt,resolve_execution_binding,RAW_RECEIPT_SCHEMA)
+    from prismaquant.native_panel_kind import (
+        execution_panel_from_joint,bind_execution_receipt,resolve_execution_binding,MOE_EXECUTION_RECEIPT_SCHEMA as RAW_RECEIPT_SCHEMA)
     final=freeze_moe_panel(*joined,cost_sha256='4'*64)
     execution=execution_panel_from_joint(final)
     raw={'schema':RAW_RECEIPT_SCHEMA,'status':'timing_admissible','panel':execution,
-         'panel_sha256':identity_sha256(execution),'phases':{'fixture':'not GPU evidence'}}
+         'panel_sha256':joint_identity_sha256(execution),'phases':{'fixture':'not GPU evidence'}}
     bound=bind_execution_receipt(raw,final)
     assert bound['raw_receipt']==raw
     assert resolve_execution_binding(bound,final)['panel']==final
@@ -638,8 +639,30 @@ def test_late_whole_owner_binding_preserves_router_and_member_execution(joined):
         bind_execution_receipt(raw,changed)
 
 
+@pytest.mark.parametrize("source_execution", ["captured", "missing", "unresolved"])
+def test_raw_execution_freeze_uses_the_source_execution_contract(joined, source_execution):
+    from prismaquant.native_moe_execution_binding import freeze_execution_panel
+    from prismaquant.native_panel_kind import execution_panel_from_joint
+
+    inputs, preflight, rows = joined
+    preflight["operator"]["declared_route"]["decoder"] = "native_fixture_decoder"
+    final = freeze_moe_panel(inputs, preflight, rows, cost_sha256="4" * 64)
+    if source_execution == "missing":
+        inputs["routing_capture"].pop("source_execution")
+    elif source_execution == "unresolved":
+        inputs["routing_capture"]["source_execution"]["modules"][inputs["unit"]]["attention"] = "sdpa"
+    inputs["routing_capture_sha256"] = joint_identity_sha256(inputs["routing_capture"])
+    preflight["operator"]["routing_capture_sha256"] = inputs["routing_capture_sha256"]
+    if source_execution == "captured":
+        raw = freeze_execution_panel(inputs, preflight, source_sha256=final["source_sha256"])
+        assert raw == execution_panel_from_joint(final)
+    else:
+        with pytest.raises(ValueError, match="source execution"):
+            freeze_execution_panel(inputs, preflight, source_sha256=final["source_sha256"])
+
+
 def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
-    from prismaquant.measure_quant_cost import _packed_experts_forward_with_weights
+    from prismaquant.routed_experts import packed_experts_forward_with_weights
     class GlmLike(torch.nn.Module):
         num_experts=1
         def _apply_gate(self,value):
@@ -647,7 +670,7 @@ def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
             return torch.nn.functional.silu(gate.clamp(max=.5))*up.clamp(-1,1)
     x=torch.ones(1,4)
     gate_up=torch.cat((torch.eye(4),2*torch.eye(4))).unsqueeze(0)
-    out=_packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
+    out=packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
         torch.ones(1,1),gate_up,torch.eye(4).unsqueeze(0))
     assert torch.equal(out,torch.full((1,4),torch.nn.functional.silu(torch.tensor(.5)).item()))
 
@@ -662,8 +685,8 @@ EMPTY_SLOT = {"index": 1, "allocation": None}
 
 
 def _restamp(preflight):
-    preflight["runtime_sha256"] = identity_sha256(preflight["runtime"])
-    preflight["workspace_sha256"] = identity_sha256(preflight["workspace"])
+    preflight["runtime_sha256"] = joint_identity_sha256(preflight["runtime"])
+    preflight["workspace_sha256"] = joint_identity_sha256(preflight["workspace"])
     return preflight
 
 
@@ -874,9 +897,9 @@ def original_protocol_case(tmp_path, layer=3):
     source_value = {'config': config, 'weight_map': mapping, 'checkpoint_weight_map': checkpoint,
         'shards': [{'path': paths[name], 'size': 128, 'sha256': digest} for name, digest in sorted(producer['files'].items())]}
     source = {'schema': 'prismaquant.streamed_model.identity.v1', 'source': str(model_root),
-              'resolved_commit': None, 'content_sha256': identity_sha256(source_value), **source_value}
+              'resolved_commit': None, 'content_sha256': joint_identity_sha256(source_value), **source_value}
     contract = prefix['model_load_contract']
-    contract['source_map_sha256'] = identity_sha256({name: {'tensor': name, 'file': checkpoint[name]} for name in names})
+    contract['source_map_sha256'] = joint_identity_sha256({name: {'tensor': name, 'file': checkpoint[name]} for name in names})
     calibration_ids = torch.zeros(512, 512, dtype=torch.int64)
     calibration = {'schema': 'prismaquant.calibration_input.v1', 'artifact_sha256': '9' * 64,
         'calibration_sha256': tensor_id(calibration_ids)['content_sha256'], 'shape': [512, 512], 'dtype': 'torch.int64',
@@ -1033,7 +1056,7 @@ def test_original_prefix_requires_exact_checkpoint_roster_after_valid_initializa
         state['model.language_model.layers.3.replacement.weight'] = state.pop(name)
     contract['persistent_tensors'] = sum(row['kind'] == 'checkpoint' for row in state.values())
     contract['derived_buffers'] = sum(row['kind'] == 'derived_buffer' for row in state.values())
-    contract['state_sha256'] = identity_sha256(state)
+    contract['state_sha256'] = joint_identity_sha256(state)
     assert validate_streaming_prefix_initialization_contract(contract) == contract
     metadata['source_acquisition']['source_initialization'] = copy.deepcopy(contract)
     metadata['source_acquisition']['entry'] = original_capture_entry(metadata)
@@ -1184,6 +1207,7 @@ def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy
         '': {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         Selector('u'): {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
         'extra': {'attention': {2: 'café', 'z': '\ud800'}}}}
+    # One owner: the panel imports joint_aura's reader rather than keeping a copy.
     assert native_moe_panel.require_native_source_execution is joint_aura.require_native_source_execution
     assert joint_aura.require_native_source_execution(value, unit='u') is value
     # Mixed leaf keys retain the native reader's unsorted JSON acceptance; an

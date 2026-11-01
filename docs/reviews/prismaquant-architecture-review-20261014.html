@@ -1,0 +1,1355 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for PrismaQuant: findings</title>
+    <style>
+:root { color-scheme: light; }
+body { margin: 0; background: #fff; color: #1f2937; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+h1 { font-size: 2rem; margin: .2rem 0 .6rem; }
+h2 { font-size: 1.4rem; margin: 2.2rem 0 .4rem; }
+h3 { font-size: 1.15rem; margin: 0; display: inline; }
+p { margin: .4rem 0; }
+a { color: #1d4ed8; }
+.schematic { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; }
+.font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em; }
+.font-semibold, .font-medium { font-weight: 600; }
+.note { color: #6b7280; font-size: .9rem; }
+.label { margin: .8rem 0 .2rem; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; font-weight: 600; }
+nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .5rem 1.5rem; margin-top: 1rem; }
+nav ul { list-style: none; padding: 0; margin: .25rem 0 0; }
+nav li { margin: .1rem 0; }
+nav li > span { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; margin-right: .45rem; vertical-align: middle; }
+.bg-emerald-500 { background: #10b981; }
+.bg-amber-400 { background: #f59e0b; }
+#candidates > div { margin-top: 2.5rem; border-bottom: 2px solid #d1d5db; padding-bottom: .3rem; }
+article { border-top: 1px solid #e5e7eb; padding: 1.1rem 0 .6rem; }
+article > div:first-child > span.font-mono { font-weight: 700; color: #374151; margin-right: .4rem; font-size: 1rem; }
+span.rounded-full { display: inline-block; border: 1px solid #d1d5db; border-radius: 999px; padding: 0 .55rem; font-size: .78rem; margin: .35rem .3rem 0 0; color: #374151; }
+span.bg-emerald-50 { background: #ecfdf5; border-color: #6ee7b7; color: #065f46; }
+span.bg-amber-50 { background: #fffbeb; border-color: #fcd34d; color: #92400e; }
+dl { margin: .6rem 0; }
+dt { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; font-weight: 600; margin-top: .5rem; }
+dd { margin: .1rem 0 0; }
+ul { margin: .2rem 0; padding-left: 1.3rem; }
+article ul.font-mono { list-style: none; padding-left: 0; font-size: .82rem; color: #374151; }
+span.rounded.bg-slate-100 { display: inline-block; background: #f3f4f6; border-radius: 4px; padding: .05rem .4rem; margin: 0 .3rem .3rem 0; font-size: .8rem; }
+div.bg-red-50 { border-left: 4px solid #dc2626; background: #fef2f2; padding: .5rem .8rem; margin: .7rem 0; }
+div.bg-amber-50 { border-left: 4px solid #f59e0b; background: #fffbeb; padding: .5rem .8rem; margin: .7rem 0; }
+#top-recommendation { border: 2px solid #10b981; background: #f0fdf4; border-radius: 8px; padding: .9rem 1.2rem; margin-top: 2.5rem; }
+#top-recommendation h2 { margin: .2rem 0; font-size: 1.3rem; }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; margin-top: .6rem; }
+th, td { border: 1px solid #e5e7eb; padding: .4rem .55rem; text-align: left; vertical-align: top; }
+th { background: #f9fafb; }
+td span.rounded { display: inline-block; border-radius: 4px; padding: 0 .35rem; font-weight: 600; font-size: .78rem; }
+.bg-red-100 { background: #fee2e2; color: #991b1b; }
+.bg-amber-100 { background: #fef3c7; color: #92400e; }
+@media print { main { max-width: none; padding: 0; } a { color: inherit; text-decoration: none; } article { break-inside: avoid; } }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans antialiased">
+    <main class="max-w-7xl mx-auto px-6 py-12 space-y-14">
+
+      <!-- ============================== HEADER ============================== -->
+      <header class="space-y-5">
+        <p class="schematic text-slate-500">Architecture review</p>
+        <h1 class="font-serif text-5xl tracking-tight">PrismaQuant</h1>
+        <p class="note">Findings only. Plain export, 2026-10-14: the before and after diagrams are left out, and all other text is as reviewed.</p>
+        <p class="text-sm text-slate-600 max-w-3xl">
+          Snapshot origin/main <span class="font-mono">138069b7993</span>, committed 2026-10-12. Reviewed 2026-10-13 in two rounds by eight read-only Opus reviewers.
+          Round 1 read the four hottest clusters: 87 files, 42% of package lines, 58% of the changes in 30 days.
+          Round 2 read the allocator and cost core, the probes and PrismaSnap, export and the ship gates, and mapped the rest, with two clusters read in depth.
+          The lead re-checked every defect below and the headline counts in code. <span class="font-mono">tools/</span>, <span class="font-mono">experiments/</span> and the Tessera repo are out of scope.
+        </p>
+
+        <nav class="grid md:grid-cols-4 gap-4 pt-2">
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Joint AURA cost</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#j1" class="hover:underline">J1 Campaign ledger</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#j2" class="hover:underline">J2 Price step</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#j3" class="hover:underline">J3 Stage session</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#j4" class="hover:underline">J4 Quantum row contract</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Tessera contract and admission</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#a1" class="hover:underline">A1 Pinned runtime</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#a2" class="hover:underline">A2 Cell verdict</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Tessera campaign and tools/</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#t1" class="hover:underline">T1 Campaign table</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#t2" class="hover:underline">T2 Row request</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#t3" class="hover:underline">T3 Forward and measurement</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#t4" class="hover:underline">T4 PrismaBuild port</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Streaming, residency, caches</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#s1" class="hover:underline">S1 Staged read</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#s2" class="hover:underline">S2 Block order</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#s3" class="hover:underline">S3 Split cost_streaming</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#s4" class="hover:underline">S4 Store append</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Allocator and cost core</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#l1" class="hover:underline">L1 Allocation run</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#l2" class="hover:underline">L2 Priced cell</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#l3" class="hover:underline">L3 Runtime-price port</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#l4" class="hover:underline">L4 Routed-expert replay</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Probes and PrismaSnap</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#p1" class="hover:underline">P1 Probe statistics</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#p2" class="hover:underline">P2 Probe inventory</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#p3" class="hover:underline">P3 Calibration draw</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#p4" class="hover:underline">P4 Fisher sweep</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Export and ship gates</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#e1" class="hover:underline">E1 Render codec</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#e2" class="hover:underline">E2 Ship-record slots</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#e3" class="hover:underline">E3 Serving units</a></li>
+            </ul>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="schematic text-slate-500">Stage A plumbing, native panels</div>
+            <ul class="mt-2 space-y-1.5 text-sm">
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#r1" class="hover:underline">R1 Native panel kinds</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span><a href="#r2" class="hover:underline">R2 Split rounds</a></li>
+              <li class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span><a href="#r3" class="hover:underline">R3 Routed-stack geometry</a></li>
+            </ul>
+          </div>
+        </nav>
+        <p class="note">Green dot: Strong. Amber dot: Worth exploring.</p>
+        <p class="text-sm"><a href="#defects" class="underline text-red-700">Fifteen defects found, with triggers</a> · <a href="#top-recommendation" class="underline">Top recommendation</a></p>
+      </header>
+
+      <!-- ============================== CLUSTER J ============================== -->
+      <section id="candidates" class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <h2 class="font-serif text-3xl">Joint AURA cost</h2>
+          <p class="text-sm text-slate-600 mt-1">37 <span class="font-mono">joint_*</span> modules, 36.1k lines, 580 file changes in 30 days. The family has 2,618 <span class="font-mono">sha256</span> mentions and 267 <span class="font-mono">torch.</span> calls.</p>
+        </div>
+
+        <!-- J1 -->
+        <article id="j1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">J1</span>
+            <h3 class="font-serif text-2xl">Give quantum records one campaign ledger</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Five modules decide if a record belongs to a campaign, and each module uses a different rule.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One ledger module owns the record layout, the schemas, the identity recipe and the campaign rule. Writers and readers go through it.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Locality: one record rule</li>
+              <li>Delete four validator copies</li>
+              <li>One tamper matrix in tests</li>
+              <li>Unblocks the row contract, J4</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">#787 fix repaired 4 drifts</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">#993 touched 37 files</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">~350 raw-key reads in 10 modules</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">refusal tests repeat: 20/61 · 11/36 · 7/18</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">The runtime still calls the producer check behind <span class="font-mono">except ImportError</span> with <span class="font-mono">pragma: no cover</span>, at joint_cost_quantum.py:454-458.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/joint_layer_quanta.py:1230 check_quantum_for_campaign</li>
+            <li>prismaquant/joint_cost_quantum.py:299-479 verify_quantum_identity</li>
+            <li>prismaquant/joint_quanta_join.py:216-378 _check_record</li>
+            <li>tools/dispatch_joint_quanta.py:485 load_records</li>
+            <li>prismaquant/joint_forward_campaign.py</li>
+            <li>tools/regenerate_joint_quanta.py:791</li>
+          </ul>
+        </article>
+
+        <!-- J2 -->
+        <article id="j2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">J2</span>
+            <h3 class="font-serif text-2xl">Make one price step for a model layer</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>The single run and the Stage B quantum repeat one private journal sequence in the same order. Three modules build the probe identity by hand.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One price-step module owns the reverse step of a layer and its journal. The incoming cotangent enters through one port with three adapters.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Bitwise gate becomes structural</li>
+              <li>Private journal helpers become internal</li>
+              <li>One probe-identity builder</li>
+              <li>Tests drop 30 to 50 monkeypatches</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">core: 2,008 lines · 15 params · 29 nested defs</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">quantum reaches 21 private names in 8 modules</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">#2283 edited 12 source files</span>
+            </div>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/joint_cost_quantum.py:1753 run_layer_quantum_core</li>
+            <li>prismaquant/aura_cost.py:1916 compute_aura_cost_streamed, :2594-2761 journal helpers</li>
+            <li>prismaquant/glm_mtp_quantum.py:99</li>
+            <li>prismaquant/joint_aura.py:1145</li>
+            <li>prismaquant/joint_quanta_join.py:789-870</li>
+          </ul>
+        </article>
+
+        <!-- J3 -->
+        <article id="j3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">J3</span>
+            <h3 class="font-serif text-2xl">Open each GPU stage through one session</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">ports &amp; adapters</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Three GPU entry points run the same ten-step bootstrap, and tests patch module globals to get past it.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A session module opens the context from the sealed digests and closes it with one provenance block. An environment port has a GB10 adapter and a CPU test adapter.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>155 setattr sites go</li>
+              <li>Two adapters make a real seam</li>
+              <li>Allowlist joint lines reach zero</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">stages A and B import the same 7 private names</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">tessera_private.txt: 7 of 12 lines</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">Risk: the stage-specific branches can turn the session into a parameter bag.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/tessera_joint_aura.py:2841 execute</li>
+            <li>prismaquant/joint_cost_stage_a.py:2685 run_adjoint_capture</li>
+            <li>prismaquant/joint_cost_quantum.py:3934 run_layer_quantum</li>
+            <li>tests/boundary_allowlists/tessera_private.txt</li>
+          </ul>
+        </article>
+
+        <!-- J4 -->
+        <article id="j4" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">J4</span>
+            <h3 class="font-serif text-2xl">Move the quantum row contract into the package</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>The dispatch tool models the phase order of the runtime and parses phase names with regexes, so runtime changes force tool edits.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A package module owns the phase plan, the argv and the resource rule. The producer seals it, the runtime checks it, and the tool reads it.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Runtime edits stop forcing tool edits</li>
+              <li>Tests import one module object</li>
+              <li>Gateway seam keeps two adapters</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">68 function-local imports from 25 modules</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">tests load it as 2 module objects</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">SPEC_PATH patched 20 times</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">Do J1 first. J4 needs the typed phase table from the ledger.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>tools/dispatch_joint_quanta.py:1246-1700, 2181-2515, 3152-3280</li>
+            <li>prismaquant/joint_stageb_resources.py verify_cotangent_plane_fits</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== CLUSTER A ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <h2 class="font-serif text-3xl">Tessera runtime contract and admission</h2>
+          <p class="text-sm text-slate-600 mt-1"><span class="font-mono">tessera_runtime_contract.py</span> has 19,834 lines. Every commit to the pin module in 30 days also edited it, 26 of 26.</p>
+        </div>
+
+        <!-- A1 -->
+        <article id="a1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">A1</span>
+            <h3 class="font-serif text-2xl">Own the pinned Tessera runtime in one module</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Two pins name one Tessera build. Nothing sets the dev pin in production, so every fact that only it supplies is absent.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One module owns the pin, one verified read, one parse and one cache. Callers get facts, not paths. The reviewed answer becomes a test-checked file.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Delete about 17k generated lines</li>
+              <li>A re-pin edits one file</li>
+              <li>Locality: one pin check</li>
+              <li>The TP&gt;1 menu stops vanishing</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">~23 of 26 pin commits are re-pins</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">re-pin 45019bc: 13 literals, 174 doc lines</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">19 test files call private _parse</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Latent defect.</span> With the dev pin unset, <span class="font-mono">tessera_tp_world_attested</span> refuses every Tessera rung at TP&gt;1 with "no Tessera runtime contract is pinned". All Tessera profiles use TP=1 today, so nothing fails yet.
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            This reopens two choices: the two-key rule of the pin module, at tessera_serving_runtime_pin.py:52-60, and the "answer, not bytes" rationale of issue #38. It is worth reopening, because the answer survives as a reviewed file. Only its home moves. The FROZEN_PINS copy in the legal domain folds in here.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/tessera_runtime_contract.py:541-17557 TESSERA_DEV_PIN_ANSWER, :19793 load_tessera_contract</li>
+            <li>prismaquant/tessera_serving_runtime_pin.py:52-60, 967-1053</li>
+            <li>prismaquant/tessera_runtime/tessera_serving_runtime_pin.json</li>
+            <li>prismaquant/tessera_menu.py:365-515</li>
+            <li>prismaquant/tessera_legal_domain.py:625-638 FROZEN_PINS</li>
+            <li>prismaquant/serving_profiles.py:57-137 · tessera_lane.py:305-405 · tessera_shipcard.py:392-410</li>
+          </ul>
+        </article>
+
+        <!-- A2 -->
+        <article id="a2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">A2</span>
+            <h3 class="font-serif text-2xl">Decide cell admission in one verdict</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>One parser reads the cell grammar, but seven callers compose the "served natively?" verdict, and three of the compositions disagree.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd><span class="font-mono">lane_eligibility</span> returns one typed verdict for a rung or for the facts of a unit. The verdict holds the status, cells, flags, plugins and refusal kind.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Leverage: one verdict, six callers</li>
+              <li>Menu and export cannot disagree</li>
+              <li>One test per refusal kind</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">disagreements: plugin, predicate, qualification</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_NATIVE_ROUTE_STATUSES defined 3 times</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">lane_eligibility: 125 public names, 37 test-only</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">Principle 9 stays. <span class="font-mono">route_status</span> remains a structured lane field, and the lane resolver becomes one more caller.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/lane_eligibility.py:2711-2978</li>
+            <li>prismaquant/tessera_render.py:236-420</li>
+            <li>prismaquant/tessera_runtime_contract.py:17897-17931 native_cells</li>
+            <li>prismaquant/tessera_export_lane.py:1410-1427</li>
+            <li>prismaquant/tessera_route_receipt.py:476-487</li>
+            <li>prismaquant/serving_profiles.py:669-763 · tessera_legal_domain.py:806-888</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== CLUSTER T ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <h2 class="font-serif text-3xl">Tessera campaign rows and the tools seam</h2>
+          <p class="text-sm text-slate-600 mt-1"><span class="font-mono">tessera_campaign.py</span> has 9,367 lines and 152 top-level defs. <span class="font-mono">tools/</span> has 167 files and 59.9k lines, and 13 of those files hold 42% of the lines.</p>
+        </div>
+
+        <!-- T1 -->
+        <article id="t1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">T1</span>
+            <h3 class="font-serif text-2xl">Give the campaign table one package owner</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>One package module writes the campaign table, and 24 other modules read it. Its merge and union rules live in tools, and the package imports those tools.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One package module owns the table: layout, schemas, split, merge, union, reseal and read sets. Tools keep argv and printing.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Package stops importing tools</li>
+              <li>Merge equals whole scope, as a test</li>
+              <li>A new payload key changes one module</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">7 package modules import tools/</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">union docstring: 10+ stale line citations</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">#1796 and #2195: 11 files each</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Precondition for T1 and T2. <span class="font-mono">import prismaquant</span> loads <span class="font-mono">format_registry</span>, which imports torch, at <span class="font-mono">__init__.py:21</span>. Host-side tools cannot import the package, so they copy facts or load files by path.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>tools/dispatch_tessera_campaign.py:161 PLAN_SCHEMA, :3935-4306 merge_payloads</li>
+            <li>tools/union_tessera_census_tables.py · tools/reseal_campaign_identity.py</li>
+            <li>experiments/glm_data_manifests.py</li>
+            <li>prismaquant/tessera_campaign.py:2155 campaign_cost_payload</li>
+            <li>prismaquant/joint_catalog_extension.py:427, 488, 857, 891 · tessera_joint_aura.py:811 · tessera_materialization.py:115</li>
+          </ul>
+        </article>
+
+        <!-- T2 -->
+        <article id="t2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">T2</span>
+            <h3 class="font-serif text-2xl">Replace argv with a typed row request</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Four modules derive the kind of a row from a 62-flag argv, with three different argv rules. One test evaluates code that it cuts from the source of <span class="font-mono">_main</span>.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A torch-free row-request module names the kind and owns the only argv codec. The CLI becomes an adapter, and each kind gets its own runner.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>One argv codec, not three</li>
+              <li><span class="font-mono">_main</span> splits into kind runners</li>
+              <li>Source-parsing tests go</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_main: 318 conditionals · 20 nested defs</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">33 test files drive main([...])</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">12 test files check argv-derived demand</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">R23 stays untouched. <span class="font-mono">run-pipeline.sh</span> does not run the campaign.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/tessera_campaign.py:6705 _main, 2,620 lines</li>
+            <li>tools/dispatch_tessera_campaign.py:733, 738, 1608-1630</li>
+            <li>tools/tessera_campaign_container.py:1265</li>
+            <li>experiments/glm_arc_prewarm.py:166</li>
+            <li>tests/test_routed_resume_admission_1761.py:33-50</li>
+          </ul>
+        </article>
+
+        <!-- T3 -->
+        <article id="t3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">T3</span>
+            <h3 class="font-serif text-2xl">Publish calibration forward and cell measurement</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Other modules reach 76 of the 109 private functions in the campaign. Materialization rebuilds the pricing sequence from 13 of them, without the ordering rules in <span class="font-mono">_main</span>.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>Two public modules take this work. Calibration forward turns a model and tokens into activation statistics. Cell measurement turns weights and rungs into priced anchors and wires.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Interface matches what callers use</li>
+              <li>Ordering rules live inside</li>
+              <li>About 72 private test reaches go</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_collect_activations: tested in 17 files</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_checkpoint_identity_api: 14 calls in 5 modules</span>
+            </div>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/tessera_campaign.py:3654 _collect_activations, :479-853 _measure_anchor*, :2452 _checkpoint_identity_api</li>
+            <li>prismaquant/tessera_materialization.py:248-357</li>
+            <li>prismaquant/glm_mtp_capture.py:313-390</li>
+            <li>prismaquant/joint_stage_b_head.py:404 · tessera_joint_aura.py:898, 1560, 1611</li>
+          </ul>
+        </article>
+
+        <!-- T4 -->
+        <article id="t4" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">T4</span>
+            <h3 class="font-serif text-2xl">Submit PrismaBuild work through one port</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">ports &amp; adapters</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Eight submitters build PrismaBuild argv and client paths by hand, and tests fake PrismaBuild in six different ways.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One module owns "submit an action, wait for its endings". It has a CLI adapter for the fleet and an in-memory adapter for tests.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>A new PB flag lands once</li>
+              <li>One fake replaces six styles</li>
+              <li>Two adapters make a real seam</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">18 test files, 6 fake styles</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">40 commits on PB flags since 09-13</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">The CLI is already a gated seam. The gain is locality, not safety.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>tools/dispatch_tessera_campaign.py:119, 1792, 2828, 2863</li>
+            <li>tools/tessera_fleet/common.py:30, 95, 112</li>
+            <li>tools/dispatch_joint_quanta.py:91-92 · submit_quantum_cache_row.py:103 · g3job/g3_submit.py:26</li>
+            <li>tools/dispatch_capture_chain.py · tools/dispatch_stage_a_split.py · prismaquant/pbwait_table.py</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== CLUSTER S ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <h2 class="font-serif text-3xl">Streaming, residency and caches</h2>
+          <p class="text-sm text-slate-600 mt-1">More than 100 test files import <span class="font-mono">cost_streaming.py</span> (7,390 lines), and more than 100 import <span class="font-mono">production_weight_cache.py</span> (8,173 lines). Principle 8 holds for the store formats. It does not hold for the code around the stores.</p>
+        </div>
+
+        <!-- S1 -->
+        <article id="s1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">S1</span>
+            <h3 class="font-serif text-2xl">Hide the staged read behind one interface</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">ports &amp; adapters</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Six modules write the staged-read sequence by hand, with nine <span class="font-mono">record_*</span> calls in a fixed order, and the copies already differ.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One staged-read module takes a declared file or range and returns bytes with a receipt, or one refusal. Tier order, pins, fences, accounting and mount facts stay inside.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>A contract edit lands once</li>
+              <li>The mount fact gets one owner</li>
+              <li>One suite, not one per reader</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">fence edit 4053ef7: 8 modules, 3 copies missed</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">single-enter edit ffb40f4: 5 modules</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">ResidencyResolver: 22 public methods</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Latent defect.</span> <span class="font-mono">staged_lease._mount_options</span> keeps the first of two rows with the same mount point. On sparky, sparklina and celestia, <span class="font-mono">/mnt/shared</span>, <span class="font-mono">/stage/prewarm</span> and <span class="font-mono">/ram/prewarm</span> list autofs before NFS, so <span class="font-mono">release_retry_horizon_s</span> returns 0 for paths there. Nothing fails today, because the PB queue root has its own NFS row.
+          </div>
+          <p class="text-sm text-slate-500">Overlaps D43 and D44(b).</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/io_engine.py:321-661</li>
+            <li>prismaquant/staged_whole_file.py:111-215</li>
+            <li>prismaquant/perturbed_x_cache.py:690-830, 2009-2081, 2248-2337</li>
+            <li>prismaquant/joint_adjoint_checkpoints.py:1615-1707 · tessera_joint_aura.py:165-267</li>
+            <li>prismaquant/residency_shard_reader.py:858-1281 · residency_map.py:1069-1306</li>
+            <li>prismaquant/staged_lease.py:1234-1300</li>
+          </ul>
+        </article>
+
+        <!-- S2 -->
+        <article id="s2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">S2</span>
+            <h3 class="font-serif text-2xl">Let the streamed model own the block order</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Callers own the prefetch, install, settle and unload order, and the bugs came from those compositions.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>The streamed model runs every walk. Callers give the block order, the lookahead and the work for each block.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>The order rule lives once</li>
+              <li>30 private-name reaches go</li>
+              <li>CPU settle cannot pass silently</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">f944ba4: wrong rope table on 41 of 46 layers</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">fb2c7b6: unload/install asymmetry</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">2613f46: FP32 buffers narrowed in export only</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">StreamingContext: 27 init params</span>
+            </div>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/streaming_model.py:700-1612</li>
+            <li>prismaquant/cost_streaming.py:5255-5955 · prismaquant/layer_streaming.py</li>
+            <li>prismaquant/aura_cost.py:3044-3070 · joint_cost_quantum.py:978-1000 · joint_cost_stage_a.py:1945-1975</li>
+            <li>prismaquant/expert_empirical_cost.py:1366-1401 · export_native_compressed.py:6166-6185</li>
+          </ul>
+        </article>
+
+        <!-- S3 -->
+        <article id="s3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">S3</span>
+            <h3 class="font-serif text-2xl">Split cost_streaming into its three modules</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">ports &amp; adapters</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>One 7,390-line file holds three modules. Its hidden produced-output half takes most of the churn, and tests patch its private methods.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>Split it into the streamed forward, the model identity and the activation owner. A produced-group ledger reaches PrismaBuild only through the publication adapter.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Failure injection at a real seam</li>
+              <li>Identity tests skip 7k lines</li>
+              <li>Checkpoint ledger joins its consumer</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">63 produced-state refs in 6 core methods</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">docstring: "thin consumer of StreamingContext"</span>
+            </div>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/cost_streaming.py:294-5001 StreamedBoundaryArtifacts, 5004-6032 forward, 6039-7390 identity</li>
+            <li>prismaquant/produced_stager.py · prismaquant/produced_output_spool.py</li>
+            <li>prismaquant/joint_adjoint_checkpoints.py, the one checkpoint-ledger caller</li>
+          </ul>
+        </article>
+
+        <!-- S4 -->
+        <article id="s4" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">S4</span>
+            <h3 class="font-serif text-2xl">Give the rendered-weight store one append</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Six writer kinds fill the rendered-weight store through private functions and a public mutable index.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>The store owns one append. Entries and their input identity go in. Names, atomic writes, the index and the identity stay inside.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Principle 8 holds for writes</li>
+              <li>14 hand-built test stores go</li>
+              <li>One tensor-identity recipe</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">29 prod importers · 99 test files</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_cb_cache_tensor_identity: 9 modules, 4 tools</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Do design work first. The merge rules really differ by writer, for example the pair-fit map and the per-block map.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/production_weight_cache.py:109-135, 183-233, 2148-2214, 4154-5757</li>
+            <li>prismaquant/tessera_joint_aura.py:702-722, 1379</li>
+            <li>prismaquant/tessera_campaign.py:738-795 · streaming_production_cache.py:301-330</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== ROUND 2 · CLUSTER L ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <p class="schematic text-slate-400">Round 2</p>
+          <h2 class="font-serif text-3xl">Allocator and cost core</h2>
+          <p class="text-sm text-slate-600 mt-1">46 modules, 52.6k lines, 277 file changes in 30 days. <span class="font-mono">allocator.main</span> alone is 4,513 lines.</p>
+        </div>
+
+        <!-- L1 -->
+        <article id="l1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">L1</span>
+            <h3 class="font-serif text-2xl">Give the allocation run an interface</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>The allocation run lives as local state of one 4,513-line function. Its only interface is argv, so <span class="font-mono">prefill_frontier</span> calls it four times with callbacks.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One allocation-run module admits the inputs once and offers three operations: solve, price an assignment and write the layer config. Each regime and the CLI become callers.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Four regimes become callers</li>
+              <li>Stats precedence lives once</li>
+              <li>Tests stop round-tripping argv</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">66 add_argument · 66 SystemExit</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">27 test files drive main([...])</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">co-change with prefill_frontier: 0.57</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">R23 stays untouched. The shell still calls the CLI.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/allocator.py:1997-6509 main</li>
+            <li>prismaquant/allocator.py:5391-5711 Pareto and knee · 5725-6471 byte budget · 5007-5303 PACT · 5305-5386 measured sweep</li>
+            <li>prismaquant/prefill_frontier.py:1053, 1192, 1228, 1275</li>
+            <li>tools/reselect_mtp_fixed.py:16</li>
+          </ul>
+        </article>
+
+        <!-- L2 -->
+        <article id="l2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">L2</span>
+            <h3 class="font-serif text-2xl">Read each cost row into one priced cell</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Six functions classify a cost row, each with its own subset and order. The newest price kind arrives through a hidden key on the probe stats.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One priced-cell module classifies a row once, under a policy that the run sets once. Every reader uses its record, and lane-owned kinds register as adapters.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>One classification, every reader</li>
+              <li>The hidden stats channel goes</li>
+              <li>Validation reads the DP price</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">6 alias-aware row lookups</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">7 stats side maps, 2 with no reader</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">run policy read from os.environ per cell</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">Principle 14 stays. The producers still attest the lane-owned kinds.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/allocator_candidates.py:931-1137, 1430-2115, 2617-2996</li>
+            <li>prismaquant/rung_allowability.py:21, 290-349</li>
+            <li>prismaquant/validate_assignments_kl.py:185-276 · kl_measurement.py:150-168</li>
+          </ul>
+        </article>
+
+        <!-- L3 -->
+        <article id="l3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">L3</span>
+            <h3 class="font-serif text-2xl">Price runtime through one port</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Three runtime-price sources have three loaders and no shared interface, and two modules own the device-bytes formula.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One port takes the expanded options and returns resources, the fixed charge and one verdict. A run binds one adapter.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Mutual exclusion by structure</li>
+              <li>One device-bytes formula</li>
+              <li>Tessera scope through the lane seam</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">dispatch 1,720 · measured 4,413 · shape 2,330 lines</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">Research-only paths today. D37 and R21 apply, so time stays a constraint.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/allocator.py:2473-2815, 3894-4283, 5007-5386</li>
+            <li>prismaquant/serve_constraints.py:797-992 · serve_dispatch_table.py:576-586</li>
+            <li>prismaquant/measured_runtime_prices.py:907-1008 · shape_runtime_prices.py:102, 1476-1491</li>
+            <li>prismaquant/allocator_solver.py:308-327</li>
+          </ul>
+        </article>
+
+        <!-- L4 -->
+        <article id="l4" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">L4</span>
+            <h3 class="font-serif text-2xl">Publish the routed-expert replay</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Five production modules import 10 private names of the routed MoE replay, and native receipts record a private function name as the reference operation.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd><span class="font-mono">routed_experts</span> owns the replay next to discovery, and callers use one public operation.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>A rename stops changing evidence</li>
+              <li>Eight test files test one interface</li>
+            </ul>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/measure_quant_cost.py:1012-1341</li>
+            <li>prismaquant/native_moe_panel.py:1118, 1315 · routed_experts.py:426-427</li>
+            <li>prismaquant/production_weight_cache.py:2940, 7328 · tessera_campaign.py:3811</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== ROUND 2 · CLUSTER P ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <p class="schematic text-slate-400">Round 2</p>
+          <h2 class="font-serif text-3xl">Probes and PrismaSnap</h2>
+          <p class="text-sm text-slate-600 mt-1">23 modules, 33k lines, 89 changes in 30 days. The retired sample-parallel lane is still 5.2k lines, and <span class="font-mono">incremental_probe</span> still imports it.</p>
+        </div>
+
+        <!-- P1 -->
+        <article id="p1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">P1</span>
+            <h3 class="font-serif text-2xl">Give the Fisher row one owner</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Five modules restate the global-token Fisher normalization rule, and one of them, the card builder, uses the wrong count.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One module owns the Fisher row, its reduction, one finalize step and the artifact read. Writers hand over chunk reductions, and readers get finalized rows.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>The CLAUDE.md §3 rule lives once</li>
+              <li>Leverage: one rule, 13 callers</li>
+              <li>A PR 14 class fix lands once</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">row literals: 6 · accumulation sites: 10</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">PR 14 fix: 3 commits in 4 modules</span>
+            </div>
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/sensitivity_probe.py:553-644, 2285</li>
+            <li>prismaquant/incremental_probe.py:103-161, 2195, 3700, 4029, 4089</li>
+            <li>prismaquant/sample_parallel_probe_merge.py:109-149, 787-967</li>
+            <li>prismaquant/sensitivity_card.py:252 · sensitivity_card_build.py:43, 174-180</li>
+            <li>prismaquant/allocator.py:1680 · measure_quant_cost.py:296</li>
+          </ul>
+        </article>
+
+        <!-- P2 -->
+        <article id="p2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">P2</span>
+            <h3 class="font-serif text-2xl">Let the probe publish its inventory</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Three modules each decide which tensors the probe prices, with different rules, and the export gate built to catch a mismatch misses it.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>The probe answers one inventory query over the model and profile: every priced unit with its kind, and every excluded Linear with a reason.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>The [3d] gate checks the real rule</li>
+              <li>Packed recognition fails closed</li>
+              <li>Names get normalized once</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">model_walk: 0 co-changes with either probe</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Defect, fails today by static reading.</span> <span class="font-mono">model_walk.py:1752-1755</span> applies the probe's end-anchored module-name patterns to parameter names, so <span class="font-mono">mlp\..*gate$</span> never matches <span class="font-mono">...mlp.shared_expert_gate.weight</span>. On Qwen3.5/3.6-MoE the gate passes a decide claim that the probe does not price. Export still ships that Linear as BF16.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/incremental_probe.py:537-556, 2826-2833</li>
+            <li>prismaquant/model_walk.py:1707-1765</li>
+            <li>prismaquant/sensitivity_probe.py:1144-1197 · model_profiles/base.py:274-276</li>
+            <li>prismaquant/tessera_campaign.py:4977-5035 · name_projection.py:137</li>
+          </ul>
+        </article>
+
+        <!-- P3 -->
+        <article id="p3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">P3</span>
+            <h3 class="font-serif text-2xl">Own the calibration draw in one module</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Each stage draws the calibration again, and the held-out rule rests on a prefix-stability claim that no test checks and that packing can break.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One module owns the sampler, the pinned draw, one identity and the split. A held-out split becomes an operation that the module proves.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Held-out disjointness becomes checked</li>
+              <li>One identity, not five</li>
+              <li>Leverage: 11 call sites, 9 modules</li>
+            </ul>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Defect, defaults safe.</span> When the corpus runs out of long texts, packing restarts at the first text (<span class="font-mono">sensitivity_probe.py:3338-3351</span>). Held-out windows can then reuse probe text. Example trigger: diverse-v1, 256 rows, with NSAMPLES=64 and saturation picking, 320 windows. R14 still passes.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/sensitivity_probe.py:3126-3357 load_calibration</li>
+            <li>prismaquant/calibration_data.py:70-211</li>
+            <li>prismaquant/validate_assignments_kl.py:339-395, 599-618 · run-pipeline.sh:762</li>
+            <li>prismaquant/source_generation.py:174-203 · perturbed_x_cache.py:2373</li>
+          </ul>
+        </article>
+
+        <!-- P4 -->
+        <article id="p4" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">P4</span>
+            <h3 class="font-serif text-2xl">Give the Fisher sweep a testable interface</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>No test calls the three private passes, so tests parse their source. About 1,000 lines still serve the retired sample-parallel lane.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One sweep takes a streamed model, a draw, the inventory and the instruments, and returns rows. Body, MTP and visual become schedules.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Source-parsing tests become calls</li>
+              <li>The retired lane goes behind a wall</li>
+            </ul>
+          </div>
+          <p class="text-sm text-slate-500">Do S2 first. The sweep needs the block-order owner.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/incremental_probe.py:1845, 2783, 4387, 4677 main</li>
+            <li>prismaquant/sensitivity_probe.py:3415 run_probe_pass (no caller), 3798</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== ROUND 2 · CLUSTER E ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <p class="schematic text-slate-400">Round 2</p>
+          <h2 class="font-serif text-3xl">Export and ship gates</h2>
+          <p class="text-sm text-slate-600 mt-1">46 modules, 40k lines, 156 changes in 30 days. <span class="font-mono">export_native_compressed.py</span> is eight modules in one file, and its codec alone is about 3,470 lines.</p>
+        </div>
+
+        <!-- E1 -->
+        <article id="e1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">E1</span>
+            <h3 class="font-serif text-2xl">Render through one codec, driven by one lever value</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Seven modules reach 24 private codec names, the render cache swaps three module globals to steer the codec, and some render inputs appear in no record.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A codec module renders one Linear from a format, one immutable lever value and the activations. The cache identity, the stage settings and the export fingerprint stamp that same value.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Principle 8 enforced by structure</li>
+              <li>Four format adapters, a real seam</li>
+              <li>Every render input gets recorded</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">18 test files reach 50 private codec names</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">_quantize_2d: 14 params</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">16 function-local exporter imports in the cache</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Defect, latent.</span> The default JSO path reads <span class="font-mono">PRISMAQUANT_NVFP4_JOINT_SCALE_LEVELS</span> (frozen at import) and the joint-scale global grid and span. GPTQ reads <span class="font-mono">PRISMAQUANT_GPTQ_DAMP_ROLES</span>. No record holds them. If they differ between cache build and export, the shipped codes differ from the validated render, and nothing refuses. Default values are safe.
+          </div>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/export_native_compressed.py: codec near 120-1000, 2809-4725, 4896-5850 · globals 8763-8766</li>
+            <li>prismaquant/production_weight_cache.py:1953-1984, 2138-2146, 4004-4110</li>
+            <li>prismaquant/export_batched_gptq.py:35-44 · kernels/nvfp4_fused.py:80-92</li>
+            <li>prismaquant/format_registry.py:848-856 · format_cost_registry.py:243-256 · gguf_gptq.py:72</li>
+          </ul>
+        </article>
+
+        <!-- E2 -->
+        <article id="e2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">E2</span>
+            <h3 class="font-serif text-2xl">Let each ship-record slot own make and replay</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>The refusal contract has two owners for its base slots, and the lane field of the card decides which lane slots the card owes.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A slot registry holds one adapter per slot, which owns make, preflight and replay. One function derives the lane from the card, the build block and config.json.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Thresholds live once</li>
+              <li>Lane obligations cannot be erased</li>
+              <li>Gold fill works without argv</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">shipcard: 3,936 lines · 19 importers</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">shipcard / shipcard_cli co-change: 0.83</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Two defects.</span> First, a live gap: native cards bind only the names and sizes of the weight files (<span class="font-mono">shipcard.py:401-410</span>). A same-size byte edit, such as the documented in-place <span class="font-mono">input_global_scale</span> patch, passes verify and publication on the old records. Second, with an edited card: delete <span class="font-mono">"lane"</span> and the card no longer owes <span class="font-mono">route.sweep</span>, or <span class="font-mono">route.census</span> and <span class="font-mono">route.trace</span> on Tessera.
+          </div>
+          <p class="text-sm text-slate-500">R13 and R16 stay. The card remains the refusal contract.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/shipcard.py:1683-1838 verify, 1399-1459, 2868-3034, 3209-3246</li>
+            <li>prismaquant/shipcard_cli.py:148-279 · ship_gates.py:205-234</li>
+            <li>prismaquant/validate_quantized_model.py:180-196, 868-916 · validate_native_export.py:344-367</li>
+            <li>prismaquant/export_native_compressed.py:8544-8635 · lane_shipcard.py:84-97</li>
+          </ul>
+        </article>
+
+        <!-- E3 -->
+        <article id="e3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">E3</span>
+            <h3 class="font-serif text-2xl">Answer serving units in one place</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>At least five places decide which Linears must share one format, and their overlap and error rules differ.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd><span class="font-mono">NameProjection</span> answers serving units for every caller, with one overlap rule and fail-closed errors.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Hard serving invariants: one answer</li>
+              <li>Eight silent fallbacks go</li>
+            </ul>
+          </div>
+          <p class="text-sm text-slate-500">Issue #2443 is half closed. The profile and the exporter still swallow a registry failure.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/export_native_compressed.py:1320-1805, 7745-8190</li>
+            <li>prismaquant/allocator_solver.py:745-779, 1047-1217</li>
+            <li>prismaquant/name_projection.py:644-723 · nvfp4_activation_contract.py:619-640, 796-840</li>
+            <li>prismaquant/model_profiles/base.py:285-335 · artifact_completeness.py:706-711</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== ROUND 2 · CLUSTER R ============================== -->
+      <section class="space-y-10">
+        <div class="border-b border-slate-300 pb-3">
+          <p class="schematic text-slate-400">Round 2</p>
+          <h2 class="font-serif text-3xl">Stage A plumbing and native panels</h2>
+          <p class="text-sm text-slate-600 mt-1">The reviewer mapped the remaining modules into clusters and read two of them in depth: the Stage A run (9 modules, 3.8k lines) and the native panels (7 modules, 5.6k lines).</p>
+        </div>
+
+        <!-- R1 -->
+        <article id="r1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">R1</span>
+            <h3 class="font-serif text-2xl">Put the two native panel kinds behind one interface</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Two panel kinds exist, but no seam expresses them. The emitter and the gate each build the dense row binding, and the late binding exists twice.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>One panel-kind interface, keyed by schema. Each kind supplies its consumer, late binding, row binding, scope and world size, and the gate recomputes through the same code.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>Emitter and gate cannot drift</li>
+              <li>Two adapters, a real seam</li>
+              <li>One contract suite per kind</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">7 modules · 5,640 lines · 160 public names</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">allocator, prefill_frontier import runtime_provenance privates</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+            <span class="font-semibold">Defect, latent.</span> <span class="font-mono">native_moe_execution_binding.py:52</span> calls <span class="font-mono">owner._source_execution</span>, which commit <span class="font-mono">07e81e3a446</span> deleted on 2026-10-03. Any call to the MoE <span class="font-mono">freeze_execution_panel</span> raises AttributeError. Nothing calls it today.
+          </div>
+          <p class="text-sm text-slate-500">Principle 14 stays. The gate keeps recomputing every row.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/native_operator_panel.py:49-111, 494-588 · native_moe_panel.py:19-21, 1775-1880</li>
+            <li>prismaquant/native_execution_binding.py:39-137 · native_moe_execution_binding.py:15-93</li>
+            <li>prismaquant/native_receipt_table.py:89-105, 373-481 · runtime_provenance.py:1352-1368, 1443-1602</li>
+          </ul>
+        </article>
+
+        <!-- R2 -->
+        <article id="r2" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">R2</span>
+            <h3 class="font-serif text-2xl">Run every split round through one protocol</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">Strong</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">local-substitutable</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd>Three modules run the same prep, range-quanta and join round, and 18 sites in 9 modules compose the generation paths by hand.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>A split-round module owns the prep record, range tiling, owner status, fragment seal, join preconditions and one readiness query. A Stage A run plan resolves the mode once.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>The owner check lives once</li>
+              <li>Dispatchers ask one readiness query</li>
+              <li>The mode table becomes data</li>
+            </ul>
+            <div class="flex flex-wrap content-start gap-1.5"><p class="label">Evidence</p>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">9 modules · 3,839 lines · 39 test files</span>
+              <span class="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700">24 sealed record schemas in Stage A</span>
+            </div>
+          </div>
+          <p class="text-sm text-slate-500">The split rounds are Strong. The run plan is worth exploring, because it sits next to J3, the stage session.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/stage_a_forward_split.py:84-298 · stage_a_chain_split.py:65-499</li>
+            <li>prismaquant/capture_layer_chain.py:73-636 · joint_cost_stage_a.py:1263-1319, 3120-3267</li>
+            <li>tools/dispatch_stage_a_split.py:570-641 · tools/dispatch_capture_chain.py:143-197</li>
+            <li>prismaquant/cost_streaming.py:530-560, 876-886 generation layout</li>
+          </ul>
+        </article>
+
+        <!-- R3 -->
+        <article id="r3" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+          <div class="flex flex-wrap items-baseline gap-3">
+            <span class="font-mono text-xs text-slate-400">R3</span>
+            <h3 class="font-serif text-2xl">Let the model profile own routed-stack geometry</h3>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-800">Worth exploring</span>
+            <span class="rounded-full border border-slate-300 px-2.5 py-0.5 text-xs text-slate-600">in-process</span>
+          </div>
+          <dl class="grid md:grid-cols-[6.5rem_1fr] gap-x-4 gap-y-2">
+            <dt class="schematic text-slate-500 pt-1">Problem</dt>
+            <dd><span class="font-mono">native_moe_panel</span> hard-codes two models in 17 branching functions and restates names that the profile already owns.</dd>
+            <dt class="schematic text-slate-500 pt-1">Solution</dt>
+            <dd>The profile declares the routed-stack geometry from config.json, and the panel validates against that declaration.</dd>
+          </dl>
+          <div class="grid md:grid-cols-2 gap-4">
+            <p class="label">Wins</p>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+              <li>A third MoE model edits a profile</li>
+              <li>Precedent: 92a00029a93 moved PACT facts</li>
+            </ul>
+          </div>
+          <p class="text-sm text-slate-500">The payoff waits for a third MoE model and for D37 and D39.</p>
+          <p class="label">Files</p>
+          <ul class="font-mono text-sm text-slate-700 space-y-0.5">
+            <li>prismaquant/native_moe_panel.py:28-364, 646-760, 980-1000, 1166-1170</li>
+            <li>prismaquant/model_profiles/glm5_next.py · model_profiles/lfm2_moe.py · specs/glm5_next.json:19</li>
+            <li>prismaquant/model_profiles/base.py:409, 892, 1132, 1324</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ============================== TOP RECOMMENDATION ============================== -->
+      <section id="top-recommendation" class="deep rounded-2xl p-8 space-y-3">
+        <div class="schematic text-emerald-300">Top recommendation</div>
+        <h2 class="font-serif text-3xl"><a href="#j1" class="underline decoration-slate-500 hover:decoration-emerald-300">J1 · Give quantum records one campaign ledger</a></h2>
+        <p class="text-slate-200 max-w-3xl">It sits in the busiest cluster, its validator copies already drifted once (#787), and it needs no decision that you have not made.</p>
+      </section>
+
+      <!-- ============================== DEFECTS ============================== -->
+      <section id="defects" class="rounded-2xl border border-red-200 bg-white p-6 space-y-4">
+        <h2 class="font-serif text-2xl">Defects found</h2>
+        <p class="text-sm text-slate-600">The lead checked each row in code. Fix the live rows and the rows that fail today first. They are small, targeted fixes, and they do not wait for any deepening.</p>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left schematic text-slate-500">
+                <th class="py-2 pr-3">No.</th><th class="py-2 pr-3">Defect</th><th class="py-2 pr-3">Where</th><th class="py-2 pr-3">Status</th><th class="py-2">Card</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200 align-top">
+              <tr><td class="py-2 pr-3">1</td><td class="py-2 pr-3">Native ship cards bind the names and sizes of the weight files, not their bytes. A same-size edit passes verify and publication on the old records.</td><td class="py-2 pr-3 font-mono text-xs">shipcard.py:401-410 · tools/publish_artifact.py:845-860</td><td class="py-2 pr-3"><span class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">Live</span> No automated step edits bytes in place.</td><td class="py-2"><a href="#e2" class="underline">E2</a></td></tr>
+              <tr><td class="py-2 pr-3">2</td><td class="py-2 pr-3">The [3d] export gate runs end-anchored module-name patterns on parameter names, so it misses decide claims that the probe excludes.</td><td class="py-2 pr-3 font-mono text-xs">model_walk.py:1752-1755</td><td class="py-2 pr-3"><span class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">Fails today</span> On Qwen3.5/3.6-MoE, by static reading. Export still ships BF16.</td><td class="py-2"><a href="#p2" class="underline">P2</a></td></tr>
+              <tr><td class="py-2 pr-3">3</td><td class="py-2 pr-3">The surrogate-versus-KL diagnostic sums raw predicted_dloss fields, which are 0 under the legacy production-render-score recipe. The rank checks report nothing.</td><td class="py-2 pr-3 font-mono text-xs">validate_assignments_kl.py:206-276 · select_validated_frontier.py:496-504</td><td class="py-2 pr-3"><span class="rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-800">Fails today</span> On that recipe only. Selection does not change.</td><td class="py-2"><a href="#l2" class="underline">L2</a></td></tr>
+              <tr><td class="py-2 pr-3">4</td><td class="py-2 pr-3">Some render inputs are in no record: the JSO scale levels, the joint-scale global grid and span, and the GPTQ damp roles.</td><td class="py-2 pr-3 font-mono text-xs">export_native_compressed.py:326-337, 623-639, 2958</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> Default values are safe.</td><td class="py-2"><a href="#e1" class="underline">E1</a></td></tr>
+              <tr><td class="py-2 pr-3">5</td><td class="py-2 pr-3">Held-out windows can reuse probe text, because packing restarts at the first text.</td><td class="py-2 pr-3 font-mono text-xs">sensitivity_probe.py:3338-3351</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> Defaults are safe. Small corpora trigger it.</td><td class="py-2"><a href="#p3" class="underline">P3</a></td></tr>
+              <tr><td class="py-2 pr-3">6</td><td class="py-2 pr-3">A card without a "lane" key owes no lane slots.</td><td class="py-2 pr-3 font-mono text-xs">shipcard.py:3238, 1419-1434</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> Needs an edited card.</td><td class="py-2"><a href="#e2" class="underline">E2</a></td></tr>
+              <tr><td class="py-2 pr-3">7</td><td class="py-2 pr-3">With the dev pin unset, the Tessera menu refuses every rung at TP&gt;1.</td><td class="py-2 pr-3 font-mono text-xs">tessera_menu.py:474-515</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> All Tessera profiles use TP=1.</td><td class="py-2"><a href="#a1" class="underline">A1</a></td></tr>
+              <tr><td class="py-2 pr-3">8</td><td class="py-2 pr-3">A failed pin release gets no retry under an autofs-stacked NFS mount.</td><td class="py-2 pr-3 font-mono text-xs">staged_lease.py:1234-1300</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> The PB queue root has its own NFS row.</td><td class="py-2"><a href="#s1" class="underline">S1</a></td></tr>
+              <tr><td class="py-2 pr-3">9</td><td class="py-2 pr-3">The MoE <span class="font-mono">freeze_execution_panel</span> calls a deleted function.</td><td class="py-2 pr-3 font-mono text-xs">native_moe_execution_binding.py:52</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> No caller today.</td><td class="py-2"><a href="#r1" class="underline">R1</a></td></tr>
+              <tr><td class="py-2 pr-3">10</td><td class="py-2 pr-3">Issue #2443 is half closed. The profile and the exporter still swallow a registry failure.</td><td class="py-2 pr-3 font-mono text-xs">model_profiles/base.py:334-335 · export_native_compressed.py:7780-7781</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span></td><td class="py-2"><a href="#e3" class="underline">E3</a></td></tr>
+              <tr><td class="py-2 pr-3">11</td><td class="py-2 pr-3">The packed-expert recognizer swallows profile errors and reports no packed experts.</td><td class="py-2 pr-3 font-mono text-xs">sensitivity_probe.py:1144-1156</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span></td><td class="py-2"><a href="#p2" class="underline">P2</a></td></tr>
+              <tr><td class="py-2 pr-3">12</td><td class="py-2 pr-3">Two device-bytes formulas: the search and the stamped verdict can disagree.</td><td class="py-2 pr-3 font-mono text-xs">allocator_solver.py:324-327 · serve_constraints.py:900-906</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span> Research path only.</td><td class="py-2"><a href="#l3" class="underline">L3</a></td></tr>
+              <tr><td class="py-2 pr-3">13</td><td class="py-2 pr-3"><span class="font-mono">_quantize_2d</span> reads all-False lever arguments as "unset", so process globals apply.</td><td class="py-2 pr-3 font-mono text-xs">export_native_compressed.py:5052-5066</td><td class="py-2 pr-3"><span class="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">Latent</span></td><td class="py-2"><a href="#e1" class="underline">E1</a></td></tr>
+              <tr><td class="py-2 pr-3">14</td><td class="py-2 pr-3">The card builder divides visual rows by the body token count, 32 times off at defaults.</td><td class="py-2 pr-3 font-mono text-xs">sensitivity_card_build.py:174-180</td><td class="py-2 pr-3"><span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">Off path</span> Merged body and visual probes only.</td><td class="py-2"><a href="#p1" class="underline">P1</a></td></tr>
+              <tr><td class="py-2 pr-3">15</td><td class="py-2 pr-3">The completeness gate reads quant_config.json, which no live exporter writes, and raises on native artifacts.</td><td class="py-2 pr-3 font-mono text-xs">artifact_completeness.py:614</td><td class="py-2 pr-3"><span class="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-700">Orphaned</span> Only archive code calls it.</td><td class="py-2">none</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============================== FOUND ON THE WAY ============================== -->
+      <section class="grid md:grid-cols-2 gap-6">
+        <div class="rounded-2xl border border-slate-200 bg-white p-6 space-y-3">
+          <h2 class="font-serif text-xl">Found on the way</h2>
+          <ul class="text-sm space-y-2 list-disc pl-5">
+            <li><span class="font-medium">No production importer and no CLI reference</span>, checked by script, about 6.1k lines: <span class="font-mono">layer_state_cache</span> 587, <span class="font-mono">weight_session</span> 561, <span class="font-mono">artifact_collection</span> and <span class="font-mono">artifact_collection_legacy</span> 1,520 (they import only each other), <span class="font-mono">proposal_validation</span> 546, <span class="font-mono">quality_prefill_screen</span> 430, <span class="font-mono">tessera_full_domain_ledger</span> 332, <span class="font-mono">quality_prefill_coverage</span> 298, <span class="font-mono">fisher_col_weights</span> 261, <span class="font-mono">per_row_pricing</span> 260, <span class="font-mono">production_cache_stripes</span> 228, <span class="font-mono">speed_quality_frontier</span> 226, <span class="font-mono">shard_layout</span> 206, <span class="font-mono">shard_commit_progress</span> 201, <span class="font-mono">index_entropy</span> 151, <span class="font-mono">tessera_reduced_schedule_repair</span> 129, <span class="font-mono">sensitivity_coverage</span> 108, <span class="font-mono">stage_a_local_spool</span> 12.</li>
+            <li><span class="font-medium">Staged on purpose, so decide or keep:</span> <span class="font-mono">pact_frontier_profile</span> (D50), <span class="font-mono">produced_render_publication</span> (#870), <span class="font-mono">sensitivity_card_allocate</span> (§4.8), <span class="font-mono">gguf_kl_evaluator</span> (D26), <span class="font-mono">serving_runtime_patch_set</span> (D38).</li>
+            <li><span class="font-medium">Retired but still imported:</span> the sample-parallel lane, 5.2k lines. <span class="font-mono">incremental_probe</span> imports it, refuses it at parse time, and spends about 1,000 more lines on it.</li>
+            <li><span class="font-medium">Unreachable inside live modules:</span> 756 lines of <span class="font-mono">anchored_cost</span> that only tests reach, <span class="font-mono">kl_measurement.l2_cost_value</span>, and two stats maps in <span class="font-mono">allocator_candidates</span> with no reader. <span class="font-mono">union_production_cache</span> (1,923 lines) has no caller in the repo; it is a manual CLI.</li>
+            <li><span class="font-medium">Stale prose:</span> <span class="font-mono">io_engine.py:6-7</span> says one caller, and 14 modules import it. <span class="font-mono">tessera_allocator.py</span> says the pipeline does not import it, but <span class="font-mono">tessera_rate_surface.py:72</span> does. <span class="font-mono">tessera_export_lane.py:1196</span> says fold and gate cannot disagree. ARCHITECTURE.md:21102-21108 says <span class="font-mono">shard_layout</span> owns the partition rule; it does not. ARCHITECTURE.md still shows the sample-parallel lane as live. §12 D30(3) is still open, but 300648305ac fixed it.</li>
+            <li><span class="font-medium">Small merges:</span> fold <span class="font-mono">joint_replay_metadata</span> into the spill. Drop the 45-name re-export of <span class="font-mono">joint_adjoint_slices</span> from <span class="font-mono">joint_adjoint_checkpoints</span>. Make <span class="font-mono">_aligned_buffer</span> public. Finish the #1301 move off the digest re-exports in <span class="font-mono">cost_stage_checkpoint</span>. Split <span class="font-mono">autoscale</span>, which does three jobs.</li>
+            <li><span class="font-medium">One root cause to examine:</span> the implementation identity hashes the whole package (<span class="font-mono">aura_cost.py:147</span>). So each fix after a sealed prepare needs a transition module, and five exist now.</li>
+          </ul>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white p-6 space-y-3">
+          <h2 class="font-serif text-xl">Examined and left alone</h2>
+          <ul class="text-sm space-y-2 list-disc pl-5">
+            <li><span class="font-mono">tessera_lane.py</span>: shallow on purpose. It is the seam that keeps core free of Tessera imports (PQ #1550).</li>
+            <li><span class="font-mono">digests.py</span>: deep. A shrink-only census guards new digest sites.</li>
+            <li><span class="font-mono">joint_aura.py</span>, <span class="font-mono">joint_statistics_replay.py</span>, <span class="font-mono">stage_a_produced_output.py</span>, <span class="font-mono">tessera_expert_projection.py</span>: deep, with many callers.</li>
+            <li><span class="font-mono">allocator_solver</span>: deep, and its <span class="font-mono">Candidate</span> is a narrow interface. <span class="font-mono">select_validated_frontier</span>: sound; its knee is a diagnostic (R1).</li>
+            <li><span class="font-mono">footprint</span>, <span class="font-mono">nvfp4_activation_contract</span>, <span class="font-mono">name_projection</span>, <span class="font-mono">gguf_formats</span>: single owners with many callers.</li>
+            <li><span class="font-mono">lane_spec</span> and <span class="font-mono">lane_shipcard</span>: a sound data seam (R16). <span class="font-mono">compressed_route_sweep</span> and its gate: the principle-14 split.</li>
+            <li>PrismaSnap: the lifecycle split is sound. Its leaks are local: the provenance schema is declared twice, and validation imports six private key sets.</li>
+            <li>GLM family: it has one adapter, so a seam would be hypothetical. <span class="font-mono">model_profiles/base.py</span> and <span class="font-mono">glm5_next.py</span> change together because the R26/R27 accessor seam works as designed.</li>
+            <li><span class="font-mono">staged_lease.py</span>, <span class="font-mono">memory_management</span>, <span class="font-mono">io_spans</span>, <span class="font-mono">dev_mode</span>, <span class="font-mono">schemas</span>, <span class="font-mono">stage_inputs</span>, <span class="font-mono">LayerCache</span>, <span class="font-mono">PerturbedActivationCache</span>: each owns one fact for many callers.</li>
+          </ul>
+          <p class="text-xs text-slate-500 pt-2">Not reviewed: <span class="font-mono">tools/</span> beyond about 15 files, <span class="font-mono">experiments/</span>, the tests as a body, <span class="font-mono">run-pipeline.sh</span> and the Tessera repo. The count scripts are in <span class="font-mono">/home/rob/fleet/ceo/exec/archreview-20261013/scratch/</span>.</p>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>

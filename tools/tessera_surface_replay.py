@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.tessera_anchored_surface import replay_campaign
 
 
@@ -24,10 +24,10 @@ def main(argv=None):
         report = replay_campaign(args.costs, args.checkpoint, plan)
         encoded = json.dumps(report, sort_keys=True, indent=2, allow_nan=False).encode() + b"\n"
         output = Path(args.out)
-        if output.exists() and output.read_bytes() != encoded:
+        destination = output.parent.resolve(strict=False) / output.name
+        created = publish_new_bytes(destination, encoded, nofollow=True)
+        if not created and destination.read_bytes() != encoded:
             raise ValueError("output already contains a different replay; use another --out")
-        if not output.exists():
-            atomic_write_bytes(output, encoded)
     except (ValueError, RuntimeError, KeyError, TypeError, OSError) as exc:
         parser.exit(2, f"replay refused: {exc}\n")
     return 0

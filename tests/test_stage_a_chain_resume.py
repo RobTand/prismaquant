@@ -10,11 +10,12 @@ its lowest sealed checkpoint. The claims these tests hold it to:
 * The interrupted run keeps its forward boundary entries and its sealed
   checkpoints when it fails, and a resume removes only the interrupted
   attempt's rolling entries and sets partial checkpoint directories aside.
-* A resume under a different implementation needs dev mode and an explicit
-  declaration. The run header keeps the original implementation; the
-  declaration is in the receipt and in every band sealed below the switch.
-* Every difference in what decides the chain's bytes refuses, before
-  anything is removed or renamed.
+* Certified resumes refuse changed run seals. Default dev mode stamps seal
+  mismatches, including undeclared implementation and arithmetic changes.
+  Explicit switch declarations remain in receipts and affected bands; the
+  run header retains the original implementation.
+* Chain layout and data constraints refuse in both modes before anything
+  is removed or renamed.
 
 The fixture is a five-layer dense model at stride 2, so the run seals the
 tail checkpoint 5 and checkpoints 4 and 2, and a four-layer model whose
@@ -38,7 +39,8 @@ import torch
 from prismaquant import joint_cost_stage_a as stage_a
 from prismaquant import stage_a_chain_resume as resume_mod
 from prismaquant.cost_stage_checkpoint import canonical_json_bytes
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts, StreamedCausalLM
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
+from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.joint_adjoint_band import build_band_receipt
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_receipt_path,
@@ -941,7 +943,7 @@ def test_dev_mode_refuses_a_generation_whose_status_is_not_interrupted(
 def test_a_boundary_storage_layout_difference_refuses_in_dev_mode(field, value):
     """The schema, the capture order and the read window lay out the stored
     entries; the byte ceilings bound one run's memory and disk."""
-    from prismaquant.cost_streaming import boundary_storage_layout_differs
+    from prismaquant.streamed_boundary_artifacts import boundary_storage_layout_differs
 
     stored = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
               "max_resident_bytes": 1, "max_auxiliary_bytes": 2, "max_artifact_bytes": 3,

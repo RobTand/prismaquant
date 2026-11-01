@@ -12,6 +12,8 @@ import torch
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
@@ -24,7 +26,7 @@ def main():
     from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.model_profiles.glm5_next import Glm5NextProfile
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     assert torch.cuda.is_available(), 'GPU source gate requires CUDA'
     config = _tiny_config()
     config.text_config.hidden_size = 256
@@ -92,7 +94,7 @@ def main():
     try:
         with torch.inference_mode():
             expected_logits = [model(input_ids=ids.cuda(), use_cache=False).logits.cpu() for ids in tokens]
-            baseline = run_profile('source', lambda: _collect_activations(model, targets, tokens, 7, 'cuda', want_hessian=True, profile=profile))
+            baseline = run_profile('source', lambda: capture_activation_statistics(model, targets, tokens, 7, 'cuda', want_hessian=True, profile=profile))
             reference_state = {name: tensor.detach().cpu() for name, tensor in [*model.named_parameters(), *model.named_buffers()]}
             del model
             torch.cuda.empty_cache()
@@ -115,7 +117,7 @@ def main():
                     if tensor.dtype != expected.dtype or not torch.equal(tensor.cpu(), expected):
                         results['state_mismatches'][name] = dict(actual_dtype=str(tensor.dtype), expected_dtype=str(expected.dtype), max_abs=float((tensor.cpu().float()-expected.float()).abs().max()))
                 names = [n for n in targets if runner.layer_index_for_qname(n) == layer]
-                local = _collect_activations(runner.model, names, tokens, 7, 'cuda',
+                local = capture_activation_statistics(runner.model, names, tokens, 7, 'cuda',
                     want_hessian=True, profile=profile, forward_batch=forward_batch)
                 for full, part in zip(captured, local):
                     full.update(part)

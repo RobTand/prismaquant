@@ -17,7 +17,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from tools import reseal_campaign_identity as tool  # noqa: E402
+from prismaquant import tessera_campaign_reseal as tool
+from prismaquant.cost_stage_checkpoint import unit_path
+from prismaquant.digests import file_sha256hex
+from tools.reseal_campaign_identity import main as reseal_main  # noqa: E402
 
 OLD = dict(prismaquant_source_sha256='a'*64, encoder_source_sha256='b'*64)
 NEW = dict(prismaquant_source_sha256='c'*64, encoder_source_sha256='d'*64)
@@ -57,7 +60,7 @@ def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'laye
     parts = root/'cost.anchors.json.parts'
     manifest = dict(schema=tool.MANIFEST_SCHEMA, stage=tool.STAGE, identity_sha256=sha,
                     identity=json.loads(tool.canonical_bytes(identity)),
-                    units=[dict(qname=u, file=str(tool.unit_path(parts, u).relative_to(parts))) for u in units])
+                    units=[dict(qname=u, file=str(unit_path(parts, u).relative_to(parts))) for u in units])
     (root/'cost.anchors.json').write_bytes(tool.manifest_bytes(manifest))
     wires = {}
     for u in units:
@@ -68,7 +71,7 @@ def make_row(root, *, pins=OLD, units=('layers.0.mlp.experts.0.down_proj', 'laye
         payload = pickle.dumps(state, protocol=5)
         envelope = dict(schema=tool.UNIT_SCHEMA, stage=tool.STAGE, qname=u, identity_sha256=sha,
                         payload_sha256=hashlib.sha256(payload).hexdigest(), payload=payload)
-        path = tool.unit_path(parts, u)
+        path = unit_path(parts, u)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(pickle.dumps(envelope, protocol=5))
     if with_cost:
@@ -112,7 +115,7 @@ def write_bundle(path, old=OLD, new=NEW, ok=True, strata=DEFAULT_STRATA):
 
 
 def run(*argv):
-    return tool.main([str(a) for a in argv])
+    return reseal_main([str(a) for a in argv])
 
 
 def test_dry_run_lists_every_edit_and_writes_nothing(tmp_path, capsys):
@@ -141,7 +144,7 @@ def test_migrate_then_verify_is_consistent_and_idempotent(tmp_path, capsys):
     assert manifest['identity']['prismaquant_source_sha256'] == NEW['prismaquant_source_sha256']
     assert manifest['identity_sha256'] == tool.identity_sha256(manifest['identity']) != old_sha
     record = manifest['identity_migration'][-1]
-    assert record['old_identity_sha256'] == old_sha and record['proof_bundle_sha256'] == tool.sha256_file(bundle)
+    assert record['old_identity_sha256'] == old_sha and record['proof_bundle_sha256'] == file_sha256hex(bundle)
     cost = pickle.loads((row/'cost.pkl').read_bytes())
     assert cost['provenance']['identity_migration'] == manifest['identity_migration']
     assert all(r['identity']['encoder_source_sha256'] == NEW['encoder_source_sha256']
@@ -692,7 +695,7 @@ def test_a_bundle_is_rechecked_against_its_arm_results_when_loaded(tmp_path, cap
     bundle = json.loads(path.read_text())
 
     def with_arm(arm, scope):
-        bundle['arms'] = [dict(result=str(arm), result_sha256=tool.sha256_file(arm), pin_scope=scope)]
+        bundle['arms'] = [dict(result=str(arm), result_sha256=file_sha256hex(arm), pin_scope=scope)]
         path.write_text(json.dumps(bundle))
         return run('dry-run', '--pins', pins, '--proof', path, '--row', row)
 

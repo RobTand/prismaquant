@@ -1,0 +1,164 @@
+{
+  "records": [
+    {
+      "identity": {
+        "calibration": {
+          "fit_ids_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "campaign_schema": "prismaquant.tessera_campaign_cost.v1",
+        "currency": "output_mse_under_route_activation_contract",
+        "encoder_recipe": {
+          "ldlq_block": 32,
+          "ldlq_sigma": 1.0,
+          "refit_gauss_seidel": false,
+          "refit_objective": {
+            "channel": "hessian",
+            "lut16": "h^1.0",
+            "s6b": "plain"
+          },
+          "refit_objective_trailing": null,
+          "refit_reach_floor": false
+        },
+        "encoder_source_sha256": "8c471b10a0010d0d68c748b3fe328a782e778e6d1a88b80a0ec144a5969d51bd",
+        "expert_projection": null,
+        "input_global_scale_policy": "fixture",
+        "prismaquant_source_sha256": "95e3c97d5a367679ebe9114ac67b55a210bfabe11c5e16a96dc05107aadab1cd",
+        "serving_scope": null,
+        "settings": {
+          "custom": {
+            "flag": false,
+            "n": 0,
+            "value": null
+          },
+          "false_setting": false,
+          "model": "fixture-\u00e9",
+          "seed": 0,
+          "unknown_none": null
+        },
+        "units": {
+          "unit": {
+            "hessian": null,
+            "input_global_scale": null,
+            "menu": [],
+            "scoring_rows": null,
+            "weight": {
+              "algorithm": "sha256.dtype_shape_contiguous.v1",
+              "dtype": "torch.float32",
+              "sha256": "e031e8184e41a302ce2ebb4b2475e8f50e8e6b48f795a1b29b485f5a7d21e4d1",
+              "shape": [
+                2,
+                2
+              ]
+            }
+          }
+        }
+      },
+      "raw_settings": {
+        "acquisition_request": null,
+        "acquisition_request_sha256": null,
+        "allow_pinned": null,
+        "cache_dir": "excluded-cache",
+        "custom": {
+          "flag": false,
+          "n": 0,
+          "value": null
+        },
+        "false_setting": false,
+        "model": "fixture-\u00e9",
+        "out": "excluded.pkl",
+        "pinned_roster_only": false,
+        "seed": 0,
+        "source_scope": null,
+        "unknown_none": null
+      }
+    },
+    {
+      "identity": {
+        "calibration": {
+          "fit_ids_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "campaign_schema": "prismaquant.tessera_campaign_cost.v1",
+        "currency": "output_mse_under_route_activation_contract",
+        "encoder_recipe": {
+          "ldlq_block": 32,
+          "ldlq_sigma": 1.0,
+          "refit_gauss_seidel": false,
+          "refit_objective": {
+            "channel": "hessian",
+            "lut16": "h^1.0",
+            "s6b": "plain"
+          },
+          "refit_objective_trailing": null,
+          "refit_reach_floor": false
+        },
+        "encoder_source_sha256": "8c471b10a0010d0d68c748b3fe328a782e778e6d1a88b80a0ec144a5969d51bd",
+        "expert_projection": null,
+        "input_global_scale_policy": "fixture",
+        "prismaquant_source_sha256": "95e3c97d5a367679ebe9114ac67b55a210bfabe11c5e16a96dc05107aadab1cd",
+        "serving_scope": null,
+        "settings": {
+          "custom": {
+            "flag": false,
+            "n": 0,
+            "value": null
+          },
+          "false_setting": false,
+          "model": "fixture-\u00e9",
+          "seed": 0,
+          "unknown_none": null
+        },
+        "units": {
+          "unit": {
+            "acquisition_source_weight": {
+              "count": 0,
+              "qualified": false,
+              "source_tensor_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            },
+            "hessian": null,
+            "input_global_scale": null,
+            "menu": [],
+            "scoring_rows": null,
+            "weight": {
+              "algorithm": "sha256.dtype_shape_contiguous.v1",
+              "dtype": "torch.float32",
+              "sha256": "e031e8184e41a302ce2ebb4b2475e8f50e8e6b48f795a1b29b485f5a7d21e4d1",
+              "shape": [
+                2,
+                2
+              ]
+            }
+          }
+        }
+      },
+      "raw_settings": {
+        "acquisition_request": null,
+        "acquisition_request_sha256": null,
+        "acquisition_source_weights": {
+          "unit": {
+            "count": 0,
+            "qualified": false,
+            "source_tensor_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        },
+        "allow_pinned": null,
+        "cache_dir": "excluded-cache",
+        "custom": {
+          "flag": false,
+          "n": 0,
+          "value": null
+        },
+        "false_setting": false,
+        "model": "fixture-\u00e9",
+        "out": "excluded.pkl",
+        "pinned_roster_only": false,
+        "seed": 0,
+        "source_scope": null,
+        "unknown_none": null
+      }
+    }
+  ],
+  "schema": "prismaquant.refactor_checkpoint_settings_oracle.v1",
+  "source_owner": "old Namespace checkpoint API in frozen pre-change source"
+}

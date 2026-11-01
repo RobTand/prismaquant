@@ -7,6 +7,8 @@ rows. This is one resident layer control, not whole-campaign qualification.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import argparse
 from contextlib import ExitStack, contextmanager
 import datetime as dt
@@ -26,7 +28,7 @@ import urllib.parse
 import urllib.request
 
 import torch
-from prismaquant import measure_quant_cost as mqc, tessera_campaign as campaign
+from prismaquant import routed_experts, tessera_campaign as campaign
 from prismaquant.prismabuild_progress import report
 
 
@@ -73,7 +75,7 @@ def _reference_smoke():
     experts = routing._GateExperts(e)
     parent = routing._FixedRoute(indices, weights)
     assert _same(routing._reference_derive(experts, x, parent),
-                 mqc.derive_per_expert_activations(experts, x, parent))
+                 routed_experts.derive_per_expert_activations(experts, x, parent))
     assert callable(checking._reference_checked_units)
     print(json.dumps(dict(reference_imports=True, cpu_equality=True,
                          cuda_initialized=torch.cuda.is_initialized())), flush=True)
@@ -209,7 +211,7 @@ def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds
     prefix = f"model.language_model.layers.{binding['layer']}.mlp.experts"
     targets = {f'{prefix}.{e}.{projection}' for e in range(288)
         for projection in ('gate_proj','up_proj','down_proj')}
-    original = mqc.derive_per_expert_activations
+    original = routed_experts.derive_per_expert_activations
     arm = ['before']
     references = dict(before=_references()[0]._reference_derive, after=original)
     def selected(*args, **kwargs):
@@ -263,10 +265,10 @@ def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds
             # is installed. No-op forward avoids a second source-model draw.
             yield torch.zeros((1,1),dtype=torch.long)
         raise _HookControlComplete()
-    mqc.derive_per_expert_activations = selected
+    routed_experts.derive_per_expert_activations = selected
     try:
         try:
-            campaign._collect_activations(model, targets, batches(), 512, 'cuda',
+            calibration_forward.capture_activation_statistics(model, targets, batches(), 512, 'cuda',
                 want_hessian=True,profile=profile,shared_packed_inputs=True,
                 forward_batch=lambda _:None,on_forwards_complete=lambda:None)
         except _HookControlComplete:
@@ -274,7 +276,7 @@ def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds
         else:
             raise RuntimeError('hook control did not end at the declared boundary')
     finally:
-        mqc.derive_per_expert_activations = original
+        routed_experts.derive_per_expert_activations = original
     if moe.experts._forward_pre_hooks:
         raise RuntimeError('production collector left a hook installed')
     gc.collect(); torch.cuda.empty_cache()
@@ -437,7 +439,7 @@ def main():
                     for max_rows in (None, 16):
                         kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows)
                         old = routing._reference_derive(moe.experts, inputs, moe, **kwargs)
-                        new = mqc.derive_per_expert_activations(moe.experts, inputs, moe, **kwargs)
+                        new = routed_experts.derive_per_expert_activations(moe.experts, inputs, moe, **kwargs)
                         row = dict(capture_down=capture_down, max_rows=max_rows, equal=_same(old,new),
                             zero_row_experts=old['row_counts'].count(0))
                         record['equality'].append(row)
@@ -445,7 +447,7 @@ def main():
                         if not row['equal']:
                             raise RuntimeError('routed outputs changed')
                 calls = dict(before=lambda: routing._reference_derive(moe.experts, inputs, moe),
-                             after=lambda: mqc.derive_per_expert_activations(moe.experts, inputs, moe))
+                             after=lambda: routed_experts.derive_per_expert_activations(moe.experts, inputs, moe))
                 checks = {name:(lambda fn=fn: fn(bound, weights=live, model_path=binding['model'],
                     source=source, source_authentication=decoder)) for name,fn in dict(
                         before=checking._reference_checked_units, after=campaign._checked_projected_units).items()}

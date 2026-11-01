@@ -378,10 +378,10 @@ def test_window_load_rejects_file_drift_after_preflight(tmp_path, monkeypatch):
 
 
 def test_selected_release_does_not_adopt_same_named_unverified_file(tmp_path):
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
     key = ('unit', 'FP8')
     tensor = torch.ones(4)
-    torch.save(torch.zeros(4), tmp_path / _cache_weight_filename(*key))
+    torch.save(torch.zeros(4), tmp_path / cache_weight_filename(*key))
     cache = ProductionWeightCache({key: tensor}, {}, cache_dir=str(tmp_path))
     assert cache.release_resident_tensors([key]) == 0
     assert cache.get_resident(*key) is tensor

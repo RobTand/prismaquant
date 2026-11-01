@@ -1,17 +1,13 @@
-"""The Tessera grid-space seam, pinned against the rungs that were measured.
+"""Tessera schedules, byte accounting and pinned route admission.
 
-The point of this file is not coverage.  ``tessera_formats`` exists to let
-PrismaQuant's allocator price Tessera continuously, and two things have to hold
-for that to be honest rather than decorative:
-
-1. The rungs with published weight-space numbers must be namable, and must
-   price at the bpp those numbers were published at.  An allocator addressing
-   rungs nobody measured is addressing fiction.
-2. Every rung the module offers must hand the encoder a schedule it will
-   accept.  "Continuous" is a claim about realisability, so it is tested by
-   realising, not by asserting a range.
+Published ladder entries retain their measured wire and accounting domain.
+Schedule checks span the offered rungs; encoder checks use representative
+rungs, recipes and shapes. They do not measure quality or serving at every
+offered rung.
 """
 from fractions import Fraction
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 
 import torch
 import pytest
@@ -847,9 +843,9 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     name = "TESSERA_E4M3_K1_R896"
     control = "TESSERA_E2M1_K2_R896"
-    assert tr.tessera_lane_attested(name, serving_context=routed)
+    assert (tr.tessera_lane_admission(name, serving_context=routed)).admitted
     assert tr.synthesize_tessera_spec(name, serving_context=routed).producer_eligible
-    assert tr.tessera_lane_attested(control, serving_context=context)
+    assert (tr.tessera_lane_admission(control, serving_context=context)).admitted
     assert tr.synthesize_tessera_spec(control, serving_context=context).producer_eligible
 
     without = {digest: grid for digest, grid in alphabet.SERIALISABLE_GRIDS.items()
@@ -895,14 +891,14 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     from prismaquant.tessera_render import synthesize_tessera_spec
 
     # The table is PRESENT and DOES govern both families.
-    table, _formats = tr._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _formats = snapshot.eligibility, snapshot.published_formats
     assert table.present
     assert table.governs("TESSERA_E2M1_K2") and table.governs("TESSERA_E4M3_K1")
 
     from prismaquant.lane_eligibility import ServingContext
 
     pin_module.require_pinned_tessera_runtime()
-    assert tr._release_pin_satisfied() is True
 
     # The installed table is SCOPED (lane schema v6), so admission needs an
     # explicit serving context. Context-free eligibility -- which is what
@@ -911,16 +907,16 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     context = _cell_context("TESSERA_E2M1_K2", "dense")
     # E4M3 asked at its routed scope, which attests q896 since contract v38.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R896", serving_context=routed) is True
-    assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=routed) is True
-    assert tr.tessera_lane_attested("TESSERA_E4M3_K1_R1024") is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R896", serving_context=routed)).admitted is True
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E4M3_K1_R1024", serving_context=routed)).admitted is True
+    assert (tr.tessera_lane_admission("TESSERA_E4M3_K1_R1024")).admitted is False
     assert not synthesize_tessera_spec("TESSERA_E4M3_K1_R1024").producer_eligible
 
     # A rung no cell names stays False under the very same pin and context.
-    assert tr.tessera_lane_attested(
-        "TESSERA_E2M1_K1_R640", serving_context=context) is False
+    assert (tr.tessera_lane_admission(
+        "TESSERA_E2M1_K1_R640", serving_context=context)).admitted is False
 
 
 def _default_serve_image() -> str:
@@ -934,21 +930,23 @@ def _default_serve_image() -> str:
             "versions"]["default_serve_image"]
 
 
-def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch):
+def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch, tmp_path):
     """The refusal half: a Tessera whose contract is not the pinned bytes."""
     from prismaquant import tessera_render as tr
-    from prismaquant import tessera_serving_runtime_pin as pin_module
-    from prismaquant.lane_eligibility import ServingContext
+    from prismaquant import tessera_runtime_contract as runtime
     from prismaquant.tessera_render import synthesize_tessera_spec
 
-    monkeypatch.setattr(pin_module, "installed_tessera_contract_sha256",
-                        lambda: "c" * 64)
-    assert tr._release_pin_satisfied() is False
+    import json
+    payload = json.loads(runtime.contract_path().read_bytes())
+    payload["contract_version"] += 1
+    path = tmp_path / "unreviewed-contract.json"
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(runtime, "contract_path", lambda: path)
     context = _cell_context("TESSERA_E2M1_K2", "dense")
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024",
                  "TESSERA_E2M1_K1_R640"):
-        assert tr.tessera_lane_attested(name, serving_context=context) is False
-        assert tr.tessera_lane_attested(name) is False
+        assert (tr.tessera_lane_admission(name, serving_context=context)).admitted is False
+        assert (tr.tessera_lane_admission(name)).admitted is False
         assert synthesize_tessera_spec(name).producer_eligible is False
 
 
@@ -957,10 +955,8 @@ def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch):
 # ``tessera.export.wire_recipe`` is the single statement of which body, span,
 # scale plane and window the exporter writes for a grid at a rung.  Everything
 # below is written against *explicitly constructed* recipes rather than the
-# current default, because the default is going to move -- the window body over
-# a CHANNEL plane is measured better on E4M3 and is held behind a kernel gate,
-# not a doubt -- and a test that only exercises today's wire would go quiet on
-# the day the flip happens, which is the day it is needed.
+# current default. The default changed on 2026-09-02; explicit recipes retain
+# coverage of the other supported wire geometries.
 
 # ------------------------------------------------------------------ the sweep
 #
@@ -1372,9 +1368,8 @@ def test_the_route_is_a_property_of_the_grid_and_the_plane_together():
         assert spec.act_quant_changes_input is False, name
         assert spec.min_capability_sm == 80, name
 
-    # And none of it is a serving claim (principle 9 / 14): a layout that
-    # *would* materialise is still not a route a pinned runtime was measured
-    # taking, so nothing is producer-eligible.
+    # These calls omit the serving context required for producer admission.
+    # A materialisable layout alone does not establish that admission.
     for name, wire in [("TESSERA_E2M1_K2_R896", None),
                        ("TESSERA_E4M3_K1_R1024", channel)]:
         spec = synthesize_tessera_spec(

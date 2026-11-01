@@ -4,6 +4,11 @@ These rules are mandatory for coding agents working in this repository.
 Before implementing new functionality, read this file,
 `docs/design/design_guidelines.md`, and `docs/ARCHITECTURE.md`.
 
+**GGUF is deprecated, per Rob on 2026-10-17.** Preserve the existing GGUF code,
+but do not fix, enhance or extend it. The GGUF contracts below describe the
+retained implementation, not an ongoing support commitment. Focus new work on
+the supported compressed-tensors and Tessera paths within their existing gates.
+
 ## Repository change delivery
 
 Every change to `main` must start with an issue in this repository and arrive
@@ -78,9 +83,13 @@ references to another repository do not satisfy this check.
    `lane_eligibility.cell_evidence_admits` and the independent export and
    serving gates; do not infer admission beyond a matched cell. The non-vLLM-native lanes are
    sanctioned, not exceptions; what is forbidden is a forked runtime.
-   PrismaQuant must never vendor or import the Tessera *serving* runtime;
-   compatibility crosses that repository boundary only through the immutable
-   pin and the packaged contract.
+   Tessera is a numerical-format dependency; import its format and producer
+   APIs where needed. Prefer published interfaces and keep serving-specific
+   imports in integration or measurement paths running in their declared
+   runtime. Ordinary metadata work should use the producer metadata APIs
+   without loading the serving stack. Use the external package rather than
+   vendoring or forking it. Imports do not replace the immutable pin,
+   packaged contract, or independent export and serving gates.
 
    **A fourth container was retired on 2026-09-02.** The codebook lane
    (NVFP4-CB / FP8-CB) served by the separately released

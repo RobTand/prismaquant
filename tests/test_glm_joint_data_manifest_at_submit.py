@@ -26,10 +26,13 @@ and the exclusions that make the order true:
   the chain's demand, because a ``pbrun`` option after the separator is an
   argument of the action instead.
 
-The tests are torch-free on purpose: they run on the fleet's CPU boxes, which
-have no torch, and the producer they exercise imports nothing from the
-``prismaquant`` package for the same reason.
+The tests exercise metadata-only paths without Torch. The producer imports
+cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
 """
+
+from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant.render_cache_paths import cache_weight_filename
+from prismaquant import tessera_campaign_table as campaign_table
 
 import gzip
 import hashlib
@@ -53,7 +56,7 @@ if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
 from container_inspection_fixture import inspection
-from experiments import glm_data_manifests  # noqa: E402
+from prismaquant import campaign_data_manifests as glm_data_manifests
 
 #: The sealed replay frontier's own definitions, loaded the way the producer
 #: loads them: no ``prismaquant`` package, no GPU image.
@@ -190,7 +193,7 @@ def _workspace(scratch: Path) -> dict:
         cache = workspace / "rows" / f"row-{layer:04d}" / "cache"
         for index, name in enumerate(UNITS[layer]):
             for offset, fmt in enumerate(MEASURED):
-                filename = glm_data_manifests._cache_weight_filename(name, fmt)
+                filename = cache_weight_filename(name, fmt)
                 (cache / filename).write_bytes(b"r" * (2048 + 10 * index + offset))
 
     merged = workspace / "merged"
@@ -252,9 +255,9 @@ def _workspace(scratch: Path) -> dict:
     # the campaign it belongs to, and the plan's own bound census cannot show
     # that by itself.
     import dispatch_tessera_campaign as dispatch
-    scope = dispatch.joint_campaign_scope(json.loads(plan.read_text()))
+    scope = campaign_table.joint_campaign_scope(json.loads(plan.read_text()))
     campaign_identity = scratch / "campaign-identity.json"
-    campaign_identity.write_text(json.dumps(dispatch.campaign_identity(scope),
+    campaign_identity.write_text(json.dumps(campaign_table.campaign_identity(scope),
                                             sort_keys=True))
     return {"plan": plan, "workspace": workspace, "wire_dir": wire_dir,
             "checkpoint": checkpoint, "parts": parts, "names": names,
@@ -335,10 +338,10 @@ def workspace_with_sealed_checkpoint(scratch):
     plan["inputs"]["merged_checkpoint"]["sha256"] = hashlib.sha256(
         checkpoint.read_bytes()).hexdigest()
     plan_path.write_text(json.dumps(plan))
-    fixture["scope"] = dispatch.joint_campaign_scope(
+    fixture["scope"] = campaign_table.joint_campaign_scope(
         json.loads(plan_path.read_text()))
     Path(fixture["campaign_identity"]).write_text(json.dumps(
-        dispatch.campaign_identity(fixture["scope"]), sort_keys=True))
+        campaign_table.campaign_identity(fixture["scope"]), sort_keys=True))
     return fixture, document["identity_sha256"]
 
 
@@ -531,7 +534,7 @@ def test_prepare_refuses_a_prefetch_window_it_cannot_release(scratch, shared_mou
     plan = json.loads(fixture["plan"].read_text())
     plan["source_prefetch"]["max_cache_slots"] = 3
     fixture["plan"].write_text(json.dumps(plan))
-    with pytest.raises(SystemExit, match="source prefetch can outlive"):
+    with pytest.raises(ReadsetRefused, match="source prefetch can outlive"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -720,7 +723,7 @@ def test_prepare_manifest_uses_exact_cached_source_sha_and_refuses_mutation(
         handle.seek(-1, 2)
         handle.write(bytes([last[0] ^ 1]))
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
-    with pytest.raises(SystemExit, match="no longer proves"):
+    with pytest.raises(ReadsetRefused, match="no longer proves"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -763,7 +766,7 @@ def test_a_cache_written_through_another_mount_refuses_and_names_the_mount(
         "sha256": hashlib.sha256(cache.read_bytes()).hexdigest()}
     fixture["plan"].write_text(json.dumps(plan))
 
-    with pytest.raises(SystemExit, match="no longer proves") as refusal:
+    with pytest.raises(ReadsetRefused, match="no longer proves") as refusal:
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
     message = str(refusal.value)
@@ -800,7 +803,7 @@ def test_a_cache_written_through_another_mount_refuses_and_names_the_mount(
         handle.seek(-1, 2)
         handle.write(bytes([last[0] ^ 1]))
     os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
-    with pytest.raises(SystemExit, match="no longer proves"):
+    with pytest.raises(ReadsetRefused, match="no longer proves"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -830,7 +833,7 @@ def test_the_wire_of_a_render_the_campaign_never_wrote_is_read_in_the_head(
     fixture = _workspace(scratch)
     name, fmt = fixture["names"][0], MEASURED[0]
     render = (fixture["workspace"] / "rows" / "row-0000" / "cache"
-              / glm_data_manifests._cache_weight_filename(name, fmt))
+              / cache_weight_filename(name, fmt))
     assert render.is_file()
     # A rung this campaign adopted rather than encoded: wire, no shard.
     render.unlink()
@@ -874,6 +877,15 @@ def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
 
     names = [phase["name"] for phase in manifest["annotations"]["phases"]]
     assert names == ["head", "layer-0", "layer-1"]
+    from prismaquant.joint_run_progress import JointRunProgress
+    committed = []
+    progress = JointRunProgress(layers=2, partitions=1, phases=tuple(names),
+        clock=lambda: 0.0, log=lambda message: None,
+        commit=lambda phase, units: committed.append((phase, units)) or True)
+    for layer in range(2):
+        progress.entry(layer=layer, partition=0)
+        progress.flush(force=True)
+    assert committed == [("layer-0", 1), ("layer-1", 2)]
     assert str(prepared) in _paths(manifest, "head")
     assert str(cache) in _paths(manifest, "head")
 
@@ -882,14 +894,14 @@ def test_the_run_manifest_reads_only_consumed_renders_after_the_head(
         for name in sorted(UNITS[layer]):
             for fmt in sorted(MEASURED):
                 expected.append(str(fixture["workspace"] / "rows" / f"row-{layer:04d}"
-                                    / "cache" / glm_data_manifests._cache_weight_filename(name, fmt)))
+                                    / "cache" / cache_weight_filename(name, fmt)))
         assert _paths(manifest, f"layer-{layer}") == expected
     assert not any(entry['path'].endswith('.tessera') for entry in manifest['entries'])
     assert manifest['annotations']['counts'].get('wires', 0) == 0
     # A missing render cannot turn this metadata/price action into a wire
     # consumer through the preparation synthesis fallback.
     Path(expected[-1]).unlink()
-    with pytest.raises(SystemExit, match='prepared render is missing'):
+    with pytest.raises(ReadsetRefused, match='prepared render is missing'):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture['plan']), command='run', produced_by=PRODUCED_BY,
             prepared=str(prepared))
@@ -902,7 +914,7 @@ def test_a_joint_pass_before_the_merge_is_refused_with_the_path_named(
     for shard in (fixture["parts"] / "units").iterdir():
         shard.unlink()
 
-    with pytest.raises(SystemExit) as refusal:
+    with pytest.raises(ReadsetRefused) as refusal:
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY)
 
@@ -1005,6 +1017,48 @@ def test_the_export_manifest_declares_selected_wires_and_passthrough_source(
     assert manifest["annotations"]["read_order_attested"] is False
 
 
+def test_layer_phases_are_spelled_by_the_progress_reporters_one_function(
+    scratch, shared_mount, monkeypatch,
+):
+    """The run and export read sets name layer phases through the reporter.
+
+    ``joint_run_progress.layer_phase_name`` is the one spelling of a layer
+    phase: the reporter commits under it, so a declared phase spelled any
+    other way would match none of its commits. The function is replaced with
+    a sentinel spelling here, and the builders must declare the sentinel. A
+    builder that typed ``layer-<L>`` itself would still declare the old names.
+    """
+    from prismaquant import joint_run_progress
+
+    assert joint_run_progress.layer_phase_name(7) == "layer-7"
+    monkeypatch.setattr(joint_run_progress, "layer_phase_name",
+                        lambda layer: f"sentinel-{layer}")
+    fixture = _workspace(scratch)
+    prepared = scratch / "prepared.json"
+    cache = scratch / "production.pkl"
+    cache.write_bytes(b"p" * 5000)
+    prepared.write_text(json.dumps({
+        "schema": glm_data_manifests.JOINT_PREPARED_SCHEMA,
+        "status": "complete",
+        "production_cache": {"path": str(cache), "sha256": None},
+    }))
+    allocation = scratch / "shared-allocation-cost.pkl"
+    allocation.write_bytes(b"a" * 1024)
+    assignment = scratch / "layer_config.json"
+    assignment.write_text(json.dumps({name: MEASURED[0] for name in fixture["names"]}))
+
+    run = glm_data_manifests.build_joint_pass_manifest(
+        str(fixture["plan"]), command="run", produced_by=PRODUCED_BY,
+        prepared=str(prepared))
+    export = glm_data_manifests.build_export_manifest(
+        str(fixture["plan"]), assignment=str(assignment),
+        allocation_cost=str(allocation), produced_by=PRODUCED_BY)
+
+    for manifest in (run, export):
+        assert [phase["name"] for phase in manifest["annotations"]["phases"]] == [
+            "head", "sentinel-0", "sentinel-1"]
+
+
 def test_the_submit_command_puts_the_manifest_before_the_detach(
     scratch, shared_mount, capsys, monkeypatch,
 ):
@@ -1014,7 +1068,6 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
     manifest_dir = scratch / "manifests"
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     code = dispatch.main([
         "submit-joint", "prepare",
@@ -1078,7 +1131,6 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
     digest = hashlib.sha256(receipt.read_bytes()).hexdigest()
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     built = {}
     real = glm_data_manifests.build_joint_pass_manifest
 
@@ -1103,7 +1155,7 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
         str(fixture["plan"]), command="run", produced_by=PRODUCED_BY,
         prepared=str(prepared), source_transition=str(receipt))
     assert str(receipt) in _paths(manifest, "head")
-    with pytest.raises(SystemExit, match="run command only"):
+    with pytest.raises(ReadsetRefused, match="run command only"):
         glm_data_manifests.build_joint_pass_manifest(
             str(fixture["plan"]), command="prepare", produced_by=PRODUCED_BY,
             source_transition=str(receipt))
@@ -1146,7 +1198,6 @@ def test_joint_submit_environment_reaches_launcher_argv(
     spec = scratch / "spec.joint.json"
     original = json.dumps({"container": {"image": "x"}, "env": environment})
     spec.write_text(original)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main([
         "submit-joint", "prepare", "--plan", str(fixture["plan"]),
         *_scope_args(fixture), "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1184,7 +1235,6 @@ def test_joint_submit_refuses_environment_conflicts_before_manifest(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}, "env": {name: value}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest",
                         lambda *args, **kwargs: pytest.fail("manifest built before environment refusal"))
     with pytest.raises(RuntimeError, match=name):
@@ -1212,7 +1262,6 @@ def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
                           *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1260,7 +1309,6 @@ def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     assert dispatch.main(["submit-joint", "prepare", "--plan", str(fixture["plan"]),
                           *_scope_args(fixture),
                           "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1318,7 +1366,6 @@ def test_cached_source_proof_refuses_a_broad_gpu_tag_before_submission(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", cached)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     with pytest.raises(RuntimeError, match="proof is local"):
         dispatch.main([
             "submit-joint", "prepare", "--plan", str(fixture["plan"]),
@@ -1352,7 +1399,6 @@ def test_a_diagnostic_subset_is_not_submittable_as_the_campaign(
     }
     pilot = scratch / "plan.pilot.json"
     pilot.write_text(json.dumps(plan))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     def submit(launch_plan, require_scope):
         return dispatch.main([
@@ -1364,7 +1410,7 @@ def test_a_diagnostic_subset_is_not_submittable_as_the_campaign(
         ])
 
     # The full campaign's score cannot be produced by 16 of its 512 windows.
-    with pytest.raises(dispatch.ScopeRefused,
+    with pytest.raises(campaign_table.ScopeRefused,
                        match="requires a complete_campaign scope"):
         submit(pilot, "complete_campaign")
     # Submitted for what it is, it resolves.
@@ -1381,7 +1427,6 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
     spec.write_text(json.dumps({"container": {"image": "x"}}))
     directory = scratch / "manifests"
     submitted = []
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     real_run = subprocess.run
 
     def fake_run(argv, **kwargs):
@@ -1429,7 +1474,6 @@ def test_a_joint_reservation_under_the_plans_own_bound_is_refused(
         "cwd": "/workspace", "python": "python3", "env": {},
         "container": {"image": "x"},
         "cpu_memory_gb": 34, "box_memory_gb": 114}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     def submit(demand):
         return dispatch.main([
@@ -1469,7 +1513,6 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     dispatch.main([
         "submit-joint", "prepare", "--plan", str(fixture["plan"]),
@@ -1534,7 +1577,6 @@ def test_a_read_set_over_the_prismabuild_ceiling_is_refused_at_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
     monkeypatch.setattr(glm_data_manifests, "MAX_MANIFEST_BYTES", 128)
 
     with pytest.raises(SystemExit) as refusal:
@@ -1580,7 +1622,6 @@ def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
         return manifest
 
     monkeypatch.setattr(glm_data_manifests, "build_joint_pass_manifest", verified)
-    monkeypatch.setattr(dispatch, "_manifest_producer", lambda: glm_data_manifests)
 
     assert dispatch.main([
         "submit-joint", "prepare",

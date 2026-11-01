@@ -1,6 +1,5 @@
 """Packed campaign decisions retain honest source coverage and priced receipts."""
 from __future__ import annotations
-
 import copy
 import json
 import pickle
@@ -8,7 +7,7 @@ import sys
 
 import pytest
 
-from prismaquant import tessera_campaign as campaign
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from test_allocator_expert_projection import (
@@ -42,7 +41,7 @@ def _fixture(tmp_path, *, sampled=False):
     carried = tep.carried_projection(producer,
         tep.bind_expert_projection(producer, declared={STACK: declared}),
         request=tep.stack_plan_request({STACK: ('E4M3', 1024)}), tool='fixture')
-    population = campaign.ExpertPopulation(members=(), declared={STACK: declared},
+    population = campaign_table.ExpertPopulation(members=(), declared={STACK: declared},
         packed_in_scope=parameters, omitted_outside_layer_stride={})
     stats, samples = {}, {}
     for packed, shape in parameters.items():
@@ -51,11 +50,11 @@ def _fixture(tmp_path, *, sampled=False):
                    out_features=shape[1], in_features=shape[2], n_params=4*shape[1]*shape[2],
                    router_path=None, expert_id=None)
         stats[packed] = row
-        samples[packed] = campaign.stack_sample_from_probe(packed, row, profile,
+        samples[packed] = campaign_table.stack_sample_from_probe(packed, row, profile,
             sampled_experts=(0, 1) if sampled else range(4),
             inclusion_prob={e: .5 if sampled else 1.0 for e in range(4)}, seed=0)
     costs = {name: {FMT: dict(output_mse=1e-4, output_mse_measured=True,
-                             currency=campaign.CURRENCY)} for name in parameters}
+                             currency=campaign_table.CURRENCY)} for name in parameters}
     menus = {name: [FMT] for name in declared}
     payload = dict(costs=costs, formats=[FMT],
                    provenance=dict(cost_mode='production-render-score', wire_dir=str(tmp_path/'wire'),
@@ -71,13 +70,13 @@ def _fixture(tmp_path, *, sampled=False):
 
 def _with_population(tmp_path, **kwargs):
     payload, inputs, stats = _fixture(tmp_path, **kwargs)
-    payload['provenance'][tep.POPULATION_KEY] = campaign.campaign_population_block(**inputs)
+    payload['provenance'][tep.POPULATION_KEY] = campaign_table.campaign_population_block(**inputs)
     return payload, stats
 
 
 def test_population_prices_packed_decisions_and_records_full_sample_frame(tmp_path):
     payload, inputs, _ = _fixture(tmp_path, sampled=True)
-    block = campaign.campaign_population_block(**inputs)
+    block = campaign_table.campaign_population_block(**inputs)
     assert set(block['priced']['routed_experts']) == set(payload['costs'])
     assert block['unpriced']['routed_experts'] == {}
     assert block['priced']['stacks'] == [STACK]
@@ -113,8 +112,8 @@ def test_sampled_stack_retained_at_bf16_needs_no_missing_wire(tmp_path):
 def test_population_refuses_double_pricing_a_member_and_its_packed_decision(tmp_path):
     payload, inputs, _ = _fixture(tmp_path)
     inputs['costs'][f'{STACK}.0.w1'] = {FMT: {'output_mse': .1}}
-    with pytest.raises(campaign.StackSampleError, match='both|double'):
-        campaign.campaign_population_block(**inputs)
+    with pytest.raises(campaign_table.StackSampleError, match='both|double'):
+        campaign_table.campaign_population_block(**inputs)
 
 
 def test_bridge_refuses_mapping_a_member_to_two_packed_decisions(tmp_path):

@@ -4,8 +4,8 @@ WHAT THIS HOLDS.
 
 * The fused leg's output is BIT-identical to the Torch composition it replaced
   (``_nvfp4_activation_qdq_registered_op_unfused``), compared as raw bits, not
-  only with ``torch.equal``: a signed zero or a NaN payload that moved would
-  pass ``torch.equal`` and still be a different tensor.
+  only with ``torch.equal``: signed zeros can compare numerically equal while
+  their bits differ. Integer views also compare NaN payload bits explicitly.
 * The group-maximum kernel under the shared scale rule is the priced plane
   (``_nvfp4_registered_stored_plane``), so the leg carries one scale rule.
 * The kernel is declared: a registered-operator identity names it, a binding

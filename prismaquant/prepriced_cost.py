@@ -2,18 +2,20 @@
 
 This is an intake gate, not a new cost producer or an acceptance override.
 The existing schema, currency, research-provenance and Tessera Hessian owners
-decide their own contracts. A model reference is checked exactly as recorded;
-it is not a checkpoint-content attestation. Allocator and export gates still
-own per-unit coverage, renderer identity and serving eligibility.
+decide their own contracts. Model references match exactly. Native FP8 cells
+also require their measured source binding or a validated independent joint
+or sparse-anchor source contract. Allocator and export gates still own
+per-unit coverage, renderer identity and serving eligibility.
 """
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import json
 import os
 from pathlib import Path
 import pickle
+import re
 import tempfile
 from typing import Any
 
@@ -107,6 +109,172 @@ def _model_binding(payload: Mapping, model: str) -> dict[str, Any]:
     }
 
 
+
+def checkpoint_only_cost_qnames(model_root: str | Path, qnames: Iterable[str]) -> frozenset[str]:
+    """Find MTP and visual cells through the producer's profile schedule."""
+    from .incremental_probe import build_shard_schedule
+
+    schedule = build_shard_schedule(
+        model_path=str(model_root), num_body_layers=0, body_layers_per_shard=1,
+        body_layer_range=(0, 0), include_mtp=True, include_visual=True,
+        include_lm_head=False, unified_body_sweep=False,
+    )
+    patterns = [re.compile(entry.linear_include) for entry in schedule
+                if entry.kind in ("mtp", "visual")]
+    return frozenset(qname for qname in qnames
+                     if any(pattern.search(qname) for pattern in patterns))
+
+
+def cost_source_binding_for_region(binding: Mapping, *, checkpoint_only: bool) -> Mapping:
+    """Keep text decode evidence; project sidecars to checkpoint and dtype only.
+
+    Callers supply producer evidence or the current observation after boundary
+    validation. This projection never replaces a producer's checkpoint bytes.
+    """
+    from .streamed_model_identity import SOURCE_MODEL_BINDING_SCHEMA
+
+    if not checkpoint_only:
+        return binding
+    return {
+        "schema": SOURCE_MODEL_BINDING_SCHEMA,
+        "checkpoint": binding["checkpoint"],
+        "effective_dtype": binding["effective_dtype"],
+    }
+
+def _native_cost_cells(payload: Mapping, *, where: str, independent: bool):
+    from .joint_aura_rows import validate_joint_aura_entry
+
+    anchor = None
+    provenance = payload.get("provenance") or {}
+    costs = payload.get("costs")
+    if not isinstance(costs, Mapping):
+        raise ValueError(f"{where}: native cost input has no cost map")
+    for qname, rows in costs.items():
+        if not isinstance(rows, Mapping):
+            raise ValueError(f"{where}: native cost rows for {qname} are malformed")
+        for fmt, entry in rows.items():
+            cell = f"{where} {qname}/{fmt}"
+            if not isinstance(entry, Mapping):
+                raise ValueError(f"{cell}: native cost cell is malformed")
+            if "error" in entry:
+                continue
+            if independent and validate_joint_aura_entry(entry):
+                operator = entry["joint_operator_identity"]
+                if operator["qname"] != qname or operator["format"] != fmt:
+                    raise ValueError(f"{cell}: joint source identity names another cell")
+                yield cell, entry.get("source_binding"), False
+                continue
+            if independent and entry.get("production_anchor_measured") is True:
+                from .streaming_production_cache import validate_completed_production_anchor_identity
+
+                if anchor is None:
+                    anchor = validate_completed_production_anchor_identity(
+                        provenance.get("production_anchor_renderer"), where=cell)
+                if (fmt not in anchor["formats_by_qname"].get(qname, ())
+                        or entry.get("dw_source") != "production_render"
+                        or entry.get("cost_source") != "aura"):
+                    raise ValueError(f"{cell}: production-anchor source identity does not cover the cell")
+                yield cell, entry.get("source_binding"), False
+                continue
+            yield cell, entry.get("source_binding"), True
+
+
+def _native_cost_bindings(cells, *, checkpoint_only_cells=frozenset()):
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, SOURCE_MODEL_BINDING_SCHEMA,
+        validate_source_model_binding,
+    )
+
+    validated = {}
+    for cell, raw in cells:
+        key = id(raw)
+        if key not in validated:
+            try:
+                binding = validate_source_model_binding(raw, where=cell)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{cell}: native source binding is unqualified: {exc}; "
+                    "recompute/reprice this cell with the current source decoder; "
+                    "do not restamp retained costs") from exc
+            validated[key] = (raw, binding)
+        binding = validated[key][1]
+        if cell in checkpoint_only_cells:
+            if binding["schema"] != SOURCE_MODEL_BINDING_SCHEMA:
+                raise ValueError(f"{cell}: sidecar binding must exclude the text decoder claim; rebuild/reprice")
+        elif binding["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+            raise ValueError(f"{cell}: native source binding is unqualified: legacy decoder identity cannot qualify native costs; rebuild/reprice")
+        yield cell, binding
+
+
+def require_native_cost_source_binding(
+    payload: Mapping, expected_binding: object, *, where: str,
+) -> dict[str, object]:
+    """Require exact per-cell evidence against an offline producer binding."""
+    from .streamed_model_identity import (
+        NATIVE_SOURCE_MODEL_BINDING_SCHEMA, validate_source_model_binding,
+    )
+
+    try:
+        expected = validate_source_model_binding(expected_binding, where=where)
+        if expected["schema"] != NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+            raise ValueError("native source requires a complete v2 decoder binding")
+    except ValueError as exc:
+        raise ValueError(f"{where}: unqualified native harvest source binding: {exc}; run a fresh harvest and reprice") from exc
+    cells = _native_cost_cells(payload, where=where, independent=False)
+    for cell, binding in _native_cost_bindings((cell, raw) for cell, raw, _ in cells):
+        if binding != expected:
+            raise ValueError(f"{cell}: native source binding differs from the harvest; rebuild/reprice for this source")
+    return expected
+
+
+def validate_native_cost_source_for_model(payload: Mapping, *, model: str, where: str) -> None:
+    """Observe current native source once; retain each priced cell's dtype.
+
+    Profile-declared MTP and visual cells bind checkpoint bytes and dtype only.
+    These cells do not claim native text decode. Offline stock admission remains
+    limited to exact v2 evidence.
+    Validated joint and sparse-anchor products retain their own source regime.
+    That admission is not an exact current-metadata v2 equality claim.
+    """
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    cells = list(_native_cost_cells(payload, where=where, independent=True))
+    if not cells:
+        return
+    root = resolve_source_checkpoint_path(model, local_files_only=True)
+    if source_model_decode_contract(root) is None:
+        from .streamed_model_identity import NATIVE_SOURCE_MODEL_BINDING_SCHEMA
+
+        for cell, raw, _ in cells:
+            if isinstance(raw, Mapping) and raw.get("schema") == NATIVE_SOURCE_MODEL_BINDING_SCHEMA:
+                raise ValueError(f"{cell}: native source binding cannot qualify costs when the current source is not native; rebuild/reprice")
+        return
+    sidecar_qnames = checkpoint_only_cost_qnames(root, payload["costs"])
+    checkpoint_only_cells = {
+        f"{where} {qname}/{fmt}"
+        for qname, rows in payload["costs"].items()
+        if qname in sidecar_qnames
+        for fmt in rows
+    }
+    bindings = list(_native_cost_bindings(
+        ((cell, raw) for cell, raw, required in cells if required),
+        checkpoint_only_cells=checkpoint_only_cells))
+    if not bindings:
+        return
+    expected = build_source_model_binding(
+        root, dtype=bindings[0][1]["effective_dtype"], local_files_only=True)
+    for cell, binding in bindings:
+        wanted = cost_source_binding_for_region(
+            {**expected, "effective_dtype": binding["effective_dtype"]},
+            checkpoint_only=cell in checkpoint_only_cells,
+        )
+        if binding != wanted:
+            raise ValueError(f"{cell}: native source binding differs from the current checkpoint/decoder; rebuild/reprice")
+
+
 def validate_prepriced_cost(
     path: str | os.PathLike, *, cost_mode: str, model: str,
     expected_sha256: str | None = None,
@@ -165,6 +333,7 @@ def validate_prepriced_cost(
             payload["costs"], references=lambda: hessian_references(payload)))
         hessian.pop("row_capture_sha256", None)
         binding = _model_binding(payload, model)
+        validate_native_cost_source_for_model(payload, model=model, where=str(source))
         usable = sum(
             "error" not in row
             for rows in payload["costs"].values() for row in rows.values())

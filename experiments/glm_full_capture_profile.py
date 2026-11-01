@@ -7,6 +7,8 @@ at 5-second intervals, with explicit disk caps suitable for a 24-hour action.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import argparse
 from contextlib import contextmanager, nullcontext
 import hashlib
@@ -472,8 +474,10 @@ def main(argv=None):
     if not torch.cuda.is_available():
         raise RuntimeError('full capture profiler requires CUDA')
     from prismaquant import tessera_campaign as campaign
-    methods = ('_measure_anchor', '_measure_anchor_batch') if args.selected_anchors else ('_collect_activations',)
-    originals = {method: getattr(campaign, method) for method in methods}
+    from prismaquant import tessera_cell_measurement
+    instrument_owner = tessera_cell_measurement if args.selected_anchors else calibration_forward
+    methods = ('measure_cells',) if args.selected_anchors else ('capture_activation_statistics',)
+    originals = {method: getattr(instrument_owner, method) for method in methods}
     observer = (AnchorObserver(args.evidence_out, profile_calls=calls,
                               trace_max_bytes=args.anchor_trace_max_bytes, command=command,
                               cuda_only=args.anchor_cuda_only, window_seconds=args.anchor_profile_seconds)
@@ -481,12 +485,12 @@ def main(argv=None):
     with observer:
         try:
             for method, original in originals.items():
-                setattr(campaign, method, observer.wrap_anchor(original) if args.selected_anchors
+                setattr(instrument_owner, method, observer.wrap_anchor(original) if args.selected_anchors
                         else observer.wrap_collector(original))
             return campaign.main(command)
         finally:
             for method, original in originals.items():
-                setattr(campaign, method, original)
+                setattr(instrument_owner, method, original)
 
 
 if __name__ == '__main__':

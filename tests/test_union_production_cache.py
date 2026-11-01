@@ -3,14 +3,16 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import pickle
+import shutil
 from pathlib import Path
 
 import pytest
 import torch
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant import union_production_cache as union
 from prismaquant.format_registry import RetiredFormatError
@@ -111,7 +113,22 @@ def _make_shard(
     coverage: dict | None = None,
     render_scope: str = "assignment",
     requested_formats: list[str] | None = None,
+    witnesses: dict | None = None,
 ) -> Path:
+    """Build and manifest one shard bundle.
+
+    ``witnesses`` maps ``(qname, fmt)`` to a fused joint global. A witness for
+    an entry the shard holds is bound to the file written for it, as its fill
+    would; one for another entry names a shard this bundle does not have.
+    """
+    from prismaquant.file_identity import file_stat_signature
+    from prismaquant.production_weight_cache import (
+        NVFP4_JOINT_GLOBAL_WITNESS_KEY,
+        NVFP4JointGlobalWitness,
+        PublishedShard,
+        nvfp4_joint_global_witness_section,
+    )
+
     bundle = root / shard_id
     weights = bundle / "weights"
     weights.mkdir(parents=True)
@@ -122,12 +139,25 @@ def _make_shard(
         torch.save(tensor, weights / filename)
         cache_weights[(qname, fmt)] = filename
         activation_max_abs[qname] = float(index + 2)
+    extra = dict(extra_metadata or {})
+    if witnesses:
+        bound = {}
+        for key, joint_global in witnesses.items():
+            filename = cache_weights.get(key, "elsewhere.pt")
+            signature = (
+                file_stat_signature((weights / filename).lstat())
+                if key in cache_weights else (0, 0, 0, 0, 0)
+            )
+            bound[key] = NVFP4JointGlobalWitness(
+                joint_global, PublishedShard(filename, signature))
+        extra[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+            nvfp4_joint_global_witness_section(bound))
     metadata, resolved_levers = _metadata(
         entries,
         assignment,
         calib_hash=calib_hash,
         levers=levers,
-        extra=extra_metadata,
+        extra=extra,
         render_scope=render_scope,
         requested_formats=requested_formats,
     )
@@ -645,3 +675,268 @@ def test_format_menu_cli_uses_verified_stripe_plan(tmp_path, capsys):
     assert [row["coverage_mode"] for row in summaries] == [
         "format-menu", "format-menu"
     ]
+
+
+def _bound_witnesses(cache_dir: Path, cache) -> dict:
+    """Each witness's joint global, after requiring it to bind its shard here."""
+    from prismaquant.production_weight_cache import (
+        nvfp4_joint_global_witness_problem,
+        nvfp4_joint_global_witnesses,
+    )
+
+    bound = {}
+    for key, witness in nvfp4_joint_global_witnesses(
+        cache.metadata, where="test"
+    ).items():
+        served = cache.weights[key]
+        assert nvfp4_joint_global_witness_problem(
+            witness, served=served, path=cache_dir / served) is None, key
+        bound[key] = witness.joint_global
+    return bound
+
+
+def test_union_merges_each_shards_own_joint_global_witnesses(tmp_path):
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    shard_a = _make_shard(
+        tmp_path, shard_id="a",
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        assignment=assignment,
+        witnesses={("model.a", "NVFP4"): 0.25},
+    )
+    shard_c = _make_shard(
+        tmp_path, shard_id="c",
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        assignment=assignment,
+        witnesses={("model.c", "NVFP4"): 0.5},
+    )
+
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        [shard_a, shard_c], assignment=assignment, output_bundle=output)
+    _payload, cache = union.verify_union_manifest(
+        output / "union_manifest.json", assignment=assignment)
+
+    # Each witness now binds the union's own verified copy of its shard.
+    assert _bound_witnesses(output / "weights", cache) == {
+        ("model.a", "NVFP4"): 0.25,
+        ("model.c", "NVFP4"): 0.5,
+    }
+
+
+@pytest.mark.parametrize("change", ["chmod", "copy"])
+def test_union_export_refusal_names_rebuild_instead_of_unscoped_resume(change, tmp_path):
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    manifest = _make_shard(
+        tmp_path, shard_id="a", assignment=assignment,
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        witnesses={("model.a", "NVFP4"): 0.25},
+    )
+    other = _make_shard(
+        tmp_path, shard_id="c", assignment=assignment,
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        witnesses={("model.c", "NVFP4"): 0.5},
+    )
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        [manifest, other], assignment=assignment, output_bundle=output)
+    _payload, cache = union.verify_union_manifest(
+        output / "union_manifest.json", assignment=assignment)
+    assert not (output / "render_identity.json").exists()
+    assert not (output / "weights/render_identity.json").exists()
+    shard = output / "weights" / cache.weights[("model.a", "NVFP4")]
+    before = shard.read_bytes()
+    if change == "copy":
+        copied = shard.with_name(shard.name + ".copy")
+        shutil.copy2(shard, copied)
+        os.replace(copied, shard)
+    else:
+        mode = shard.stat().st_mode & 0o777
+        shard.chmod(0o600 if mode != 0o600 else 0o644)
+    assert shard.read_bytes() == before
+    cache.get("model.a", "NVFP4")
+    with pytest.raises(RuntimeError) as refusal:
+        cache.witnessed_nvfp4_joint_global("model.a", "NVFP4", where="export")
+    message = str(refusal.value)
+    assert "Only resident-fill directories support removing the affected shard" in message
+    assert "Rebuild an exact union from its verified input stripes at the final export location" in message
+    assert "For a copied cache, export from the original directory" in message
+
+
+def test_union_refuses_a_shard_witnessing_another_shards_entry(tmp_path):
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    legacy = _make_shard(
+        tmp_path, shard_id="legacy",
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        assignment=assignment,
+    )
+    lender = _make_shard(
+        tmp_path, shard_id="lender",
+        entries={("model.c", "NVFP4"): torch.ones(5)},
+        assignment=assignment,
+        witnesses={("model.a", "NVFP4"): 0.25},
+    )
+
+    with pytest.raises(ValueError, match="entries it does not hold"):
+        union.union_shard_manifests(
+            [legacy, lender], assignment=assignment,
+            output_bundle=tmp_path / "union")
+
+
+def test_shard_manifest_refuses_a_witness_its_hashed_file_breaks(tmp_path):
+    assignment = {"model.a": "NVFP4"}
+    manifest = _make_shard(
+        tmp_path, shard_id="a",
+        entries={("model.a", "NVFP4"): torch.ones(3)},
+        assignment=assignment,
+        witnesses={("model.a", "NVFP4"): 0.25},
+    )
+    shard = manifest.parent / "weights" / "render-0.pt"
+    copied = shard.with_name("render-0.pt.copy")
+    shutil.copy2(shard, copied)
+    os.replace(copied, shard)
+
+    with pytest.raises(ValueError, match="does not match its published file identity"):
+        union.create_shard_manifest(
+            cache_path=manifest.parent / "cache.pkl",
+            cache_dir=manifest.parent / "weights",
+            manifest_path=manifest.parent / "again.json",
+            shard_id="a",
+            source_model_identity=_source_identity(),
+            settings={
+                "schema": "test.union_settings.v1",
+                "max_act_rows": 512,
+                "dtype": "bf16",
+            },
+            code_identity=CODE_IDENTITY,
+            assignment=assignment,
+        )
+
+
+@pytest.mark.parametrize("operation", ["manifest", "verify"])
+def test_union_boundary_names_a_server_local_device_mismatch(
+    operation, tmp_path, monkeypatch,
+):
+    from prismaquant import streamed_model_identity as identity
+
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    manifests = [
+        _make_shard(
+            tmp_path, shard_id=label,
+            entries={(qname, "NVFP4"): torch.ones(3)},
+            assignment=assignment, witnesses={(qname, "NVFP4"): 0.25},
+        )
+        for label, qname in [("a", "model.a"), ("c", "model.c")]
+    ]
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        manifests, assignment=assignment, output_bundle=output)
+    original_fingerprint = identity.stat_fingerprint
+
+    def another_device_view(path, value):
+        observed = original_fingerprint(path, value)
+        return {**observed, "device": observed["device"] + 1}
+
+    monkeypatch.setattr(identity, "stat_fingerprint", another_device_view)
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "zfs")
+
+    def check_boundary():
+        if operation == "verify":
+            return union.verify_union_manifest(
+                output / "union_manifest.json", assignment=assignment)
+        return union.create_shard_manifest(
+            cache_path=manifests[0].parent / "cache.pkl",
+            cache_dir=manifests[0].parent / "weights",
+            manifest_path=manifests[0].parent / "again.json",
+            shard_id="a", source_model_identity=_source_identity(),
+            settings={"schema": "test.union_settings.v1", "max_act_rows": 512, "dtype": "bf16"},
+            code_identity=CODE_IDENTITY, assignment=assignment,
+        )
+
+    with pytest.raises(ValueError, match="device-only mismatch.*NFS client mount"):
+        check_boundary()
+    # Identical recorded fields through an NFS client retain their admission.
+    monkeypatch.setattr(identity, "_mount_filesystem_type", lambda _path: "nfs4")
+    check_boundary()
+
+
+def test_union_rebinds_witnesses_of_transferred_shards_to_its_copies(tmp_path, monkeypatch):
+    """A transferred shard's files are other files; its manifest's SHA-256,
+    taken while its witnesses bound them, carries the witnesses to the
+    union's copies. A copy of the union bundle binds none of them."""
+    assignment = {"model.a": "NVFP4", "model.c": "NVFP4"}
+    built = tmp_path / "built"
+    built.mkdir()
+    manifests = [
+        _make_shard(
+            built, shard_id=shard_id,
+            entries={(qname, "NVFP4"): torch.ones(size)},
+            assignment=assignment,
+            witnesses={(qname, "NVFP4"): value},
+        )
+        for shard_id, qname, size, value in (
+            ("a", "model.a", 3, 0.25), ("c", "model.c", 5, 0.5))
+    ]
+    transferred = tmp_path / "transferred"
+    shutil.copytree(built, transferred)
+
+    output = tmp_path / "union"
+    union.union_shard_manifests(
+        [transferred / path.relative_to(built) for path in manifests],
+        assignment=assignment, output_bundle=output)
+    _payload, cache = union.verify_union_manifest(
+        output / "union_manifest.json", assignment=assignment)
+    assert _bound_witnesses(output / "weights", cache) == {
+        ("model.a", "NVFP4"): 0.25,
+        ("model.c", "NVFP4"): 0.5,
+    }
+
+    from prismaquant.production_weight_cache import (
+        nvfp4_joint_global_witness_problem,
+        nvfp4_joint_global_witnesses,
+    )
+
+    copied = tmp_path / "copied-union"
+    shutil.copytree(output, copied)
+    copy_cache = union._load_cache(copied / "production_weight_cache.pkl")
+    copy_cache.relocate(copied / "weights")
+    for key, witness in nvfp4_joint_global_witnesses(
+        copy_cache.metadata, where="test"
+    ).items():
+        served = copy_cache.weights[key]
+        assert "does not match its published file identity" in (
+            nvfp4_joint_global_witness_problem(
+                witness, served=served, path=copied / "weights" / served))
+
+    import prismaquant.export_native_compressed as exporter
+    from prismaquant.native_render_levers import NativeRenderLevers
+
+    monkeypatch.setattr(exporter, "_PRODUCTION_WEIGHT_CACHE", copy_cache)
+    monkeypatch.setattr(exporter, "_RENDER_LEVERS", NativeRenderLevers())
+
+    def no_unwitnessed_repack(*args, **kwargs):
+        raise AssertionError("a copied union reached the codec before witness refusal")
+
+    monkeypatch.setattr(
+        exporter._native_render_codec, "quantize_dequantize_nvfp4", no_unwitnessed_repack)
+    with pytest.raises(RuntimeError, match="does not match its published file identity"):
+        exporter._pack_production_cached_2d(
+            "model.a", "NVFP4", nvfp4_global_real_override=torch.tensor(0.25),
+            device=torch.device("cpu"),
+        )
+    with pytest.raises(ValueError, match="rebuild the union.*input stripe bundles"):
+        union.verify_union_manifest(copied / "union_manifest.json", assignment=assignment)
+
+    # The portable input stripes can build a new union at the final location
+    # without re-rendering any weights. Its new copies carry bound witnesses.
+    rebuilt = tmp_path / "export-union"
+    union.union_shard_manifests(
+        [transferred / path.relative_to(built) for path in manifests],
+        assignment=assignment, output_bundle=rebuilt,
+    )
+    _payload, rebuilt_cache = union.verify_union_manifest(
+        rebuilt / "union_manifest.json", assignment=assignment,
+    )
+    assert _bound_witnesses(rebuilt / "weights", rebuilt_cache) == {
+        ("model.a", "NVFP4"): 0.25,
+        ("model.c", "NVFP4"): 0.5,
+    }

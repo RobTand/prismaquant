@@ -21419,7 +21419,7 @@
   ]
  },
  "pin": {
-  "commit": "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb",
+  "commit": "aaa417003f0ee690e8ace138acd18df7f9531369",
   "contract_sha256": "ee065629b081d913a0351e43160c5c6e1bd38fa628cafd51e756e9caf3bb334e",
   "live_gate": "admits",
   "native_extension_rows": [

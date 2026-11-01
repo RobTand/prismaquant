@@ -7,10 +7,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 import prismaquant.format_registry as fr
 from prismaquant.cost_streaming import StreamedCausalLM
-from prismaquant.joint_aura import validate_joint_aura_entry
+from prismaquant.joint_aura_rows import validate_joint_aura_entry
 from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 from prismaquant.perturbed_x_cache import _activation_qdq
@@ -181,7 +182,7 @@ def test_grouped_packed_joint_matches_eager_source_oracle(monkeypatch):
 
 
 def test_packed_joint_checkpoint_resume_keeps_aligned_unit_roster(tmp_path, monkeypatch):
-    monkeypatch.setattr(aura, '_checkpoint_git_commit', lambda: '1' * 40)
+    monkeypatch.setattr(aura_provenance, 'checkpoint_git_commit', lambda: '1' * 40)
     _, _, runner, profile, cache, _ = _fixture()
     first = _run(runner, profile, cache, checkpoint_dir=tmp_path)
     _, context, runner, profile, cache, _ = _fixture()

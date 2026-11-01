@@ -191,5 +191,5 @@ def test_build_candidates_forwards_the_deferral(monkeypatch):
              for name in _LOSS}
     specs = [fr.REGISTRY["NVFP4"], fr.REGISTRY["BF16"]]
     ac.build_candidates(stats, costs, specs,
-                        defer_menu_reduction=frozenset(_MEMBERS))
+                        defer_menu_reduction=frozenset(_MEMBERS)).candidates
     assert seen["defer_reduction"] == frozenset(_MEMBERS)

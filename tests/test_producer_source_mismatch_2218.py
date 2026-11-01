@@ -10,6 +10,8 @@ synthetic tree through the established default-root seam.
 """
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal
+
 import hashlib
 import json
 from pathlib import Path
@@ -32,7 +34,7 @@ def _package(tmp_path: Path) -> Path:
 
 
 def _identity(digest: str) -> dict:
-    return {"schema": aura.AURA_CHECKPOINT_IDENTITY_SCHEMA,
+    return {"schema": aura_checkpoint_journal.AURA_CHECKPOINT_IDENTITY_SCHEMA,
             "producer_source_sha256": digest}
 
 
@@ -43,7 +45,7 @@ def _point_default_root_at(monkeypatch, root: Path) -> None:
 
 
 def _write_manifest(checkpoint: Path, digest: str) -> None:
-    aura._write_aura_checkpoint_manifest(checkpoint, _identity(digest), ["unit.a"])
+    aura_checkpoint_journal._write_aura_checkpoint_manifest(checkpoint, _identity(digest), ["unit.a"])
 
 
 def test_changed_file_is_named_with_both_per_file_digests(tmp_path, monkeypatch):
@@ -58,7 +60,7 @@ def test_changed_file_is_named_with_both_per_file_digests(tmp_path, monkeypatch)
     assert current_digest != stored_digest
 
     with pytest.raises(RuntimeError) as refused:
-        aura._load_aura_checkpoint_manifest(checkpoint, _identity(current_digest))
+        aura_checkpoint_journal._load_aura_checkpoint_manifest(checkpoint, _identity(current_digest))
     message = str(refused.value)
     assert "producer_source_sha256" in message
     assert "sub/renderer.py" in message
@@ -90,7 +92,7 @@ def test_any_tree_mutation_names_the_first_differing_path(
         (root / "sub" / "renderer.py").unlink()
 
     with pytest.raises(RuntimeError) as refused:
-        aura._load_aura_checkpoint_manifest(
+        aura_checkpoint_journal._load_aura_checkpoint_manifest(
             checkpoint, _identity(pwc._production_cache_source_sha256()))
     message = str(refused.value)
     assert "producer_source_sha256" in message
@@ -112,7 +114,7 @@ def test_tree_changed_between_identity_and_manifest_write_is_named(
     _write_manifest(checkpoint, identity["producer_source_sha256"])
 
     with pytest.raises(RuntimeError) as refused:
-        aura._load_aura_checkpoint_manifest(
+        aura_checkpoint_journal._load_aura_checkpoint_manifest(
             checkpoint, _identity(pwc._production_cache_source_sha256()))
     message = str(refused.value)
     assert "producer_source_sha256" in message
@@ -133,7 +135,7 @@ def test_manifest_without_the_listing_keeps_the_plain_refusal(tmp_path, monkeypa
 
     (root / "profiles.json").write_bytes(b'{"format": "FP8"}\n')
     with pytest.raises(RuntimeError) as refused:
-        aura._load_aura_checkpoint_manifest(
+        aura_checkpoint_journal._load_aura_checkpoint_manifest(
             checkpoint, _identity(pwc._production_cache_source_sha256()))
     message = str(refused.value)
     assert "producer_source_sha256" in message

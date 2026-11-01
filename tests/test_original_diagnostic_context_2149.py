@@ -10,7 +10,7 @@ import pytest
 
 from prismaquant import joint_cost_stage_a as stage_a, source_generation as sg
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.stage_a_selected_row_diagnostic import (
     SESSION_PREPARATION_OWNER,
     load_original_diagnostic_context,

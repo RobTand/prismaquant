@@ -39,6 +39,7 @@ RobTand/prismaquant#183.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -55,9 +56,11 @@ from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 #: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
-#: tensor per unit.  Pinned to ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` by
-#: ``tests/test_tessera_expert_projection.py``; spelled here so the export gate
-#: can refuse without importing the producer package.
+#: tensor per unit.  The public ``tessera.metadata`` API does not publish it, so
+#: ``tests/test_tessera_expert_projection.py`` cross-checks it against
+#: ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` where that package is
+#: installed beside the tests; spelled here so the export gate can refuse
+#: without importing the producer package.
 SOURCE_LAYOUT_UNPACKED = "unpacked_per_expert"
 #: The producer's whole-tensor selector for an unpacked unit.
 WHOLE_SELECTOR = "whole"
@@ -715,8 +718,8 @@ WIRE_DIR_KEY = "tessera_expert_wire_dir"
 def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
     """One cost row's ``(predicted_dloss, wire_bytes)``, or refuse by name.
 
-    Exact fields or nothing: a row that carries neither a float-able
-    ``predicted_dloss`` nor an integer ``wire_bytes`` is not a price this
+    Exact fields or nothing: a row needs a finite ``predicted_dloss`` and
+    nonnegative integer ``wire_bytes`` to be a price this
     allocator may spend, and guessing one would spend the byte budget on a
     number nobody measured.
     """
@@ -734,10 +737,21 @@ def _priced_row(row: Any, *, unit: str, fmt: str) -> tuple[float, int]:
     if dloss is None or isinstance(dloss, bool) or not isinstance(dloss, (int, float)):
         raise ExpertProjectionError(
             f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not a number")
+    try:
+        dloss = float(dloss)
+    except OverflowError as exc:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not finite") from exc
+    if not math.isfinite(dloss):
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row predicted_dloss {dloss!r} is not finite")
     if type(wire) is not int:
         raise ExpertProjectionError(
             f"{unit}@{fmt}: priced row wire_bytes {wire!r} is not an integer")
-    return float(dloss), int(wire)
+    if wire < 0:
+        raise ExpertProjectionError(
+            f"{unit}@{fmt}: priced row wire_bytes {wire!r} is negative")
+    return dloss, wire
 
 
 def select_priced_unit_upgrades(costs: Mapping[str, Mapping[str, Any]],

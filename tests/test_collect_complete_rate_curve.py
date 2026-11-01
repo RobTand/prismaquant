@@ -26,7 +26,7 @@ from prismaquant.cost_stage_checkpoint import (
     unit_path,
     write_unit,
 )
-from prismaquant.tessera_campaign import CURRENCY, CampaignAnchor
+from prismaquant.tessera_campaign_table import (CURRENCY, CampaignAnchor)
 from tessera.cached_unit import ENCODING_INPUT_SCHEMA
 from tessera.encoder_identity import encoder_fixture_id
 

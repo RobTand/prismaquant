@@ -23,6 +23,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from prismaquant import joint_quantum_row as quantum_row
+
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tests", ROOT / "tools"):
     if str(_entry) not in sys.path:
@@ -43,7 +45,7 @@ def _resumed_spill_run(tmp_path, monkeypatch):
     import prismaquant.joint_adjoint_checkpoints as checkpoints
     import prismaquant.joint_cost_quantum as qc
     import prismaquant.joint_replay_spill as spill_mod
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import unit_path as _aura_unit_checkpoint_path
 
     monkeypatch.setattr(phases, "_expert_fixture", one_pass._bf16_expert_fixture)
     for name in spill_mod.SPILL_ENV:
@@ -144,14 +146,13 @@ def test_a_resumed_quantum_runs_only_the_units_its_phases_price(
     ``render-01`` prices. Nothing commits between a pass's first and last
     unit.
     """
-    import dispatch_joint_quanta as dispatch
 
     manifest, resolved, log = _resumed_spill_run(tmp_path, monkeypatch)
     plan = {phase["name"]: phase for phase in manifest["read_plan"]["phases"]}
     n_probes = manifest["annotations"]["n_probes"]
     priced = {}
     for name, phase in plan.items():
-        for term in dispatch.compute_phase_work(
+        for term in quantum_row.compute_phase_work(
                 name, replay_mode="spill",
                 entries=len(phase["entry_indices"]), n_probes=n_probes,
                 capture_batch=1) or ():

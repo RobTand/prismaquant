@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import io_spans, tessera_row_stream
 from test_stage_a_source_wait_1663 import _Delivery
 
@@ -61,14 +62,14 @@ def test_row_stream_observes_failed_delivery_without_admitting_it(monkeypatch):
 def test_campaign_publishes_scoped_waits_on_success_and_failure(tmp_path, monkeypatch, refused):
     from test_tessera_row_stream import stream_fixture
     campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
-    original = campaign._measure_anchor
+    original = cell_measurement.measure_cell
 
     def measure(**kwargs):
         if refused:
             raise RuntimeError("fixture encode refused")
         return original(**kwargs)
 
-    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     if refused:
         with pytest.raises(RuntimeError, match="campaign row failed"):
             campaign.main(argv)

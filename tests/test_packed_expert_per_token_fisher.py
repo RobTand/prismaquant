@@ -12,7 +12,7 @@ FIX 1 (audit M3): packed-MoE expert Fisher uses the per-token-summed
 FIX 2 (audit M4, denominator superseded by PR #14):
     `FisherAccumulator.finalize` applies a SINGLE normalization — no
     second ÷route_prob (route_prob is metadata only) — so the
-    `run_probe_pass` backend agrees with the incremental (production)
+    `FisherAccumulator` backend agrees with the incremental (production)
     backend's convention. M4 originally made that single division
     per-ROUTED-token; PR #14 deliberately reversed the denominator to
     the GLOBAL calib token count for every row (tokens never routed to
@@ -21,7 +21,7 @@ FIX 2 (audit M4, denominator superseded by PR #14):
     property M4 pinned still holds and is still pinned here.
 
 FIX 3 (audit M9): every h-detail writer goes through
-    `sensitivity_probe.h_detail_blob` (per-token units + explicit
+    `probe_statistics.h_detail_blob` (per-token units + explicit
     ``units: "per_token"`` marker); `HDetailIndex.h_diag_from_blob`
     refuses legacy raw token-summed ``H`` blobs. Since PR #14 the blob
     denominator is the GLOBAL calib token count (v4), matching the
@@ -36,11 +36,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from prismaquant.sensitivity_probe import (
-    FisherAccumulator,
-    h_detail_blob,
-    install_packed_expert_hooks,
-)
+from prismaquant.sensitivity_probe import FisherAccumulator, install_packed_expert_hooks
+from prismaquant.probe_statistics import h_detail_blob
 from prismaquant.measure_quant_cost import HDetailIndex
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
@@ -327,7 +324,7 @@ class _StubTracker:
 
 class TestBackendNormalizationAgreement(unittest.TestCase):
     """FIX 2 (audit M4) + the PR #14 denominator reversal: the
-    run_probe_pass backend's expert h_trace is the routed-token gradient
+    FisherAccumulator backend's expert h_trace is the routed-token gradient
     mass divided ONCE, by the GLOBAL calib token count — the same
     single-division convention the incremental (production) backend
     implements — with route_prob kept as metadata only, never applied

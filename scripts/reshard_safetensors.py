@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Reshard a single large .safetensors file into <=SHARD_GB shards + HF index.
+"""Reshard a single large .safetensors file into target-sized shards + HF index.
 
 Streaming byte-copy per tensor (no torch, no GPU, RAM ~ the copy buffer): the
 Hy3 CB export writes one 110 GB model.safetensors, but the HF Hub caps files at
 50 GB. Produces model-0000N-of-0000M.safetensors + model.safetensors.index.json
 in --out; tensor bytes are copied verbatim (bit-identical), source order kept.
+Tensors are indivisible, so one tensor can exceed the requested shard size.
 
   reshard_safetensors.py SRC OUT_DIR [--shard-gb 25]
 """

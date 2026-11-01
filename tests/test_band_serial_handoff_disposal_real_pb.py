@@ -116,7 +116,7 @@ def test_a_failed_handoff_disposes_its_landed_uncommitted_groups(
     from fleet_sdk import require_prismabuild_sdk
     require_prismabuild_sdk()
     _src, pb_repo = pb_source(monkeypatch)
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.produced_output_spool import MAX_ENV, ROOT_ENV
 
     producer, _consumer, storage = band_campaign(tmp_path)

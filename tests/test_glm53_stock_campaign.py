@@ -1,10 +1,8 @@
-"""GLM-5.3 stock campaign seam: dense plan + measured pricing/merge (CPU).
+"""GLM campaign contracts use real source facts and synthetic scalar prices.
 
-Synthetic censuses shaped exactly like the real ones exercise the REAL
-legality gate (``check_format_applicability`` against the GLM serving
-profile), the dense-plan construction the GPU harvest uses, and the campaign
-action's fail-closed identity checks and three-provenance merge -- all
-without a GPU or the 306 GiB checkpoint.
+Inventory controls use metadata fixtures. Full campaign controls use a tiny
+native checkpoint, its actual header census and streamed source identity.
+These CPU checks do not measure AURA, served quality or full-model behavior.
 """
 from __future__ import annotations
 
@@ -13,7 +11,6 @@ import pickle
 import pytest
 
 from prismaquant.glm53_stock_harvest import (
-    HARVEST_SCHEMA,
     build_arm_identity,
     build_dense_plan,
 )
@@ -25,17 +22,14 @@ from prismaquant.glm53_stock_reprice import (
     run_campaign_from_artifacts,
 )
 
-CALIB_HASH = "feedbeef" * 4
+from tests.native_source_contract_fixtures import (
+    CALIB_HASH, _probe_unit, coherent_glm_campaign,
+)
 
 
-def _probe_unit(out_features, in_features, *, experts=None, packed=False):
-    return {
-        "n_params": (experts or 1) * out_features * in_features,
-        "in_features": in_features,
-        "out_features": out_features,
-        "num_experts": experts,
-        "is_packed": packed,
-    }
+@pytest.fixture
+def campaign_inputs(tmp_path):
+    return coherent_glm_campaign(tmp_path)
 
 
 def _censuses():
@@ -76,81 +70,6 @@ def _censuses():
     return probe, checkpoint
 
 
-def _anchor_row(value):
-    return {
-        "predicted_dloss": value,
-        "dw_source": "production_render",
-        "production_anchor_measured": True,
-        "cost_source": "aura",
-        "output_mse_measured": False,
-    }
-
-
-def _harvest(probe, checkpoint, **overrides):
-    planned = build_dense_plan(probe, checkpoint)
-    arm = build_arm_identity(
-        probe_calib_hash=CALIB_HASH,
-        observed_calib_hash=CALIB_HASH,
-        dataset="/data/diverse-v1.jsonl",
-        n_calib_samples=8,
-        calib_seqlen=512,
-        calib_seed=42,
-        n_probes=32,
-        max_act_rows=256,
-    )
-    costs = {
-        qname: {fmt: _anchor_row(1e-4 * (idx + 1)) for fmt in fmts}
-        for idx, (qname, fmts) in enumerate(sorted(planned["plan"].items()))
-    }
-    wrapper = {
-        "schema": HARVEST_SCHEMA,
-        "plan_scope": planned["plan_scope"],
-        "unit_filter": None,
-        "max_units": 0,
-        "plan": {q: list(f) for q, f in planned["plan"].items()},
-        "packed_expert_units_excluded": planned["packed_expert_units_excluded"],
-        "pinned_units": planned["pinned_units"],
-        "ladder_refusals": planned["ladder_refusals"],
-        "arm_identity": arm,
-        "model_identity": {"source_model": "synthetic"},
-        "checkpoint_dir": "/durable/ckpt",
-        "aura_payload": {
-            "schema": "aura",
-            "n_probes": 32,
-            "formats": ["NVFP4"],
-            "costs": costs,
-            "provenance": {
-                "git_commit": "test",
-                "calib_hash": CALIB_HASH,
-                "dw_rtn_fallback_rows": 0,
-                "dw_production_anchor_rows": len(costs),
-                "streaming": True,
-            },
-        },
-    }
-    wrapper.update(overrides)
-    return wrapper
-
-
-def _expert_payload(probe):
-    packed = [
-        name for name, row in probe["units"].items() if row["is_packed"]
-    ]
-    return {
-        "schema": "prismaquant.expert_empirical_cost.v1",
-        "costs": {
-            name: {
-                "NVFP4": {"predicted_dloss": 3e-2, "cost_source": "expert_kl"},
-                "FP8_E4M3": {
-                    "predicted_dloss": 2e-2, "cost_source": "expert_kl",
-                },
-            }
-            for name in packed
-        },
-        "provenance": {"eval_driver": "forked-stream/1", "calib_batch": 16},
-    }
-
-
 def test_dense_plan_partition_and_refusals():
     probe, checkpoint = _censuses()
     planned = build_dense_plan(probe, checkpoint)
@@ -189,13 +108,13 @@ def test_dense_plan_filter_marks_partial():
     ]
 
 
-def test_campaign_prices_and_merges_three_provenances():
-    probe, checkpoint = _censuses()
+def test_campaign_prices_and_merges_three_provenances(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
     payload = run_campaign_from_artifacts(
         probe_census=probe,
         checkpoint_census=checkpoint,
-        harvest=_harvest(probe, checkpoint),
-        expert_payload=_expert_payload(probe),
+        harvest=harvest,
+        expert_payload=expert,
     )
     report = payload["provenance"]["merge_report"]
     assert report["anchored_units"] == 2
@@ -209,13 +128,13 @@ def test_campaign_prices_and_merges_three_provenances():
     assert dense_fp8["FP8_SOURCE"]["predicted_dloss"] == 0.0
     assert dense_fp8["NVFP4"]["predicted_dloss"] > 0.0
     dense_bf16 = costs[
-        "model.language_model.layers.0.mlp.shared_experts.down_proj"
+        "model.language_model.layers.1.mlp.shared_experts.down_proj"
     ]
     assert set(dense_bf16) == {"NVFP4", "BF16"}
-    packed = costs["model.language_model.layers.0.mlp.experts.gate_up_proj"]
+    packed = costs["model.language_model.layers.1.mlp.experts.gate_up_proj"]
     assert set(packed) == {"NVFP4", "FP8_E4M3"}
     assert packed["NVFP4"]["cost_source"] == "expert_kl"
-    pinned = costs["model.language_model.layers.0.self_attn.q_proj"]
+    pinned = costs["model.language_model.layers.1.self_attn.q_b_proj"]
     assert set(pinned) == {"BF16"}
     assert pinned["BF16"]["predicted_dloss"] == 0.0
     refusal_rows = payload["provenance"]["ladder_refusals"]
@@ -227,64 +146,60 @@ def test_campaign_prices_and_merges_three_provenances():
     assert pickle.loads(pickle.dumps(payload))["schema"] == payload["schema"]
 
 
-def test_campaign_refuses_filtered_harvest():
-    probe, checkpoint = _censuses()
-    harvest = _harvest(probe, checkpoint, plan_scope="filtered")
+def test_campaign_refuses_filtered_harvest(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
+    harvest["plan_scope"] = "filtered"
     with pytest.raises(Glm53StockError, match="plan_scope"):
         run_campaign_from_artifacts(
             probe_census=probe,
             checkpoint_census=checkpoint,
             harvest=harvest,
-            expert_payload=_expert_payload(probe),
+            expert_payload=expert,
         )
 
 
-def test_campaign_refuses_plan_drift():
-    probe, checkpoint = _censuses()
-    harvest = _harvest(probe, checkpoint)
+def test_campaign_refuses_plan_drift(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
     harvest["plan"].popitem()
     with pytest.raises(Glm53StockError, match="plan differs"):
         run_campaign_from_artifacts(
             probe_census=probe,
             checkpoint_census=checkpoint,
             harvest=harvest,
-            expert_payload=_expert_payload(probe),
+            expert_payload=expert,
         )
 
 
-def test_campaign_refuses_rtn_fallback_rows():
-    probe, checkpoint = _censuses()
-    harvest = _harvest(probe, checkpoint)
+def test_campaign_refuses_rtn_fallback_rows(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
     harvest["aura_payload"]["provenance"]["dw_rtn_fallback_rows"] = 1
     with pytest.raises(Glm53StockError, match="RTN-fallback"):
         run_campaign_from_artifacts(
             probe_census=probe,
             checkpoint_census=checkpoint,
             harvest=harvest,
-            expert_payload=_expert_payload(probe),
+            expert_payload=expert,
         )
 
 
-def test_campaign_refuses_missing_empirical_unit():
-    probe, checkpoint = _censuses()
-    expert = _expert_payload(probe)
+def test_campaign_refuses_missing_empirical_unit(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
     expert["costs"] = {
         "model.language_model.layers.99.mlp.experts.gate_up_proj": {
-            "NVFP4": {"predicted_dloss": 1e-2},
+            "NVFP4": {"predicted_dloss": 1e-2, "source_binding": harvest["source_binding"]},
         },
     }
     with pytest.raises(Exception, match="empirical"):
         run_campaign_from_artifacts(
             probe_census=probe,
             checkpoint_census=checkpoint,
-            harvest=_harvest(probe, checkpoint),
+            harvest=harvest,
             expert_payload=expert,
         )
 
 
-def test_campaign_refuses_foreign_calibration():
-    probe, checkpoint = _censuses()
-    harvest = _harvest(probe, checkpoint)
+def test_campaign_refuses_foreign_calibration(campaign_inputs):
+    probe, checkpoint, harvest, expert = campaign_inputs
     arm = dict(harvest["arm_identity"])
     arm["calibration"] = dict(arm["calibration"], probe_calib_hash="0" * 32)
     harvest["arm_identity"] = arm
@@ -293,7 +208,7 @@ def test_campaign_refuses_foreign_calibration():
             probe_census=probe,
             checkpoint_census=checkpoint,
             harvest=harvest,
-            expert_payload=_expert_payload(probe),
+            expert_payload=expert,
         )
 
 

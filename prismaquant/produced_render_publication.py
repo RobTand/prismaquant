@@ -112,9 +112,9 @@ class ProducedRenderPublication(BoundaryProducedPublication):
         if archive_max_bytes > min(maxima["payload_max_bytes"], maxima["temp_max_bytes"]):
             raise ValueError("render archive ceiling exceeds sealed payload/temp maxima")
 
-        from .production_weight_cache import _cache_weight_filename
+        from .render_cache_paths import cache_weight_filename
 
-        leaf = _cache_weight_filename(qname, fmt)
+        leaf = cache_weight_filename(qname, fmt)
         if (Path(leaf).name != leaf or "\\" in leaf
                 or any(ord(c) < 32 or ord(c) == 127 for c in leaf)):
             raise ValueError("unsafe render archive leaf")

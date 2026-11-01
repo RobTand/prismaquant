@@ -25,7 +25,7 @@ import torch
 import torch.nn.functional as F
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import cost_entry_predicted_dloss
+from prismaquant.priced_cell import cost_entry_predicted_dloss
 from prismaquant.allocator_solver import _shape_from_stats
 from prismaquant.build_rtn_cache import kl_divergence
 from prismaquant.kl_fisher import forward_kl_per_token

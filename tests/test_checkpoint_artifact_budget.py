@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space,
     write_adjoint_checkpoint,

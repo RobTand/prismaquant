@@ -6,6 +6,8 @@ re-exports these symbols for backwards compatibility.
 """
 from __future__ import annotations
 
+from .measured_runtime_prices import device_placement_bytes
+
 import os
 import time
 from collections.abc import Mapping, Sequence
@@ -305,28 +307,6 @@ def _runtime_float(value, label: str, *, nonnegative: bool = True) -> float:
     return float(value)
 
 
-def _placement_bytes(totals, fixed_device_bytes, fixed_non_step_peak_bytes, *,
-                     charge_activation=True):
-    """`max(scalar_budget_bytes, non_step_transient_peak_bytes)`, the obligation.
-
-    The per-step composition prices one engine step. The off-step peak prices
-    what the engine still holds while no step is running, and a box has to hold
-    both. A `None` off-step peak is an absence of evidence and never a zero, so
-    it leaves this arithmetic exactly as it was; so does an off-step peak the
-    per-step composition already covers.
-
-    ``charge_activation`` is the boundary's ``row_terms_charged`` decision:
-    under ``transient_charge_boundary`` v1 a row's ``activation_bytes`` is the
-    logical input the fixed terms already hold, so it stays a frontier
-    coordinate and is not added here (design §3.8). With no boundary -- a table
-    that carries no fixed charge -- the three row axes compose as before.
-    """
-    step = totals[4] + totals[5] + (totals[6] if charge_activation else 0) + fixed_device_bytes
-    if fixed_non_step_peak_bytes is None:
-        return step
-    return max(step, fixed_non_step_peak_bytes)
-
-
 def solve_runtime_frontier(
     candidates: dict[str, list[Candidate]],
     resources: Mapping[tuple[str, str], RuntimeResources],
@@ -603,8 +583,9 @@ def solve_runtime_frontier(
                 if max_decode_ms is not None and totals[3] > max_decode_ms:
                     continue
                 if (max_device_bytes is not None
-                        and _placement_bytes(totals, fixed_device_bytes,
-                                             fixed_non_step_peak_bytes,
+                        and device_placement_bytes(totals[4], totals[5], totals[6],
+                                             fixed_device_bytes=fixed_device_bytes,
+                                             non_step_transient_peak_bytes=fixed_non_step_peak_bytes,
                                              charge_activation=charge_activation) > max_device_bytes):
                     continue
                 workspace = (_merge_workspace(state.workspace, b[7], name=name)
@@ -692,8 +673,9 @@ def solve_runtime_frontier(
             resident_bytes=None if ranked else a[4],
             peak_scratch_bytes=None if ranked else a[5],
             activation_bytes=None if ranked else a[6],
-            device_bytes=None if ranked else _placement_bytes(
-                a, fixed_device_bytes, fixed_non_step_peak_bytes,
+            device_bytes=None if ranked else device_placement_bytes(
+                a[4], a[5], a[6], fixed_device_bytes=fixed_device_bytes,
+                non_step_transient_peak_bytes=fixed_non_step_peak_bytes,
                 charge_activation=charge_activation),
             rank_workspace_bytes=(None if not ranked else
                                   tuple(_workspace_bytes(state.workspace, rank)
@@ -740,43 +722,6 @@ def predicted_dloss(h_trace: float, weight_mse: float,
                     gain: float = 1.0) -> float:
     """Per-(layer, format) predicted loss under the diagonal-Fisher model."""
     return 0.5 * float(h_trace) * float(weight_mse) * float(gain)
-
-
-def _group_by_profile(names, profile) -> dict[str, list[str]]:
-    """Group Linear names by the profile's fused-sibling key."""
-    groups: dict[str, list[str]] = {}
-    for name in names:
-        key = profile.fused_sibling_group(name) if profile is not None else None
-        if key is None:
-            continue
-        groups.setdefault(key, []).append(name)
-    return groups
-
-
-def _packed_groups_by_profile(names, profile) -> dict[str, list[str]]:
-    """Group Linear names by the profile's packed-MoE serving unit key."""
-    groups: dict[str, list[str]] = {}
-    group_fn = getattr(profile, "packed_expert_format_group", None)
-    if not callable(group_fn):
-        return groups
-    for name in names:
-        try:
-            key = group_fn(name)
-        except PackedExpertRoleUnknown:
-            # A profile that cannot name a packed expert's role under
-            # --packed-role-split is a declaration gap, not a "this row has no
-            # group" answer: swallowing it here would silently promote the two
-            # roles as one unit, i.e. ship a DIFFERENT allocation than the
-            # operator asked for. Aggregation raises this first today, so this
-            # is defence in depth for any future path that promotes without
-            # aggregating.
-            raise
-        except Exception:
-            key = None
-        if key is None:
-            continue
-        groups.setdefault(key, []).append(name)
-    return groups
 
 
 def legal_formats_from_candidates(
@@ -1102,53 +1047,21 @@ def _promote_group_components(
                     "widen or narrow the family relaxation"
                 )
 
+    from .name_projection import ServingUnit, connected_serving_components
+
     out = dict(assignment)
-    parent = {name: name for name in out}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a: str, b: str) -> None:
-        ra = find(a)
-        rb = find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    for group in groups:
-        members = [m for m in group if m in out]
-        if len(members) < 2:
-            continue
-        first = members[0]
-        for member in members[1:]:
-            union(first, member)
-
-    components: dict[str, list[str]] = {}
-    for name in out:
-        components.setdefault(find(name), []).append(name)
-
-    # Which kinds met in each component, recomputed AFTER every union so the
-    # roots are final.  A group that contributed no union (fewer than two
-    # members present) contributed no coupling either, so it lends no kind.
-    comp_kinds: dict[str, set[str]] = {}
-    comp_sources: dict[str, list[tuple[str, list[str]]]] = {}
-    if group_kinds is not None:
-        for index, group in enumerate(groups):
-            members = [m for m in group if m in out]
-            if len(members) < 2:
-                continue
-            root = find(members[0])
-            comp_kinds.setdefault(root, set()).add(group_kinds[index])
-            comp_sources.setdefault(root, []).append(
-                (group_kinds[index], sorted(members)))
-
+    units = (
+        ServingUnit(group_kinds[index] if group_kinds is not None else "",
+                    str(index), tuple(group))
+        for index, group in enumerate(groups)
+    )
     licence = fused_licence
-    for root, members in components.items():
+    for component in connected_serving_components(out, units):
+        members = list(component.members)
         if len(members) < 2:
             continue
-        kinds_here = comp_kinds.get(root, set())
+        kinds_here = {unit.kind for unit in component.units} - {""}
+        sources = [(unit.kind, sorted(unit.members)) for unit in component.units]
         best_fmt = max(
             (out[member] for member in members),
             key=lambda fmt: _rank_of(
@@ -1166,10 +1079,10 @@ def _promote_group_components(
                 # module and says nothing about experts; the packed unit is
                 # outside it. Refuse rather than pick a side.
                 fused_side = sorted(
-                    src for kind, src in comp_sources.get(root, [])
+                    src for kind, src in sources
                     if kind == _GROUP_KIND_FUSED)
                 packed_side = sorted(
-                    src for kind, src in comp_sources.get(root, [])
+                    src for kind, src in sources
                     if kind == _GROUP_KIND_PACKED)
                 raise AssertionError(
                     f"serving-unit component of {len(members)} members "
@@ -1246,18 +1159,13 @@ def promote_serving_units(
     if profile is None:
         from .model_profiles import DefaultProfile
         profile = DefaultProfile()
-    groups: list[list[str]] = []
-    group_kinds: list[str] = []
-    if include_fused:
-        for members in _group_by_profile(
-                assignment.keys(), profile).values():
-            groups.append(members)
-            group_kinds.append(_GROUP_KIND_FUSED)
-    if include_moe:
-        for members in _packed_groups_by_profile(
-                assignment.keys(), profile).values():
-            groups.append(members)
-            group_kinds.append(_GROUP_KIND_PACKED)
+    from .name_projection import GROUP_FUSED_SIBLINGS, NameProjection
+
+    units = NameProjection(profile).serving_units(
+        assignment, include_fused=include_fused, include_packed=include_moe)
+    groups = [list(unit.members) for unit in units]
+    group_kinds = [_GROUP_KIND_FUSED if unit.kind == GROUP_FUSED_SIBLINGS
+                   else _GROUP_KIND_PACKED for unit in units]
     return _promote_group_components(
         assignment, format_rank, groups, legal_formats,
         group_kinds=group_kinds, fused_licence=fused_licence)
@@ -1324,7 +1232,8 @@ def promote_fused(assignment: dict[str, str],
         legal_formats=legal_formats,
         fused_licence=fused_licence,
     )
-    groups = _group_by_profile(assignment.keys(), profile)
+    from .name_projection import NameProjection
+    groups = NameProjection(profile).serving_units(assignment, include_packed=False)
     licence = fused_licence
 
     def _group_is_licensed(members_present: list[str]) -> bool:
@@ -1358,8 +1267,8 @@ def promote_fused(assignment: dict[str, str],
     # ``max(ranks)`` would silently discard exactly those rungs (issue
     # #169). (The repass is also legality-blind, so writing here would be
     # able to undo the component pass's legal-for-all choice.)
-    for members_present in groups.values():
-        members_present = [m for m in members_present if m in out]
+    for unit in groups:
+        members_present = [m for m in unit.members if m in out]
         if len(members_present) < 2:
             continue
         if len({out[m] for m in members_present}) > 1 and _group_is_licensed(
@@ -1377,7 +1286,8 @@ def promote_fused(assignment: dict[str, str],
                         members=members_present) < best:
                 out[m] = best_fmt
 
-    for group_key, members in groups.items():
+    for unit in groups:
+        group_key, members = unit.key, unit.members
         if len(members) < 2:
             continue
         fmts = {out[m] for m in members}

@@ -5,8 +5,8 @@ import json
 
 import pytest
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
 from experiments.stageb_checkpoint_host_replay import replay
-from prismaquant import aura_cost
 
 
 def _source(tmp_path, *, cyclic=False):
@@ -20,10 +20,9 @@ def _source(tmp_path, *, cyclic=False):
             "identity": {"calibration": "unchanged"}}
         if cyclic:
             state["self"] = state
-        aura_cost._write_aura_unit_checkpoint(
-            root, qname=name, identity_sha256="a" * 64, state=state)
+        aura_checkpoint_journal.UnitCheckpointWriter(root, "a" * 64).publish(qname=name, state=state)
         units.append({"qname": name,
-                      "file": str(aura_cost._aura_unit_checkpoint_path(root, name).relative_to(root))})
+                      "file": str(cost_stage_checkpoint.unit_path(root, name).relative_to(root))})
     (root / "manifest.json").write_text(json.dumps({"units": units, "identity_sha256": "a" * 64}))
     return root
 
@@ -54,7 +53,7 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
     gc.collect()
     decoded_ids = set()
     decode_count = 0
-    decode = aura_cost._decode_aura_unit_checkpoint
+    decode = aura_checkpoint_journal.load_unit
 
     def observed_decode(*args, **kwargs):
         nonlocal decode_count
@@ -64,13 +63,13 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
         decoded_ids.add(id(state["self"]))
         return state
 
-    monkeypatch.setattr(aura_cost, "_decode_aura_unit_checkpoint", observed_decode)
+    monkeypatch.setattr(aura_checkpoint_journal, "load_unit", observed_decode)
 
     def refuse(*args, **kwargs):
         raise RuntimeError("injected source lease refusal")
 
     if failure == "synchronous":
-        monkeypatch.setattr(aura_cost, "_write_aura_unit_checkpoint", refuse)
+        monkeypatch.setattr(aura_checkpoint_journal.UnitCheckpointWriter, "publish", refuse)
     elif failure == "snapshot":
         from prismaquant import joint_checkpoint_publication
         monkeypatch.setattr(joint_checkpoint_publication, "snapshot_bound", refuse)
@@ -122,7 +121,7 @@ def test_source_allowance_precedes_any_decode(monkeypatch, tmp_path):
     import experiments.stageb_checkpoint_host_replay as host
 
     source = _source(tmp_path)
-    path = aura_cost._aura_unit_checkpoint_path(source, "unit-0")
+    path = cost_stage_checkpoint.unit_path(source, "unit-0")
     # The established loader accepts trailing bytes; this remains a valid
     # envelope, but cannot be constructed inside the requested staging slot.
     with path.open("ab") as handle:
@@ -147,7 +146,7 @@ def test_source_refuses_unbounded_pickle_before_state_decode(monkeypatch, tmp_pa
     import experiments.stageb_checkpoint_host_replay as host
 
     source = _source(tmp_path)
-    path = aura_cost._aura_unit_checkpoint_path(source, "unit-0")
+    path = cost_stage_checkpoint.unit_path(source, "unit-0")
     loads = pickle.loads
     envelope = loads(path.read_bytes())
     envelope.update(payload=payload, payload_sha256=hashlib.sha256(payload).hexdigest())

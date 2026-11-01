@@ -156,7 +156,7 @@ def _restamp_probe(root, quantum, field, value, *, first_only=False):
     """
     import pickle
 
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
 
     path = root / "layer-quanta" / quantum / "cost.pkl"
     payload = pickle.loads(path.read_bytes())
@@ -171,9 +171,9 @@ def _restamp_probe(root, quantum, field, value, *, first_only=False):
             entry = copy.deepcopy(entry)
             entry["probe_identity"][field] = value
             operator = entry["joint_operator_identity"]
-            digest = identity_sha256(entry["probe_identity"])
+            digest = joint_identity_sha256(entry["probe_identity"])
             entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
-            entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+            entry["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
             rows[fmt] = entry
             rewritten += 1
     path.write_bytes(pickle.dumps(payload))
@@ -273,7 +273,8 @@ def test_rows_of_another_producer_source_are_ranked_with_a_stamp(
 # -- the quantum record and the stage-A header ---------------------------------
 
 def _record(**campaign_fields):
-    from prismaquant.joint_layer_quanta import LAYER_QUANTUM_SCHEMA, canonical_sha256
+    from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA)
+    from prismaquant.joint_layer_quanta import (canonical_sha256)
 
     record = {"schema": LAYER_QUANTUM_SCHEMA, "quantum_id": "layer-001", "layer": 1,
               "campaign": {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
@@ -297,30 +298,30 @@ CAMPAIGN = {"plan_sha256": "a" * 64, "prepared_sha256": "b" * 64,
     ("campaign_scope", None)])
 def test_a_quantum_sealed_for_another_campaign_revision_is_admitted(
         field, value, unset, monkeypatch):
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
 
     campaign = {**CAMPAIGN, field: value}
-    check_quantum_for_campaign(_record(), campaign)
+    require_quantum_campaign(_record(), campaign)
     assert f"[DEV-MODE] seal {field}" in unset()
     monkeypatch.setenv(ENV, "0")
     with pytest.raises(ValueError, match="refusing"):
-        check_quantum_for_campaign(_record(), campaign)
+        require_quantum_campaign(_record(), campaign)
 
 
 def test_the_unit_roster_stays_a_wall(unset):
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
 
     with pytest.raises(ValueError, match="another unit_roster_sha256"):
-        check_quantum_for_campaign(_record(), {**CAMPAIGN, "unit_roster_sha256": "e" * 64})
+        require_quantum_campaign(_record(), {**CAMPAIGN, "unit_roster_sha256": "e" * 64})
 
 
 def test_an_edited_record_stays_refused(unset):
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
 
     record = _record()
     record["layer"] = 2
     with pytest.raises(ValueError, match="edited record"):
-        check_quantum_for_campaign(record, CAMPAIGN)
+        require_quantum_campaign(record, CAMPAIGN)
 
 
 def test_a_stage_a_header_of_another_plan_or_a_null_scope_is_admitted(unset, monkeypatch):
@@ -495,7 +496,7 @@ def test_aura_units_without_a_manifest_are_archived_and_recomputed_by_default(
 
 def _bound_generation(tmp_path):
     """An interrupted run's boundary generation: status ``running``."""
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     config = {"schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "exact"),
               "max_resident_bytes": 1 << 20, "max_auxiliary_bytes": 1 << 20,
@@ -510,7 +511,7 @@ def _bound_generation(tmp_path):
     ("max_resident_bytes", 1 << 21), ("max_auxiliary_bytes", 1 << 21),
     ("max_artifact_bytes", 1 << 21)])
 def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, field, value):
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path / "dev")
     owner = StreamedBoundaryArtifacts({**config, field: value})
@@ -531,7 +532,7 @@ def test_rebind_stamps_a_byte_ceiling_difference(tmp_path, unset, monkeypatch, f
 def test_rebind_refuses_a_boundary_layout_difference(tmp_path, unset, field, value):
     """The schema, the capture order and the read window lay out the stored
     entries: a wall in dev mode too (PQ #1147)."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path)
     running = {**config, field: value}
@@ -546,7 +547,7 @@ def test_rebind_refuses_a_boundary_layout_difference(tmp_path, unset, field, val
 @pytest.mark.parametrize("status", ["complete", "attached", "retained"])
 def test_rebind_refuses_a_generation_that_did_not_stop_partway(tmp_path, unset, status):
     """Another owner or reader holds it: a wall in dev mode too (PQ #1147)."""
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     config, session = _bound_generation(tmp_path)
     path = Path(config["directory"]) / session["generation"] / "generation.json"

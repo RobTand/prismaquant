@@ -502,7 +502,7 @@ def test_terminal_cost_source_is_the_allocator_passthrough_contract():
     near-miss label still prices correctly while misclassifying provenance and
     the activation branch. Pin the two constants together so they cannot drift.
     """
-    from prismaquant.allocator_candidates import SOURCE_PASSTHROUGH_COST_SOURCE
+    from prismaquant.priced_cell import SOURCE_PASSTHROUGH_COST_SOURCE
 
     units = (_unit("unit.0"),)
     plugin = _SyntheticPlugin()

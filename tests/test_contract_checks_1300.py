@@ -11,13 +11,13 @@ returned value, or the same exception type, text and chained cause.
 """
 
 from __future__ import annotations
-
 from collections.abc import Mapping
 import re
 from types import MappingProxyType
 
 import pytest
 
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import (
     artifact_collection,
     artifact_collection_legacy,
@@ -37,17 +37,15 @@ from prismaquant import (
     quality_prefill_pb_adapter,
     quality_prefill_screen,
     runtime_provenance,
-    sample_parallel_probe,
     schemas,
     tessera_anchored_surface,
-    tessera_campaign,
     tessera_joint_aura,
     tessera_sampled_stack_proposal,
 )
 from tests.golden_table import GoldenTable, outcome
 
 
-GOLDEN = GoldenTable("contract_checks_1300")
+GOLDEN = GoldenTable("contract_checks_1300", every_row_used=True)
 
 
 # Documents every strict loader is fed. Each refusal case appears at least once:
@@ -76,8 +74,7 @@ TEXT_LOADERS = {
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
     "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
-    "sample_parallel_probe": lambda text: sample_parallel_probe._strict_json_loads(text, where="probe"),
-    "tessera_campaign": tessera_campaign.parse_family_restriction,
+    "tessera_campaign": campaign_table.parse_family_restriction,
 }
 
 BYTE_LOADERS = {

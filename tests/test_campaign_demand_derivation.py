@@ -17,6 +17,8 @@ import math
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+
 GIB = 1024 ** 3
 
 # A plan whose rounding slack sits below the measured process floor, so the
@@ -43,7 +45,7 @@ def _margin_bytes():
 def _fixed_plan(monkeypatch, plan_bytes=PLAN_BYTES):
     """Inject the phase plan, so the derivation is the only variable."""
     dispatch = _dispatch()
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan',
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan',
         lambda spec, census, members, *, selected_source: dict(
             memory_bytes=plan_bytes, selected_layers=['0'],
             baseline_policy='declared-headroom-pre-run-measured-in-row'))
@@ -103,16 +105,16 @@ def test_the_demand_is_the_plan_plus_the_measured_floor_plus_the_guard_margin(
     """
     dispatch = _fixed_plan(monkeypatch)
     spec = _spec(tmp_path)
-    demand = dispatch._row_memory_demand(spec, ['layers.0.proj'], _census(tmp_path),
+    demand = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], _census(tmp_path),
                                          selected_source=True)
-    expected_bytes = (PLAN_BYTES + dispatch.DEFAULT_PROCESS_BASELINE_BYTES
+    expected_bytes = (PLAN_BYTES + campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES
                       + _margin_bytes())
     assert demand['plan_bytes'] == PLAN_BYTES
-    assert demand['process_baseline_bytes'] == dispatch.DEFAULT_PROCESS_BASELINE_BYTES
+    assert demand['process_baseline_bytes'] == campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES
     assert demand['guard_margin_bytes'] == _margin_bytes()
     assert demand['demand_bytes'] == expected_bytes
     assert demand['mem_gb'] == math.ceil(expected_bytes / GIB)
-    assert dispatch._row_memory_gb(spec, ['layers.0.proj'], _census(tmp_path),
+    assert campaign_rows.row_memory_gb(spec, ['layers.0.proj'], _census(tmp_path),
                                    selected_source=True) == demand['mem_gb']
 
 
@@ -127,11 +129,11 @@ def test_the_margin_is_read_from_the_guard_rather_than_restated(monkeypatch, tmp
     dispatch = _fixed_plan(monkeypatch)
     spec = _spec(tmp_path)
     census = _census(tmp_path)
-    before = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    before = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                          selected_source=True)
     monkeypatch.setattr(memory_management.CaptureMemoryGuard, 'MARGIN_BYTES',
                         memory_management.CaptureMemoryGuard.MARGIN_BYTES + 4 * GIB)
-    after = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    after = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                         selected_source=True)
     assert after['guard_margin_bytes'] - before['guard_margin_bytes'] == 4 * GIB
     assert after['demand_bytes'] - before['demand_bytes'] == 4 * GIB
@@ -150,22 +152,22 @@ def test_a_spec_reservation_overrides_the_fleet_default_and_the_plan_says_which(
     dispatch = _fixed_plan(monkeypatch)
     census = _census(tmp_path)
 
-    default_bytes, default_policy = dispatch._process_baseline(_spec(tmp_path))
-    assert default_bytes == dispatch.DEFAULT_PROCESS_BASELINE_BYTES
+    default_bytes, default_policy = campaign_rows.process_baseline(_spec(tmp_path))
+    assert default_bytes == campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES
     assert default_policy == autoscale.BASELINE_POLICY_MEASURED_DEFAULT_RESERVATION
 
-    declared_bytes, declared_policy = dispatch._process_baseline(
+    declared_bytes, declared_policy = campaign_rows.process_baseline(
         _spec(tmp_path, process_baseline_bytes=3 * GIB))
     assert declared_bytes == 3 * GIB
     assert declared_policy == autoscale.BASELINE_POLICY_EXPLICIT_RESERVATION
 
     # A declared zero is a choice, not an absence: it reserves nothing and says
     # the spec asked for nothing.
-    zero_bytes, zero_policy = dispatch._process_baseline(
+    zero_bytes, zero_policy = campaign_rows.process_baseline(
         _spec(tmp_path, process_baseline_bytes=0))
     assert zero_bytes == 0
     assert zero_policy == autoscale.BASELINE_POLICY_EXPLICIT_RESERVATION
-    assert dispatch._row_memory_demand(
+    assert campaign_rows.row_memory_demand(
         _spec(tmp_path, process_baseline_bytes=0), ['layers.0.proj'], census,
         selected_source=True)['demand_bytes'] == PLAN_BYTES + _margin_bytes()
 
@@ -173,14 +175,14 @@ def test_a_spec_reservation_overrides_the_fleet_default_and_the_plan_says_which(
 def test_the_resident_source_branch_charges_the_same_two_terms(monkeypatch, tmp_path):
     """A floor and a margin exist whether or not the row streams."""
     dispatch = _dispatch()
-    monkeypatch.setattr(dispatch, '_model_bytes', lambda model: 10 * GIB)
+    monkeypatch.setattr(campaign_rows, '_model_bytes', lambda model: 10 * GIB)
     census = dict(unit_shapes={'layers.0.proj': [4, 8]})
-    spec = dict(model='/source', campaign_argv=[], headroom_gb=3, max_act_rows=2)
+    spec = dict(model='/source', campaign_argv=['--max-act-rows', '2'], headroom_gb=3)
     body = 10 * GIB + 8 ** 2 * 4 + 8 * 2 * 4
-    demand = dispatch._row_memory_demand(spec, ['layers.0.proj'], census)
+    demand = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census)
     assert demand['plan_bytes'] == body
     assert demand['mem_gb'] == math.ceil(
-        (body + dispatch.DEFAULT_PROCESS_BASELINE_BYTES + _margin_bytes()) / GIB) + 3
+        (body + campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES + _margin_bytes()) / GIB) + 3
 
 
 # ---------------------------------------------------------------------------
@@ -193,15 +195,15 @@ def test_an_under_declared_row_is_refused_and_the_message_carries_the_numbers(
     dispatch = _fixed_plan(monkeypatch)
     spec = _spec(tmp_path)
     census = _census(tmp_path)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     row = _manifest_row(tmp_path, mem_gb=derived - 1)
     with pytest.raises(dispatch.DemandRefused) as refusal:
         dispatch.verify_row_demand(spec, census, row, label='row-0000')
     message = str(refusal.value)
-    for number in (PLAN_BYTES, dispatch.DEFAULT_PROCESS_BASELINE_BYTES,
+    for number in (PLAN_BYTES, campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES,
                    _margin_bytes(),
-                   PLAN_BYTES + dispatch.DEFAULT_PROCESS_BASELINE_BYTES + _margin_bytes(),
+                   PLAN_BYTES + campaign_rows.DEFAULT_PROCESS_BASELINE_BYTES + _margin_bytes(),
                    (derived - 1) * GIB):
         assert str(number) in message, f'{number} is missing from {message!r}'
     assert 'row-0000' in message
@@ -211,7 +213,7 @@ def test_an_under_declared_row_is_refused_and_the_message_carries_the_numbers(
 def test_a_row_declaring_what_it_derives_passes(monkeypatch, tmp_path):
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     record = dispatch.verify_row_demand(spec, census,
                                         _manifest_row(tmp_path, mem_gb=derived),
@@ -236,7 +238,7 @@ def test_the_check_reads_the_rows_own_argv_not_the_specs(monkeypatch, tmp_path):
         return dict(memory_bytes=PLAN_BYTES + (2 * GIB if overlap else 0),
                     selected_layers=['0'])
 
-    monkeypatch.setattr(dispatch, '_streamed_resource_plan', plan)
+    monkeypatch.setattr(campaign_rows, 'streamed_resource_plan', plan)
     spec, census = _spec(tmp_path), _census(tmp_path)
     row = _manifest_row(tmp_path, mem_gb=999, extra_argv=(
         '--publication-overlap-bytes', '2147483648'))
@@ -249,7 +251,7 @@ def test_a_row_wider_than_the_declared_box_is_refused(monkeypatch, tmp_path):
     """Capacity is a parameter, so the test never reads the fleet's files."""
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     row = _manifest_row(tmp_path, mem_gb=derived)
     assert dispatch.verify_row_demand(spec, census, row, label='row-0000',
@@ -271,7 +273,7 @@ def test_the_relaunch_row_is_now_refused_at_submit_rather_than_after_admission(
     """
     dispatch = _fixed_plan(monkeypatch, plan_bytes=GLM_ROW_0074_PLAN_BYTES)
     spec, census = _spec(tmp_path), _census(tmp_path)
-    demand = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    demand = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                          selected_source=True)
     assert demand['mem_gb'] == 105
     with pytest.raises(dispatch.DemandRefused, match='no admission can come'):
@@ -283,7 +285,7 @@ def test_the_relaunch_row_is_now_refused_at_submit_rather_than_after_admission(
 def test_every_under_declared_row_is_named_at_once(monkeypatch, tmp_path):
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     rows = [_manifest_row(tmp_path, mem_gb=derived),
             _manifest_row(tmp_path, mem_gb=derived - 1),
@@ -314,7 +316,7 @@ def test_submit_refuses_an_under_declared_manifest_before_submitting_it(
     # together by ``tests/test_tessera_campaign_fanout.py``.
     monkeypatch.setattr(dispatch, 'attach_data_manifests',
                         lambda workspace, rows, **kw: rows)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     (tmp_path / 'manifest.json').write_text(json.dumps(
         [_manifest_row(tmp_path, mem_gb=derived - 1)]))
@@ -342,7 +344,7 @@ def test_submit_refuses_rather_than_skipping_the_check_it_cannot_run(tmp_path):
 def test_check_reports_every_row_it_verified(monkeypatch, tmp_path, capsys):
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
-    derived = dispatch._row_memory_demand(spec, ['layers.0.proj'], census,
+    derived = campaign_rows.row_memory_demand(spec, ['layers.0.proj'], census,
                                           selected_source=True)['mem_gb']
     (tmp_path / 'manifest.json').write_text(json.dumps(
         [_manifest_row(tmp_path, mem_gb=derived)]))

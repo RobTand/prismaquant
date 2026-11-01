@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 from safetensors.torch import save_file
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_calibration_forward as calibration_forward
 from test_tessera_campaign_resume import UNIT, _main_fixture
 
 from prismaquant import digests
@@ -50,7 +52,7 @@ def test_exact_draw_real_text_checkpoint_resume_and_receipt(monkeypatch, tmp_pat
     def collect(_model, _targets, tokens, *_args, **kwargs):
         seen.extend(tokens)
         return ({UNIT: inputs["rows"]}, {}, {UNIT: 8}, {UNIT: inputs["max_abs"]})
-    monkeypatch.setattr(tool, "_collect_activations", collect)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", collect)
     assert tool.main([*argv, *options, "--seed", "19"]) == 0
     assert len(seen) == 2
     assert all(list(batch.shape) == [1, 4] for batch in seen)
@@ -71,7 +73,7 @@ def test_exact_draw_real_text_checkpoint_resume_and_receipt(monkeypatch, tmp_pat
     assert payload["provenance"]["hessian"]["calibration_identity"] == identity
     def no_encode(**kwargs):
         pytest.fail("same saved draw re-encoded on resume")
-    monkeypatch.setattr(tool, "_measure_anchor", no_encode)
+    monkeypatch.setattr(cell_measurement, "measure_cell", no_encode)
     assert tool.main([*argv, *options, "--seed", "19"]) == 0
     _path.rename(tmp_path / "renamed-draw.safetensors")
     _text.rename(tmp_path / "renamed-corpus.txt")
@@ -166,7 +168,7 @@ def test_model_vocabulary_refuses_before_capture(monkeypatch, tmp_path):
     _forbid_sampler(monkeypatch)
     def no_capture(*args, **kwargs):
         pytest.fail("out-of-vocabulary draw reached capture")
-    monkeypatch.setattr(tool, "_collect_activations", no_capture)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", no_capture)
     with pytest.raises(ValueError, match="vocab"):
         tool.main([*argv, *options])
 
@@ -196,7 +198,7 @@ def test_wrapper_config_vocabulary_comes_from_its_text_config(monkeypatch, tmp_p
     def collect(_model, _targets, tokens, *_args, **kwargs):
         seen.extend(tokens)
         return ({UNIT: inputs["rows"]}, {}, {UNIT: 8}, {UNIT: inputs["max_abs"]})
-    monkeypatch.setattr(tool, "_collect_activations", collect)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", collect)
     assert tool.main([*argv, *options]) == 0
     assert torch.equal(torch.cat(seen), ids)
 
@@ -208,7 +210,7 @@ def test_wrapper_config_text_vocabulary_still_refuses_out_of_range_ids(monkeypat
     _forbid_sampler(monkeypatch)
     def no_capture(*args, **kwargs):
         pytest.fail("out-of-vocabulary draw reached capture")
-    monkeypatch.setattr(tool, "_collect_activations", no_capture)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", no_capture)
     with pytest.raises(ValueError, match="vocab"):
         tool.main([*argv, *options])
 
@@ -228,8 +230,8 @@ def test_absent_intake_keeps_historical_checkpoint_settings_identity():
     common = {"weights": {}, "acts": {}, "hessians": {}, "menus": {},
               "calibration_identity": th.calibration_identity("real corpus", [], fit_tokens=0),
               "serving_scope": None, "static_scales": {}, "static_scale_policy": "fixture"}
-    legacy = campaign._campaign_checkpoint_identity(args=SimpleNamespace(seed=0), **common)
-    current = campaign._campaign_checkpoint_identity(args=SimpleNamespace(seed=0,
+    legacy = campaign.campaign_checkpoint_identity(settings=dict(seed=0), **common)
+    current = campaign.campaign_checkpoint_identity(settings=dict(seed=0,
         calibration_input=None, calibration_input_sha256=None,
         calibration_corpus=None, calibration_input_receipt=None), **common)
     assert current == legacy
@@ -263,7 +265,7 @@ def test_census_and_capture_reuse_keep_saved_draw_identity(monkeypatch, tmp_path
     ids, provenance, _path, _text, options = _saved_draw(tmp_path)
     _forbid_sampler(monkeypatch)
     monkeypatch.setattr(prismaquant, "pretrained_initialization_contract", lambda model: {"fixture": True})
-    monkeypatch.setattr(tool, "_collect_activations", lambda *args, **kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *args, **kwargs: (
         {}, {}, {UNIT: ids.numel()}, {UNIT: inputs["max_abs"]}))
     census_path = tmp_path / "census.json"
     census_options = [*argv, *options, "--seed", "19", "--attention-implementation", "eager"]
@@ -293,7 +295,7 @@ def test_census_and_capture_reuse_keep_saved_draw_identity(monkeypatch, tmp_path
     monkeypatch.setattr(store, "prefetch_capture", prefetch)
     def no_capture(*args, **kwargs):
         pytest.fail("complete capture reuse repeated calibration")
-    monkeypatch.setattr(tool, "_collect_activations", no_capture)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", no_capture)
     assert tool.main([*census_options, "--seed", "20", "--hessian", "require",
         "--calibration-census", str(census_path),
         "--capture-calibration-out", str(capture_dir)]) == 0

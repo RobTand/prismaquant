@@ -69,7 +69,7 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
                                producer_source, parent_boundary):
     """Run a source layer only until the real packed-expert call is reached."""
     from . import pretrained_initialization_contract
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
     from .stage_inputs import require_source_identity
 
     if runner.profile.name != "glm5_next" or not (3 <= layer < runner.num_layers):

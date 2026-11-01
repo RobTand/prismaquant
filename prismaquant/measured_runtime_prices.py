@@ -332,6 +332,15 @@ def load_runtime_context(path: str | Path) -> RuntimeContext:
     return parse_runtime_context(_json(path))
 
 
+def device_placement_bytes(resident_bytes, peak_scratch_bytes, activation_bytes, *,
+                           fixed_device_bytes=0, non_step_transient_peak_bytes=None,
+                           charge_activation=True):
+    """Compose a one-device step charge with its separately measured off-step peak."""
+    step = (resident_bytes + peak_scratch_bytes
+            + (activation_bytes if charge_activation else 0) + fixed_device_bytes)
+    return step if non_step_transient_peak_bytes is None else max(step, non_step_transient_peak_bytes)
+
+
 @dataclass(frozen=True)
 class RuntimeResources:
     """Separate wire bytes, resident terminal weights, and transient allocations.

@@ -15,7 +15,7 @@ from safetensors.torch import save_file
 import torch
 from transformers import AutoConfig
 
-import prismaquant.cost_streaming as cost_streaming
+from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.model_profiles import detect_profile
 from prismaquant.prismasnap import PRISMASNAP_ALGORITHM, PrismaSnapSearchConfig
 import prismaquant.prismasnap_checkpoint as checkpoint
@@ -542,12 +542,12 @@ def _tiny_planned_checkpoint(
             weight_ckpt={key: key for key in weight_map},
         ),
     )
-    identity = cost_streaming.build_streamed_model_identity(
+    identity = cost_streaming_identity.build_streamed_model_identity(
         runner, str(source.resolve())
     )
     # Exercise the same validator the production planner consumes before the
     # identity is admitted into the synthetic plan.
-    assert cost_streaming.validate_streamed_model_identity(
+    assert cost_streaming_identity.validate_streamed_model_identity(
         identity, where="test source identity"
     ) == identity
     identity_path = tmp_path / "streamed_model_identity.json"

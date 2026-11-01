@@ -22,8 +22,8 @@ before it runs:
    step's measured peak times the batch ratio;
 3. the capture pass with its spill observer at one stored batch, under the
    declared reserve;
-4. the capture pass at 2 and then 4 stored batches, each under the previous
-   step's measured peak times the batch ratio.
+4. the capture pass with doubled batches up to ``capture_batch``, each under
+   the previous step's measured peak times the exact batch ratio, rounded up.
 
 A step the guard refuses is recorded with the refusal and ends the ladder,
 because every later step is larger. A pass that stops on a free-memory floor
@@ -33,10 +33,12 @@ a lower bound.
 from __future__ import annotations
 
 import json
+import math
 import os
 import statistics
 import threading
 import time
+from fractions import Fraction
 from pathlib import Path
 
 from .digests import bytes_sha256hex
@@ -116,7 +118,7 @@ def ladder(capture_batch):
     while batch < capture_batch:
         following = min(2 * batch, capture_batch)
         name = f"capture-b{following}"
-        steps.append((name, True, following, (previous, following // batch)))
+        steps.append((name, True, following, (previous, Fraction(following, batch))))
         previous, batch = name, following
     return steps
 
@@ -271,7 +273,7 @@ def run_ladder(items, *, run_group, observed, guard, declared_workspace_bytes,
             basis_text = (f"declared workspace_reserve_bytes {declared_workspace_bytes} "
                           f"x {factor}")
         else:
-            reserve = measured[reference] * int(factor)
+            reserve = math.ceil(measured[reference] * factor)
             basis_text = f"measured peak of {reference} ({measured[reference]}) x {factor}"
         if with_observer:
             reserve += int(capture_reserve_bytes)
@@ -351,7 +353,7 @@ def profile_capture_workspace(request, *, storage, batches, layer, run_group, ob
     """
     import torch
 
-    from .cost_streaming import prefetched_boundary_batches
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
 
     if guard is None:
         raise RuntimeError("the capture workspace profile needs the live capture guard")

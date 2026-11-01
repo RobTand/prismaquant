@@ -63,6 +63,11 @@ Model-agnostic:
 """
 from __future__ import annotations
 
+from . import probe_inventory
+
+from . import probe_statistics
+
+
 import json
 import atexit
 import os
@@ -548,99 +553,6 @@ def load_multimodal_calibration(
 
 
 _ALLOW_SUMSQ_PACKED_FISHER_ENV = "PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER"
-
-
-def h_detail_blob(h_raw: torch.Tensor, global_tokens: int, name: str, *,
-                  kind: str = "linear",
-                  g2_per_token: torch.Tensor | None = None) -> dict:
-    """Normalize a token-SUMMED Fisher diagonal accumulator to per-token
-    units and wrap it in the canonical h-detail blob schema.
-
-    ``global_tokens`` must be the GLOBAL calibration token count — the
-    same denominator `finalize_fisher_stats` applies to the scalar
-    ``h_trace`` — never a per-row routed-token count. v4 pins this:
-    passing an unpacked expert Linear's own ``n_tokens_seen`` here left
-    the detail blob (global/routed)× hotter than the scalar it must
-    agree with, so `predicted_dloss` fallback rows priced expert rows on
-    a different scale than the rest of the knapsack.
-
-    Every h-detail writer (this module's `FisherAccumulator.finalize` and
-    `incremental_probe`'s two writer sites) goes through this helper so
-    the on-disk units are per-token everywhere and stamped with an
-    explicit ``units: "per_token"`` marker (audit M9 — the incremental
-    writer used to save the raw token-summed ``H``, leaving the consumer
-    `HDetailIndex.h_diag_from_blob` ~n_tokens× off depending on which
-    probe produced the directory). ``g2_per_token`` is already a
-    per-token vector and is stored as-is.
-    """
-    tokens = max(int(global_tokens), 1)
-    h = h_raw.detach().to("cpu", torch.float32) / tokens
-    blob = {
-        "h_diag": h,
-        "name": name,
-        "kind": kind,
-        "shape": list(h.shape),
-        "units": "per_token",
-        # v3: unit marker; no route_prob term (M4).
-        # v4: denominator is the GLOBAL calib token count for every row
-        #     (v3 unpacked-expert blobs were per-ROUTED-token).
-        "h_detail_version": 4,
-        "norm_tokens": tokens,
-    }
-    if g2_per_token is not None:
-        blob["g2_per_token"] = g2_per_token
-    return blob
-
-
-def finalize_fisher_stats(merged_stats: dict, global_tokens: int) -> None:
-    """Normalize raw Fisher accumulators into ``h_trace`` (etc.), in place.
-
-    Fisher normalization must share ONE denominator across every row: the
-    global calibration token count (nsamples x seqlen). Dense trunk Linears
-    accumulate exactly that many tokens in ``n_tokens_seen``, so their
-    values are unchanged by dividing by the global count. Per-expert
-    Linears, however, only see their ROUTED tokens; a per-row
-    ``h_trace_raw / n_tokens_seen`` inflates a rarely-routed expert's
-    Fisher by (global/routed) — exactly inverted importance weighting (the
-    least-used experts look the most sensitive). Tokens never routed to an
-    expert contribute zero gradient, so the empirical Fisher over the
-    calibration set divides by the GLOBAL count for every row.
-
-    HISTORY — this deliberately REVERSES a documented convention. Audit M4
-    removed an explicit ÷route_prob on the grounds that dividing by the
-    routed-token count was "the one implicit ÷token-fraction the MoE
-    convention prescribes", and both backends then shipped per-routed-token
-    as the single normalization (pinned by the original
-    tests/test_packed_expert_per_token_fisher.py). M4's *agreement* goal
-    stands — one division, both backends, route_prob as metadata only —
-    but per-routed-token was the wrong denominator for the mean-Δloss
-    objective the allocator optimizes: it is the same 1/p_e inflation M4
-    removed, merely implicit. CLAUDE.md §3 records the same reversal.
-
-    ``n_tokens_seen`` stays raw (routed count, metadata). Every h-detail
-    blob is normalized by the SAME global count (`h_detail_blob` v4) so
-    scalar and per-weight detail Fisher share one denominator.
-    """
-    for s in merged_stats.values():
-        s["h_trace"] = s.get("h_trace_raw", 0.0) / global_tokens
-        s["h_w2_sum"] = s.get("h_w2_sum_raw", 0.0) / global_tokens
-        # Per-expert Fisher trace (only present on packed-3D stat entries;
-        # dense Linears have no per-expert dimension). Normalize by the
-        # same token count so it shares units with `h_trace`.
-        per = s.get("h_trace_per_expert_raw")
-        if per is not None:
-            s["h_trace_per_expert"] = [float(v) / global_tokens for v in per]
-        # Per-GROUP Fisher trace (grouped-BMM operands like DSv4's wo_a).
-        # Same rule, same denominator: the group axis is a contraction
-        # structure ON one logical tensor, and every group sees every
-        # calibration token (attention output projection — nothing is
-        # routed), so the global count is exact for it, not just
-        # consistent.
-        per_group = s.get("h_trace_per_group_raw")
-        if per_group is not None:
-            s["h_trace_per_group"] = [
-                float(v) / global_tokens for v in per_group]
-        s["h_trace_norm_tokens"] = global_tokens
 
 
 # ---------------------------------------------------------------------------
@@ -1141,82 +1053,14 @@ class _PackedWeightGradFallback(torch.autograd.Function):
         return None, None, None, None, None
 
 
-def _packed_expert_param_name_set(profile=None) -> set[str]:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return set(profile.packed_expert_param_names())
-        except Exception:
-            pass
-    return set()
 
 
-def _packed_expert_parent_for_projection(profile, projection_name: str) -> str | None:
-    if profile is None:
-        try:
-            from .model_profiles import DefaultProfile
-            profile = DefaultProfile()
-        except Exception:
-            profile = None
-    if profile is not None:
-        try:
-            return profile.packed_expert_parent_for_projection(projection_name)
-        except Exception:
-            pass
-    return None
 
 
-def _is_packed_experts_module(module: nn.Module, profile=None) -> bool:
-    """A module qualifies as a packed-experts container iff (a) its
-    class name contains "Experts" (case-insensitive), and (b) it owns
-    at least one profile-declared 3D packed expert parameter.
-
-    The class-name check excludes other modules that happen to own 3D
-    parameters — most importantly Conv1d in linear-attention paths,
-    whose `weight` is shape `[out, in, kernel]`. The param-name check
-    is a second safety net against unusual modules with unrelated 3D
-    state.
-    """
-    names = _packed_expert_param_name_set(profile)
-    cls_name = type(module).__name__.lower()
-    if "expert" not in cls_name:
-        return False
-    for n, p in module.named_parameters(recurse=False):
-        if (isinstance(p, nn.Parameter)
-                and p.dim() == 3
-                and n in names):
-            return True
-    return False
 
 
-def _packed_experts_param_names(module: nn.Module, profile=None) -> list[str]:
-    """Return the attribute names of all 3D packed parameters on
-    `module`, restricted to the known MoE expert names. Order is stable
-    across Python runs."""
-    names_allowed = _packed_expert_param_name_set(profile)
-    names = []
-    for n, p in module.named_parameters(recurse=False):
-        if (isinstance(p, nn.Parameter)
-                and p.dim() == 3
-                and n in names_allowed):
-            names.append(n)
-    return sorted(names)
 
 
-def _packed_expert_projection_candidate_names(profile=None) -> tuple[str, ...]:
-    names = set(_packed_expert_param_name_set(profile))
-    if profile is not None:
-        for name in list(names):
-            try:
-                names.update(profile.packed_expert_projection_names(name))
-            except Exception:
-                pass
-    return tuple(sorted(names))
 
 
 _PRISMAQUANT_PATCH_SENTINEL = "_prismaquant_packed_expert_patch"
@@ -1270,9 +1114,9 @@ def install_packed_expert_hooks(
     """
     meta: dict[str, dict] = {}
     for qname, module in model.named_modules():
-        if not _is_packed_experts_module(module, profile):
+        if not probe_inventory.is_packed_experts_module(module, profile):
             continue
-        param_names = _packed_experts_param_names(module, profile)
+        param_names = probe_inventory.packed_experts_param_names(module, profile)
         if not param_names:
             continue
 
@@ -1503,7 +1347,7 @@ def discover_moe_structure(
             raise
         except Exception:
             profile = None
-    projection_candidates = _packed_expert_projection_candidate_names(profile)
+    projection_candidates = probe_inventory.packed_expert_projection_candidate_names(profile)
 
     def _router_matches_num_experts(child: nn.Module, num_experts: int) -> bool:
         if isinstance(child, nn.Linear) and child.out_features == num_experts:
@@ -1635,7 +1479,7 @@ def discover_moe_routers(
             raise
         except Exception:
             profile = None
-    packed_names = _packed_expert_param_name_set(profile)
+    packed_names = probe_inventory.packed_expert_param_name_set(profile)
     routers: dict[str, int] = {}
 
     def _matches(child: nn.Module, num_experts: int) -> bool:
@@ -2246,16 +2090,13 @@ class RouterTracker:
 # ---------------------------------------------------------------------------
 # Fisher accumulator with activation snapshot cache
 # ---------------------------------------------------------------------------
-_DENSE_FISHER_MARGINAL_KEYS = (
-    "fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax",
-)
 
 
 def dense_marginal_chunk(gy2_sq: torch.Tensor, x2_sq: torch.Tensor,
                          x2: torch.Tensor,
                          chunk_h: torch.Tensor) -> list[torch.Tensor]:
     """Five per-channel reductions of one (gy², x², H) chunk, in
-    ``_DENSE_FISHER_MARGINAL_KEYS`` order, device-resident fp32.
+    ``probe_statistics.FISHER_MARGINAL_KEYS`` order, device-resident fp32.
 
     Reductions force fp32 accumulation: the inputs are bf16 and a
     T-long running sum in bf16 loses real precision for free.
@@ -2341,7 +2182,7 @@ class FisherAccumulator:
         # identity and the declared structural spellings are read through
         # prismaquant.name_projection, never re-derived here from string
         # surgery. When the model's own profile is unavailable, fall back
-        # to DefaultProfile exactly like `_packed_expert_param_name_set`
+        # to DefaultProfile exactly like `probe_inventory.packed_expert_param_name_set`
         # above; NameProjection itself refuses a None profile by contract,
         # so the fallback is an explicit declaration, not a silent degrade.
         if self.model_profile is not None:
@@ -2580,10 +2421,11 @@ class FisherAccumulator:
                 marginal_accumulator=self._packed_marginal_acc,
                 profile=self.model_profile,
             )
+            packed_input_members: dict[str, list[str]] = defaultdict(list)
             for full_name, meta in packed_meta.items():
                 # Filter against the tracked set when tracked is a regex
                 # match; here we accept any packed param under a tracked
-                # parent (the regex from run_probe_pass already filters
+                # parent (the caller's selection already filters
                 # by layer).
                 experts_qname = meta.pop("_packed_experts_module")
                 meta.pop("_packed_param", None)
@@ -2597,35 +2439,30 @@ class FisherAccumulator:
                 parent_layer = self._name_projection.block_id(experts_qname)
                 if any(t.startswith(parent_layer + ".") for t in self.tracked):
                     self.stats[full_name] = meta
-                    # Register a forward hook on the experts module to
-                    # bump the per-backward sample count (used to keep
-                    # n_tokens_seen aligned with the Linear path's
-                    # accounting).
-                    try:
-                        experts_mod = model.get_submodule(experts_qname)
-                    except AttributeError:
-                        continue
+                    packed_input_members[experts_qname].append(full_name)
+            for experts_qname, full_names in packed_input_members.items():
+                experts_mod = model.get_submodule(experts_qname)
 
-                    def _exp_fwd(_mod, inp, _out, _qn=experts_qname,
-                                 _full=full_name, _x_acc=self._packed_act_snaps,
-                                 _r=self._packed_act_rows):
-                        x = inp[0] if isinstance(inp, tuple) else inp
-                        if isinstance(x, torch.Tensor):
-                            self._packed_sample_count[_full] += int(
-                                x.detach().reshape(-1, x.size(-1)).size(0))
-                            if act_cache_dir is not None:
-                                need = self.input_rows - _r[_qn]
-                                if need > 0:
-                                    flat = x.detach().reshape(-1, x.size(-1))
-                                    if flat.size(0) > need:
-                                        idx = torch.randperm(flat.size(0),
-                                                             device=flat.device)[:need]
-                                        flat = flat.index_select(0, idx)
-                                    _x_acc[_qn].append(flat.to("cpu"))
-                                    _r[_qn] += flat.size(0)
+                def _exp_fwd(_mod, inp, _out, _qn=experts_qname,
+                             _fulls=tuple(full_names), _x_acc=self._packed_act_snaps,
+                             _r=self._packed_act_rows):
+                    x = inp[0] if isinstance(inp, tuple) else inp
+                    if isinstance(x, torch.Tensor):
+                        flat = x.detach().reshape(-1, x.size(-1))
+                        for full_name in _fulls:
+                            self._packed_sample_count[full_name] += int(flat.size(0))
+                        if act_cache_dir is not None:
+                            need = self.input_rows - _r[_qn]
+                            if need > 0:
+                                if flat.size(0) > need:
+                                    idx = torch.randperm(flat.size(0),
+                                                         device=flat.device)[:need]
+                                    flat = flat.index_select(0, idx)
+                                _x_acc[_qn].append(flat.to("cpu"))
+                                _r[_qn] += flat.size(0)
 
-                    self._fwd_handles.append(
-                        experts_mod.register_forward_hook(_exp_fwd))
+                self._fwd_handles.append(
+                    experts_mod.register_forward_hook(_exp_fwd))
 
     _dense_marginal_chunk = staticmethod(dense_marginal_chunk)
 
@@ -2641,7 +2478,7 @@ class FisherAccumulator:
             ]
             return
         for key, dst, src in zip(
-            _DENSE_FISHER_MARGINAL_KEYS, current, values, strict=True,
+            probe_statistics.FISHER_MARGINAL_KEYS, current, values, strict=True,
         ):
             if key == "act_absmax":
                 torch.maximum(dst, src, out=dst)
@@ -2686,7 +2523,7 @@ class FisherAccumulator:
             for name, values in device_entries:
                 entry = self.stats.get(name)
                 for key, value in zip(
-                    _DENSE_FISHER_MARGINAL_KEYS, values, strict=True,
+                    probe_statistics.FISHER_MARGINAL_KEYS, values, strict=True,
                 ):
                     length = int(value.numel())
                     if entry is not None:
@@ -3034,7 +2871,7 @@ class FisherAccumulator:
         # See finalize_fisher_stats for the full derivation + history.
         # `route_prob` stays in the stats as metadata only.
         global_tokens = max(int(global_tokens), 1)
-        finalize_fisher_stats(self.stats, global_tokens)
+        probe_statistics.finalize_fisher_stats(self.stats, global_tokens)
 
         if self.cache_dir is not None:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3093,7 +2930,7 @@ class FisherAccumulator:
                                 else torch.empty(0, dtype=torch.float32))
                 fname = sub.sub("__", name) + ".pt"
                 torch.save(
-                    h_detail_blob(acc, global_tokens, name, kind="linear",
+                    probe_statistics.h_detail_blob(acc, global_tokens, name, kind="linear",
                                   g2_per_token=g2_per_token),
                     self.h_detail_dir / fname)
                 self.stats[name]["h_detail_path"] = fname
@@ -3107,7 +2944,7 @@ class FisherAccumulator:
                 # device-resident; h_detail_blob lands it on CPU for the
                 # saved blob.)
                 fname = sub.sub("__", full_name) + ".pt"
-                torch.save(h_detail_blob(ch, global_tokens, full_name,
+                torch.save(probe_statistics.h_detail_blob(ch, global_tokens, full_name,
                                          kind="packed"),
                            self.h_detail_dir / fname)
                 self.stats[full_name]["h_detail_path"] = fname
@@ -3123,237 +2960,6 @@ class FisherAccumulator:
 # ---------------------------------------------------------------------------
 # Calibration data
 # ---------------------------------------------------------------------------
-def load_calibration(tokenizer, source: str, n_samples: int,
-                     seqlen: int, *, calib_seed: int = 42) -> torch.Tensor:
-    """Load calibration from a HuggingFace dataset id, a local .jsonl, or
-    a local .txt file. Extensionless regular files are content-sniffed so a
-    bind-mounted JSONL at a canonical container path such as ``/dataset``
-    remains local. JSONL rows can have either {"text": ...} or
-    {"messages": [...]} for chat-style data.
-    """
-    import os
-
-    # A local-file source that does not exist must NOT fall through to the
-    # HuggingFace loader. It used to: the `.jsonl`/`.txt` branches were guarded
-    # by os.path.exists, so a missing file skipped to the generic `else` and
-    # HF reported `Dataset '/home/.../diverse-v1.jsonl' doesn't exist on the
-    # Hub` -- an error that names a filesystem path as a dataset id and sends
-    # the reader looking for something to download. Nothing is downloadable;
-    # the file is simply absent.
-    if (source.endswith((".jsonl", ".txt")) or os.sep in source) \
-            and not os.path.exists(source):
-        raise FileNotFoundError(
-            f"calibration file not found: {source}\n"
-            "This is a local path, not a HuggingFace dataset id, so there is "
-            "nothing to download. Either:\n"
-            "  * build the default corpus:  python tools/"
-            "build_diverse_calibration.py --output <path> --tokenizer <model>\n"
-            "  * point DATASET at your own .jsonl ({\"text\": ...} or "
-            "{\"messages\": [...]} rows) or .txt (one sample per line)\n"
-            "  * point DATASET at a HuggingFace dataset id "
-            "(e.g. ultrachat_200k)"
-        )
-
-    local_kind: str | None = None
-    if source.endswith(".jsonl") and os.path.isfile(source):
-        local_kind = "jsonl"
-    elif source.endswith(".txt") and os.path.isfile(source):
-        local_kind = "txt"
-    elif (
-        os.path.isfile(source)
-        and not os.path.splitext(os.path.basename(source))[1]
-    ):
-        # Docker commonly mounts one host file at a path-neutral canonical
-        # name.  Do not reinterpret that existing regular file as a Hub
-        # dataset merely because the container target has no suffix.  Sniff
-        # only extensionless files; known alternate local formats retain the
-        # generic datasets-loader behavior they had before this contract.
-        first_nonempty = ""
-        with open(source) as handle:
-            for line in handle:
-                if line.strip():
-                    first_nonempty = line
-                    break
-        try:
-            first_value = json.loads(first_nonempty)
-        except (json.JSONDecodeError, TypeError):
-            first_value = None
-        local_kind = (
-            "jsonl"
-            if isinstance(first_value, dict)
-            and ("text" in first_value or "messages" in first_value)
-            else "txt"
-        )
-
-    texts: list[str] = []
-    if local_kind == "jsonl":
-        with open(source) as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                obj = json.loads(line)
-                if "messages" in obj:
-                    try:
-                        texts.append(tokenizer.apply_chat_template(
-                            obj["messages"], tokenize=False))
-                    except Exception:
-                        # Tokenizer has no chat template (base / pt models
-                        # like DSv4-Flash-Base). Fall back to concatenating
-                        # the message contents — good enough as calibration
-                        # text, mirrors the ultrachat fallback below.
-                        parts = []
-                        for m in obj["messages"]:
-                            if isinstance(m, dict):
-                                c = m.get("content")
-                                if isinstance(c, str) and c:
-                                    parts.append(c)
-                        if parts:
-                            texts.append("\n\n".join(parts))
-                elif "text" in obj:
-                    texts.append(obj["text"])
-    elif local_kind == "txt":
-        with open(source) as f:
-            texts = [ln.strip() for ln in f if ln.strip()]
-    elif source == "ultrachat_200k":
-        from datasets import load_dataset
-
-        ds = load_dataset("HuggingFaceH4/ultrachat_200k",
-                          split="train_sft", streaming=True)
-        for row in ds:
-            msgs = row.get("messages", [])
-            if not msgs:
-                continue
-            try:
-                texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
-            except Exception:
-                # Tokenizer has no chat template (base / pt models).
-                # Join plain message contents — good enough as calibration.
-                parts = []
-                for m in msgs:
-                    if isinstance(m, dict):
-                        c = m.get("content")
-                        if isinstance(c, str) and c:
-                            parts.append(c)
-                if parts:
-                    texts.append("\n\n".join(parts))
-            if len(texts) >= n_samples * 8:
-                break
-    else:
-        try:
-            from datasets import load_dataset
-        except ModuleNotFoundError as exc:
-            raise ModuleNotFoundError(
-                "Loading HuggingFace calibration datasets requires the "
-                "'datasets' package. Local .jsonl and .txt calibration files "
-                "do not require it."
-            ) from exc
-        # Generic HF dataset loader. Handles three common schemas:
-        #   1. {"text": "..."} — raw text corpora (pile, wikitext, etc.)
-        #   2. {"messages": [...]} — chat-format SFT (ultrachat, tulu-3, etc.)
-        #   3. anything else — falls back to first string column
-        # Streaming when possible so we don't download the full dataset for
-        # just 32 samples.
-        try:
-            ds = load_dataset(source, split="train", streaming=True)
-            stream = True
-        except Exception:
-            ds = load_dataset(source, split="train")
-            stream = False
-
-        # Probe one row to detect schema
-        iterator = iter(ds) if stream else ds
-        first = next(iterator) if stream else (ds[0] if len(ds) else {})
-        schema = None
-        if "messages" in first:
-            schema = "messages"
-        elif "text" in first:
-            schema = "text"
-        else:
-            # pick first string-valued column
-            for k, v in first.items():
-                if isinstance(v, str):
-                    schema = k
-                    break
-        if schema is None:
-            raise ValueError(f"Could not find text or messages field in {source}")
-        print(f"[probe] {source} schema: {schema}", flush=True)
-
-        # Re-iterate (we consumed the first row)
-        if stream:
-            ds = load_dataset(source, split="train", streaming=True)
-            iterator = iter(ds)
-        else:
-            iterator = iter(ds)
-
-        for row in iterator:
-            if schema == "messages":
-                msgs = row.get("messages") or row.get("conversations") or []
-                if not msgs:
-                    continue
-                try:
-                    texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
-                except Exception:
-                    # Tokenizer has no chat template (base / pt models)
-                    # or the template rejects this message shape.
-                    # Fall back to concatenating the message contents —
-                    # good enough as calibration text, decouples the
-                    # probe from the tokenizer's chat-template state.
-                    parts = []
-                    for m in msgs:
-                        if isinstance(m, dict):
-                            c = m.get("content")
-                            if isinstance(c, str) and c:
-                                parts.append(c)
-                    if parts:
-                        texts.append("\n\n".join(parts))
-            else:
-                v = row.get(schema)
-                if isinstance(v, str) and v.strip():
-                    texts.append(v)
-            if len(texts) >= n_samples * 8:
-                break
-
-    # Two-pass sampling:
-    #   1) first pass picks any sample already >= seqlen tokens
-    #   2) fallback packs multiple short samples together (separated by
-    #      EOS) to reach seqlen. This makes SFT/chat datasets with short
-    #      turns (tulu-3, glaive) usable without lowering seqlen.
-    # calib_seed controls (a) which subset of dataset texts is tried (shuffle)
-    # and (b) where within each text the seqlen window starts. Default 42 is
-    # the historical value and is byte-stable.
-    if calib_seed != 42:
-        rng_shuffle = random.Random(calib_seed)
-        rng_shuffle.shuffle(texts)
-    random.seed(calib_seed)
-    samples = []
-    for t in texts:
-        ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
-        if ids.size(1) < seqlen:
-            continue
-        start = random.randint(0, ids.size(1) - seqlen)
-        samples.append(ids[0, start:start + seqlen])
-        if len(samples) >= n_samples:
-            break
-
-    if len(samples) < n_samples:
-        eos = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
-        # Pack short samples by concatenating with EOS separator
-        buf: list[int] = []
-        for t in texts:
-            ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids[0].tolist()
-            buf.extend(ids)
-            buf.append(eos)
-            while len(buf) >= seqlen and len(samples) < n_samples:
-                samples.append(torch.tensor(buf[:seqlen], dtype=torch.long))
-                buf = buf[seqlen:]
-            if len(samples) >= n_samples:
-                break
-
-    if len(samples) < n_samples:
-        print(f"[probe] warning: only got {len(samples)}/{n_samples} samples "
-              f"(even with packing). Consider wider corpus.",
-              flush=True)
-    return torch.stack(samples[:n_samples], dim=0)
 
 
 def per_token_ce(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -3371,6 +2977,8 @@ def load_probe_model_and_tokenizer(model_path: str,
                                    device_map: str | None = None,
                                    gradient_checkpointing: bool = True,
                                    offload_folder: str | None = None):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     staged = stage_text_only(model_path)
@@ -3412,152 +3020,6 @@ def load_probe_model_and_tokenizer(model_path: str,
     return staged, tokenizer, model, exec_device, load_device_map
 
 
-def run_probe_pass(model: nn.Module,
-                   tokenizer,
-                   calib: torch.Tensor,
-                   model_name: str,
-                   dataset_name: str,
-                   seqlen: int,
-                   dtype_name: str,
-                   requested_device: str,
-                   load_device_map,
-                   exec_device: torch.device,
-                   linear_include: str,
-                   linear_exclude: str,
-                   importance_weighting: bool,
-                   activation_cache_dir: str | None,
-                   output_path: str,
-                   h_detail_dir: str | None = None):
-    inc = re.compile(linear_include)
-    exc = re.compile(linear_exclude)
-    tracked = [n for n, m in model.named_modules()
-               if isinstance(m, nn.Linear)
-               and inc.search(n) and not exc.search(n)]
-    print(f"[probe] tracking {len(tracked)} Linear layers", flush=True)
-
-    expert_info_all = discover_moe_structure(model)
-    expert_info = {k: v for k, v in expert_info_all.items() if k in tracked}
-    top_k = read_top_k(model, default=2)
-    routers = sorted({r for r, _ in expert_info.values()})
-    print(f"[probe] MoE: {len(expert_info)} expert linears, "
-          f"{len(routers)} routers, top_k={top_k}", flush=True)
-    if len(expert_info) == 0:
-        diag_count = 0
-        for pname, pmod in model.named_modules():
-            for attr in ("experts", "block_sparse_moe_experts",
-                         "moe_experts", "expert_layer"):
-                child = getattr(pmod, attr, None)
-                if child is None or not isinstance(child, nn.Module):
-                    continue
-                kids = list(child.named_children())
-                numkids = [k for k, _ in kids if k.isdigit()]
-                print(f"[probe/diag] parent={pname!r} attr={attr!r} "
-                      f"container_cls={type(child).__name__} "
-                      f"n_children={len(kids)} n_numeric_children={len(numkids)}"
-                      f" first_children={[k for k,_ in kids[:5]]}",
-                      flush=True)
-                diag_count += 1
-                if diag_count >= 3:
-                    break
-            if diag_count >= 3:
-                break
-
-    tracker = RouterTracker(model, routers, top_k) if routers else None
-    cache_dir = Path(activation_cache_dir) if activation_cache_dir else None
-    detail_dir = Path(h_detail_dir) if h_detail_dir else None
-    acc = FisherAccumulator(model, tracked, expert_info, cache_dir,
-                            h_detail_dir=detail_dir)
-
-    print(f"[probe] calibration shape: {calib.shape}", flush=True)
-
-    model.train()
-    t_fwd = t_bwd = 0.0
-    for i in range(calib.size(0)):
-        ids = calib[i:i+1].to(exec_device)
-        t0 = time.time()
-        with torch.no_grad():
-            embed = model.get_input_embeddings()(ids)
-        embed.requires_grad_(True)
-        out = model(inputs_embeds=embed, labels=ids)
-        logits = out.logits
-        t_fwd += time.time() - t0
-
-        t0 = time.time()
-        # Use sum-reduction CE so per-token gradients aggregate without
-        # the 1/T factor that mean-reduction introduces. The accumulated
-        # ||grad_W||²_F divided by total tokens then gives the per-token
-        # empirical Fisher diagonal trace under the standard assumption
-        # of independence across token positions.
-        shift_logits = logits[..., :-1, :].contiguous()
-        shift_labels = ids[..., 1:].contiguous()
-        # .float() before log_softmax: matches the sibling Fisher CE
-        # sites (incremental phase-2, per_token_ce) — bf16 log_softmax
-        # loses ~0.4% rel on the CE gradient for no memory win here.
-        lp = F.log_softmax(
-            shift_logits.reshape(-1, shift_logits.size(-1)).float(), dim=-1)
-        gather = -lp.gather(1, shift_labels.reshape(-1, 1)).squeeze(1)
-        if importance_weighting:
-            with torch.no_grad():
-                tok = per_token_ce(logits.detach(), ids).reshape(-1)
-                mean = float(tok.mean().item())
-            # Importance weights renormalized to mean ~1 so the per-token
-            # Fisher units are preserved (the weights only redistribute
-            # contributions across token positions, not change the total).
-            w = (tok / max(mean, 1e-6)).clamp(0.25, 4.0)
-            loss = (gather * w).sum()
-        else:
-            loss = gather.sum()
-        loss.backward()
-        t_bwd += time.time() - t0
-
-        if (i + 1) % 4 == 0 or i == 0:
-            n_tok = max(int(gather.numel()), 1)
-            mean_loss = float(loss.detach().item()) / n_tok
-            print(f"[probe] sample {i+1}/{calib.size(0)} "
-                  f"loss={mean_loss:.3f} "
-                  f"fwd_avg={t_fwd/(i+1):.2f}s bwd_avg={t_bwd/(i+1):.2f}s",
-                  flush=True)
-
-        del out, loss, ids, embed, logits
-        acc._saved_inputs.clear()
-
-    # Global calib token count — must equal the meta nsamples×seqlen
-    # product below so the allocator's load-time renormalization is
-    # idempotent on probes written by this finalize.
-    fisher_norm_tokens = int(calib.size(0)) * int(seqlen)
-    acc.finalize(tracker, fisher_norm_tokens)
-    acc.remove_hooks()
-    if tracker is not None:
-        tracker.remove_hooks()
-
-    out_path = Path(output_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "wb") as f:
-        pickle.dump({
-            "stats": acc.stats,
-            "router_counts": dict(tracker.counts) if tracker else {},
-            "router_totals": dict(tracker.total_tokens) if tracker else {},
-            "router_active_counts": dict(tracker.active_counts) if tracker else {},
-            "expert_route_stats": dict(tracker.route_stats) if tracker else {},
-            "expert_info": expert_info,
-            "meta": {
-                "packed_fisher_estimator": "per_token_v2",
-                "model": model_name,
-                "dataset": dataset_name,
-                "nsamples": calib.size(0),
-                "seqlen": seqlen,
-                "fisher_norm_tokens": fisher_norm_tokens,
-                "dtype": dtype_name,
-                "device_map": str(load_device_map),
-                "execution_device": str(exec_device),
-                "top_k": top_k,
-                "importance_weighting": importance_weighting,
-                "activation_cache_dir": str(cache_dir) if cache_dir else None,
-                "linear_include": linear_include,
-                "linear_exclude": linear_exclude,
-            },
-        }, f)
-    print(f"[probe] wrote {out_path}", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -3599,6 +3061,8 @@ def run_multimodal_visual_probe_pass(
     False on graceful fallback. Raises only on unexpected errors
     (not OOM / resource shortage).
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoProcessor
 
     staged = stage_multimodal(model_path)
@@ -4051,19 +3515,11 @@ def run_streaming_multimodal_visual_probe_pass(
             text_embeds = base_model.embed_tokens(input_ids).to(dtype)
             image_embeds = image_embeds.to(text_embeds.device,
                                            dtype=text_embeds.dtype)
-            try:
-                image_mask, _vmask = get_placeholder_mask(
-                    input_ids, inputs_embeds=text_embeds,
-                    image_features=image_embeds)
-                inputs_embeds = text_embeds.masked_scatter(
-                    image_mask, image_embeds)
-            except Exception:
-                # Processor didn't put image tokens in input_ids, or
-                # shape mismatch. Skip merge — body will still see text
-                # embeds; visual grad flows via a reconstruction path.
-                # Use a fallback that sums visual features into the
-                # first-image-token position, preserving a grad edge.
-                inputs_embeds = text_embeds + 0.0 * image_embeds.sum()
+            image_mask, _vmask = get_placeholder_mask(
+                input_ids, inputs_embeds=text_embeds,
+                image_features=image_embeds)
+            inputs_embeds = text_embeds.masked_scatter(
+                image_mask, image_embeds)
 
             # ---- Streaming body forward (Phase 1) ----------------------
             # Save per-layer CPU activations for the reverse sweep.

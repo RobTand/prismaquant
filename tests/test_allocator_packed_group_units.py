@@ -609,7 +609,7 @@ def test_group_ucb_stderr_preserves_conservative_bound(monkeypatch):
                 "predicted_dloss_stderr": stderr[f]}
             for f in base
         }
-    cands = build_candidates(stats, costs, _specs())
+    cands = build_candidates(stats, costs, _specs()).candidates
     _stats2, costs2, cands2 = aggregate_packed_serving_groups(
         stats, costs, _specs(), cands, _PackedProfile())
     super_name = next(n for n in cands2 if _PACKED_GROUP_MARKER in n)
@@ -624,7 +624,7 @@ def test_group_ucb_stderr_preserves_conservative_bound(monkeypatch):
 
     # z == 0 (default): bit-identical to the exact member-candidate sum.
     monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
-    cands0 = build_candidates(stats, costs, _specs())
+    cands0 = build_candidates(stats, costs, _specs()).candidates
     _stats0, costs0, cands0x = aggregate_packed_serving_groups(
         stats, costs, _specs(), cands0, _PackedProfile())
     super0 = next(n for n in cands0x if _PACKED_GROUP_MARKER in n)

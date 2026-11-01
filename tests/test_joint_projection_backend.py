@@ -8,19 +8,22 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import joint_projection_contract
+from prismaquant import aura_provenance
 from prismaquant import joint_projection_backend as backend
 from prismaquant import format_registry as fr
-from prismaquant.joint_aura import SignedJointProjectionLease, arithmetic_identity, identity_sha256
+from prismaquant.joint_aura import SignedJointProjectionLease, arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256
 
 
 def selector(path='missing.so'):
-    qualification, _ = backend._qualification()
-    return {'name': backend.FUSED_NAME,
+    qualification, _ = joint_projection_contract.projection_qualification()
+    return {'name': joint_projection_contract.FUSED_NAME,
             'binary': {'path': str(path), 'sha256': qualification['build']['binary_sha256']}}
 
 
 def test_reference_remains_available_without_cuda_compiler_or_artifact(monkeypatch):
-    monkeypatch.setattr(backend, '_qualification', lambda: pytest.fail('reference read fused qualification'))
+    monkeypatch.setattr(joint_projection_contract, 'projection_qualification', lambda: pytest.fail('reference read fused qualification'))
     monkeypatch.setattr(backend.kernel, 'load_backend', lambda: pytest.fail('reference compiled GPU code'))
     monkeypatch.setattr(backend, '_runtime_identity', lambda _: pytest.fail('reference inspected GPU runtime'))
     prepared = backend.prewarm_projection_backend(None, device='cpu')
@@ -34,7 +37,7 @@ def test_reference_remains_available_without_cuda_compiler_or_artifact(monkeypat
         values = lease.finish_probe()['unit', 'BF16']
     assert values['weight'] == float((torch.ones((2, 4)).T @ x.detach() * delta).sum())
     assert values['activation'] == values['mixed'] == 0.0
-    assert prepared.identity == arithmetic_identity(torch.float32)['projection_backend'] == backend.REFERENCE_IDENTITY
+    assert prepared.identity == arithmetic_identity(torch.float32)['projection_backend'] == joint_projection_contract.REFERENCE_IDENTITY
 
 
 @pytest.mark.parametrize('config', ['fused_fp32_v1', {}, {'name': 'surprise'}, {'name': 'torch', 'enable': True},
@@ -55,7 +58,7 @@ def test_fused_lease_refuses_missing_explicit_prewarm():
 
 @pytest.mark.parametrize('field', ['torch', 'torch_git', 'cuda', 'machine', 'device', 'headers', 'compiler'])
 def test_prewarm_refuses_each_unqualified_runtime_dimension(monkeypatch, field):
-    qualification, _ = backend._qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     actual = deepcopy(qualification['runtime'])
     actual[field] = 'different-runtime'
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
@@ -66,7 +69,7 @@ def test_prewarm_refuses_each_unqualified_runtime_dimension(monkeypatch, field):
 
 
 def qualify_mock_runtime(monkeypatch):
-    qualification, _ = backend._qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
     monkeypatch.setattr(backend, '_runtime_identity', lambda _: deepcopy(qualification['runtime']))
     monkeypatch.setattr(backend.kernel, '_source_digest', lambda: qualification['build']['source_sha256'])
@@ -101,28 +104,28 @@ def test_missing_artifact_cannot_trigger_implicit_build(tmp_path, monkeypatch):
 
 
 def test_serialized_backend_identity_is_complete_and_changes_probe_contract():
-    qualification, digest = backend._qualification()
-    identity = {'schema': backend.SCHEMA, 'name': backend.FUSED_NAME,
+    qualification, digest = joint_projection_contract.projection_qualification()
+    identity = {'schema': joint_projection_contract.SCHEMA, 'name': joint_projection_contract.FUSED_NAME,
                 'qualification_sha256': digest, 'build': qualification['build'],
                 'runtime': qualification['runtime'], 'qualified_shapes': qualification['qualified_shapes'],
                 'ineligible_layout': 'torch_reference'}
-    backend.validate_projection_backend_identity(identity)
+    joint_projection_contract.validate_projection_backend_identity(identity)
     fused = arithmetic_identity(torch.float32, SimpleNamespace(identity=identity))
-    assert identity_sha256(fused) != identity_sha256(arithmetic_identity(torch.float32))
+    assert joint_identity_sha256(fused) != joint_identity_sha256(arithmetic_identity(torch.float32))
     for field in identity:
         invalid = deepcopy(identity)
         invalid.pop(field)
         with pytest.raises(ValueError, match='unqualified backend identity'):
-            backend.validate_projection_backend_identity(invalid)
+            joint_projection_contract.validate_projection_backend_identity(invalid)
 
 
 def test_legacy_v1_signed_rows_require_fresh_recomputation():
     from test_joint_aura_assignment_diagnostics import _row
-    from prismaquant.joint_aura import validate_joint_aura_entry
+    from prismaquant.joint_aura_rows import validate_joint_aura_entry
     # This test uses the same valid row fixture as assignment diagnostics.
     row = _row("model.layers.0.mlp.down_proj", [1.0, 2.0])
     row['joint_operator_identity']['schema'] = 'prismaquant.joint_aura.operator.v1'
-    row['joint_operator_identity_sha256'] = identity_sha256(row['joint_operator_identity'])
+    row['joint_operator_identity_sha256'] = joint_identity_sha256(row['joint_operator_identity'])
     with pytest.raises(ValueError, match='legacy artifacts require fresh prepare and recompute'):
         validate_joint_aura_entry(row)
 
@@ -186,6 +189,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     # This remains a certified refusal; dev mode records a backend seal.
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import model_profiles, aura_cost, joint_aura
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
     _stub_device_envelope(monkeypatch, bridge)
@@ -204,9 +208,9 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
         (torch.zeros((512, 512), dtype=torch.int64), calibration))
     runner = SimpleNamespace(model=torch.nn.Module(), layer_index_for_qname=lambda _: 0, shutdown=lambda: None)
     monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', lambda *_args, **_kwargs: runner)
-    monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
+    monkeypatch.setattr(cost_streaming_identity, 'build_streamed_model_identity', lambda *_args, **_kwargs: source)
     monkeypatch.setattr(joint_aura, 'source_execution_identity', lambda _: execution)
-    monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: 'c' * 64)
+    monkeypatch.setattr(aura_provenance, 'producer_package_sha256', lambda: 'c' * 64)
     monkeypatch.setattr(aura_cost, 'compute_aura_cost_streamed', lambda *_args, **_kwargs:
         pytest.fail('foreign preparation reached the adjoint'))
     monkeypatch.setattr(bridge.pickle, 'loads', lambda _: pytest.fail('foreign preparation adopted PWC'))
@@ -229,6 +233,7 @@ def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tm
     The pass now hands the identity build the plan's bound digest cache and a
     refusal naming the CPU-only quantum, so nothing is hashed under the GPU."""
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import model_profiles
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)
     _stub_device_envelope(monkeypatch, bridge)
@@ -254,7 +259,7 @@ def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tm
     def identity(*_args, **kwargs):
         seen.update(kwargs)
         raise Reached
-    monkeypatch.setattr(cost_streaming, 'build_streamed_model_identity', identity)
+    monkeypatch.setattr(cost_streaming_identity, 'build_streamed_model_identity', identity)
     digests = tmp_path / 'digests.json'
     digests.write_text('{}')
     config = _plan(tmp_path)
@@ -267,19 +272,19 @@ def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tm
 
 
 def test_repeated_row_admission_uses_prewarmed_metadata_without_file_io(monkeypatch):
-    backend._qualification.cache_clear()
-    qualification, digest = backend._qualification()
-    identity = {'schema': backend.SCHEMA, 'name': backend.FUSED_NAME,
+    joint_projection_contract.projection_qualification.cache_clear()
+    qualification, digest = joint_projection_contract.projection_qualification()
+    identity = {'schema': joint_projection_contract.SCHEMA, 'name': joint_projection_contract.FUSED_NAME,
                 'qualification_sha256': digest, 'build': qualification['build'],
                 'runtime': qualification['runtime'], 'qualified_shapes': qualification['qualified_shapes'],
                 'ineligible_layout': 'torch_reference'}
     monkeypatch.setattr(Path, 'read_bytes', lambda _: pytest.fail('row admission reopened package metadata'))
-    backend.validate_projection_backend_identity(identity)
-    backend.validate_projection_backend_identity(deepcopy(identity))
+    joint_projection_contract.validate_projection_backend_identity(identity)
+    joint_projection_contract.validate_projection_backend_identity(deepcopy(identity))
 
 
 def _campaign_runtime(monkeypatch, **changed):
-    qualification, _ = backend._qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     actual = deepcopy(qualification['runtime'])
     actual.update(changed)
     monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
@@ -312,13 +317,13 @@ def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path,
 
 
 def qualification_nvcc():
-    return backend._qualification()[0]['runtime']['compiler']['nvcc_version']
+    return joint_projection_contract.projection_qualification()[0]['runtime']['compiler']['nvcc_version']
 
 
 def test_plan_preflight_refuses_an_unqualified_image_without_a_device(tmp_path, monkeypatch):
     """Step 3a loads the plan in the campaign's own container, before the GB10."""
     from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, _sha
-    qualification, _ = backend._qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     environment = {key: value for key, value in qualification['runtime'].items() if key != 'device'}
     config = _plan(tmp_path)
     config['execution']['projection_backend'] = selector()
@@ -350,7 +355,7 @@ def test_the_synthesize_stage_is_not_held_to_the_projection_runtime(tmp_path, mo
 
 
 def test_refusal_names_the_qualified_and_the_executing_image(monkeypatch):
-    qualification, _ = backend._qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     record = qualification['image']
     assert qualification['runtime']['image'] == record['content_sha256']
     monkeypatch.setenv(backend.CONTAINER_CONTENT_ENV, 'f' * 64)

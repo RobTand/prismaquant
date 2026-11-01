@@ -3,11 +3,8 @@ import copy
 
 import pytest
 
-from prismaquant.native_moe_panel import (
-    _calibration_and_capture,
-    _validate_prefix_capture,
-    identity_sha256,
-)
+from prismaquant.native_moe_panel import _calibration_and_capture, _validate_prefix_capture
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from test_native_moe_glm_geometry import glm_routing, glm_shape
 
 
@@ -19,8 +16,8 @@ def fixture(layer=3):
     contract={'schema':'prismaquant.streaming_prefix_initialization.v1','scope':'streamed_text_source_prefix',
         'status':'completed','transformers_version':'actual','model_class':'transformers.models.glm5_next.Glm5NextForConditionalGeneration',
         'dtype':'torch.bfloat16','layers_prefix':'model.language_model.layers.','total_model_layers':45,'observed_layers':list(range(layer + 1)),
-        'head_state_names':sorted(heads),'state':state,'persistent_tensors':len(names),'derived_buffers':0,'state_sha256':identity_sha256(state),
-        'source_map_sha256':identity_sha256({n:{'tensor':n,'file':'shard.safetensors'} for n in names})}
+        'head_state_names':sorted(heads),'state':state,'persistent_tensors':len(names),'derived_buffers':0,'state_sha256':joint_identity_sha256(state),
+        'source_map_sha256':joint_identity_sha256({n:{'tensor':n,'file':'shard.safetensors'} for n in names})}
     source={'content_sha256':'a'*64,'weight_map':live,'checkpoint_weight_map':checkpoint}
     if layer == 44:
         contract = {key: value for key, value in contract.items()

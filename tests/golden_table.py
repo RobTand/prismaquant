@@ -15,9 +15,16 @@ round-trips its bits). A temporary directory in any text is written as
 
 Set ``PQ_GOLDEN_RECORD=<directory>`` to rewrite the tables there instead of
 checking them.
+
+A table opts into ``every_row_used=True`` to also catch rows nothing checks:
+a row left behind by a deleted test or parametrization, or a row a test no
+longer reaches (an early return, a deleted loop). ``tests/conftest.py``
+applies the check when one process ran the whole module; rows of tests that
+skipped or failed there are exempt.
 """
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping
 import json
 import os
 from pathlib import Path
@@ -46,8 +53,9 @@ def outcome(call, *, tmp=None) -> dict:
 class GoldenTable:
     """One test module's frozen outcomes, ``tests/fixtures/<name>.json``."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, *, every_row_used: bool = False):
         self.name = name
+        self.every_row_used = every_row_used
         self._record_dir = os.environ.get("PQ_GOLDEN_RECORD")
         self._rows: dict[str, dict] = {}
         self._calls: dict[str, int] = {}
@@ -79,3 +87,38 @@ class GoldenTable:
     def value(self, value, *, tmp=None) -> dict:
         """Check an already computed value by its ``repr``."""
         return self.check(outcome(lambda: value, tmp=tmp))
+
+    def unused_rows(self, *, unfinished: Collection[str]) -> list[str]:
+        """Rows no call in this process used, except rows of ``unfinished`` tests.
+
+        A row key is ``<test>#<call index>``. A test that passed with fewer
+        calls than it has rows leaves rows unused, and so does a row whose test
+        no longer exists. A recording run checks nothing.
+        """
+        if self._record_dir:
+            return []
+        used = {f"{node}#{index}" for node, last in self._calls.items()
+                for index in range(last + 1)}
+        return sorted(key for key in self._rows
+                      if key not in used and key.rsplit("#", 1)[0] not in unfinished)
+
+
+def unfinished_tests_if_whole_module_ran(module: Path, *, args: Iterable[str],
+                                         deselected: Collection[Path],
+                                         outcomes: Mapping[str, str | None]) -> set[str] | None:
+    """The module's tests that did not pass, or None if this process did not run it whole.
+
+    ``outcomes`` maps the node id of each selected test in the module to the
+    outcome it reached in this process, or None if it did not run here (it ran
+    in another pytest-xdist worker, or ``-x`` stopped the run). A module
+    narrowed by a ``file::test`` argument, ``-k``, ``-m`` or ``--deselect`` was
+    not selected whole, so rows of its unselected tests are not orphans.
+    """
+    if module in deselected:
+        return None
+    if any("::" in arg and Path(arg.split("::", 1)[0]).name == module.name for arg in args):
+        return None
+    if not outcomes or any(result is None for result in outcomes.values()):
+        return None
+    return {nodeid.split("::", 1)[1] for nodeid, result in outcomes.items()
+            if result != "passed"}

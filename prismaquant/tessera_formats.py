@@ -59,6 +59,10 @@ from functools import lru_cache, wraps
 import json
 import re
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tessera.export import WireRecipe
 
 __all__ = [
     "ANCHOR_BUDGET_BITS",
@@ -117,8 +121,6 @@ try:  # pragma: no cover - exercised by the import-failure path
         BF16_GRID, E2M1_GRID, E4M3_GRID, lloyd_max_grid, tuple_grid,
     )
     from tessera.errors import GrammarError
-    from tessera import export as _tessera_export
-    from tessera.export import WireRecipe, wire_recipe
     from tessera.grammar import (
         Q256_UNIT,
         bresenham_rate_schedule,
@@ -381,6 +383,8 @@ def _recipe_for(base: str, base_size: int, arity: int, rung: "int | None") -> "W
     # override -- must be able to substitute ``tessera.export.wire_recipe``
     # and be seen here.  Pair any such substitution with
     # :func:`clear_recipe_cache`.
+    from tessera import export as _tessera_export
+
     return _tessera_export.wire_recipe(_build_grid(base, base_size, arity), rung)
 
 
@@ -512,6 +516,8 @@ _STRUCTURES = ("dense", "routed_moe")
 @lazily_sized_cache(recipe_cache_bound)
 def _served_recipe_for(base: str, base_size: int, arity: int, rung: int,
                        structure: str) -> "WireRecipe":
+    from tessera import export as _tessera_export
+
     return _tessera_export.served_recipe(_build_grid(base, base_size, arity), rung, structure)
 
 
@@ -589,6 +595,8 @@ def recipe_from_wire_names(
     adapter that keeps those call sites working now that the recipe is the
     unit of account, and the one place the two vocabularies meet.
     """
+    from tessera.export import WireRecipe
+
     kind = _PLANE_KINDS[scale_plane_name(scale_plane)]
     if isinstance(body, str):
         try:
@@ -678,6 +686,8 @@ def _resolved_recipe(
     day E4M3 flipped, which is a wire that has never existed.  Ask for the
     window wire by passing ``recipe=``.
     """
+    from tessera.export import WireRecipe
+
     if recipe is not None:
         if span is not None or scale_plane is not None:
             raise TesseraFormatError(
@@ -1179,6 +1189,8 @@ def _tcq_body_is_reachable(base: str, base_size: int, arity: int) -> bool:
 
     Sized by :func:`family_cache_bound`: keyed per family, asked per family.
     """
+    from tessera import export as _tessera_export
+
     table = _tessera_export.recipe_table(_build_grid(base, base_size, arity))
     return any(BodyKind(entry.recipe.body) is BodyKind.TCQ for entry in table)
 
@@ -1398,7 +1410,7 @@ class TesseraServingRoute:
 
     This is a statement about *layouts*, which is all a producer may assert on
     its own.  It is **not** an attestation that a pinned runtime routes these
-    bytes (principle 14): that is ``tessera_render.tessera_lane_attested``,
+    bytes (principle 14): that is ``tessera_render.tessera_lane_admission``,
     a lookup against the contract Tessera's OWN vLLM plugin packages
     (``tessera.serving``, ``quant_method: "tessera"``), ANDed with the reviewed
     release pin in ``prismaquant/tessera_runtime/``; a rung is

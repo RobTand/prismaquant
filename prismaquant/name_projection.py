@@ -1,6 +1,6 @@
 """One shared projection between PrismaQuant's parameter-name namespaces.
 
-A Linear in this pipeline has four names, and until this module every
+A Linear in this pipeline has five names, and until this module every
 consumer re-derived the mapping between them ad hoc — which is how a
 weight consumed through a skipped module class (DSv4's ``attn.wo_a``)
 could stay invisible to the allocator while its bytes shipped. This
@@ -74,6 +74,7 @@ and model_walk types enter lazily through :meth:`NameProjection.for_walk`.
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Iterable, Sequence
 
 __all__ = [
@@ -94,6 +95,12 @@ __all__ = [
     "ProjectedName",
     "RECIPE",
     "ServingGroup",
+    "ServingUnit",
+    "ServingComponent",
+    "connected_serving_components",
+    "UNIT_PACKED_MOE_EXPERTS",
+    "fused_dense_group",
+    "fused_sibling_group_key",
     "VLLM",
     "strip_weight_leaf",
 ]
@@ -249,6 +256,157 @@ class ServingGroup:
 GROUP_SINGLETON = "singleton"
 GROUP_FUSED_SIBLINGS = "fused_siblings"
 GROUP_PACKED_EXPERTS = "packed_experts"
+UNIT_PACKED_MOE_EXPERTS = "packed_moe_experts"
+
+
+@dataclasses.dataclass(frozen=True)
+class ServingUnit:
+    """One declared coupling; several couplings can share a member."""
+
+    kind: str
+    key: str
+    members: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class ServingComponent:
+    """Complete overlap closure and the declarations that contributed to it."""
+
+    members: tuple[str, ...]
+    units: tuple[ServingUnit, ...]
+
+
+def connected_serving_components(
+    names: Iterable[str], units: Iterable[ServingUnit],
+) -> tuple[ServingComponent, ...]:
+    """Union present members, retaining source declarations and input order."""
+    all_names = tuple(dict.fromkeys(names))
+    parent = {name: name for name in all_names}
+    present_units = tuple(
+        ServingUnit(unit.kind, unit.key,
+                    tuple(name for name in unit.members if name in parent))
+        for unit in units
+    )
+
+    def find(name):
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for unit in present_units:
+        for member in unit.members[1:]:
+            first, other = find(unit.members[0]), find(member)
+            if first != other:
+                parent[other] = first
+    members_by_root = {}
+    for name in all_names:
+        members_by_root.setdefault(find(name), []).append(name)
+    units_by_root = {}
+    for unit in present_units:
+        # A singleton contributes no coupling or licence kind.
+        if len(unit.members) >= 2:
+            units_by_root.setdefault(find(unit.members[0]), []).append(unit)
+    return tuple(
+        ServingComponent(tuple(members), tuple(units_by_root.get(key, ())))
+        for key, members in members_by_root.items()
+    )
+
+
+# Compatibility fallback for profiles that cannot expose serving fusion
+# metadata. This name catalog belongs to the projection owner so activation
+# calibration and native export ask the same naming policy.  New architectures
+# should still declare their groups in the model profile/structure spec.
+_FUSED_DENSE_PATTERNS = (
+    (
+        re.compile(
+            r"^(?P<pre>.+)\.self_attn\.(?P<sib>q_proj|k_proj|v_proj)$"
+        ),
+        ("q_proj", "k_proj", "v_proj"),
+    ),
+    (
+        re.compile(r"^(?P<pre>.+)\.mlp\.(?P<sib>gate_proj|up_proj)$"),
+        ("gate_proj", "up_proj"),
+    ),
+    (
+        re.compile(
+            r"^(?P<pre>.+)\.mlp\.shared_expert\."
+            r"(?P<sib>gate_proj|up_proj)$"
+        ),
+        ("gate_proj", "up_proj"),
+    ),
+    (
+        re.compile(
+            r"^(?P<pre>.+)\.linear_attn\."
+            r"(?P<sib>in_proj_qkv|in_proj_z)$"
+        ),
+        ("in_proj_qkv", "in_proj_z"),
+    ),
+    (
+        re.compile(
+            r"^(?P<pre>.+)\.linear_attn\."
+            r"(?P<sib>in_proj_a|in_proj_b)$"
+        ),
+        ("in_proj_a", "in_proj_b"),
+    ),
+)
+
+
+def fused_dense_group(name: str) -> tuple[str, tuple[str, ...]] | None:
+    """Return the legacy fallback group prefix and sibling leaf names."""
+
+    for pattern, members in _FUSED_DENSE_PATTERNS:
+        match = pattern.match(str(name))
+        if match:
+            return match.group("pre"), members
+    return None
+
+
+def fused_sibling_group_key(
+    name: str,
+    *,
+    profile=None,
+    tolerate_profile_errors: bool = False,
+) -> str | None:
+    """Resolve one canonical fused-sibling key.
+
+    Versioned contract callers use the strict default: a profile that cannot
+    attest its execution unit is an export error.  The legacy native exporter
+    uses the strict profile declaration. Historical explicitly tolerant
+    callers retain their requested metadata fallback policy.
+    """
+
+    target = str(name)
+    group_fn = getattr(profile, "fused_sibling_group", None)
+    if callable(group_fn):
+        try:
+            group = group_fn(target)
+        except Exception:
+            if not tolerate_profile_errors:
+                raise
+            group = None
+        if group:
+            return str(group)
+
+    mapping_fn = getattr(profile, "fused_sibling_leaf_mapping", None)
+    if callable(mapping_fn) and "." in target:
+        try:
+            mapping = mapping_fn()
+        except Exception:
+            if not tolerate_profile_errors:
+                raise
+            mapping = None
+        if mapping:
+            prefix, leaf = target.rsplit(".", 1)
+            for fused, members in mapping.items():
+                if leaf in {str(member) for member in members}:
+                    return f"{prefix}.{fused}"
+
+    fallback = fused_dense_group(target)
+    if fallback is None:
+        return None
+    prefix, members = fallback
+    return f"{prefix}::__fused__:{','.join(members)}"
 
 
 class NameProjectionError(KeyError):
@@ -721,6 +879,50 @@ class NameProjection:
             kind=GROUP_SINGLETON, key="", namespace=RECIPE,
             members=(base,),
         )
+
+    def serving_units(
+        self, names: Iterable[str], *, include_fused: bool = True,
+        include_packed: bool = True, fused_metadata_fallback: bool = False,
+    ) -> tuple[ServingUnit, ...]:
+        """Enumerate every declared coupling over a recipe-name universe.
+
+        Fused and packed memberships overlap. Unlike ``serving_group`` this
+        roster retains both, including a declaration with one present member.
+        Declaration failures propagate to the consumer rather than dropping
+        the name from its component. ``connected_serving_components`` excludes
+        one-member declarations from coupling and licence scope.
+
+        Native export also resolves the profile's fused leaf mapping and the
+        existing dense catalog. Allocation uses directly declared profile
+        groups. ``fused_metadata_fallback`` preserves that existing distinction.
+        """
+        universe = tuple(dict.fromkeys(strip_weight_leaf(name) for name in names))
+        grouped = {}
+        accessors = []
+        if include_fused:
+            accessors.append((GROUP_FUSED_SIBLINGS, "fused_sibling_group"))
+        if include_packed:
+            accessors.append((UNIT_PACKED_MOE_EXPERTS, "packed_expert_format_group"))
+        for kind, accessor in accessors:
+            query = getattr(self._profile, accessor, None)
+            if not callable(query) and not (
+                kind == GROUP_FUSED_SIBLINGS and fused_metadata_fallback
+            ):
+                continue
+            for name in universe:
+                key = (fused_sibling_group_key(name, profile=self._profile)
+                       if kind == GROUP_FUSED_SIBLINGS and fused_metadata_fallback
+                       else query(name))
+                if key is not None:
+                    grouped.setdefault((kind, key), []).append(name)
+        return tuple(ServingUnit(kind, key, tuple(members))
+                     for (kind, key), members in grouped.items())
+
+    def serving_components(self, names: Iterable[str], *, fused_metadata_fallback=False) -> tuple[ServingComponent, ...]:
+        """Return the full fused/packed overlap closure over recipe names."""
+        universe = tuple(dict.fromkeys(strip_weight_leaf(name) for name in names))
+        return connected_serving_components(universe, self.serving_units(
+            universe, fused_metadata_fallback=fused_metadata_fallback))
 
     def require_serving_group(self, qname: str, *, kinds: Sequence[str]) -> ServingGroup:
         """Refuse unless the unit's serving group is of a required kind.

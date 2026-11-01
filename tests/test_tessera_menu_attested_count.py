@@ -1,4 +1,6 @@
 """An explicitly named Tessera rung is not "attested" until the predicate says so (#278)."""
+from tests.tessera_metadata_fixture import install_metadata
+
 from prismaquant import format_registry as fr
 from prismaquant import tessera_menu as menu
 
@@ -122,9 +124,9 @@ def test_contract_attested_rung_names_are_read_from_the_packaged_contract(monkey
                             "attested_rungs_q256": [],
                             "reader_rate_range_q256": [256, 4096]},
     }
-    from prismaquant import tessera_render
-    monkeypatch.setattr(tessera_render, "_pinned_serving_table",
-                        lambda: ({}, formats))
+    for family, row in formats.items():
+        row["family"] = family
+    install_metadata(monkeypatch, {"formats": list(formats.values())}, pinned=False)
     assert menu.contract_attested_rung_names() == ("TESSERA_E2M1_K2_R896",)
 
 

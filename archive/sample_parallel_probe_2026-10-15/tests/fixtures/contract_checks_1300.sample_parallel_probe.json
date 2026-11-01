@@ -1,0 +1,15 @@
+{
+"test_text_loader_refuses_as_before[\"text\"-sample_parallel_probe]#0": {"returned": "'text'"},
+"test_text_loader_refuses_as_before[-sample_parallel_probe]#0": {"cause": ["json.decoder.JSONDecodeError", "Expecting value: line 1 column 1 (char 0)"], "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe is invalid JSON"},
+"test_text_loader_refuses_as_before[7-sample_parallel_probe]#0": {"cause": ["builtins.TypeError", "the JSON object must be str, bytes or bytearray, not int"], "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe is invalid JSON"},
+"test_text_loader_refuses_as_before[None-sample_parallel_probe]#0": {"cause": ["builtins.TypeError", "the JSON object must be str, bytes or bytearray, not NoneType"], "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe is invalid JSON"},
+"test_text_loader_refuses_as_before[[1, 2]-sample_parallel_probe]#0": {"returned": "[1, 2]"},
+"test_text_loader_refuses_as_before[[{\"k\": 1, \"k\": 2}]-sample_parallel_probe]#0": {"cause": null, "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe contains duplicate JSON member 'k'"},
+"test_text_loader_refuses_as_before[{\"a\": -Infinity}-sample_parallel_probe]#0": {"returned": "{'a': -inf}"},
+"test_text_loader_refuses_as_before[{\"a\": 1, \"a\": 2}-sample_parallel_probe]#0": {"cause": null, "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe contains duplicate JSON member 'a'"},
+"test_text_loader_refuses_as_before[{\"a\": 1, \"b\": [1, 2.5, \"x\"]}-sample_parallel_probe]#0": {"returned": "{'a': 1, 'b': [1, 2.5, 'x']}"},
+"test_text_loader_refuses_as_before[{\"a\": 1-sample_parallel_probe]#0": {"cause": ["json.decoder.JSONDecodeError", "Expecting ',' delimiter: line 1 column 8 (char 7)"], "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe is invalid JSON"},
+"test_text_loader_refuses_as_before[{\"a\": Infinity}-sample_parallel_probe]#0": {"returned": "{'a': inf}"},
+"test_text_loader_refuses_as_before[{\"a\": NaN}-sample_parallel_probe]#0": {"returned": "{'a': nan}"},
+"test_text_loader_refuses_as_before[{\"outer\": {\"k\": 1, \"k\": 1}}-sample_parallel_probe]#0": {"cause": null, "raised": "prismaquant.sample_parallel_probe.SampleParallelProbeError", "text": "probe contains duplicate JSON member 'k'"}
+}

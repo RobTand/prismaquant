@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Assert the built artifacts carry prismaquant's runtime data files.
 
-prismaquant is pure Python, so the packaging risk is not compiled sources —
-it is the JSON and tensor tables that the code *reads at runtime*: model,
-serving and lane specs; exact IQ/CB lookup tables; and the
-integration contract. Those are declared in
+The package reads JSON contracts, tensor tables and native extension sources
+at runtime: model, serving and lane specs; exact IQ lookup tables; kernel
+qualifications and JIT source identities; and the Tessera integration contract.
+Those files are declared in
 `[tool.setuptools.package-data]`, which is easy to break silently: the package
 still imports, and the failure only appears when something asks for a profile
 — i.e. on a user's first real run, not in any import smoke test.
@@ -31,6 +31,11 @@ def _expected(source_root: str) -> set[str]:
         "prismaquant/serving_profile_specs/*.json",
         "prismaquant/lane_specs/*.json",
         "prismaquant/data/*.pt",
+        "prismaquant/data/*.json",
+        "prismaquant/kernels/*.cpp",
+        "prismaquant/kernels/*.cu",
+        "prismaquant/kernels/*_qualification.json",
+        "prismaquant/tessera_runtime/*.json",
         "prismaquant/run-pipeline.sh",
     ):
         for path in glob.glob(os.path.join(source_root, pattern)):

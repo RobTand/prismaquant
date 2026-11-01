@@ -44,9 +44,9 @@ def _pb():
     src = _published_pb_src()
     if str(src) not in sys.path:
         sys.path.insert(0, str(src))
-    import prismabuild.core as core
-    import prismabuild.storage_tiers as tiers
-    for module in (core, tiers):
+    import prismabuild.data_manifest as data_manifest
+    import prismabuild.manifest_layout as manifest_layout
+    for module in (data_manifest, manifest_layout):
         if not Path(module.__file__).resolve().is_relative_to(src.resolve()):
             # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
             # site-packages prismabuild turn the test green without running it.
@@ -54,7 +54,7 @@ def _pb():
                 "a different prismabuild is already imported -- it shadows the "
                 "published generation under test; the interpreter carries a stale "
                 "prismabuild (PQ #1109)")
-    return core, tiers
+    return data_manifest, manifest_layout
 
 
 def _parent():
@@ -74,15 +74,15 @@ def _parent():
 
 def test_slice_stages_under_published_pb():
     from prismaquant.joint_layer_quanta import slice_layer_manifest
-    core, tiers = _pb()
+    data_manifest, manifest_layout = _pb()
     manifest = slice_layer_manifest(
         _parent(), 0, chunk_target_bytes=2048, quantum="layer-000",
         output_root="/mnt/shared/run", plan_path="plan.json",
         plan_sha256="0" * 64, prepared_sha256="1" * 64,
         parent_manifest_sha256="2" * 64)
     assert all(p["bytes"] > 0 for p in manifest["annotations"]["phases"])
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
+    normalized = data_manifest.validate_data_manifest(manifest)
+    ranges = manifest_layout.manifest_phase_ranges(normalized)
     assert ranges, "published PB stages nothing for the fixed slice"
     assert [r["name"] for r in ranges] == [
         p["name"] for p in manifest["annotations"]["phases"]]

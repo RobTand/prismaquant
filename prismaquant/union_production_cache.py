@@ -4,18 +4,35 @@ This module is deliberately unrelated to the archived ``smart union``
 research path.  It never selects candidates or prunes a format menu.  Its
 only operation is the set union of disjoint, already-rendered cache keys.
 
-The portable workflow has three steps::
+Transfer input stripe bundles to the final export filesystem before union::
 
     python -m prismaquant.union_production_cache manifest ...
     python -m prismaquant.union_production_cache union ...
     python -m prismaquant.union_production_cache verify ...
 
-Each input shard is a self-contained bundle.  Its manifest binds the cache
+Each input shard is a self-contained, portable bundle. Its manifest binds the cache
 pickle and every backing tensor by SHA-256, plus value-bearing identities for
 the source checkpoint, calibration corpus, producer code, common settings,
 and exact render coverage.  Union refuses overlaps, failed renders,
 identity drift, missing or modified files, incomplete expected coverage,
 and cache metadata it cannot merge without changing semantics.
+
+The union binds fused NVFP4 witnesses to its published copies. A completed
+union carrying those witnesses can be read through another NFS mount of the
+same files or renamed within one filesystem, but copying it voids its fused
+witnesses. Verification and export refuse that copy. Rebuild the union from
+its verified input stripe bundles at the final location; no weight re-render
+is needed. Bundles without fused witnesses retain their byte-verification
+transfer behavior.
+
+Witness-checking steps (manifest, verify, export and resident resume) require
+its writer's filesystem view or an NFS client mount with matching inode,
+size and timestamps. The fleet's NFS server dl380g10 sees /mnt/shared as
+local ZFS and refuses device-only drift from an NFS writer. That filesystem
+dependency justifies placing those checks on an NFS client through
+PrismaBuild. Union itself can run on the server: its SHA-verified copies
+receive witnesses for that server's own view. Server-local/client inode and
+timestamp equality has not been measured.
 """
 from __future__ import annotations
 
@@ -38,19 +55,26 @@ from prismaquant.cost_stage_checkpoint import (
     canonical_json,
     canonical_json_sha256,
 )
-from prismaquant.cost_streaming import validate_streamed_model_identity
+from prismaquant.streamed_model_identity import validate_streamed_model_identity
 from prismaquant.layer_config import load_assignment
 from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.schemas import refuse_retired_codebook_format
+from prismaquant.file_identity import file_stat_signature
 from prismaquant.production_weight_cache import (
     ACTIVATION_HOOK_SCOPE_KEY,
     ACTIVATION_HOOK_SCOPE_SCHEMA,
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
+    NVFP4JointGlobalWitness,
     ProductionWeightCache,
+    PublishedShard,
     _production_cache_git_commit,
     _production_cache_source_sha256,
     first_identity_difference,
     identity_value_for_error,
+    nvfp4_joint_global_witness_problem,
+    nvfp4_joint_global_witness_section,
+    nvfp4_joint_global_witnesses,
     packed_activation_hook_scope_of,
     validate_activation_hook_scope,
 )
@@ -118,6 +142,7 @@ _MERGED_METADATA_KEYS = frozenset({
     "render_gates",
     "four_over_six",
     "fisher_weighted_gptq",
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     PACKED_ACTIVATION_HOOK_SCOPE_KEY,
 })
 
@@ -770,6 +795,33 @@ def _backing_records(
     return records
 
 
+def _require_witnesses_bind_hashed_files(
+    cache: ProductionWeightCache, *, cache_dir: Path, where: str, remedy: str,
+) -> None:
+    """Refuse a cache whose fused witnesses do not bind the files it hashed.
+
+    Runs after ``_backing_records`` hashed every backing file. A witness that
+    still binds its shard then shows the hashed bytes are its producer's
+    render, so the manifest's SHA-256 carries the witness to every verified
+    copy (``union_shard_manifests`` re-binds it to its own). Witnesses for
+    entries the shard does not hold are the union merge's to refuse.
+    """
+    for key, witness in nvfp4_joint_global_witnesses(
+        cache.metadata, where=where
+    ).items():
+        value = cache.weights.get(key)
+        if value is None:
+            continue
+        served = None if isinstance(value, torch.Tensor) else str(value)
+        problem = nvfp4_joint_global_witness_problem(
+            witness,
+            served=served,
+            path=None if served is None else cache_dir / served,
+        )
+        if problem is not None:
+            raise ValueError(f"{where} entry {key[0]}@{key[1]}: {problem}; {remedy}")
+
+
 def _manifest_envelope(
     *, schema: str, payload: Mapping[str, object], where: str
 ) -> dict[str, object]:
@@ -816,6 +868,14 @@ def create_shard_manifest(
     cache.relocate(cache_dir)
     _expected_keys_for_coverage(cache, expected, require_complete=False)
     records = _backing_records(cache, cache_dir=cache_dir)
+    _require_witnesses_bind_hashed_files(
+        cache, cache_dir=cache_dir, where="cache shard",
+        remedy=(
+            "for a device-only mismatch, run manifest through the writer's "
+            "view or an NFS client mount; otherwise re-render the shard into "
+            "a fresh --cache-dir before manifesting it"
+        ),
+    )
     campaign = build_campaign_identity(
         cache,
         source_model_identity=source_model_identity,
@@ -1309,6 +1369,7 @@ def _merge_cache_metadata(
         reference[key] = copy.deepcopy(value)
 
     render_records: dict[str, object] = {}
+    joint_global_witnesses: dict[tuple[str, str], float] = {}
     render_common = None
     for index, (cache, item) in enumerate(zip(caches, metadata, strict=True)):
         scores = _validate_render_scores(
@@ -1333,6 +1394,21 @@ def _merge_cache_metadata(
         failures = item.get("render_failures")
         if failures not in (None, {}):
             raise ValueError(f"cache shard {index} records render failures")
+        # A shard may witness only the fused joint globals of entries it
+        # rendered; a union never lends one shard's witness to another's.
+        shard_witnesses = nvfp4_joint_global_witnesses(
+            item, where=f"cache shard {index}")
+        foreign = sorted(set(shard_witnesses) - set(cache.weights))
+        if foreign:
+            raise ValueError(
+                f"cache shard {index} witnesses fused NVFP4 joint globals "
+                f"for entries it does not hold; sample={foreign[:8]}"
+            )
+        _merge_disjoint_mapping(
+            joint_global_witnesses,
+            shard_witnesses,
+            where="fused NVFP4 joint-global witnesses",
+        )
 
     expert_coverage: dict[str, object] = {}
     for index, item in enumerate(metadata):
@@ -1447,6 +1523,10 @@ def _merge_cache_metadata(
         "entries": len(render_records),
         "records": dict(sorted(render_records.items())),
     }
+    if joint_global_witnesses:
+        reference[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+            nvfp4_joint_global_witness_section(joint_global_witnesses)
+        )
     if expert_coverage:
         reference["packed_expert_coverage"] = dict(sorted(expert_coverage.items()))
     mtp_render = _merge_mtp_render(caches)
@@ -1493,7 +1573,10 @@ def _merge_cache_metadata(
     return dict(sorted(reference.items()))
 
 
-def _copy_verified(source: Path, destination: Path, *, expected_sha256: str) -> None:
+def _copy_verified(
+    source: Path, destination: Path, *, expected_sha256: str,
+) -> tuple[int, int, int, int, int]:
+    """Copy one shard, verify its SHA-256 and return the copy's file identity."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     with source.open("rb") as src, destination.open("xb") as dst:
         shutil.copyfileobj(src, dst, length=8 * 1024 * 1024)
@@ -1504,6 +1587,42 @@ def _copy_verified(source: Path, destination: Path, *, expected_sha256: str) -> 
         raise ValueError(
             f"copied cache shard SHA-256 mismatch for {destination.name}"
         )
+    # The copy lives in this union's private staging directory; nothing else
+    # writes it between the hash and this stat.
+    return file_stat_signature(destination.lstat())
+
+
+def _rebind_witnesses_to_copies(
+    union_cache: ProductionWeightCache,
+    source_by_key: Mapping[tuple[str, str], tuple[Path, Mapping[str, object]]],
+    copy_identities: Mapping[str, tuple[int, int, int, int, int]],
+) -> None:
+    """Bind each merged fused witness to the union's copy of its shard.
+
+    Each shard manifest hashed a witness's shard while the witness bound it
+    (``_require_witnesses_bind_hashed_files``), and the copy matched that
+    hash, so the witnessed render is the copy's bytes. A witness that names
+    another file than the one its shard manifested refuses.
+    """
+    witnesses = nvfp4_joint_global_witnesses(
+        union_cache.metadata, where="union cache")
+    if not witnesses:
+        return
+    rebound: dict[tuple[str, str], NVFP4JointGlobalWitness] = {}
+    for key, witness in witnesses.items():
+        _source, record = source_by_key[key]
+        named = None if witness.shard is None else witness.shard.name
+        if named != record["path"]:
+            raise ValueError(
+                f"cache shard witness for {key[0]}@{key[1]} names "
+                f"{named!r}, not its manifested backing file {record['path']!r}"
+            )
+        copy = str(union_cache.weights[key])
+        rebound[key] = NVFP4JointGlobalWitness(
+            witness.joint_global, PublishedShard(copy, copy_identities[copy]))
+    union_cache.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+        nvfp4_joint_global_witness_section(rebound)
+    )
 
 
 def _union_weight_filename(key: tuple[str, str], content_sha256: str) -> str:
@@ -1527,7 +1646,7 @@ def union_shard_manifests(
     output_bundle: str | Path,
     require_current_code: bool = True,
 ) -> dict[str, object]:
-    """Union verified disjoint shards into one atomic, portable cache bundle."""
+    """Union verified disjoint shards into one atomic bundle at its final location."""
     expected = _coerce_coverage(assignment=assignment, coverage=coverage)
     if len(manifest_paths) < 2:
         raise ValueError("exact cache union requires at least two shard manifests")
@@ -1631,6 +1750,7 @@ def union_shard_manifests(
         weights_dir = temporary_root / "weights"
         weights_dir.mkdir()
         copied: dict[str, str] = {}
+        copy_identities: dict[str, tuple[int, int, int, int, int]] = {}
         for key in sorted(source_by_key):
             source, record = source_by_key[key]
             digest = _require_sha256(
@@ -1640,10 +1760,12 @@ def union_shard_manifests(
             destination = weights_dir / filename
             prior = copied.get(filename)
             if prior is None:
-                _copy_verified(source, destination, expected_sha256=digest)
+                copy_identities[filename] = _copy_verified(
+                    source, destination, expected_sha256=digest)
                 copied[filename] = digest
             elif prior != digest:
                 raise ValueError(f"content-addressed filename collision: {filename}")
+        _rebind_witnesses_to_copies(union_cache, source_by_key, copy_identities)
 
         cache_bytes = pickle.dumps(union_cache, protocol=pickle.HIGHEST_PROTOCOL)
         cache_path = temporary_root / "production_weight_cache.pkl"
@@ -1720,7 +1842,12 @@ def verify_union_manifest(
     coverage: Mapping[str, object] | None = None,
     require_current_code: bool = True,
 ) -> tuple[dict[str, object], ProductionWeightCache]:
-    """Verify a canonical union bundle after publication or transfer."""
+    """Verify a union's bytes, coverage and recorded fused witness bindings.
+
+    Transfer stripe bundles before building the union at the final export
+    location. A copy of a completed union has new file identities and cannot
+    retain its fused witnesses merely by passing the byte checks here.
+    """
     expected = _coerce_coverage(assignment=assignment, coverage=coverage)
     path = Path(manifest_path)
     payload, _ = _load_manifest_envelope(
@@ -1812,6 +1939,15 @@ def verify_union_manifest(
         or exact_union.get("entries") != len(cache)
     ):
         raise ValueError("union cache exact-union metadata is inconsistent")
+    _require_witnesses_bind_hashed_files(
+        cache, cache_dir=cache_dir, where="union cache",
+        remedy=(
+            "for a device-only mismatch, verify through the writer's view or "
+            "an NFS client mount; for a copied union, rebuild the union from "
+            "the verified input stripe bundles at the final export location, "
+            "because copying a completed union does not transfer its fused witnesses"
+        ),
+    )
     return payload, cache
 
 

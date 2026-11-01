@@ -11,8 +11,8 @@ Model publication is deliberately stricter than a convenience ``hf upload``:
   bytes, then rechecks the setting before announcing success;
 * the complete local file set is frozen before the authoritative shipcard
   replay. Small files are captured as bytes. Large files stay zero-copy, but
-  are held by no-follow file descriptors and content-addressed blockwise; the
-  upload reader refuses to expose a block that differs from that snapshot;
+  are held by no-follow file descriptors and content-addressed blockwise.
+  Their digests are replayed after the remote commit, before success is announced;
 * the remote file set is enumerated at one exact branch head and replaced in
   one ``create_commit`` call with ``revision`` plus ``parent_commit`` CAS.
   ``.gitattributes`` is the one intentional retained Hub-managed file;
@@ -60,7 +60,7 @@ from prismaquant.shipcard import (  # noqa: E402
     unfilled_slots,
     uniform_control_summary,
     verify,
-    write_shipcard,
+    update_shipcard,
 )
 REPO_TYPES = ("model", "dataset", "space")
 SNAPSHOT_BLOCK_BYTES = 8 * 1024 * 1024
@@ -223,6 +223,8 @@ def _canonical_shipcard_problem(
 def check_shipcard(
     artifact_dir: Path,
     shipcard_path: Path,
+    *,
+    observed_weight_content: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Return ``(card, problems)``; malformed input is not forceable."""
     if not shipcard_path.is_file():
@@ -235,7 +237,9 @@ def check_shipcard(
         structural = _shipcard_structure_problems(card, artifact_dir)
         if structural:
             return None, structural
-        problems = verify(card, model_dir=artifact_dir)
+        problems = verify(card, model_dir=artifact_dir,
+                          observed_weight_content=observed_weight_content)
+        problems.extend(_research_standing_problems(card))
     except Exception as exc:
         return None, [f"{shipcard_path} is not a readable shipcard: {exc!r}"]
     return card, problems
@@ -359,24 +363,47 @@ def _confirm_forced(artifact_dir: Path, confirm_name: str | None) -> bool:
     return True
 
 
+def _research_standing_problems(card: Mapping[str, Any]) -> list[str]:
+    problems = []
+    build_block = card.get("build") or {}
+    if build_block.get("research_only") is True:
+        source = (
+            "prefill_frontier_replay_claim (prefill-frontier replay stamp)"
+            if "prefill_frontier_replay" in build_block
+            else "the card's build block"
+        )
+        problems.append(
+            f"build.research_only is True, stamped by {source}: a "
+            "research-standing artifact is not releasable; promote the "
+            "assignment out of research or re-run with --force-unverified "
+            "to publish it UNVERIFIED"
+        )
+
+    return problems
+
+
 def stamp_forced(
     shipcard_path: Path,
-    card: dict[str, Any],
     artifact_dir: Path,
-    problems: list[str],
     repo_id: str,
 ) -> None:
-    """Record on the artifact that it was published without a closed card."""
-    card["forced_unverified"] = True
-    history = list(card.get("forced_unverified_history") or [])
-    history.append({
-        "repo_id": repo_id,
-        "model_sha": compute_model_sha(artifact_dir),
-        "problems": list(problems),
-        "unfilled_slots": unfilled_slots(card, model_dir=artifact_dir),
-    })
-    card["forced_unverified_history"] = history
-    write_shipcard(shipcard_path, card)
+    """Record the current card's unverified publication without erasing measurements."""
+    def stamp(card):
+        structural = _shipcard_structure_problems(card, artifact_dir)
+        if structural:
+            raise ValueError("; ".join(structural))
+        problems = verify(card, model_dir=artifact_dir) + _research_standing_problems(card)
+        card["forced_unverified"] = True
+        history = list(card.get("forced_unverified_history") or [])
+        history.append({
+            "repo_id": repo_id,
+            "model_sha": compute_model_sha(artifact_dir),
+            "problems": problems,
+            "unfilled_slots": unfilled_slots(card, model_dir=artifact_dir),
+        })
+        card["forced_unverified_history"] = history
+
+    update_shipcard(shipcard_path, stamp)
     print(f"[publish] stamped forced_unverified=true into {shipcard_path}")
 
 
@@ -842,22 +869,18 @@ def _freeze_artifact(
                 os.close(fd)
 
 
-def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> None:
-    """Bind the one-pass frozen hashes to a CB exporter content manifest."""
-    quant_path = snapshot.root / "quant_config.json"
-    if not quant_path.is_file():
-        return
+def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> Mapping[str, Any] | None:
+    """Bind frozen weight hashes to the artifact's immutable content claim."""
+    from prismaquant.shipcard import read_weight_content_manifest
     try:
-        quant = json.loads(quant_path.read_text(encoding="utf-8"))
+        manifest = read_weight_content_manifest(snapshot.root)
     except Exception as exc:
         raise FrozenSnapshotError(
-            f"frozen quant_config.json is unreadable: {exc}"
+            f"frozen weight content manifest is unreadable: {exc}"
         ) from exc
-    provenance = quant.get("provenance") if isinstance(quant, Mapping) else None
-    manifest = provenance.get("weight_content_manifest") if isinstance(
-        provenance, Mapping
-    ) else None
     if manifest is None:
+        if tuple(snapshot.root.glob("*.safetensors")):
+            raise FrozenSnapshotError("native artifact carries no exact weight content manifest")
         return
     declared = manifest.get("files") if isinstance(manifest, Mapping) else None
     if not isinstance(declared, Mapping):
@@ -882,6 +905,7 @@ def _verify_declared_weight_hashes(snapshot: _FrozenSnapshot) -> None:
             raise FrozenSnapshotError(
                 f"frozen bytes differ from declared weight hash: {name}"
             )
+    return manifest
 
 
 def _replay_frozen_digests(snapshot: _FrozenSnapshot) -> None:
@@ -1317,28 +1341,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {problem}", file=sys.stderr)
         return 2
 
-    # Issue #1586 (research half): research standing is not releasable
-    # standing.  ``prefill_frontier_replay_claim`` stamps
-    # ``build.research_only: True`` onto a prefill-frontier replay card's
-    # build anchor (``shipcard.build_shipcard``), and before this gate
-    # nothing that refused ever read it.  The refusal is forceable like any
-    # other evidence failure: ``--force-unverified`` re-types the basename
-    # and stamps the recorded override, so a research artifact reaches the
-    # Hub only as a declared UNVERIFIED publication.
-    build_block = card.get("build") or {}
-    if build_block.get("research_only") is True:
-        source = (
-            "prefill_frontier_replay_claim (prefill-frontier replay stamp)"
-            if "prefill_frontier_replay" in build_block
-            else "the card's build block"
-        )
-        problems.append(
-            f"build.research_only is True, stamped by {source}: a "
-            "research-standing artifact is not releasable; promote the "
-            "assignment out of research or re-run with --force-unverified "
-            "to publish it UNVERIFIED"
-        )
-
     _print_bpp_claim_with_control(card, artifact_dir)
 
     forced_override_confirmed = False
@@ -1368,9 +1370,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             stamp_forced(
                 shipcard_path,
-                card,
                 artifact_dir,
-                problems,
                 args.repo_id,
             )
         except Exception as exc:
@@ -1412,10 +1412,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        # The one-pass safetensors content capture existed for the strict
-        # RTX4090 FP8-CB publication replay (Gridbook lane retired 2026-09-02,
-        # archive/gridbook_lane_2026-09-02/). No publication asks
-        # for it now; the freeze keeps the capability for a future lane.
         snapshot_cm = _freeze_artifact(
             artifact_dir,
             expected_shipcard_sha256=expected_shipcard_sha,
@@ -1433,9 +1429,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[publish] ERROR: frozen {license_problem}; nothing was uploaded", file=sys.stderr)
             return 2
         frozen_card_path = snapshot.root / SHIPCARD_FILENAME
+        try:
+            observed_weight_content = _verify_declared_weight_hashes(snapshot)
+        except FrozenSnapshotError as exc:
+            print(f"[publish] REFUSED: {exc}", file=sys.stderr)
+            return 1
         frozen_card, frozen_problems = check_shipcard(
             snapshot.root,
             frozen_card_path,
+            observed_weight_content=observed_weight_content,
         )
         if frozen_card is None:
             print(
@@ -1449,11 +1451,6 @@ def main(argv: list[str] | None = None) -> int:
         # Gridbook lane retired 2026-09-02 (see
         # archive/gridbook_lane_2026-09-02/). Every publication now takes the
         # declared-weight-hash replay that used to be the non-strict branch.
-        try:
-            _verify_declared_weight_hashes(snapshot)
-        except FrozenSnapshotError as exc:
-            print(f"[publish] REFUSED: {exc}", file=sys.stderr)
-            return 1
         if frozen_problems and not forced_override_confirmed:
             print(
                 "[publish] REFUSED: frozen snapshot failed authoritative "

@@ -10,7 +10,7 @@ import pytest
 
 from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_control_sha256
 from prismaquant.cost_currency import CostCurrencyError
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.tessera_full_domain_acquisition import (
     joint_acquisition_from_cost_data,
     load_joint_campaign_acquisition,
@@ -273,12 +273,12 @@ def test_bound_pickle_is_revalidated_not_trusted_from_request(
     elif change == "run":
         run = payload["provenance"]["joint_aura_identity"]
         run["cached_rendered_weights"][name][FORMATS[0]] = {}
-        payload["provenance"]["joint_aura_identity_sha256"] = identity_sha256(run)
+        payload["provenance"]["joint_aura_identity_sha256"] = joint_identity_sha256(run)
     else:
         run = payload["provenance"]["joint_aura_identity"]
         run["probe_identity"] = copy.deepcopy(run["probe_identity"])
         run["probe_identity"]["calibration_sha256"] = "e" * 64
-        payload["provenance"]["joint_aura_identity_sha256"] = identity_sha256(run)
+        payload["provenance"]["joint_aura_identity_sha256"] = joint_identity_sha256(run)
     binding, _ = bound_document(tmp_path, request_document, payload)
     with pytest.raises((ValueError, CostCurrencyError)):
         load_joint_campaign_acquisition(binding)

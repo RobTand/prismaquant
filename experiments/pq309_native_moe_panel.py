@@ -74,6 +74,8 @@ def quality_binding(args, plan, *, shape):
 
 
 def prepare(args):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     import transformers
     from safetensors.torch import save_file

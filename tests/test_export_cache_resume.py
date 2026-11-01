@@ -1,9 +1,8 @@
 """Tests for the v25 per-layer export cache (resume support).
 
-These cover the layer-cache path in `_layer_cache_file` /
-`materialize_tensors_streaming` without bringing up a full vLLM
-streaming context — we patch the layer loop's per-layer pre-quantize
-hook to verify cache hit / miss behavior, atomic write, and cleanup.
+These tests exercise cache-file conventions with local stand-ins and the
+production activation-index fingerprint. They do not drive the streaming
+layer loop.
 
 The actual quantization math is covered by the per-Linear and batched
 GPTQ equivalence tests; this file is purely about the resume

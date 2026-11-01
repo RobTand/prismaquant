@@ -6,7 +6,8 @@ import json
 import torch
 import torch.nn as nn
 
-from prismaquant.sensitivity_probe import discover_moe_routers, load_calibration
+from prismaquant.sensitivity_probe import discover_moe_routers
+from prismaquant.calibration_data import load_calibration
 
 
 class _ToyTokenizer:

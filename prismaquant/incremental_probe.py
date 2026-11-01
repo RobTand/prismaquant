@@ -8,17 +8,14 @@ resident and decoder layers offloaded to disk and streamed in on demand.
 Small models just pay the no-op cost of a LayerCache that can hold every
 layer resident; large models drain the cache to disk as needed.
 
-Each shard (body layer range, MTP, lm_head) runs one streaming pass: the
-exact phase-1 / phase-2 / phase-3 flow from `streaming_probe.run_streaming_probe`,
-specialized to Fisher-instrument only the Linears matching that shard's
-regex. MTP is a built-in shard kind: after the body forward we ask the
+The body captures hidden boundaries and the terminal CE gradient once. Each
+body shard then runs a reverse Fisher sweep over its regex-scoped Linears. MTP is a built-in shard kind: after the body forward we ask the
 model profile to build its MTP module (`profile.build_mtp_module`), load
 the source MTP weights straight from safetensors
 (`profile.read_mtp_source_state_dict` / `profile.load_mtp_state_dict`),
 and run its own forward+backward for Fisher collection. The per-shard pickle
-output format matches `sensitivity_probe.run_probe_pass` / `streaming_probe`
-unchanged — the allocator consumes either. The two backends also agree on
-the estimator and normalization conventions: per-token-summed empirical
+output retains the allocator's probe schema and the estimator and
+normalization conventions: per-token-summed empirical
 Fisher (Σ_t ‖∇_t‖², including packed experts via the F.linear
 interception in `install_packed_expert_hooks`), divided by the GLOBAL
 calibration token count for every row -- dense and MoE expert alike.
@@ -36,6 +33,12 @@ share of the objective. See `_accumulate_packed_per_token_fisher`.
 """
 from __future__ import annotations
 
+from . import probe_inventory
+
+from . import probe_statistics
+from .sample_parallel_artifacts import SAMPLE_PARALLEL_META_FIELDS
+
+
 import argparse
 import dataclasses
 import gc
@@ -49,7 +52,7 @@ import types
 from collections.abc import Mapping
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import io_spans
 from prismaquant.incremental_shards import (
@@ -96,19 +99,6 @@ def _env_flag(name: str, *, default: bool) -> bool:
 # site already materializes, so they cost no extra matmul AND satisfy
 # sum(fisher_row) == sum(fisher_col) == chunk_h.sum() by construction —
 # that identity is the wiring check (tests/test_probe_marginals.py).
-# The key tuple is the dense Fisher schema's own (one owner, #1394).
-from .sensitivity_probe import _DENSE_FISHER_MARGINAL_KEYS as _MARGINAL_KEYS  # noqa: E402
-# act_absmax is a BOUND, not a total: it merges by elementwise maximum
-# across chunks/shards. Summing it would inflate it without bound.
-_MARGINAL_MAX_KEYS = frozenset({"act_absmax"})
-
-# The packed-expert (AQUA) counterparts. Separate from `_MARGINAL_KEYS`
-# because these are [E, *] per-expert arrays produced by the F.linear
-# interception, not the 1-D per-Linear vectors the dense backward hook
-# flushes through `_marginal_flush`.
-_PACKED_MARGINAL_KEYS = (
-    "expert_g_sq_sum", "expert_act_sq_sum", "expert_act_absmax",
-    "expert_tokens")
 
 
 def _marginals_enabled() -> bool:
@@ -125,32 +115,11 @@ def _marginal_accumulate(slot: dict, name: str,
     if cur is None:
         slot[name] = [v.detach().clone() for v in vecs]
         return
-    for key, c, v in zip(_MARGINAL_KEYS, cur, vecs):
-        if key in _MARGINAL_MAX_KEYS:
+    for key, c, v in zip(probe_statistics.FISHER_MARGINAL_KEYS, cur, vecs):
+        if key in probe_statistics.FISHER_MAX_KEYS:
             torch.maximum(c, v, out=c)
         else:
             c.add_(v)
-
-
-def merge_marginals(dst: dict, src) -> None:
-    """Fold per-channel marginals from `src` into `dst` in place.
-
-    Sums add elementwise; act_absmax merges by MAXIMUM. Used both for
-    the per-layer host flush and for the cross-shard partial-stats
-    merge, so the two cannot drift apart on the max-vs-sum rule.
-    """
-    for key in _MARGINAL_KEYS:
-        new = src.get(key)
-        if new is None:
-            continue
-        new = np.asarray(new, dtype=np.float32)
-        old = dst.get(key)
-        if old is None:
-            dst[key] = new.copy()
-        elif key in _MARGINAL_MAX_KEYS:
-            dst[key] = np.maximum(old, new)
-        else:
-            dst[key] = old + new
 
 
 def _marginal_flush(device_slot: dict, stats: dict) -> None:
@@ -166,7 +135,7 @@ def _marginal_flush(device_slot: dict, stats: dict) -> None:
     off = 0
     for n in names:
         payload = {}
-        for key, v in zip(_MARGINAL_KEYS, device_slot[n]):
+        for key, v in zip(probe_statistics.FISHER_MARGINAL_KEYS, device_slot[n]):
             ln = v.numel()
             # .copy() so the per-Linear arrays do not each pin the one
             # big host buffer alive.
@@ -174,7 +143,7 @@ def _marginal_flush(device_slot: dict, stats: dict) -> None:
             off += ln
         entry = stats.get(n)
         if entry is not None:
-            merge_marginals(entry, payload)
+            probe_statistics.merge_marginals(entry, payload)
     device_slot.clear()
 
 
@@ -201,21 +170,18 @@ from .layer_streaming import (
     _get_final_norm,
 )
 from .perturbed_x_cache import calibration_data_hash
-from .sensitivity_probe import (
+from prismaquant.sensitivity_probe import (
     FisherAccumulator,
     dense_marginal_chunk as _marginal_chunk,
     RouterTracker,
     SharedStateCotangents,
     discover_moe_structure,
     discover_moe_routers,
-    finalize_fisher_stats,
     grouped_linear_fisher_chunk,
     grouped_linear_groups,
     grouped_linear_stats_entry,
-    h_detail_blob,
     install_packed_expert_hooks,
     kv_cotangent_path_enabled,
-    load_calibration,
     per_token_ce,
     read_top_k,
     run_multimodal_visual_probe_pass,
@@ -223,6 +189,8 @@ from .sensitivity_probe import (
     stage_multimodal,
     stage_text_only,
 )
+from prismaquant.calibration_data import load_calibration
+
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
@@ -533,12 +501,6 @@ def _detect_profile_for_shards(model_path: str):
         return DefaultProfile()
 
 
-# Router/gate Linears carry routing logits, not quantizable weights.
-_BASE_LINEAR_EXCLUDE = (
-    r"(?:mlp\.gate$|mlp\..*gate$|\.router(?:$|\.)|block_sparse_moe\.gate$)"
-)
-
-
 def resolve_linear_exclude(model_path: str) -> str:
     """The probe's Linear exclusion: the router baseline OR'd with any
     profile-declared extra (`ModelProfile.probe_linear_exclude_extra`),
@@ -546,14 +508,7 @@ def resolve_linear_exclude(model_path: str) -> str:
     All meta stamps and hook installs must use this one resolver so
     shard-reuse keys stay consistent."""
     profile = _detect_profile_for_shards(model_path)
-    extra = ""
-    try:
-        extra = str(profile.probe_linear_exclude_extra() or "")
-    except AttributeError:
-        pass
-    if extra:
-        return f"(?:{_BASE_LINEAR_EXCLUDE}|{extra})"
-    return _BASE_LINEAR_EXCLUDE
+    return probe_inventory.linear_exclusion_for_profile(profile)
 
 
 def build_extended_shard_regexes(
@@ -971,11 +926,15 @@ def _expected_probe_shard_meta(args, *,
         "activation_rows_limit": int(args.activation_rows_limit),
         "shard_idx": shard_idx,
         "router_coverage_version": _ROUTER_COVERAGE_VERSION,
+        "packed_input_capture": "module_once.v1",
         # Not a grouping axis: it decides whether the shard's stats
         # carry per-channel marginals at all. Reusing a flag-off shard
         # in a flag-on run would silently ship marginal-less entries.
         "emit_marginals": _marginals_enabled(),
     }
+    reuse_inputs = getattr(args, "probe_reuse_inputs", None)
+    if reuse_inputs is not None:
+        meta["probe_reuse_inputs"] = dict(reuse_inputs)
     sample_parallel = getattr(args, "sample_parallel_contract", None)
     if sample_parallel is not None:
         meta["sample_parallel"] = dict(sample_parallel)
@@ -1036,8 +995,8 @@ def _validate_sample_activation_blob(
     execution_identity_sha256: str,
 ) -> None:
     """Replay one worker activation blob's closed row-selection contract."""
-    from prismaquant.sample_parallel_probe import activation_cache_shard_stamp
-    from prismaquant.sample_parallel_probe_contract import (
+    from prismaquant.sample_parallel_artifacts import activation_cache_shard_stamp
+    from prismaquant.sample_parallel_artifacts import (
         activation_row_priorities as _activation_row_priorities,
     )
 
@@ -1103,6 +1062,44 @@ def _validate_sample_activation_blob(
         raise ValueError(f"sample activation priority rows differ for {qname}")
 
 
+def _probe_reuse_inputs_mismatch(recorded, expected) -> str | None:
+    if expected is None:
+        return None
+    if expected["dataset_sha256"] is None:
+        return "dataset byte identity is unavailable; use a local calibration file"
+    if not isinstance(recorded, Mapping):
+        return "probe input identity is absent"
+    for key, value in expected.items():
+        if recorded.get(key) != value:
+            return f"probe input {key} differs"
+    return None
+
+
+_CAPTURE_META_KEYS = frozenset(("router_coverage_version", "packed_input_capture"))
+
+
+def _has_packed_stats(stats: Mapping) -> bool:
+    return any(row.get("_packed_experts_module") is not None
+               or row.get("num_experts", 0) > 0 for row in stats.values())
+
+
+def _probe_capture_compatible(data: Mapping, expected_meta: Mapping) -> bool:
+    meta = _probe_meta_flat(data.get("meta") or {})
+    stats = data.get("stats") or {}
+    if not isinstance(stats, Mapping) or any(not isinstance(row, Mapping) for row in stats.values()):
+        return False
+    packed = _has_packed_stats(stats)
+    routed = packed or any(data.get(field) for field in _ROUTING_FIELDS)
+    routed = routed or any(row.get("router_path") is not None for row in stats.values())
+    recorded = meta.get("router_coverage_version")
+    expected = expected_meta.get("router_coverage_version")
+    if recorded != expected and not (recorded == 2 and expected == 3 and not routed):
+        return False
+    if routed and meta.get("synthesized_from_cache") and not data.get("router_counts"):
+        return False
+    return not packed or meta.get("packed_input_capture") == expected_meta.get("packed_input_capture")
+
+
 def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     try:
         data = _read_pickle(path)
@@ -1117,8 +1114,19 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
     meta = data.get("meta") or {}
     probe_meta = dict(meta)
     probe_meta.update(meta.get("incremental_shard", {}))
+    if any(probe_meta.get(key) != expected_meta.get(key)
+           for key in SAMPLE_PARALLEL_META_FIELDS):
+        return False
+    reason = _probe_reuse_inputs_mismatch(
+        probe_meta.get("probe_reuse_inputs"), expected_meta.get("probe_reuse_inputs")
+    )
+    if reason is not None:
+        print(f"[incremental] refuse reuse {path}: {reason}", flush=True)
+        return False
+    if not _probe_capture_compatible(data, expected_meta):
+        return False
     for key, expected in expected_meta.items():
-        if probe_meta.get(key) != expected:
+        if key not in _CAPTURE_META_KEYS and probe_meta.get(key) != expected:
             return False
     sample_partition = expected_meta.get("sample_parallel")
     sample_census = expected_meta.get("sample_parallel_qname_census")
@@ -1145,7 +1153,7 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
                 return False
             local_samples = int(sample_partition["local_samples"])
             sample_seqlen = int(sample_partition["seqlen"])
-            from prismaquant.sample_parallel_probe_merge import (
+            from prismaquant.sample_parallel_artifacts import (
                 validate_sample_parallel_stat_row,
             )
             for name in expected_stats:
@@ -1205,11 +1213,10 @@ def probe_shard_is_reusable(path: Path, expected_meta: dict[str, Any]) -> bool:
 # Swapping LAYERS_PER_SHARD between runs changes grouping but not
 # numbers, so probe_shard pickles are safe to pool on these axes.
 _CONTENT_META_KEYS: tuple[str, ...] = (
-    "model", "dataset", "nsamples", "seqlen", "dtype",
+    "model", "dataset", "nsamples", "seqlen", "dtype", "probe_reuse_inputs",
     "requested_device", "requested_device_map",
     "importance_weighting", "activation_cache_dir",
     "linear_exclude", "h_detail_dir", "activation_rows_limit",
-    "router_coverage_version",
     # Marginal emission changes WHICH KEYS a stats entry carries, not
     # just its grouping, so a flag-off shard is not poolable into a
     # flag-on run — it would contribute entries with no marginals and
@@ -1218,12 +1225,16 @@ _CONTENT_META_KEYS: tuple[str, ...] = (
     # A different sample partition has the same qname scope but different
     # sufficient statistics. It may only meet its siblings in the dedicated
     # raw-stat sample merger, never in LPS-invariant first-seen reuse.
-    "sample_parallel",
-    "sample_parallel_importance",
-    "sample_parallel_activation_scope",
-    "sample_parallel_execution_identity",
-    "sample_parallel_qname_census",
+    *SAMPLE_PARALLEL_META_FIELDS,
 )
+
+
+def _content_meta_anchor(expected_meta: Mapping) -> dict[str, Any]:
+    """Keep both content and capture contracts when pooling shards."""
+    return {
+        key: expected_meta.get(key)
+        for key in (*_CONTENT_META_KEYS, *_CAPTURE_META_KEYS)
+    }
 
 
 def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
@@ -1238,7 +1249,16 @@ def _probe_meta_flat(raw_meta: dict[str, Any]) -> dict[str, Any]:
 def _content_meta_compatible(raw_meta: dict[str, Any],
                              anchor: dict[str, Any]) -> bool:
     probe_meta = _probe_meta_flat(raw_meta)
-    return all(probe_meta.get(k) == anchor.get(k) for k in _CONTENT_META_KEYS)
+    reason = _probe_reuse_inputs_mismatch(
+        probe_meta.get("probe_reuse_inputs"), anchor.get("probe_reuse_inputs")
+    )
+    if reason is not None:
+        print(f"[incremental] refuse cached Linear stats: {reason}", flush=True)
+        return False
+    return all(
+        probe_meta.get(k) == anchor.get(k)
+        for k in _CONTENT_META_KEYS
+    )
 
 
 def _cached_value_exact_equal(left: object, right: object) -> bool:
@@ -1281,15 +1301,21 @@ def _cached_value_exact_equal(left: object, right: object) -> bool:
     return type(left) is type(right) and left == right
 
 
+class _CachedLinearStats(dict):
+    def __init__(self):
+        super().__init__()
+        self.routing = {field: {} for field in _ROUTING_FIELDS}
+
+
 def scan_cached_linear_stats(
     shard_dir: Path,
     content_meta_anchor: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
     """Scan `shard_dir/probe_shard_*.pkl`. Return a flat map
-    `{linear_name: stats_dict}` pooled across all shards whose meta is
-    content-compatible with `content_meta_anchor` (matches on model,
-    dataset, nsamples, seqlen, etc — but NOT on linear_include or
-    shard_idx). First-seen wins on duplicates.
+    `{linear_name: stats_dict}` pooled across shards whose meta matches
+    `content_meta_anchor`: content keys (model, dataset, nsamples, seqlen,
+    etc; NOT linear_include or shard_idx) plus `_CAPTURE_META_KEYS`.
+    First-seen wins on duplicates.
 
     Used for LPS-invariant shard reuse: Fisher stats are intrinsic to
     each Linear, so a shard at lps=5 (L0-L4) and a shard at lps=3
@@ -1298,7 +1324,7 @@ def scan_cached_linear_stats(
     when every duplicate qname is bit/exactly identical, then synthesize new
     shards by filtering on regex.
     """
-    pooled: dict[str, dict[str, Any]] = {}
+    pooled = _CachedLinearStats()
     if not shard_dir.exists():
         return pooled
     for path in sorted(shard_dir.glob("probe_shard_*.pkl")):
@@ -1309,12 +1335,19 @@ def scan_cached_linear_stats(
             continue
         if not isinstance(data, dict):
             continue
-        if not _content_meta_compatible(data.get("meta") or {},
-                                        content_meta_anchor):
+        if (not _content_meta_compatible(data.get("meta") or {}, content_meta_anchor)
+                or not _probe_capture_compatible(data, content_meta_anchor)):
             continue
         stats = data.get("stats") or {}
         if not isinstance(stats, dict):
             continue
+        for field, target in pooled.routing.items():
+            for name, value in data.get(field, {}).items():
+                if name in target and not _cached_value_exact_equal(target[name], value):
+                    print(f"[incremental] divergent cached route {field}:{name}; "
+                          "refusing synthesized reuse", flush=True)
+                    return {}
+                target[name] = value
         for name, s in stats.items():
             if name in pooled and not _cached_value_exact_equal(pooled[name], s):
                 print(
@@ -1326,6 +1359,30 @@ def scan_cached_linear_stats(
             if name not in pooled:
                 pooled[name] = s
     return pooled
+
+
+_ROUTING_FIELDS = (
+    "router_counts", "router_totals", "router_active_counts",
+    "expert_route_stats", "expert_info",
+)
+
+
+def _shard_routing_payload(stats, include: re.Pattern, source: Mapping) -> dict:
+    expert_info = {
+        name: value for name, value in source.get("expert_info", {}).items()
+        if name in stats
+    }
+    routers = {router for router, _expert in expert_info.values()}
+    # Packed experts have no per-expert Linear leaves. Their sibling router
+    # belongs to the same layer selector.
+    routers.update(router for router in source.get("router_counts", {})
+                   if include.search(router))
+    return {
+        **{field: {router: value for router, value in source.get(field, {}).items()
+                   if router in routers}
+           for field in _ROUTING_FIELDS if field != "expert_info"},
+        "expert_info": expert_info,
+    }
 
 
 def synthesize_shard_from_linear_cache(
@@ -1368,7 +1425,7 @@ def synthesize_shard_from_linear_cache(
     sample_partition = expected_meta.get("sample_parallel")
     if isinstance(sample_census, dict) and isinstance(sample_partition, dict):
         try:
-            from prismaquant.sample_parallel_probe_merge import (
+            from prismaquant.sample_parallel_artifacts import (
                 validate_sample_parallel_stat_row,
             )
 
@@ -1429,12 +1486,17 @@ def synthesize_shard_from_linear_cache(
                   flush=True)
             return False
 
+    routing = _shard_routing_payload(selected, inc, getattr(cache, "routing", {}))
+    requires_routes = _has_packed_stats(selected) or any(
+        row.get("router_path") is not None for row in selected.values()
+    )
+    if requires_routes and not routing["router_counts"]:
+        print("[incremental] synthesize refused: routed stats have no route maps",
+              flush=True)
+        return False
     payload = {
         "stats": selected,
-        "router_counts": {},
-        "router_totals": {},
-        "router_active_counts": {},
-        "expert_info": {},
+        **routing,
         "meta": {
             **dict(expected_meta),
             "device_map": "streaming-layerwise",
@@ -1651,21 +1713,15 @@ def _compute_precompute_key(model_path: str, dataset_name: str,
 
 
 # In-process StreamingContext + tokenizer cache. Populated when
-# `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by (model_path, device,
-# dtype). Lets an in-process driver reuse a single loaded model
-# across N calibration chunks instead of paying the offload + tokenizer
-# rebuild cost N times.
+# `PRISMAQUANT_PROBE_CTX_CACHE=1` is set. Keyed by model path, device,
+# dtype, source checkpoint content and tokenizer content. A driver can reuse
+# one loaded model across calibration chunks.
 _PROBE_CTX_CACHE: dict = {}
 
 
-def _persistent_probe_context_enabled(
-    sample_parallel_contract: dict[str, object] | None,
-) -> bool:
-    """Legacy warm model reuse is forbidden on the source-attested lane."""
-    return (
-        os.environ.get("PRISMAQUANT_PROBE_CTX_CACHE") == "1"
-        and sample_parallel_contract is None
-    )
+def _persistent_probe_context_enabled() -> bool:
+    """Whether the ordinary probe context cache is explicitly enabled."""
+    return os.environ.get("PRISMAQUANT_PROBE_CTX_CACHE") == "1"
 
 
 # v22 Fix A: lazy weight-stats cache.
@@ -1677,13 +1733,10 @@ def _persistent_probe_context_enabled(
 # sync is a ~50 us host stall AND blocks subsequent kernel issue, so
 # the cumulative GPU pipeline gap was several seconds per chunk.
 #
-# This cache is keyed by (fqn, weight.data_ptr) so a model swap or
-# in-place weight modification (for example, an export pass) invalidates
-# automatically — different storage, different key. Within a single
-# probe run the weights are immutable, so the cache holds for the whole
-# multi-chunk driver lifetime.
+# The key contains FQN, storage pointer and shape. In-place value changes
+# do not change that key; reuse relies on immutable weights within a probe.
 _W_STATS_CACHE: dict[tuple[str, int, tuple[int, ...]], tuple[float, float]] = {}
-_ROUTER_COVERAGE_VERSION = 2
+_ROUTER_COVERAGE_VERSION = 3
 
 
 def _get_or_compute_w_stats(fqn: str, weight) -> tuple[float, float]:
@@ -1788,60 +1841,6 @@ def _scored_lm_head_logits(
     return lm_head(hidden[:, begin:begin + width, :]).float()
 
 
-def _validate_sample_parallel_publication_state(
-    *,
-    model: str,
-    qname_census: Mapping[str, object],
-    producer_snapshot_root: str,
-    execution_identity: Mapping[str, object],
-) -> None:
-    """Replay source and runtime identity immediately before publication.
-
-    The *source* half of that replay retired on 2026-09-02:
-    `validate_worker_local_source_census` was built on
-    `prismaquant.rtx4090_artifact_census`, the strict-Ada FP8-CB campaign's
-    closed Qwen3.8-27B layout, which went to
-    archive/gridbook_lane_2026-09-02/ with the Gridbook lane. The runtime half
-    below is unaffected. The sample-parallel worker entry refuses up front
-    rather than publishing with one leg of the replay missing (see the
-    `--sample-run-contract` branch in `main`).
-    """
-    from prismaquant.sample_parallel_probe import (
-        validate_local_producer_snapshot,
-    )
-
-    validate_local_producer_snapshot(
-        producer_snapshot_root,
-        expected_closure_sha256=execution_identity[
-            "producer_snapshot_sha256"
-        ],
-        expected_commit=execution_identity["producer_snapshot_commit"],
-        expected_tree=execution_identity["producer_snapshot_tree"],
-    )
-
-
-def _publish_sample_parallel_importance_stats(
-    output: str | Path,
-    *,
-    partition_contract: Mapping[str, object],
-    execution_identity_sha256: str,
-    ce_sum: float,
-    ce_count: int,
-    publication_postflight: Callable[[], None],
-) -> None:
-    """Publish stage-1 CE only after the same final source/runtime replay."""
-    from prismaquant.sample_parallel_probe import write_local_importance_stats
-
-    publication_postflight()
-    write_local_importance_stats(
-        output,
-        partition_contract=partition_contract,
-        execution_identity_sha256=execution_identity_sha256,
-        ce_sum=ce_sum,
-        ce_count=ce_count,
-    )
-
-
 def _compute_global_precompute(
     ctx: StreamingContext,
     *,
@@ -1853,11 +1852,6 @@ def _compute_global_precompute(
     resident_include_union: str,
     resident_exclude: str,
     activation_cache_dir: str | None,
-    sample_parallel_contract: dict[str, object] | None = None,
-    sample_importance_stats_output: str | None = None,
-    sample_importance_execution_sha256: str | None = None,
-    sample_publication_postflight: Callable[[], None] | None = None,
-    body_global_ce_mean: float | None = None,
 ) -> GlobalPrecompute:
     """Run Phase-1 (streaming forward, cache activations on CPU) and
     Phase-2 (chunked CE backward through lm_head). Install resident
@@ -1890,11 +1884,6 @@ def _compute_global_precompute(
 
     # ---- Phase 1: streaming forward, cache activations on CPU ----
     phase1_expert_info = discover_moe_structure(model, profile=_profile)
-    if sample_parallel_contract is not None and phase1_expert_info:
-        raise RuntimeError(
-            "sample-parallel v1 is dense-only; routed expert Fisher/cache "
-            "rows cannot be assigned exact global sample/token identities"
-        )
     phase1_router_names = sorted(discover_moe_routers(
         model, profile=_profile))
     phase1_tracker = RouterTracker(
@@ -2040,13 +2029,9 @@ def _compute_global_precompute(
     resident_act_rows: dict[str, int] = defaultdict(int)
     resident_act_token_offsets: dict[str, int] = defaultdict(int)
     resident_input_rows_limit = 256
-    # v1 intentionally omits resident/MTP activation blobs from the strict
-    # merge cover.  lm_head is terminal BF16 for the target campaign, and its
-    # chunk-major phase-2 calls do not expose a direct sample/token row map to
-    # the generic hook. Body dense Linears retain the exact cache lane below.
     _resident_cache_dir = (
         Path(activation_cache_dir)
-        if activation_cache_dir and sample_parallel_contract is None
+        if activation_cache_dir
         else None
     )
     if _resident_cache_dir is not None:
@@ -2225,7 +2210,7 @@ def _compute_global_precompute(
     grad_buf = torch.zeros_like(norm_out_d)
     chunk_T = 256
     N, T, _ = norm_out_d.shape
-    if importance_weighting and body_global_ce_mean is None:
+    if importance_weighting:
         total_ce, total_count = 0.0, 0
         for start in range(0, T - 1, chunk_T):
             end = min(start + chunk_T, T)
@@ -2243,42 +2228,6 @@ def _compute_global_precompute(
                 total_ce += float(tok_ce.sum().item())
                 total_count += int(tok_ce.numel())
         ce_mean = total_ce / max(total_count, 1)
-        if sample_importance_stats_output is not None:
-            if sample_parallel_contract is None:
-                raise RuntimeError(
-                    "sample importance collection lacks a partition contract"
-                )
-            for handle in resident_handles:
-                handle.remove()
-            resident_handles.clear()
-            resident_saved_inputs.clear()
-            if sample_publication_postflight is None:
-                raise RuntimeError(
-                    "sample importance publication lacks source/runtime "
-                    "postflight validation"
-                )
-            _publish_sample_parallel_importance_stats(
-                sample_importance_stats_output,
-                partition_contract=sample_parallel_contract,
-                execution_identity_sha256=str(
-                    sample_importance_execution_sha256
-                ),
-                ce_sum=total_ce,
-                ce_count=total_count,
-                publication_postflight=sample_publication_postflight,
-            )
-            print(
-                "[incremental/global] wrote sample-parallel local CE "
-                f"summary to {sample_importance_stats_output}; phase1 will "
-                "be rerun after the global scalar barrier "
-                "(duplicate_phase1_forward_v1)",
-                flush=True,
-            )
-            raise SystemExit(0)
-    elif importance_weighting:
-        ce_mean = float(body_global_ce_mean)
-        if not np.isfinite(ce_mean) or ce_mean <= 0.0:
-            raise RuntimeError("global importance CE mean must be finite and positive")
     else:
         ce_mean = None
 
@@ -2441,7 +2390,7 @@ def _validate_sample_precompute_resident_payload(
     exact lm-head raw accumulator rather than merely naming an arbitrary
     finite subset of the broader probe census.
     """
-    from prismaquant.sample_parallel_probe import (
+    from prismaquant.sample_parallel_artifacts import (
         LM_HEAD_STATS_ONLY,
         validate_qname_census,
     )
@@ -2636,7 +2585,12 @@ def _validate_precompute_cache_payload(
         or set(data) != _PRECOMPUTE_CACHE_KEYS
         or data.get("schema") != _PRECOMPUTE_CACHE_SCHEMA
         or not isinstance(data.get("meta"), dict)
-        or data["meta"] != dict(expected_meta)
+        or not (
+            data["meta"] == dict(expected_meta)
+            or (data["meta"].get("router_coverage_version") == 2
+                and expected_meta.get("router_coverage_version") == 3
+                and {**data["meta"], "router_coverage_version": 3} == dict(expected_meta))
+        )
     ):
         raise ValueError("precompute cache schema/meta differs")
     ids = data.get("ids_cpu")
@@ -2730,7 +2684,6 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
             flush=True,
         )
         return None
-    sample_contract = expected_meta.get("sample_parallel")
     return GlobalPrecompute(
         activations_cpu=data["activations_cpu"],
         grad_at_tail=data["grad_at_tail"],
@@ -2740,24 +2693,11 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
         resident_g2_per_token=data.get("resident_g2_per_token", {}),
         resident_act_snaps=data["resident_act_snaps"],
         resident_act_row_indices=data.get("resident_act_row_indices", {}),
-        expert_info=(
-            data["expert_info"] if sample_contract is not None
-            else data.get("expert_info", {})
-        ),
-        router_counts=(
-            data["router_counts"] if sample_contract is not None else {}
-        ),
-        router_totals=(
-            data["router_totals"] if sample_contract is not None else {}
-        ),
-        router_active_counts=(
-            data["router_active_counts"]
-            if sample_contract is not None else {}
-        ),
-        expert_route_stats=(
-            data["expert_route_stats"]
-            if sample_contract is not None else {}
-        ),
+        expert_info=data["expert_info"],
+        router_counts=data["router_counts"],
+        router_totals=data["router_totals"],
+        router_active_counts=data["router_active_counts"],
+        expert_route_stats=data["expert_route_stats"],
         # Restore the phase-1 cross-layer shared state (Gemma4
         # `shared_kv_states`); `None` for every architecture that declares no
         # per-pass shared kwargs, and for caches written before this key
@@ -2765,13 +2705,6 @@ def _load_precompute_cache(path: Path, expected_meta: dict[str, Any],
         # "delete the precompute cache" error instead of a bare KeyError.
         shared_pass_state=data.get("shared_pass_state"),
     )
-
-
-# `finalize_fisher_stats` lives in sensitivity_probe (next to
-# h_detail_blob, so both probe backends and every h-detail writer share
-# the single global-token normalization convention); it is re-exported
-# here because this module is the production backend consumers import
-# it from.
 
 
 # ---------------------------------------------------------------------------
@@ -2799,8 +2732,6 @@ def _run_body_streaming_shard(
     minimax_fast_moe_chunk_size: int = 32,
     activation_rows_limit: int = 256,
     precomputed: GlobalPrecompute | None = None,
-    sample_parallel_contract: dict[str, object] | None = None,
-    sample_parallel_execution_identity_sha256: str | None = None,
 ):
     if precomputed is None:
         raise ValueError(
@@ -2815,28 +2746,11 @@ def _run_body_streaming_shard(
     layers_prefix = ctx.layers_prefix
 
     inc = re.compile(linear_include)
-    exc = re.compile(linear_exclude)
-    # Profile-driven Linear gathering (refactor #32). Profile decides
-    # whether each Linear gets Fisher hooks. Default profile accepts
-    # any `nn.Linear`; DSv4 skips `DeepseekV4GroupedLinear` (its weight
-    # `[out_features, in_features_per_group]` doesn't match the per-token
-    # Hessian-trace effective output dim).
     from .model_profiles import profile_from_model as _pfm
     _shard_profile = _pfm(model)
-    all_linears = [
-        n for n, m in model.named_modules()
-        if _shard_profile.should_probe_linear(n, m)
-    ]
-    all_tracked = [n for n in all_linears
-                   if inc.search(n) and not exc.search(n)]
-    if sample_parallel_contract is not None:
-        routed = sorted(set(all_tracked) & set(precomputed.expert_info))
-        if routed:
-            raise RuntimeError(
-                "sample-parallel v1 activation capture is dense-only; "
-                "routed expert qnames lack exact sample/token row origins: "
-                f"{routed[:4]}"
-            )
+    inventory = probe_inventory.build_probe_inventory(
+        model, _shard_profile, linear_exclude=linear_exclude)
+    all_tracked = [name for name in inventory.linear_names if inc.search(name)]
     layer_linear_names: list[list[str]] = []
     for L in range(num_layers):
         pref = f"{layers_prefix}{L}."
@@ -2960,38 +2874,15 @@ def _run_body_streaming_shard(
     # Linears; resident snaps were populated during Phase-2 hooks above).
     activation_snaps: dict[str, list[torch.Tensor]] = defaultdict(list)
     activation_row_indices: dict[str, list[torch.Tensor]] = defaultdict(list)
-    activation_row_priorities: dict[str, list[torch.Tensor]] = defaultdict(list)
-    activation_candidate_rows: dict[str, int] = defaultdict(int)
     activation_rows: dict[str, int] = defaultdict(int)
     activation_token_offsets: dict[str, int] = defaultdict(int)
     input_rows_limit = max(1, int(activation_rows_limit))
     cache_dir = Path(activation_cache_dir) if activation_cache_dir else None
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
-    activation_priority_plan = None
-    if sample_parallel_contract is not None and cache_dir is not None:
-        from prismaquant.sample_parallel_probe import (
-            ActivationPriorityPlanCache,
-        )
-
-        # Layer-scoped deterministic selection metadata.  It lives beside the
-        # existing activation accumulators, never owns activations/weights,
-        # and is cleared at the existing per-layer flush below.
-        activation_priority_plan = ActivationPriorityPlanCache(
-            sample_parallel_contract
-        )
     act_fname_sub = re.compile(r"[^A-Za-z0-9_-]")
 
-    # v22 Fix C: async + batched activation cache writes.
-    #
-    # PRISMAQUANT_ACT_CACHE_ASYNC=1 (default off) defers per-Linear
-    # torch.save calls to a small thread pool so the main probe thread
-    # doesn't pay the file-write latency between layers. Each write is
-    # short (~1-5 ms) but ~770 writes per layer × 62 layers per phase-3
-    # = 47k synchronous file ops, roughly 50-200 s of wall time we
-    # don't need to spend in the foreground. Pool size defaults to 4
-    # workers — enough to keep up with the layer flush rate without
-    # piling on the IO subsystem.
+    # PRISMAQUANT_ACT_CACHE_ASYNC=0 keeps per-Linear writes synchronous.
     _act_async = _env_flag("PRISMAQUANT_ACT_CACHE_ASYNC", default=True)
     _act_pool = None
     _act_pending: list = []
@@ -3008,8 +2899,6 @@ def _run_body_streaming_shard(
     def flush_activation_snapshots(
         snaps_by_name: dict[str, list[torch.Tensor]],
         indices_by_name: dict[str, list[torch.Tensor]] | None = None,
-        priorities_by_name: dict[str, list[torch.Tensor]] | None = None,
-        candidate_rows_by_name: dict[str, int] | None = None,
     ):
         if cache_dir is None:
             return
@@ -3027,8 +2916,7 @@ def _run_body_streaming_shard(
             # 2× storage cost; recommended when disk is plentiful.
             cache_dtype = (
                 torch.float32
-                if sample_parallel_contract is not None
-                or os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
+                if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
                 else torch.bfloat16
             )
             X = torch.cat(snaps, dim=0).to(
@@ -3041,45 +2929,9 @@ def _run_body_streaming_shard(
                     row_indices = torch.cat(index_parts, dim=0).to(
                         "cpu", dtype=torch.long
                     ).contiguous()
-            row_priorities = None
-            if priorities_by_name is not None:
-                priority_parts = priorities_by_name.pop(name, [])
-                if priority_parts:
-                    row_priorities = torch.cat(priority_parts, dim=0).to(
-                        "cpu", dtype=torch.long
-                    ).contiguous()
             payload = {"inputs": X, "name": name}
             if row_indices is not None and row_indices.numel() == X.shape[0]:
                 payload["row_indices"] = row_indices
-            if sample_parallel_contract is not None:
-                if sample_parallel_execution_identity_sha256 is None:
-                    raise RuntimeError(
-                        "sample-parallel activation lacks execution identity"
-                    )
-                if (
-                    row_indices is None
-                    or row_priorities is None
-                    or row_priorities.numel() != X.shape[0]
-                    or candidate_rows_by_name is None
-                ):
-                    raise RuntimeError(
-                        f"sample-parallel activation provenance incomplete for {name}"
-                    )
-                from prismaquant.sample_parallel_probe import (
-                    activation_cache_shard_stamp,
-                )
-                payload["row_priorities"] = row_priorities
-                payload["sample_parallel_activation"] = (
-                    activation_cache_shard_stamp(
-                        sample_parallel_contract,
-                        qname=name,
-                        rows_limit=input_rows_limit,
-                        candidate_rows=int(candidate_rows_by_name.pop(name, 0)),
-                        execution_identity_sha256=(
-                            sample_parallel_execution_identity_sha256
-                        ),
-                    )
-                )
             fname = act_fname_sub.sub("__", name) + ".pt"
             target = cache_dir / fname
             if _act_pool is not None:
@@ -3404,95 +3256,30 @@ def _run_body_streaming_shard(
                         flat = x.detach().reshape(-1, x.size(-1))
                         base = int(activation_token_offsets[name])
                         activation_token_offsets[name] += int(flat.size(0))
-                        if sample_parallel_contract is not None:
-                            prior_x = (
-                                activation_snaps[name][0]
-                                if activation_snaps[name] else None
-                            )
-                            prior_rows = (
-                                activation_row_indices[name][0]
-                                if activation_row_indices[name] else None
-                            )
-                            prior_priorities = (
-                                activation_row_priorities[name][0]
-                                if activation_row_priorities[name] else None
-                            )
-                            if (
-                                activation_priority_plan is not None
-                                and prior_x is None
-                                and base == 0
-                                and int(flat.size(0))
-                                == activation_priority_plan.candidate_rows
-                            ):
-                                # The ordinary dense Linear call exposes the
-                                # complete local sample/token grid at once.
-                                # Resolve top-R once per fused group; sibling
-                                # q/k/v and gate/up hooks reuse these exact
-                                # device tensors and only gather their own X.
-                                rows, priorities = (
-                                    activation_priority_plan.top_rows(
-                                        name,
-                                        device=flat.device,
-                                        rows_limit=input_rows_limit,
-                                    )
-                                )
-                                selected = flat.index_select(0, rows)
-                            else:
-                                from prismaquant.sample_parallel_probe import (
-                                    merge_activation_priority_reservoir,
-                                )
-
-                                local_rows = torch.arange(
-                                    flat.size(0), device=flat.device,
-                                    dtype=torch.long,
-                                ) + base
-                                selected, rows, priorities = (
-                                    merge_activation_priority_reservoir(
-                                        prior_inputs=prior_x,
-                                        prior_local_rows=prior_rows,
-                                        prior_priorities=prior_priorities,
-                                        new_inputs=flat,
-                                        new_local_rows=local_rows,
-                                        qname=name,
-                                        partition_contract=(
-                                            sample_parallel_contract
-                                        ),
-                                        rows_limit=input_rows_limit,
-                                        priority_plan_cache=(
-                                            activation_priority_plan
-                                        ),
-                                    )
-                                )
-                            activation_snaps[name] = [selected.detach()]
-                            activation_row_indices[name] = [rows]
-                            activation_row_priorities[name] = [priorities]
-                            activation_candidate_rows[name] += int(flat.size(0))
-                            activation_rows[name] = int(selected.size(0))
+                        need = input_rows_limit - activation_rows[name]
+                        if need <= 0:
+                            return
+                        if flat.size(0) > need:
+                            idx = torch.randperm(flat.size(0), device=flat.device)[:need]
+                            flat = flat.index_select(0, idx)
                         else:
-                            need = input_rows_limit - activation_rows[name]
-                            if need <= 0:
-                                return
-                            if flat.size(0) > need:
-                                idx = torch.randperm(flat.size(0), device=flat.device)[:need]
-                                flat = flat.index_select(0, idx)
-                            else:
-                                idx = torch.arange(flat.size(0), device=flat.device)
-                            # v22 Fix C: keep on device when async writes
-                            # are enabled. Each per-Linear .to("cpu") in
-                            # the inline path forces a device→host
-                            # synchronization, stalling the forward
-                            # pipeline. Deferring lets the layer's whole
-                            # forward run uninterrupted; the device→host
-                            # copy happens once per Linear at end-of-layer
-                            # in flush_activation_snapshots.
-                            if _act_async:
-                                activation_snaps[name].append(flat.detach())
-                            else:
-                                activation_snaps[name].append(flat.to("cpu"))
-                            activation_row_indices[name].append(
-                                (idx.detach().to("cpu", dtype=torch.long) + base)
-                            )
-                            activation_rows[name] += flat.size(0)
+                            idx = torch.arange(flat.size(0), device=flat.device)
+                        # v22 Fix C: keep on device when async writes
+                        # are enabled. Each per-Linear .to("cpu") in
+                        # the inline path forces a device→host
+                        # synchronization, stalling the forward
+                        # pipeline. Deferring lets the layer's whole
+                        # forward run uninterrupted; the device→host
+                        # copy happens once per Linear at end-of-layer
+                        # in flush_activation_snapshots.
+                        if _act_async:
+                            activation_snaps[name].append(flat.detach())
+                        else:
+                            activation_snaps[name].append(flat.to("cpu"))
+                        activation_row_indices[name].append(
+                            (idx.detach().to("cpu", dtype=torch.long) + base)
+                        )
+                        activation_rows[name] += flat.size(0)
                 return hook
 
             # v21 #1: deferred Fisher sync. PRISMAQUANT_DEFERRED_FISHER_SYNC=1
@@ -3506,33 +3293,9 @@ def _run_body_streaming_shard(
             deferred_sync = _env_flag(
                 "PRISMAQUANT_DEFERRED_FISHER_SYNC", default=True)
             emit_marginals = _marginals_enabled()
-            # v22 Fix B: deferred Fisher COMPUTE. Beyond just deferring the
-            # device→host syncs (above), this defers the per-Linear matmul
-            # itself out of the autograd engine's per-Linear callback path.
-            #
-            # Why: even with #1 (no .item() syncs), every Linear's bwd
-            # hook still does ~6 GPU kernel launches (gy², x², matmul,
-            # sum, h_w2 multiply, sum) DURING autograd's traversal. Each
-            # launch is bounced through Python and the autograd engine
-            # serializes against it, leaving the GPU idle waiting for
-            # Python to dispatch the next kernel. nvidia-smi dmon shows
-            # 13% SM utilization during phase-3 because of this.
-            #
-            # With deferred_compute=on, the bwd hook just appends
-            # (name, x_ref, gy_ref, mod_ref) to a per-layer queue and
-            # returns immediately. The autograd graph traversal flies
-            # through; the GPU stream stays busy with the layer's actual
-            # bwd kernels (Q/K/V/O, attn, FFN). After `out.backward()`
-            # returns, a tight Python loop drains the queue, issuing
-            # the per-Linear Fisher matmuls back-to-back. The CUDA
-            # driver's command queue stays full — SM utilization should
-            # rise from ~13% to ~50-80%.
-            #
-            # Math is byte-identical to the immediate path. Memory cost:
-            # the queue pins (x, gy) refs for one layer's tracked Linears
-            # — typical MiniMax MoE layer ≈ 770 entries × ~2 MB = ~1.5 GB
-            # peak, well within the cache budget that already accounts
-            # for it.
+            # Deferring Fisher matmuls moves Python work out of autograd's
+            # callbacks. The queue retains each layer's activation and
+            # gradient references until the post-backward drain.
             deferred_compute = _env_flag(
                 "PRISMAQUANT_DEFERRED_FISHER_COMPUTE", default=True)
             # Per-Linear device-resident accumulators built lazily inside
@@ -3779,22 +3542,19 @@ def _run_body_streaming_shard(
                 marginal_accumulator=packed_marginal_acc,
                 profile=_shard_profile,
             ) if layer_in_scope else {}
-            if sample_parallel_contract is not None and packed_meta:
-                raise RuntimeError(
-                    "sample-parallel v1 activation capture is dense-only; "
-                    "packed expert activation rows lack exact sample/token "
-                    "origins"
-                )
             layer_prefix = f"{layers_prefix}{L}."
             layer_packed_handles: list = []
+            packed_input_modules: set[str] = set()
             for key, md in packed_meta.items():
                 full_key = f"{layer_prefix}{key}"
                 experts_qname_rel = md["_packed_experts_module"]
                 md["_packed_experts_module"] = f"{layer_prefix}{experts_qname_rel}"
                 acc_stats[full_key] = md
+                packed_input_modules.add(experts_qname_rel)
+            if cache_dir is not None:
                 # Capture activations for the packed-experts module so the
                 # allocator can use the same input cache as nn.Linear entries.
-                if cache_dir is not None:
+                for experts_qname_rel in sorted(packed_input_modules):
                     try:
                         experts_mod = layers[L].get_submodule(experts_qname_rel)
                     except AttributeError:
@@ -4049,7 +3809,7 @@ def _run_body_streaming_shard(
                     prev["h_w2_sum_raw"] += s.get("h_w2_sum_raw", 0.0)
                     prev["n_tokens_seen"] += s.get("n_tokens_seen", 0)
                     # Per-channel marginals: sums add, act_absmax maxes.
-                    merge_marginals(prev, s)
+                    probe_statistics.merge_marginals(prev, s)
                     # Per-expert Fisher is a list of floats on the packed
                     # stat entry; sum element-wise across shard splits.
                     per_prev = prev.get("h_trace_per_expert_raw")
@@ -4078,7 +3838,7 @@ def _run_body_streaming_shard(
                     # maxes. Kept beside `h_trace_per_expert_raw` rather
                     # than inside `merge_marginals` because those arrays
                     # are 1-D per-Linear and these are [E, *] per-expert.
-                    for key in _PACKED_MARGINAL_KEYS:
+                    for key in probe_statistics.PACKED_FISHER_MARGINAL_KEYS:
                         new = s.get(key)
                         if new is None:
                             continue
@@ -4113,7 +3873,7 @@ def _run_body_streaming_shard(
                     # the previous per-row count; global is used for
                     # uniformity with the per-expert-Linear writers.)
                     torch.save(
-                        h_detail_blob(tensor, global_tokens,
+                        probe_statistics.h_detail_blob(tensor, global_tokens,
                                       full_key, kind="packed"),
                         detail_dir / fname)
                 packed_full_acc.clear()
@@ -4125,17 +3885,10 @@ def _run_body_streaming_shard(
             flush_activation_snapshots(
                 activation_snaps,
                 activation_row_indices,
-                activation_row_priorities,
-                activation_candidate_rows,
             )
             flush_activation_snapshots(packed_act_snaps)
-            if activation_priority_plan is not None:
-                # q/k/v and gate/up have all observed the same cached plan by
-                # this point.  Release it with the layer's activation blobs so
-                # priority metadata cannot accumulate across the sweep.
-                activation_priority_plan.clear()
 
-            phase_pressure_trim_bytes += int(ctx.unload(L) or 0)
+            phase_pressure_trim_bytes += int(ctx.unload(L))
             # The `del` drops all per-layer refs; CPython ref counting
             # reclaims them synchronously. The per-layer gc + empty_cache
             # is a quick win for in-scope MoE layers where 768 hooks have
@@ -4185,7 +3938,7 @@ def _run_body_streaming_shard(
     # One shared denominator for every row — the global calib token count
     # (hoisted above; see finalize_fisher_stats for why per-row
     # n_tokens_seen is wrong for routed-expert Linears).
-    finalize_fisher_stats(merged_stats, global_tokens)
+    probe_statistics.finalize_fisher_stats(merged_stats, global_tokens)
 
     detail_dir = Path(h_detail_dir) if h_detail_dir else None
     if detail_dir is not None:
@@ -4209,7 +3962,7 @@ def _run_body_streaming_shard(
             # the detail (global/routed)× hotter than the scalar).
             # g2_per_token stays raw (it is already a per-token vector).
             torch.save(
-                h_detail_blob(h, global_tokens, fqn, kind="linear",
+                probe_statistics.h_detail_blob(h, global_tokens, fqn, kind="linear",
                               g2_per_token=g2_per_token),
                 detail_dir / fname,
             )
@@ -4219,16 +3972,11 @@ def _run_body_streaming_shard(
         flush_activation_snapshots(
             activation_snaps,
             activation_row_indices,
-            activation_row_priorities,
-            activation_candidate_rows,
         )
         flush_activation_snapshots(packed_act_snaps)
-        if activation_priority_plan is not None:
-            activation_priority_plan.clear()
         cache_dtype = (
             torch.float32
-            if sample_parallel_contract is not None
-            or os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
+            if os.environ.get("PRISMAQUANT_ACT_CACHE_FP32", "1") != "0"
             else torch.bfloat16
         )
         for name, snaps in resident_act_snaps.items():
@@ -4249,51 +3997,18 @@ def _run_body_streaming_shard(
         # cost step sees a fully-flushed activation cache directory.
         drain_activation_writes()
 
-    # Filter precomputed expert_info to the subset of routers whose experts are
-    # within this shard's include-regex scope.
-    shard_expert_info = {
-        k: v for k, v in precomputed.expert_info.items() if k in all_tracked
-    }
-    shard_routers_in_scope: set[str] = {
-        rq for (rq, _eid) in shard_expert_info.values()
-    }
-    # Packed Qwen3.5/3.6 experts have no per-expert nn.Linear leaves, so
-    # ``expert_info`` is empty even though Phase 1 records their sibling
-    # routers. Select those routers directly by this shard's layer regex.
-    shard_routers_in_scope.update(
-        rq for rq in precomputed.router_counts if inc.search(rq)
-    )
-    shard_router_counts = {
-        rq: per_expert_map
-        for rq, per_expert_map in precomputed.router_counts.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_router_totals = {
-        rq: total
-        for rq, total in precomputed.router_totals.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_router_active_counts = {
-        rq: per_expert_map
-        for rq, per_expert_map in precomputed.router_active_counts.items()
-        if rq in shard_routers_in_scope
-    }
-    shard_expert_route_stats = {
-        rq: stats
-        for rq, stats in precomputed.expert_route_stats.items()
-        if rq in shard_routers_in_scope
-    }
+    routing = _shard_routing_payload(all_tracked, inc, vars(precomputed))
 
     out_path = Path(output_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wb") as f:
         pickle.dump({
             "stats": merged_stats,
-            "router_counts": shard_router_counts,
-            "router_totals": shard_router_totals,
-            "router_active_counts": shard_router_active_counts,
-            "expert_route_stats": shard_expert_route_stats,
-            "expert_info": shard_expert_info,
+            "router_counts": routing["router_counts"],
+            "router_totals": routing["router_totals"],
+            "router_active_counts": routing["router_active_counts"],
+            "expert_route_stats": routing["expert_route_stats"],
+            "expert_info": routing["expert_info"],
             "meta": {
                 "model": model_path,
                 "dataset": dataset_name,
@@ -4332,27 +4047,17 @@ def _load_mtp_source_for_probe(
     mtp_profile,
     inner_mtp: nn.Module,
     model_path: str,
-    *,
-    sample_parallel: bool,
-) -> tuple[dict[str, torch.Tensor], list[str], list[str]]:
-    """Load MTP weights, closing source/module coverage before any forward."""
+) -> dict[str, torch.Tensor]:
+    """Admit complete MTP source weights, or preserve the empty-source skip."""
+    from .model_profiles.base import load_complete_mtp_state_dict
+
     raw = mtp_profile.read_mtp_source_state_dict(model_path)
     if not raw:
-        if sample_parallel:
-            raise RuntimeError(
-                f"sample-parallel profile '{mtp_profile.name}' declares MTP "
-                "but the checkpoint has no source tensors under "
-                f"{mtp_profile.mtp_source_prefix()!r}"
-            )
-        return {}, [], []
-    missing, extra = mtp_profile.load_mtp_state_dict(inner_mtp, raw)
-    if sample_parallel and (missing or extra):
-        raise RuntimeError(
-            "sample-parallel MTP source/module coverage failure: "
-            f"unmatched_source={missing[:8]} "
-            f"module_params_unset={extra[:8]}"
-        )
-    return raw, list(missing), list(extra)
+        return {}
+    load_complete_mtp_state_dict(
+        mtp_profile, inner_mtp, raw, where="incremental MTP probe",
+    )
+    return raw
 
 
 def _build_mtp_fisher_accumulator(
@@ -4363,14 +4068,8 @@ def _build_mtp_fisher_accumulator(
     *,
     input_rows_limit: int,
     detail_dir: Path | None,
-    sample_parallel_contract: dict[str, object] | None,
 ) -> FisherAccumulator:
-    """Construct the MTP collector with its execution-contract features.
-
-    Dense marginals are intentionally narrower than the global environment
-    default here: only sample-parallel MTP rows enter the all-qname closed
-    schema.  Ordinary MTP probing retains the accumulator's legacy payload.
-    """
+    """Construct the ordinary MTP collector with its existing payload schema."""
     return FisherAccumulator(
         mtp_wrapper,
         tracked,
@@ -4378,9 +4077,7 @@ def _build_mtp_fisher_accumulator(
         cache_dir,
         input_rows=input_rows_limit,
         h_detail_dir=detail_dir,
-        emit_dense_marginals=(
-            sample_parallel_contract is not None and _marginals_enabled()
-        ),
+        emit_dense_marginals=False,
     )
 
 
@@ -4401,7 +4098,6 @@ def _run_mtp_streaming_shard(
     prefetch_lookahead: int = 3,
     activation_rows_limit: int = 256,
     precomputed: GlobalPrecompute | None = None,
-    sample_parallel_contract: dict[str, object] | None = None,
 ):
     # Lazy import to avoid depending on transformers subpath at module load.
     from .model_profiles import profile_from_model as _profile_from_model
@@ -4455,11 +4151,10 @@ def _run_mtp_streaming_shard(
     mtp_wrapper.to(device=device, dtype=dtype)
     mtp_wrapper.eval()
 
-    raw, missing, extra = _load_mtp_source_for_probe(
+    raw = _load_mtp_source_for_probe(
         mtp_profile,
         inner_mtp,
         model_path,
-        sample_parallel=sample_parallel_contract is not None,
     )
     if not raw:
         # No MTP weights in source — write empty pickle to satisfy the
@@ -4492,13 +4187,9 @@ def _run_mtp_streaming_shard(
         print(f"[incremental/mtp] no MTP weights; wrote empty shard "
               f"pickle to {output_path}", flush=True)
         return
-    loaded = len(raw) - len(missing)
-    print(f"[incremental/mtp] loaded {loaded}/{len(raw)} mtp weights "
-          f"(missing={len(missing)}, module_params_unset={len(extra)})",
+    print(f"[incremental/mtp] loaded {len(raw)} mtp source tensors "
+          "with complete module coverage",
           flush=True)
-    if missing:
-        print(f"[incremental/mtp] unmatched checkpoint keys (first 5): "
-              f"{missing[:5]}{'...' if len(missing) > 5 else ''}", flush=True)
 
     # Freeze every leaf; Fisher hooks capture ||grad_w||² without
     # retaining leaf .grads.
@@ -4510,17 +4201,12 @@ def _run_mtp_streaming_shard(
     print(f"[incremental/mtp] tracking {len(tracked)} MTP Linears", flush=True)
 
     expert_info_all = discover_moe_structure(mtp_wrapper, profile=mtp_profile)
-    if sample_parallel_contract is not None and expert_info_all:
-        raise RuntimeError(
-            "sample-parallel v1 rejects routed/packed MTP modules; MTP must "
-            "be the complete dense terminal-BF16 Linear census"
-        )
     expert_info = {k: v for k, v in expert_info_all.items() if k in tracked}
     top_k = read_top_k(mtp_wrapper, default=2)
 
     cache_dir = (
         Path(activation_cache_dir)
-        if activation_cache_dir and sample_parallel_contract is None
+        if activation_cache_dir
         else None
     )
     if cache_dir is not None:
@@ -4534,7 +4220,6 @@ def _run_mtp_streaming_shard(
         cache_dir,
         input_rows_limit=input_rows_limit,
         detail_dir=detail_dir,
-        sample_parallel_contract=sample_parallel_contract,
     )
 
     # lm_head lives on the body model (resident).
@@ -4662,15 +4347,18 @@ def _run_mtp_streaming_shard(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-#: Why the sample-parallel worker entry refuses. ONE spelling, raised from two
-#: places (parse time, and the deep branch it guards) so a restorer cannot
-#: delete one and leave the mode half-open with a different message.
+#: The retired worker mode refuses at the CLI boundary before model reads.
+#: Its complete execution snapshot is in archive/sample_parallel_probe_2026-10-15/.
 SAMPLE_PARALLEL_RETIRED = (
     "sample-parallel probe is unavailable since 2026-09-02: its run contract "
     "and per-worker source census were built on the strict-Ada FP8-CB "
     "artifact census, archived with the Gridbook lane "
     "(archive/gridbook_lane_2026-09-02/). Run without "
-    "--global-calibration-tensor/--sample-partition-index."
+    "--global-calibration-tensor/--sample-partition-index. Execution snapshot: "
+    "archive/sample_parallel_probe_2026-10-15/."
+)
+SAMPLE_PARALLEL_RETIRED_HELP = (
+    "Retired sample-parallel mode; see archive/sample_parallel_probe_2026-10-15/."
 )
 
 
@@ -4694,56 +4382,37 @@ def main():
                          "Default 42 reproduces historical behavior.")
     ap.add_argument(
         "--global-calibration-tensor", default=None,
-        help="Immutable tokenized calibration artifact produced by "
-             "`python -m prismaquant.sample_parallel_probe "
-             "prepare-calibration`. Every sample-parallel worker loads this "
-             "same global tensor once and selects its declared partition.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-partition-index", type=int, default=None,
-        help="Zero-based partition from --global-calibration-tensor. This "
-             "mode requires the complete body plus MTP/head qname scope; "
-             "only the calibration sample axis may differ between workers.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-run-contract", default=None,
-        help="Closed source-censused execution contract. Required with "
-             "sample parallelism; arbitrary shared metadata is not accepted. "
-             "NOTE (2026-09-02): the `prepare-run-contract` subcommand that "
-             "minted these retired with the Gridbook lane "
-             "(archive/gridbook_lane_2026-09-02/), so this flag currently "
-             "has no producer and the branch refuses.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-cover", default=None,
-        help="Digest-bound exact sample cover produced by "
-             "`sample_parallel_probe build-cover`. Required with sample "
-             "parallelism and checked against this worker's selected "
-             "calibration partition before any model/GPU setup.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--producer-snapshot-root",
         default=os.environ.get("PRISMAQUANT_PRODUCER_SNAPSHOT_ROOT"),
-        help="Mounted immutable PrismaQuant runtime snapshot root; required "
-             "and completely re-verified in sample-parallel mode.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--container-image-digest",
         default=os.environ.get("PRISMAQUANT_PRODUCER_IMAGE_DIGEST"),
-        help="Local pinned producer image digest (sha256:<64-hex>); required "
-             "and matched to the run contract in sample-parallel mode.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-importance-stats-output", default=None,
-        help="Stage 1 of exact importance weighting: write this partition's "
-             "raw CE sum/count receipt and exit before Fisher backward. The "
-             "v1 apply stage reruns phase 1 after the scalar barrier.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument(
         "--sample-global-importance-receipt", default=None,
-        help="Stage 2 of exact importance weighting: receipt emitted by "
-             "`sample_parallel_probe merge-importance`; its global CE mean "
-             "is used for every body token before backward.",
+        help=SAMPLE_PARALLEL_RETIRED_HELP,
     )
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--device-map", default=None)
@@ -4888,12 +4557,6 @@ def main():
             "--sample-cover is required exactly when sample-parallel "
             "calibration flags are supplied"
         )
-    args.sample_parallel_contract = None
-    args.sample_parallel_importance = None
-    args.sample_parallel_activation_scope = None
-    args.sample_parallel_execution_identity = None
-    args.sample_parallel_qname_census = None
-    args.sample_parallel_importance_execution_sha256 = None
     # The marginal switch is read deep inside the hooks (and by shard
     # subprocesses), so the CLI flag lands on the env var the same way
     # allocator.py publishes --threads. Unset leaves the env default.
@@ -4916,239 +4579,7 @@ def main():
     if start >= end:
         raise SystemExit(f"empty layer range: start={start} end={end}")
 
-    # Sample parallelism is deliberately orthogonal to the existing qname
-    # shards: every worker owns the complete model scope and differs only in
-    # the exact calibration samples it sees. Load the immutable global tensor
-    # once here, validate its semantic identity, then retain only the local
-    # contiguous slice for the GPU pass.
-    sample_parallel_calib: torch.Tensor | None = None
-    if args.global_calibration_tensor is not None:
-        # Retired 2026-09-02, fail-closed rather than degraded.
-        #
-        # The sample-parallel worker admitted a shared run contract only after
-        # revalidating THIS host's own source bytes against the contract's
-        # census (`validate_worker_local_source_census`) -- "a run contract
-        # produced on one host cannot authorize another host's bytes merely
-        # because the model path string agrees". Both that check and the
-        # `prepare-run-contract` minter were built on
-        # `prismaquant.rtx4090_artifact_census`, the strict-Ada FP8-CB
-        # campaign's closed Qwen3.8-27B layout, archived with the Gridbook
-        # lane (archive/gridbook_lane_2026-09-02/).
-        #
-        # Nothing can mint a contract now, and a contract left on disk from
-        # before the retirement would be admitted with one leg of its identity
-        # replay missing. That is the exact failure this branch existed to
-        # refuse, so it refuses. Re-enabling sample parallelism means giving
-        # the census a lane-independent source of truth, not deleting this
-        # gate. Recorded as debt D34.
-        #
-        # Unreachable from `main` since the same refusal moved to parse time
-        # above; kept as the second leg because everything below it is the
-        # SHAPE to restore, and a restorer must not be able to delete the
-        # parse-time guard and find this path silently live again.
-        raise SystemExit(SAMPLE_PARALLEL_RETIRED)
-        from prismaquant.sample_parallel_probe import (
-            _load_json_mapping,
-            activation_scope_receipt,
-            importance_execution_identity_sha256,
-            load_calibration_partition,
-            load_global_importance_receipt,
-            load_local_importance_stats,
-            validate_run_contract,
-            validate_local_producer_snapshot,
-        )
-        from prismaquant.sample_parallel_probe_merge import (
-            validate_worker_sample_cover,
-        )
-
-        try:
-            run_contract = validate_run_contract(
-                _load_json_mapping(args.sample_run_contract)
-            )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel run contract is invalid: {exc}"
-            ) from exc
-        execution_identity = run_contract["execution_identity"]
-        qname_census = run_contract["qname_census"]
-        if not args.producer_snapshot_root:
-            raise SystemExit(
-                "sample-parallel worker requires --producer-snapshot-root"
-            )
-        try:
-            producer_snapshot = validate_local_producer_snapshot(
-                args.producer_snapshot_root,
-                expected_closure_sha256=execution_identity[
-                    "producer_snapshot_sha256"
-                ],
-                expected_commit=execution_identity[
-                    "producer_snapshot_commit"
-                ],
-                expected_tree=execution_identity["producer_snapshot_tree"],
-            )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel producer snapshot preflight failed: {exc}"
-            ) from exc
-        if Path(args.output).exists():
-            raise SystemExit(
-                f"sample-parallel probe output already exists; refusing "
-                f"overwrite: {args.output}"
-            )
-        sample_parallel_calib, contract = load_calibration_partition(
-            args.global_calibration_tensor,
-            partition_index=int(args.sample_partition_index),
-        )
-        try:
-            validate_worker_sample_cover(
-                _load_json_mapping(args.sample_cover),
-                run_contract=run_contract,
-                partition_contract=contract,
-            )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel worker cover preflight failed: {exc}"
-            ) from exc
-        if int(contract["seqlen"]) != int(args.seqlen):
-            raise SystemExit(
-                "sample-parallel calibration seqlen differs from --seqlen"
-            )
-        if str(contract.get("dataset", "")) != str(args.dataset):
-            raise SystemExit(
-                "sample-parallel calibration dataset differs from --dataset"
-            )
-        if str(contract.get("model", "")) != str(args.model):
-            raise SystemExit(
-                "sample-parallel calibration model differs from --model"
-            )
-        if int(contract.get("calib_seed", -1)) != int(args.calib_seed):
-            raise SystemExit(
-                "sample-parallel calibration seed differs from --calib-seed"
-            )
-        expected_execution = {
-            "model": args.model,
-            "dataset": args.dataset,
-            "calib_seed": int(args.calib_seed),
-            "dtype": args.dtype,
-            "calibration_modality": args.calibration_modality,
-            "importance_weighting": bool(args.importance_weighting),
-            "activation_rows_limit": int(args.activation_rows_limit),
-            "emit_marginals": bool(_marginals_enabled()),
-            "h_detail": False,
-            "probe_schedule": "unified_full_body_mtp_lm_head_text_only_v1",
-            "include_visual": False,
-            "producer_snapshot_sha256": producer_snapshot[
-                "closure_sha256"
-            ],
-            "producer_snapshot_commit": producer_snapshot["commit"],
-            "producer_snapshot_tree": producer_snapshot["tree"],
-            "container_image_digest": args.container_image_digest,
-        }
-        for key, expected in expected_execution.items():
-            if execution_identity.get(key) != expected:
-                raise SystemExit(
-                    f"sample-parallel execution identity {key!r} differs: "
-                    f"contract={execution_identity.get(key)!r}, cli={expected!r}"
-                )
-        importance_execution_sha = importance_execution_identity_sha256(
-            execution_identity, qname_census
-        )
-        if start != 0 or end != n_layers:
-            raise SystemExit(
-                "sample-parallel workers must process the complete body "
-                "qname scope (start-layer=0, end-layer=all)"
-            )
-        if not args.unified_sweep:
-            raise SystemExit(
-                "sample-parallel v1 requires --unified-sweep so every worker "
-                "uses the closed full-body execution schedule"
-            )
-        if args.include_visual:
-            raise SystemExit(
-                "sample-parallel v1 requires --no-include-visual; visual "
-                "Linears are excluded by the text-only source census"
-            )
-        if not args.include_mtp or not args.include_lm_head:
-            raise SystemExit(
-                "sample-parallel workers must include MTP and lm_head; "
-                "qname partitioning is not allowed on this lane"
-            )
-        if args.calibration_modality != "text-only":
-            raise SystemExit(
-                "sample-parallel incremental probe currently requires "
-                "text-only calibration; multimodal sampling has a separate "
-                "data contract"
-            )
-        if args.h_detail_dir is not None:
-            raise SystemExit(
-                "sample-parallel v1 is dense-only and requires --h-detail-dir "
-                "to be omitted; routed/per-qname g2 index merging is not "
-                "part of this exact lane"
-            )
-        collect_path = args.sample_importance_stats_output
-        apply_path = args.sample_global_importance_receipt
-        if args.importance_weighting and bool(collect_path) == bool(apply_path):
-            raise SystemExit(
-                "importance-weighted sample workers require exactly one of "
-                "--sample-importance-stats-output (stage 1) or "
-                "--sample-global-importance-receipt (stage 2)"
-            )
-        if not args.importance_weighting and (collect_path or apply_path):
-            raise SystemExit(
-                "sample importance receipts are invalid with "
-                "--no-importance-weighting"
-            )
-        if apply_path:
-            receipt = load_global_importance_receipt(
-                apply_path,
-                partition_contract=contract,
-                execution_identity_sha256=importance_execution_sha,
-            )
-            # Carry the complete, digest-validated global/local CE receipt.
-            # Projection here would erase artifact-SHA and duplicate-forward
-            # provenance before the strict cross-host merge can audit it.
-            args.sample_parallel_importance = dict(receipt)
-        elif collect_path and Path(collect_path).exists():
-            load_local_importance_stats(
-                collect_path,
-                partition_contract=contract,
-                execution_identity_sha256=importance_execution_sha,
-            )
-            print(
-                "[incremental/global] reusable local CE summary already "
-                f"exists at {collect_path}; no GPU work required",
-                flush=True,
-            )
-            return
-        args.nsamples = int(contract["local_samples"])
-        args.sample_parallel_contract = contract
-        args.sample_parallel_activation_scope = activation_scope_receipt()
-        args.sample_parallel_execution_identity = dict(execution_identity)
-        args.sample_parallel_qname_census = dict(qname_census)
-        args.sample_parallel_importance_execution_sha256 = (
-            importance_execution_sha
-        )
-        try:
-            _validate_sample_activation_directory_cover(
-                Path(args.activation_cache_dir),
-                set(str(name) for name in qname_census[
-                    "activation_qname_manifest"
-                ]["entries"]),
-                require_complete=False,
-            )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel activation-cache preflight failed: {exc}"
-            ) from exc
-        print(
-            "[incremental] sample-parallel partition "
-            f"{contract['partition_index']}/{contract['partition_count']}: "
-            f"samples [{contract['sample_start']},{contract['sample_stop']}) "
-            f"local_hash={contract['local_calibration_hash']} "
-            f"global_hash={contract['global_calibration_hash']}",
-            flush=True,
-        )
-    elif (
+    if (
         args.sample_importance_stats_output
         or args.sample_global_importance_receipt
     ):
@@ -5227,6 +4658,31 @@ def main():
     device = torch.device(args.device)
     exec_device = device  # streaming path runs on the requested device directly
 
+    from .digests import file_sha256hex
+    from .streamed_model_identity import build_source_checkpoint_identity
+    from .tokenizer_identity import build_tokenizer_identity
+
+    source_identity = build_source_checkpoint_identity(
+        args.model,
+        digest_cache_path=work_dir / "source_identity_cache.json",
+        current_bytes=True,
+    )
+    args.probe_reuse_inputs = {
+        "calib_seed": int(args.calib_seed),
+        "source_checkpoint_sha256": source_identity["content_sha256"],
+        "tokenizer_sha256": build_tokenizer_identity(args.model)["content_sha256"],
+        "dataset_sha256": (
+            file_sha256hex(args.dataset) if Path(args.dataset).is_file() else None
+        ),
+    }
+    if args.probe_reuse_inputs["dataset_sha256"] is None:
+        print("[incremental] refuse persistent probe reuse: dataset byte "
+              "identity is unavailable; use a local calibration file", flush=True)
+    context_key = (
+        args.model, str(device), args.dtype, source_identity["content_sha256"],
+        args.probe_reuse_inputs["tokenizer_sha256"],
+    )
+
     # Skip setup + calibration if every shard is reusable. Loading the
     # model+tokenizer is expensive — if the run is a no-op we want to
     # avoid paying that cost.
@@ -5248,7 +4704,7 @@ def main():
 
     ctx: StreamingContext | None = None
     tokenizer = None
-    calib: torch.Tensor | None = sample_parallel_calib
+    calib: torch.Tensor | None = None
     resolved_prefetch_lookahead: int | None = None
 
     # Module-level cache: when set, the StreamingContext + tokenizer are
@@ -5257,14 +4713,12 @@ def main():
     # This is what makes the in-process multi-chunk driver fast — the
     # 244 GB BF16 source streaming offload setup + LayerCache survive
     # across chunks, so chunk_01..N hit warm caches.
-    use_persistent = _persistent_probe_context_enabled(
-        args.sample_parallel_contract
-    )
+    use_persistent = _persistent_probe_context_enabled()
 
     def _ensure_ready():
         nonlocal ctx, tokenizer, calib
         if ctx is None and use_persistent:
-            cached = _PROBE_CTX_CACHE.get((args.model, str(device), args.dtype))
+            cached = _PROBE_CTX_CACHE.get(context_key)
             if cached is not None:
                 ctx, tokenizer = cached
                 # Reset accumulated state from prior chunks before reuse.
@@ -5294,12 +4748,11 @@ def main():
                 _print_mem_snapshot("chunk start (post-reset)")
         if ctx is None:
             staged = stage_text_only(args.model)
-            if sample_parallel_calib is None:
-                from transformers import AutoTokenizer
+            from transformers import AutoTokenizer
 
-                tokenizer = AutoTokenizer.from_pretrained(
-                    staged, trust_remote_code=True
-                )
+            tokenizer = AutoTokenizer.from_pretrained(
+                staged, trust_remote_code=True
+            )
             offload_folder = str(work_dir / "streaming_offload")
             ctx = _build_streaming_context(
                 args.model,
@@ -5311,7 +4764,7 @@ def main():
                 log_prefix="[incremental]",
             )
             if use_persistent:
-                _PROBE_CTX_CACHE[(args.model, str(device), args.dtype)] = (
+                _PROBE_CTX_CACHE[context_key] = (
                     ctx, tokenizer)
         # calib is always per-call (different chunks have different data)
         if calib is None:
@@ -5378,26 +4831,8 @@ def main():
         # cache built with the flag off must not be reused with it on.
         emit_marginals=_marginals_enabled(),
     )
-    if args.sample_parallel_contract is not None:
-        precompute_meta["sample_parallel"] = dict(
-            args.sample_parallel_contract
-        )
-    if args.sample_parallel_importance is not None:
-        precompute_meta["sample_parallel_importance"] = dict(
-            args.sample_parallel_importance
-        )
-    if args.sample_parallel_activation_scope is not None:
-        precompute_meta["sample_parallel_activation_scope"] = dict(
-            args.sample_parallel_activation_scope
-        )
-    if args.sample_parallel_execution_identity is not None:
-        precompute_meta["sample_parallel_execution_identity"] = dict(
-            args.sample_parallel_execution_identity
-        )
-    if args.sample_parallel_qname_census is not None:
-        precompute_meta["sample_parallel_qname_census"] = dict(
-            args.sample_parallel_qname_census
-        )
+
+    precompute_meta["probe_reuse_inputs"] = dict(args.probe_reuse_inputs)
 
     def _ensure_precompute() -> GlobalPrecompute:
         """Load Phase-1/Phase-2 artifacts from the on-disk cache if the
@@ -5406,17 +4841,8 @@ def main():
         if precomputed is not None:
             return precomputed
         cached = (
-            None
-            if args.sample_importance_stats_output is not None
-            else _load_precompute_cache(
-                precompute_cache_path,
-                precompute_meta,
-                device,
-                sample_calibration=(
-                    calib if args.sample_parallel_contract is not None
-                    else None
-                ),
-            )
+            _load_precompute_cache(precompute_cache_path, precompute_meta, device)
+            if args.probe_reuse_inputs["dataset_sha256"] is not None else None
         )
         if cached is not None:
             print(f"[incremental/global] reused precompute cache at "
@@ -5439,30 +4865,6 @@ def main():
             resident_include_union=resident_include_union,
             resident_exclude=linear_exclude,
             activation_cache_dir=args.activation_cache_dir,
-            sample_parallel_contract=args.sample_parallel_contract,
-            sample_importance_stats_output=(
-                args.sample_importance_stats_output
-                if args.sample_parallel_contract is not None else None
-            ),
-            sample_importance_execution_sha256=(
-                args.sample_parallel_importance_execution_sha256
-                if args.sample_parallel_contract is not None else None
-            ),
-            sample_publication_postflight=(
-                lambda: _validate_sample_parallel_publication_state(
-                    model=args.model,
-                    qname_census=args.sample_parallel_qname_census,
-                    producer_snapshot_root=args.producer_snapshot_root,
-                    execution_identity=(
-                        args.sample_parallel_execution_identity
-                    ),
-                )
-                if args.sample_parallel_contract is not None else None
-            ),
-            body_global_ce_mean=(
-                float(args.sample_parallel_importance["body_global_ce_mean"])
-                if args.sample_parallel_importance is not None else None
-            ),
         )
         _save_precompute_cache(
             precompute_cache_path, precomputed, precompute_meta)
@@ -5470,58 +4872,15 @@ def main():
               f"{precompute_cache_path}", flush=True)
         return precomputed
 
-    if args.sample_importance_stats_output is not None:
-        # Stage 1 is a scalar-reduction barrier, not a probe-shard pass. Force
-        # it before any ordinary qname/LPS reuse checks; _compute exits after
-        # atomically writing the local CE summary.
-        try:
-            _ensure_precompute()
-        finally:
-            if ctx is not None and not use_persistent:
-                ctx.shutdown()
-        raise AssertionError("sample importance collection did not exit")
-
     # Linear-level reuse cache (LPS-invariant): union of per-Linear
     # Fisher stats from all existing shards that share the same
     # content-level meta (model, dataset, nsamples, seqlen, dtype,
-    # importance_weighting, activation_cache_dir). This lets the probe
-    # resume cleanly even when LAYERS_PER_SHARD changes between runs:
+    # importance_weighting, activation_cache_dir) and _CAPTURE_META_KEYS.
+    # This lets the probe resume cleanly when LAYERS_PER_SHARD changes:
     # a new shard's regex-matched Linears may already exist under
     # different shard groupings on disk, and we can synthesize the new
     # shard pickle from that cache rather than recompute.
-    content_meta_anchor = {
-        "model": args.model,
-        "dataset": args.dataset,
-        "nsamples": args.nsamples,
-        "seqlen": args.seqlen,
-        "dtype": args.dtype,
-        "requested_device": args.device,
-        "requested_device_map": str(args.device_map),
-        "importance_weighting": args.importance_weighting,
-        "activation_cache_dir": str(Path(args.activation_cache_dir)),
-        "linear_exclude": resolve_linear_exclude(args.model),
-        "h_detail_dir": (str(Path(args.h_detail_dir))
-                         if args.h_detail_dir else None),
-        "activation_rows_limit": int(args.activation_rows_limit),
-        "router_coverage_version": _ROUTER_COVERAGE_VERSION,
-        "emit_marginals": _marginals_enabled(),
-        "sample_parallel": (
-            dict(args.sample_parallel_contract)
-            if args.sample_parallel_contract is not None else None
-        ),
-        "sample_parallel_importance": (
-            dict(args.sample_parallel_importance)
-            if args.sample_parallel_importance is not None else None
-        ),
-        "sample_parallel_activation_scope": (
-            dict(args.sample_parallel_activation_scope)
-            if args.sample_parallel_activation_scope is not None else None
-        ),
-        "sample_parallel_execution_identity": (
-            dict(args.sample_parallel_execution_identity)
-            if args.sample_parallel_execution_identity is not None else None
-        ),
-    }
+    content_meta_anchor = _content_meta_anchor(expected_metas[0])
     linear_cache = scan_cached_linear_stats(shard_dir, content_meta_anchor)
     if linear_cache:
         print(f"[incremental] linear cache: {len(linear_cache)} stats pooled "
@@ -5621,14 +4980,6 @@ def main():
                     minimax_fast_moe_chunk_size=args.minimax_fast_moe_chunk_size,
                     activation_rows_limit=args.activation_rows_limit,
                     precomputed=pre,
-                    sample_parallel_contract=args.sample_parallel_contract,
-                    sample_parallel_execution_identity_sha256=(
-                        args.sample_parallel_execution_identity[
-                            "identity_sha256"
-                        ]
-                        if args.sample_parallel_execution_identity is not None
-                        else None
-                    ),
                 )
             elif kind == "mtp":
                 pre = _ensure_precompute()
@@ -5648,7 +4999,6 @@ def main():
                     prefetch_lookahead=_prefetch_lookahead(),
                     activation_rows_limit=args.activation_rows_limit,
                     precomputed=pre,
-                    sample_parallel_contract=args.sample_parallel_contract,
                 )
             elif kind == "lm_head":
                 # The lm_head Fisher is collected naturally during the
@@ -5673,7 +5023,6 @@ def main():
                     model_path=args.model,
                     prefetch_lookahead=_prefetch_lookahead(),
                     precomputed=pre,
-                    sample_parallel_contract=args.sample_parallel_contract,
                 )
             else:
                 # visual blocks are stripped by text-only staging, so the
@@ -5877,134 +5226,10 @@ def main():
     _meta["packed_fisher_estimator"] = "per_token_v2"
     _meta["emit_marginals"] = _marginals_enabled()
     _meta["activation_rows_limit"] = int(args.activation_rows_limit)
-    if args.sample_parallel_contract is not None:
-        # Promote the partition contract to one canonical top-level location.
-        # The per-qname shards also carry it under incremental_shard for
-        # resume safety; the cross-worker merger reads this copy without
-        # depending on the internal layer-shard grouping.
-        if calibration_data_hash(calib) != args.sample_parallel_contract[
-            "local_calibration_hash"
-        ]:
-            raise SystemExit(
-                "sample-parallel local calibration hash changed during probe"
-            )
-        _meta["sample_parallel"] = dict(args.sample_parallel_contract)
-        if args.sample_parallel_importance is not None:
-            _meta["sample_parallel_importance"] = dict(
-                args.sample_parallel_importance
-            )
-        _meta["sample_parallel_activation_scope"] = dict(
-            args.sample_parallel_activation_scope
-        )
-        _meta["sample_parallel_execution_identity"] = dict(
-            args.sample_parallel_execution_identity
-        )
-        probe_entries = args.sample_parallel_qname_census[
-            "probe_qname_manifest"
-        ]["entries"]
-        observed_qnames = set(str(name) for name in _merged.get("stats", {}))
-        expected_qnames = set(str(name) for name in probe_entries)
-        if observed_qnames != expected_qnames:
-            raise SystemExit(
-                "sample-parallel worker probe differs from the authoritative "
-                f"source qname census: missing={sorted(expected_qnames-observed_qnames)[:8]} "
-                f"unexpected={sorted(observed_qnames-expected_qnames)[:8]}"
-            )
-        try:
-            from prismaquant.sample_parallel_probe import token_rows_per_sample
-            from prismaquant.sample_parallel_probe_merge import (
-                validate_sample_parallel_stat_row,
-            )
-
-            for name in sorted(expected_qnames):
-                entry = probe_entries[name]
-                validate_sample_parallel_stat_row(
-                    _merged["stats"][name],
-                    qname=name,
-                    expected_tokens=(
-                        int(args.sample_parallel_contract["local_samples"])
-                        * token_rows_per_sample(
-                            str(entry["token_rows_per_sample"]),
-                            int(args.sample_parallel_contract["seqlen"]),
-                        )
-                    ),
-                    expected_shape=tuple(
-                        int(value) for value in entry["shape"]
-                    ),
-                    require_marginals=bool(_marginals_enabled()),
-                )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel worker stat postflight failed: {exc}"
-            ) from exc
-        for map_name in (
-            "router_counts", "router_totals", "router_active_counts",
-            "expert_route_stats", "expert_info",
-        ):
-            if _merged.get(map_name):
-                raise SystemExit(
-                    f"sample-parallel v1 rejects routed/packed map {map_name!r}"
-                )
-        expected_activation = set(
-            args.sample_parallel_qname_census[
-                "activation_qname_manifest"
-            ]["entries"]
-        )
-        try:
-            activation_entries = args.sample_parallel_qname_census[
-                "activation_qname_manifest"
-            ]["entries"]
-            activation_dir = Path(args.activation_cache_dir)
-            _validate_sample_activation_directory_cover(
-                activation_dir,
-                expected_activation,
-                require_complete=True,
-            )
-            for name in sorted(expected_activation):
-                _validate_sample_activation_blob(
-                    activation_dir / (
-                        re.sub(r"[^A-Za-z0-9_-]", "__", name) + ".pt"
-                    ),
-                    qname=name,
-                    expected_width=int(activation_entries[name]["shape"][1]),
-                    partition_contract=args.sample_parallel_contract,
-                    rows_limit=int(args.activation_rows_limit),
-                    execution_identity_sha256=str(
-                        args.sample_parallel_execution_identity[
-                            "identity_sha256"
-                        ]
-                    ),
-                )
-        except Exception as exc:
-            raise SystemExit(
-                f"sample-parallel worker activation postflight failed: {exc}"
-            ) from exc
-        # Close the source/runtime TOCTOU window immediately before the only
-        # durable worker publication.  The source identity-cache verifier
-        # replays mutation-sensitive shard fingerprints; the runtime verifier
-        # re-hashes the complete immutable source-snapshot ledger.
-        try:
-            _validate_sample_parallel_publication_state(
-                model=args.model,
-                qname_census=args.sample_parallel_qname_census,
-                producer_snapshot_root=args.producer_snapshot_root,
-                execution_identity=args.sample_parallel_execution_identity,
-            )
-        except Exception as exc:
-            raise SystemExit(
-                "sample-parallel source/runtime changed before publication: "
-                f"{exc}"
-            ) from exc
     _merged["meta"] = _meta
     output_payload = pickle.dumps(_merged, protocol=pickle.HIGHEST_PROTOCOL)
-    if args.sample_parallel_contract is not None:
-        from prismaquant.sample_parallel_probe import (
-            _atomic_write_bytes_no_clobber,
-        )
-        _atomic_write_bytes_no_clobber(Path(args.output), output_payload)
-    else:
-        from prismaquant.cost_stage_checkpoint import atomic_write_bytes
-        atomic_write_bytes(Path(args.output), output_payload)
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
+    atomic_write_bytes(Path(args.output), output_payload)
     print(f"[incremental] wrote merged probe to {args.output} "
           f"(calibration_modality={args.calibration_modality})", flush=True)
 

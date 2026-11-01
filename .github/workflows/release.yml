@@ -155,9 +155,9 @@ jobs:
       # staleness, paper claims, calibration-anchor source docs — and several
       # tests read prismaquant's own .py files as source text from a
       # repo-relative path. Those cannot pass from outside a checkout by
-      # construction, and forcing them to would mean weakening them. CI runs
-      # the full suite from the checkout on every push and PR, which is the
-      # right home for repo invariants; this job's job is to prove the
+      # construction, and forcing them to would mean weakening them. Main and
+      # manual CI runs cover the full checkout suite; PRs use the required
+      # composed PrismaBuild pb-tests gate. This job proves the
       # ARTIFACT is complete and usable.
       - name: Post-install checks
         working-directory: ${{ runner.temp }}

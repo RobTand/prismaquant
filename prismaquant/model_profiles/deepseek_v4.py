@@ -118,10 +118,9 @@ class DeepseekV4Profile(ModelProfile):
         # (`self_attn.compressor.{wkv,wgate}`,
         # `self_attn.indexer.{wkv,wgate,wq_b,weights_proj}` and the
         # indexer's inner compressor) are now visible to the probe's
-        # enumeration. They stay OUT of the inventory: the gridbook D0.1
-        # serve contract keeps them source-format (weights_proj is read
-        # via `.weight` directly; no CB loader exists for these leaves),
-        # the exporter charges them to the immutable floor, and on this
+        # enumeration. The profile keeps these leaves source-format and
+        # outside the selectable inventory; the exporter charges them to
+        # the immutable floor. On this
         # FP8-source checkpoint BF16 is masked model-wide, so an
         # inventory row here would carry zero legal candidates and trip
         # the allocator's coverage refusal. This restores the 33,325
@@ -138,7 +137,7 @@ class DeepseekV4Profile(ModelProfile):
         This is the inverse of `source_tensor_name`.
 
         Drops:
-          - MTP block (`mtp.0.*`) — handled by separate MTP synthesis
+          - MTP block (`mtp.0.*`) — preserved by source passthrough
           - `.weight_scale_inv` (legacy MiniMax-style FP8 sibling; DSv4
              uses `.scale` siblings handled via fp8_scale_pairs)
           - FP8 block-scale `.scale` siblings of `.weight` keys

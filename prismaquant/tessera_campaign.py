@@ -59,9 +59,42 @@ cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
+from .tessera_campaign_requests import (
+    CaptureJoinRequest, CapturePrepRequest, capture_chain_bookend_request,
+    CensusRequest, CaptureRequest, CaptureQuantum, census_request, streamed_calibration_request,
+    CampaignScopeRequest, campaign_scope_request,
+    AnchorPlacement, anchor_placement, LoadedCensusRequest, LoadedPricingRequest,
+    ResidentCampaignWeights, SelectedCampaignWeights, loaded_campaign_request,
+)
+
+from prismaquant import tessera_campaign_wire as campaign_wire
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant.tessera_campaign_table import (
+    CENSUS_SCHEMA,
+    CURRENCY,
+    CampaignAnchor,
+    ExpertPopulation,
+    SCHEMA,
+    STAGE,
+    StackSampleError,
+    campaign_population_block,
+    campaign_cost_payload,
+    parse_family_restriction,
+    select_anchor_groups,
+    selection_stack_samples,
+    parse_rate_band,
+    campaign_acquisition_row_scope,
+    requested_acquisition_schedule,
+    campaign_acquisition_origin,
+    require_campaign_acquisition_anchor,
+    expert_partition_members,
+)
+
+
 from contextlib import contextmanager
 
-import argparse
 import re
 import functools
 import json
@@ -73,9 +106,11 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 from .digests import (
     DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_SPACED_LAX,
     DIRECT_ASCII_STRICT,
     bytes_sha256hex,
     indent2_json_file_bytes,
@@ -87,7 +122,7 @@ if TYPE_CHECKING:
 
 from . import tessera_hessian as th
 from .nvfp4_activation_contract import (
-    ActivationScaleContractError as _OwnedActivationScaleContractError,
+    ActivationScaleContractError as _ActivationScaleContractError,
     ServedQuantizerUnboundError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
@@ -95,47 +130,29 @@ from .tessera_publication import PublicationJob
 from .schemas import strict_json_loads
 
 __all__ = [
-    "CENSUS_SCHEMA",
-    "EXIT_EMPTY_MENU",
-    "PINNED_ROSTER_SCHEMA",
-    "SCHEMA",
-    "UNITS_SCHEMA",
-    "UNITS_SCHEMA_V2",
-    "STACK_SAMPLE_COUNTS_SUFFIX",
-    "STACK_SAMPLE_SIZE_SOURCES",
-    "CampaignAnchor",
-    "CampaignRoster",
-    "ExpertPopulation",
-    "anchor_group_key",
-    "anchor_schedule",
-    "audit_subsample",
-    "calibration_census",
-    "campaign_cost_payload",
-    "campaign_population_block",
-    "campaign_roster",
-    "census_max_abs",
-    "census_token_counts",
-    "contract_source_label",
-    "draw_stack_sample",
-    "load_calibration_census",
-    "load_unit_selection",
-    "selection_stack_samples",
-    "main",
-    "next_anchor_rate",
-    "pinned_roster_block",
-    "report_empty_menus",
-    "require_census_draw",
-    "resolve_anchor_groups",
-    "round_one_rates",
-    "select_anchor_groups",
-    "write_export_inputs",
+    'EXIT_EMPTY_MENU',
+    'GLM_ATTENTION_ALLOW_PINNED',
+    'PINNED_ROSTER_SCHEMA',
+    'CampaignRoster',
+    'anchor_group_key',
+    'anchor_schedule',
+    'calibration_census',
+    'campaign_roster',
+    'campaign_checkpoint_identity',
+    'census_max_abs',
+    'census_token_counts',
+    'contract_source_label',
+    'load_calibration_census',
+    'main',
+    'next_anchor_rate',
+    'pinned_roster_block',
+    'report_empty_menus',
+    'require_census_draw',
+    'resolve_anchor_groups',
+    'round_one_rates',
+    'write_export_inputs',
 ]
 
-SCHEMA = "prismaquant.tessera_campaign_cost.v1"
-
-#: The currency every row is measured or interpolated in.  Named, because the
-#: allocator's cost-source precedence reads a field, not a convention.
-CURRENCY = "output_mse_under_route_activation_contract"
 
 #: The stream head's journal before finalize (PQ #1403), beside the checkpoint
 #: and never inside ``<checkpoint>.parts``: a present checkpoint means a run
@@ -151,44 +168,6 @@ STREAM_JOURNAL_RECEIPT = "bound per unit in its stream journal shard"
 #: manifest does not record. It equals no receipt, so ``prepare_journal``
 #: refuses that manifest by the field's name (PQ #1613).
 CHECKPOINT_RECEIPT_ABSENT = "absent from the checkpoint manifest"
-
-#: Round 1's anchors: both endpoints plus the middle.  The endpoints are
-#: mandatory rather than chosen -- a surface that does not span its family's
-#: legal range would have to extrapolate to price the ends, and
-#: ``TesseraRateSurface.predict`` refuses that.  Three is the minimum at which
-#: leave-one-anchor-out has anything to drop.
-ROUND_ONE_ANCHORS = 3
-
-
-@dataclass(frozen=True)
-class CampaignAnchor:
-    """One measured (unit, family, rung) point."""
-
-    qname: str
-    family: str
-    format_name: str
-    body_rate_q256: int
-    dloss: float
-    dloss_stderr: float
-    memory_bytes: int
-    bits_per_param: float
-    activation_contract: str
-    activation_quantized: bool
-    wire_bytes: int
-    #: Encoding wall time; joined batches apportion it equally among units.
-    seconds: float
-    #: Was a Hessian actually applied to these bytes? Admission comes from the
-    #: producer's ActivationSource settings for this rung's scale plane, via
-    #: rung_accepts_hessian, not a campaign-owned plane roster. Stamped per
-    #: measured row so weights-only and H-aware results cannot be conflated.
-    hessian_applied: bool = False
-    #: The static NVFP4 ``input_global_scale`` this anchor's A side was scored
-    #: under, when the rung's route executes the static UE4M3 contract; None
-    #: on every other route.  Carried per row so the price's activation
-    #: identity survives into the cost table beside the Hessian identity.
-    input_global_scale: "float | None" = None
-    encoding_batch_size: int = 1
-
 
 def anchor_schedule(lo: int, hi: int, count: int) -> list[int]:
     """``count`` rungs spanning ``[lo, hi]``, endpoints included.
@@ -207,61 +186,6 @@ def anchor_schedule(lo: int, hi: int, count: int) -> list[int]:
     out = sorted({int(round(lo + i * step)) for i in range(count)})
     out[0], out[-1] = lo, hi
     return sorted(set(out))
-
-
-def parse_rate_band(text) -> "tuple[int, int] | None":
-    """CLI ``"lo,hi"`` or a strict integer provenance pair, in q256 units."""
-    if text is None or str(text).strip() == "":
-        return None
-    if isinstance(text, (list, tuple)):
-        if len(text) != 2 or any(type(value) is not int for value in text):
-            raise RuntimeError(f"--rate-band {text!r}: want two integer q256 values")
-        parts = text
-    else:
-        parts = str(text).split(",")
-    if len(parts) != 2:
-        raise RuntimeError(f"--rate-band {text!r}: want 'lo,hi' in q256 units")
-    try:
-        lo, hi = int(parts[0]), int(parts[1])
-    except ValueError as exc:
-        raise RuntimeError(f"--rate-band {text!r}: not two integers") from exc
-    if lo <= 0 or hi <= 0 or lo > hi:
-        raise RuntimeError(f"--rate-band {text!r}: want 0 < lo <= hi")
-    return lo, hi
-
-
-FAMILY_RESTRICTION_SCHEMA = "prismaquant.tessera_campaign_family_restriction.v1"
-
-
-def parse_family_restriction(value):
-    """Canonical opt-in pricing scope; it grants no reader or serving support."""
-    if value is None:
-        return None
-    from .tessera_formats import get_tessera_family
-
-    if isinstance(value, str):
-        value = strict_json_loads(value, duplicate=lambda key: ValueError(
-            f"family restriction repeats field {key!r}"))
-    if not isinstance(value, Mapping) or set(value) != {"schema", "dense", "routed_moe"}:
-        raise ValueError("family restriction requires exactly schema, dense and routed_moe")
-    if value["schema"] != FAMILY_RESTRICTION_SCHEMA:
-        raise ValueError("family restriction has an unsupported schema")
-    result = {"schema": FAMILY_RESTRICTION_SCHEMA}
-    for structure in ("dense", "routed_moe"):
-        names = value[structure]
-        if not isinstance(names, list) or not names or any(not isinstance(n, str) for n in names):
-            raise ValueError(f"family restriction {structure} requires a nonempty family list")
-        if len(set(names)) != len(names):
-            raise ValueError(f"family restriction {structure} repeats a family")
-        for name in names:
-            try:
-                family = get_tessera_family(name)
-            except (ValueError, KeyError) as exc:
-                raise ValueError(f"family restriction has unknown family {name!r}") from exc
-            if family.name != name:
-                raise ValueError(f"family restriction requires canonical family name {name!r}")
-        result[structure] = sorted(names)
-    return result
 
 
 def _unit_family_names(name, restriction, structure_by_unit):
@@ -410,577 +334,6 @@ def next_anchor_rate(
     return None
 
 
-# ---------------------------------------------------------------------------
-# Measurement
-# ---------------------------------------------------------------------------
-
-class ActivationScaleContractError(_OwnedActivationScaleContractError):
-    """A static-activation-contract rung has no calibrated input scale.
-
-    Its own class for the same reason ``HessianContractError`` has one: the
-    anchor loop absorbs per-anchor failures with ``except Exception:
-    continue``, and a scale-contract refusal is about every W4A4 row this run
-    would write, not about one anchor.  Falling back to the registry's dynamic
-    FP32-scale quantiser instead would price an activation regime the serve
-    does not execute -- exactly the defect this refusal exists to make loud
-    (RobTand/prismaquant#194).
-
-    The same refusal, raised by the assignment-KL hooks and the production
-    cache scorer, is the owner's
-    ``nvfp4_activation_contract.ActivationScaleContractError``; this is that
-    class under the campaign's historical name (#205), so a caller catching
-    either sees one contract error.
-    """
-
-
-def _encode_and_render(weight, format_name: str, *, activation_kwargs=None,
-                       hessian_required: bool = True, recipe=None):
-    """``(render, blob)`` for one rung: the bytes, and what they decode to.
-
-    A thin adapter over ``tessera_render.encode_tessera_unit``, which is the
-    shared scalar/batch adapter that calls Tessera's byte path.  Everything
-    that made this function worth having -- the render is
-    ``read_unit_artifact(blob)``, i.e. the bytes decoded rather than a second
-    reconstruction (principle 8), and ``verify=False`` because the tensor
-    ``verify`` would compare against is one nothing downstream sees -- now
-    lives there, so a caller cannot reach the encoder around it and skip the
-    Hessian contract.
-    """
-    from .tessera_render import encode_tessera_unit
-
-    return encode_tessera_unit(
-        weight, format_name,
-        activation_kwargs=activation_kwargs,
-        hessian_required=bool(hessian_required), verify=False,
-        recipe=recipe,
-    )
-
-
-def _activation_kwargs_memo(source, weights, device, *, max_entries=None,
-                            resource_check=None, factor_scratch_bytes=0):
-    """The campaign's existing plane-keyed memo, with an explicit owner bound."""
-    if max_entries is not None and (type(max_entries) is not int or max_entries < 1):
-        raise ValueError('encoder memo capacity must be positive or unbounded')
-
-    @functools.lru_cache(maxsize=max_entries)
-    def for_unit(name, scale_plane):
-        if resource_check is not None:
-            resource_check('before_selected_encoder_factors:'+name,
-                           reserve_bytes=factor_scratch_bytes)
-        kwargs = th.encoder_kwargs(source, name, int(weights[name].shape[1]),
-                                   device, scale_plane=scale_plane)
-        if resource_check is not None:
-            resource_check('after_selected_encoder_factors:'+name)
-        return kwargs
-
-    return for_unit
-
-
-def _measure_anchor(
-    *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
-    activation_kwargs_for=None, hessian_required: bool = True,
-    static_input_scale: "float | None" = None, publisher=None,
-    structure: "str | None" = None, profile=None,
-):
-    """Render one rung, price it as served, and store the wire beside it.
-
-    ``structure`` is the unit's serving structure (``dense``/``routed_moe``)
-    when the run declares one; the wire is then the one that structure is
-    served on (``tessera_served_wire_recipe``, #1502), not the research table.
-
-    ``static_input_scale`` is the unit's calibrated NVFP4
-    ``input_global_scale`` (fused-sibling unified), required whenever the
-    rung's route executes the static UE4M3 activation contract and ignored on
-    every other route.  The refusal for a missing one runs BEFORE the encode,
-    because the encode is the expensive half and the refusal is about the
-    whole run.
-
-    ``activation_kwargs_for`` is a callable ``(qname, scale_plane) -> encoder
-    kwargs`` -- the block-LDL of that unit's regularised ``XᵀX`` and the
-    plane's refit metric -- which the caller memoises per ``(unit, plane)``.
-    Per unit alone would be wrong and silently so: the refit objective is keyed
-    by scale plane, so a memo that ignored the plane would price a unit's
-    second family under the first family's objective.  Per rung would be
-    wasteful: no rate reaches that call, and a twelve-anchor surface would
-    otherwise factorise the same Hessian twelve times.  The plane is constant
-    across every rung of a family and differs between families, so the bound is
-    one factorisation per unit per family-plane while retained. Selected
-    source campaigns bound the memo to the compatible anchor batch width.
-
-    A **missing key is a hard failure**, never a silently H-free encode: this
-    codebase has already been bitten once by a render whose activation lookup
-    missed and quietly fell back to RTN, raising nothing, and an H-free encode
-    of a rung whose shipping bytes are H-aware is exactly that bug with
-    different bytes.
-    """
-    prepared = _prepare_anchor(
-        qname=qname, format_name=format_name,
-        activation_kwargs_for=activation_kwargs_for,
-        hessian_required=hessian_required, static_input_scale=static_input_scale,
-        structure=structure, profile=profile)
-    started = time.time()
-    render, blob = _encode_and_render(
-        weight, format_name, recipe=prepared["wire"],
-        activation_kwargs=prepared["activation_kwargs"],
-        hessian_required=prepared["hessian_required"])
-    return _finish_anchor(qname=qname, weight=weight, activations=activations,
-        format_name=format_name, cache=cache, wire_dir=wire_dir,
-        prepared=prepared, render=render, blob=blob, elapsed=time.time() - started,
-        publisher=publisher, profile=profile)
-
-
-#: The context the campaign's pricing seam names when it binds the served
-#: activation quantiser (RobTand/prismaquant#1481).
-SERVED_QUANTIZER_CONTEXT = "Stage A Tessera campaign activation pricing"
-
-#: The identity record this process bound through the owner, or ``None`` when
-#: the campaign bound nothing itself. Stamped into the cost table's provenance.
-_SERVED_QUANTIZER_RECORD = None
-
-
-def _bind_served_quantizer(qname, format_name):
-    """Bind the served activation arithmetic before this rung is scored.
-
-    A rung whose route executes the static NVFP4 activation contract is priced
-    by vLLM's registered ``scaled_fp4_quant``, and the contract refuses to price
-    it unbound (RobTand/prismaquant#567). Until #1481 nothing on the campaign
-    path bound it, so every A4 rung raised ``ServedQuantizerUnboundError``.
-
-    The rule has one owner, ``joint_cost_quantum.bind_joint_served_quantizer``,
-    which Stage B already calls; this seam calls it too. It requires the
-    registered operator for a served contract, never falls back to the Torch
-    model, and binds nothing for A8/A16 rungs, so those rosters never import the
-    serving extension.
-
-    A process that already holds a binding keeps it. Either an earlier rung of
-    this run bound it, or a CPU screen declared the model on purpose
-    (``tests/priced_model_screen.py``). The owner would refuse a second,
-    different binding anyway, so re-asking could only turn a declared choice
-    into a refusal.
-    """
-    global _SERVED_QUANTIZER_RECORD
-    from .nvfp4_activation_contract import active_served_quantizer_identity
-    from .joint_cost_quantum import bind_joint_served_quantizer
-
-    if active_served_quantizer_identity() is not None:
-        return
-    record = bind_joint_served_quantizer(
-        {qname: (format_name,)}, context=SERVED_QUANTIZER_CONTEXT)
-    if record is not None:
-        _SERVED_QUANTIZER_RECORD = dict(record)
-        print(f"[campaign] served quantizer bound for {format_name}: backend "
-              f"{record.get('backend')} op {record.get('op')} image "
-              f"{record.get('image_content_sha256')} dequant "
-              f"{record.get('dequant_kernel')}", flush=True)
-
-
-def _is_glm_direct_consumer_profile(profile) -> bool:
-    """Use the declared architecture before the undeclared profile identity."""
-    if profile is None:
-        return False
-    architectures = profile.declared_architectures()
-    if architectures:
-        return architectures == ("Glm5NextForConditionalGeneration",)
-    return profile.name == "glm5_next"
-
-
-def _direct_consumer_activation_contract(qname, *, profile):
-    source = qname.removesuffix(".weight")
-    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
-        return None
-    if profile is None:
-        raise ActivationScaleContractError(
-            f"{qname}: a direct-consumer leaf needs the run profile to bind "
-            "its activation contract; profile=None drops the GLM a16/a32 "
-            "contract silently, so it refuses instead.")
-    if not _is_glm_direct_consumer_profile(profile):
-        return None
-    from tessera.serving.dense_ownership import fused_module, role_name
-    from tessera.serving.projection_routes import direct_consumer_activation_contract
-    tensor = source + ".weight"
-    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
-    return direct_consumer_activation_contract(source if fused is None else fused[0], role_name(tensor))
-
-
-def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
-                    hessian_required, static_input_scale, structure=None, profile=None):
-    """Admit each unit's Hessian and served activation contract before encode."""
-    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
-    if direct_contract is None:
-        _bind_served_quantizer(qname, format_name)
-    from . import format_registry as fr
-    from .tessera_formats import (
-        parse_tessera_format_name, tessera_served_wire_recipe, tessera_serving_route,
-    )
-    from .tessera_render import HessianContractError
-
-    from .tessera_render import rung_accepts_hessian
-
-    spec = fr.get_format(format_name)
-    family, rung = parse_tessera_format_name(format_name)
-    # ONE resolve for this anchor. The plane the kwargs are built on, the plane
-    # the predicate reads and the plane the encode writes are this object --
-    # not three lookups that agree only while nothing clears the recipe memo.
-    # It is the wire this unit's STRUCTURE is served on (#1502): a routed
-    # E2M1x2 stack below the cap ships span-2 TCQ, not the research WINDOW
-    # recipe, and a structure the pinned contract attests no wire for refuses
-    # here rather than pricing bytes the serve cannot read.
-    wire = tessera_served_wire_recipe(family, rung, structure=structure)
-    # The A side, as served.  A route with a STATIC activation contract
-    # executes vLLM's static-global-scale ``scaled_fp4_quant`` (UE4M3 block
-    # scales) against the artifact's ``trellis_input_global_scale``; every
-    # other route keeps the serving format's own dynamic quantiser, taken by
-    # reference from the spec.
-    #
-    # WHICH of the two is the SPEC's answer, never a compare of the route's
-    # source-format name against ``"NVFP4"`` (#205's rule, #221's fix): the
-    # spec resolved above already carries the contract, because
-    # ``synthesize_tessera_spec`` derived it from the registry row the route
-    # names.  A Tessera rung routed through the same kernel has the same
-    # contract and a different name, and the day a second registry row gets a
-    # contract, a name compare here would price it under a quantiser the
-    # runtime never runs while the cache scorer and the KL hooks -- which
-    # already read the row -- refuse the same unit.
-    route = tessera_serving_route(family, wire, rung)
-    contract = spec.static_activation_contract
-    if contract is not None:
-        if static_input_scale is None or not float(static_input_scale) > 0:
-            raise ActivationScaleContractError(
-                f"{qname} {format_name}: this rung's route executes the "
-                f"static activation contract {contract.execution} "
-                f"({route.contract}) and no calibrated input_global_scale was "
-                "supplied. Scoring it with the registry's dynamic FP32-scale "
-                "quantiser would price an activation regime the serve does "
-                "not execute; a lookup that misses must refuse, not fall back."
-            )
-        input_scale = float(static_input_scale)
-        # The contract's own oracle, not a second spelling of it.
-        activation_qdq = (
-            lambda x: contract.quantize_dequantize(x, input_scale))
-    else:
-        input_scale = None
-        activation_qdq = spec.activation_quantize_dequantize
-    if direct_contract is not None:
-        activation_qdq = fr.get_format("BF16").activation_quantize_dequantize
-    activation_kwargs = None
-    # Whether an H can be applied is a property of the RUNG'S WIRE, not of the
-    # run, and it is DERIVED from what the pinned ActivationSource emits for
-    # that wire's plane rather than restated here (``rung_accepts_hessian``).
-    # It reads True on every plane PrismaQuant resolves at this pin.
-    hessian_required = bool(hessian_required) and rung_accepts_hessian(
-        format_name, wire)
-    if hessian_required:
-        if activation_kwargs_for is None:
-            raise HessianContractError(
-                f"{qname}: hessian_required=True but no activation-kwargs "
-                "source was passed to _measure_anchor")
-        activation_kwargs = activation_kwargs_for(qname, wire.scale_plane)
-        if not activation_kwargs:
-            raise HessianContractError(
-                f"{qname}: no Hessian for this Linear. A lookup that misses "
-                "must not fall through to a weights-only encode.")
-    return dict(spec=spec, family=family, rung=rung, wire=wire, structure=structure,
-                activation_qdq=activation_qdq, input_scale=input_scale,
-                activation_contract=direct_contract or str(spec.act_dtype_name or "a16"),
-                activation_kwargs=activation_kwargs,
-                hessian_required=hessian_required)
-
-
-def _direct_consumer_memory_bytes(qname, family, shape, *, profile):
-    """Charge each direct cache once through its source member."""
-    source = qname.removesuffix(".weight")
-    if not source.endswith((".self_attn.kv_b_proj", ".self_attn.indexer.weights_proj")):
-        return 0
-    if not _is_glm_direct_consumer_profile(profile):
-        return 0
-    from tessera.serving.dense_ownership import fused_module, role_name
-    from tessera.serving.projection_routes import direct_consumer_resident_bytes
-    from tessera.serving.scheme import ROUTES
-    tensor = source + ".weight"
-    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
-    owner = source if fused is None else fused[0]
-    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
-    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
-    rows, columns = map(int, shape)
-    extra = direct_consumer_resident_bytes(owner, route_family, rows, columns,
-                                           [(role_name(tensor), rows)])
-    return extra["resident_bytes_resident_mode"]
-
-
-def _direct_consumer_render(blob, qname, family, device):
-    """Use the runtime owner's direct decoder for the priced source unit."""
-    from tessera.serving.dense_ownership import fused_module, role_name
-    from tessera.serving.projection_routes import direct_consumer_weight
-    from tessera.serving.scheme import ROUTES
-    tensor = qname.removesuffix(".weight") + ".weight"
-    fused = fused_module(tensor, "Glm5NextForConditionalGeneration")
-    owner = tensor.removesuffix(".weight") if fused is None else fused[0]
-    grid = family.base + (f"x{family.arity}" if family.arity > 1 else "")
-    route_family = next(label for label, route in ROUTES.items() if grid in route["grids"])
-    return direct_consumer_weight(blob, owner, role_name(tensor), route_family, device=str(device))
-
-
-def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
-                   prepared, render, blob, elapsed, encoding_batch_size=1,
-                   publisher=None, profile=None):
-    """Score decoded bytes and publish the existing cache/wire entries.
-
-    ``publisher``, when given, is a
-    :class:`~prismaquant.tessera_publication.BoundedPublisher` that performs
-    the two writes on its own thread instead of here.  The bytes handed to it
-    are the same bytes and the writes are the same calls; what moves is only
-    which thread runs them, and the caller then owes the completion an
-    ordering rule -- the anchor is not journalled until its files exist.  With
-    no publisher this function is what it has always been, line for line.
-    """
-    import torch
-    from .production_weight_cache import (
-        _canonical_rendered_weight_tensor, _local_forward_render_score,
-        _store_rendered_weight_entry)
-
-    spec, family, rung = (prepared[key] for key in ("spec", "family", "rung"))
-    activation_qdq, input_scale = (prepared[key] for key in (
-        "activation_qdq", "input_scale"))
-    direct_contract = _direct_consumer_activation_contract(qname, profile=profile)
-    preserve_fp32 = direct_contract == "a32"
-    cache_dtype = torch.float32 if preserve_fp32 else torch.bfloat16
-    if direct_contract is not None:
-        render = _direct_consumer_render(blob, qname, family, weight.device)
-    publication_bytes = render.numel() * (4 if preserve_fp32 else 2) + len(blob)
-    score, metric, quantized, _clipped = _local_forward_render_score(
-        reference_weight=weight,
-        rendered_weight=render,
-        activations=activations,
-        activation_quantize=activation_qdq,
-        # No pre-clip on top: the static route's clamp lives inside the served
-        # oracle (``nvfp4_activation_qdq_served`` clamps at the stored UE4M3
-        # scale), and the dynamic routes have no calibrated clip at all.
-        activation_max_abs=None,
-    )
-    if metric != "output_mse":
-        raise RuntimeError(f"unexpected render-score metric {metric!r}")
-    hessian_applied = bool(prepared["activation_kwargs"])
-
-    # Room first, then the bytes.  The copy below is a new host allocation the
-    # writer will own, so the budget has to admit it BEFORE it exists: charging
-    # it after the fact would leave this thread holding one artifact more than
-    # the bound allows, every time the writer is behind.  The size is known
-    # without a copy: the declared cache dtype sets each element's bytes.
-    if publisher is not None:
-        publisher.reserve(publication_bytes)
-    try:
-        # The device-to-host copy stays on the thread that owns the device
-        # work, whichever way the bytes are written.
-        # ``_store_rendered_weight_entry`` canonicalises again below and that
-        # second call is an identity on a CPU tensor already in the target
-        # dtype and contiguous, so the synchronous path stores the same object
-        # it always stored.  Staging it here is what gives the writer thread
-        # bytes nobody else owns.
-        staged = _canonical_rendered_weight_tensor(
-            render, weight_dtype=cache_dtype, preserve_fp32=preserve_fp32)
-    except BaseException:
-        if publisher is not None:
-            publisher.release(publication_bytes)
-        raise
-    # The wire, beside the render.  A ``.tessera`` shard per (qname, rung),
-    # named the way the cache names its weight shards, so the export leg can
-    # find the exact bytes this row was priced on instead of re-encoding.
-    wire_path = _wire_path(wire_dir, qname, format_name)
-
-    def _publish():
-        # Check on the writer thread as well as at batch admission, so queued
-        # publications see every earlier durable coordinate before any write.
-        _require_injective_anchor_filenames(
-            cache, wire_dir, ((qname, format_name),))
-        _store_rendered_weight_entry(
-            weights=cache.weights,
-            qname=qname,
-            fmt=format_name,
-            tensor=staged,
-            cache_dir_path=Path(cache.cache_dir) if cache.cache_dir else None,
-            weight_dtype=cache_dtype, preserve_fp32=preserve_fp32,
-        )
-        tmp = wire_path.with_suffix(".tessera.tmp")
-        tmp.write_bytes(blob)
-        os.replace(tmp, wire_path)
-        _campaign_wire_coordinates(cache, wire_dir).add((qname, format_name))
-        if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
-            # The existing PWC entry is already disk-backed. Completed anchor
-            # files must not accumulate an unbounded page-cache owner across
-            # rungs. The release helper checks the entry's identity, fsyncs
-            # and advises it from its own descriptor. No verification consumes
-            # a second hash of these completed files here.
-            from .perturbed_x_cache import release_activation_cache_file_pages
-            rendered_path = Path(cache.cache_dir)/cache.weights[(qname, format_name)]
-            for path in (rendered_path, wire_path):
-                release_activation_cache_file_pages(path, expected_stat=path.stat())
-
-    if publisher is None:
-        _publish()
-    else:
-        # The reservation above was taken for exactly these bytes; the
-        # The selected direct head cache keeps FP32; other caches keep BF16.
-        publisher.submit(PublicationJob(
-            key=(FILES_JOB, qname, format_name),
-            charged_bytes=publication_bytes,
-            publish=_publish,
-        ))
-
-    bits = spec.bits_for_shape(tuple(weight.shape))
-    return CampaignAnchor(
-        qname=qname,
-        family=family.name,
-        format_name=format_name,
-        body_rate_q256=int(rung),
-        dloss=float(score),
-        # One calibration draw: the stderr a single measurement supports is
-        # zero, and inventing one would put a fabricated uncertainty into the
-        # allocator's UCB hedge.  Reported as zero and named as such.
-        dloss_stderr=0.0,
-        memory_bytes=(int(spec.memory_bytes_for_shape(tuple(weight.shape)))
-                      + _direct_consumer_memory_bytes(qname, family, weight.shape, profile=profile)),
-        bits_per_param=float(bits) / max(1, int(weight.numel())),
-        activation_contract=prepared.get("activation_contract", str(spec.act_dtype_name or "a16")),
-        activation_quantized=bool(quantized),
-        wire_bytes=len(blob),
-        seconds=elapsed,
-        hessian_applied=hessian_applied,
-        input_global_scale=input_scale,
-        encoding_batch_size=encoding_batch_size,
-    )
-
-
-def _measure_anchor_batch(*, qnames, weights, activations, format_name,
-                          cache, wire_dir, activation_kwargs_for=None,
-                          hessian_required=True, static_input_scales=None,
-                          publisher=None, structures=None, profile=None):
-    """One producer batch, with the scalar path's per-unit gates and storage.
-
-    ``structures`` maps a unit to its serving structure, as ``structure`` does
-    for :func:`_measure_anchor`; a unit it does not name declares none.
-    """
-    from .tessera_render import encode_tessera_units
-
-    if not qnames or len(set(qnames)) != len(qnames):
-        raise ValueError("anchor batch needs distinct nonempty unit names")
-    if len(weights) != len(qnames) or len(activations) != len(qnames):
-        raise ValueError("anchor batch needs one weight and activation input per unit")
-    prepared = [_prepare_anchor(
-        qname=name, format_name=format_name,
-        activation_kwargs_for=activation_kwargs_for,
-        hessian_required=hessian_required,
-        static_input_scale=(static_input_scales or {}).get(name),
-        structure=(structures or {}).get(name), profile=profile) for name in qnames]
-    # The producer call takes ONE recipe and ONE Hessian requirement for the
-    # whole batch, from its first entry.  Both derive from (family, rung,
-    # structure) only, so a batch built by ``_anchor_batches`` agrees by
-    # construction; a batch
-    # that does not would encode some unit under another unit's recipe, and is
-    # refused rather than priced.
-    for name, entry in zip(qnames[1:], prepared[1:]):
-        if (entry["wire"] != prepared[0]["wire"]
-                or entry["hessian_required"] != prepared[0]["hessian_required"]):
-            raise ValueError(
-                f"anchor batch {format_name}: {name} prepares a different wire "
-                f"recipe or Hessian requirement than {qnames[0]}")
-    _require_injective_anchor_filenames(
-        cache, wire_dir, ((name, format_name) for name in qnames))
-    started = time.time()
-    encoded = encode_tessera_units(
-        weights, format_name, recipe=prepared[0]["wire"],
-        activation_kwargs=[entry["activation_kwargs"] for entry in prepared],
-        hessian_required=prepared[0]["hessian_required"])
-    # Batch wall time is apportioned, not attributed as a measured per-unit
-    # duration. Summing anchor.seconds still reports the actual encoding time.
-    elapsed = (time.time() - started) / len(qnames)
-    return [_finish_anchor(qname=name, weight=weight, activations=acts,
-        format_name=format_name, cache=cache, wire_dir=wire_dir, prepared=entry,
-        render=render, blob=blob, elapsed=elapsed,
-        encoding_batch_size=len(qnames), publisher=publisher, profile=profile)
-        for name, weight, acts, entry, (render, blob) in zip(
-            qnames, weights, activations, prepared, encoded)]
-
-
-def _anchor_batches(pending, *, weights, batch_size, structures=None):
-    """Bound compatible encodes inside this action; never assign hosts.
-
-    Membership is by ``(family, rung, structure, shape, dtype, device)`` for
-    every unit, dense or projected expert.  A unit's wire recipe and Hessian
-    requirement are functions of ``(family, rung, structure)`` alone
-    (``_prepare_anchor``; structure since #1502, because a routed E2M1x2 stack
-    below the cap is served on another wire than a dense unit), and the
-    joined producer call is column-independent, so a dense unit joins
-    same-shape units of other groups exactly as an expert joins its stack.
-    Dense units used to be keyed by ``(unit, family, rung)``, which kept every
-    dense encode at batch one: a long serial chain of narrow Viterbi calls at
-    about 25 W of the 140 W envelope (RobTand/prismaquant#1479).  The ORDER of
-    the batches is unit-major: the batches of one compatible key differ only
-    by rung, and the chunk at one position holds the same members at every
-    rung when the round pended every member at every rate (round one does,
-    per member in rate order), so consecutive batches encode the same units
-    at successive rungs.  The encoder memo is sized to the batch width
-    (``encoder_memo_capacity``), so that order is what lets a unit's block-LDL
-    factorization be reused across its rungs instead of refactorized once per
-    (unit, rung) with 864 batches of other units in between
-    (RobTand/prismaquant#389).  Rung-major emission -- every batch of rung A,
-    then every batch of rung B -- is what the insertion-ordered grouping
-    produced before, and with the memo at the batch width it hit nothing.
-    """
-    if batch_size < 1:
-        raise ValueError("anchor batch size must be positive")
-    if batch_size == 1:
-        return [[item] for item in pending]
-    groups = {}
-    for item in pending:
-        name, family, rung = item
-        weight = weights[name]
-        # A ``meta`` placeholder is a host weight the row stream has not read
-        # yet (PQ #1654); it batches exactly as the host copy it stands for.
-        base = (family, (structures or {}).get(name), tuple(weight.shape),
-                weight.dtype, _host_device() if weight.is_meta else weight.device)
-        key = (family, rung, *base[1:])
-        groups.setdefault(key, (base, []))[1].append(item)
-    # Sort key: the base (the key minus its rung) in first-appearance order,
-    # then the chunk position, then the rung in first-appearance order -- so
-    # chunk 0 of every rung of one base precedes chunk 1 of any of them.
-    base_rank, key_rank, chunks = {}, {}, []
-    for key, (base, group) in groups.items():
-        base_rank.setdefault(base, len(base_rank))
-        key_rank[key] = len(key_rank)
-        for position, start in enumerate(range(0, len(group), batch_size)):
-            chunks.append(((base_rank[base], position, key_rank[key]),
-                           group[start:start + batch_size]))
-    chunks.sort(key=lambda chunk: chunk[0])
-    return [batch for _rank, batch in chunks]
-
-
-def _stale_served_wire(anchor, record, *, structure) -> "str | None":
-    """Why a resumed row's receipt names a wire ``structure`` is not served on.
-
-    ``None`` when the receipt's stamped recipe is the served recipe for the
-    row's rung, or when the receipt carries no readable recipe (the full
-    identity check that follows refuses those).  Only a receipt whose recipe
-    is readable and differs is stale; every other disagreement stays a
-    refusal of the whole resume.
-    """
-    if structure is None:
-        return None
-    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
-
-    stamped = ((record or {}).get("identity") or {}).get("recipe")
-    parsed = parse_tessera_format_name(anchor.format_name)
-    if not isinstance(stamped, dict) or parsed is None:
-        return None
-    family, rung = parsed
-    served = tessera_served_wire_recipe(family, rung, structure=structure,
-                                        refuse_unattested=False).to_config()
-    observed = {key: value for key, value in stamped.items() if key not in ("grid", "q256")}
-    if observed == served:
-        return None
-    return (f"{anchor.format_name}: receipt stamped {observed}, but a {structure} unit is "
-            f"served on {served} at this rung (#1502); re-priced, not adopted")
-
-
 def _load_campaign_acquisition(args, parser):
     """Authenticate opt-in work before any campaign preparation has side effects."""
     binding = (args.acquisition_request, args.acquisition_request_sha256)
@@ -1006,58 +359,7 @@ def _load_campaign_acquisition(args, parser):
     return load_joint_campaign_acquisition(binding={"path": binding[0], "sha256": binding[1]})
 
 
-def _campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
-    """Require every real atomic member and exactly the requested scope."""
-    requests, sources = acquisition["requests"], acquisition["source_weights"]
-    flat = [name for members in scope_groups.values() for name in members]
-    known = set(flat)
-    if len(flat) != len(known):
-        raise ValueError("acquisition actual atomic scope overlaps or repeats members")
-    if not requests or set(requests) - known:
-        raise ValueError("acquisition names empty or unknown unit scope")
-    keys = [key for key, members in sorted(scope_groups.items()) if set(members) & set(requests)]
-    expanded = {name for key in keys for name in scope_groups[key]}
-    if set(requests) != expanded or set(sources) != expanded:
-        raise ValueError("acquisition requires request and source identity for every atomic member")
-    if selected is not None and set(selected) != expanded:
-        raise ValueError("acquisition selected scope differs from requested atomic-expanded scope")
-    return keys, expanded
-
-
-def _campaign_acquisition_row_scope(acquisition, scope_groups, *, selected=None):
-    """Project only an explicit complete actual --units selection after full validation."""
-    keys, expanded = _campaign_acquisition_scope(acquisition, scope_groups)
-    if selected is None:
-        return acquisition, keys, expanded
-    if isinstance(selected, (str, bytes)):
-        raise ValueError("acquisition row selection requires explicit unit names, not a string")
-    listed = list(selected)
-    selected = set(listed)
-    if len(listed) != len(selected):
-        raise ValueError("acquisition row selection repeats a unit")
-    row_keys = [key for key in keys if selected.intersection(scope_groups[key])]
-    row_members = {name for key in row_keys for name in scope_groups[key]}
-    if not selected or row_members != selected or not selected <= expanded:
-        raise ValueError("acquisition row selection must contain complete requested actual atomic groups")
-    from .tessera_full_domain_acquisition import project_joint_campaign_acquisition
-    projected = project_joint_campaign_acquisition(acquisition, units=sorted(selected))
-    _campaign_acquisition_scope(projected, scope_groups, selected=selected)
-    return projected, row_keys, row_members
-
-
-def _requested_acquisition_schedule(groups, requests):
-    """Exact atomic-expanded requested work only, not an assertion of legal prices."""
-    result = {}
-    for _key, members in sorted(groups.items()):
-        families = sorted({family for name in members for family in requests[name]})
-        union = {family: sorted({q for name in members for q in requests[name].get(family, [])})
-                 for family in families}
-        for name in members:
-            result[name] = {family: list(qs) for family, qs in union.items()}
-    return dict(sorted(result.items()))
-
-
-def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap,
+def _campaign_round_one_schedule(groups, group_rates, *, placement: AnchorPlacement, audit_units, snap,
                                  requests=None, rates_by_unit=None):
     """One seam for early priming and actual round one; validate the whole plan.
 
@@ -1069,10 +371,10 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
     if requests is not None:
         if set(requests) != names:
             raise ValueError("acquisition schedule requires every atomic member, no extra units")
-        if (audit_units or getattr(args, "rate_band", None) is not None
-                or args.exhaustive_rate_grid or args.max_rounds != 1):
+        if (audit_units or placement.rate_band is not None
+                or placement.exhaustive_rate_grid or placement.max_rounds != 1):
             raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
-    requested_schedule = None if requests is None else _requested_acquisition_schedule(groups, requests)
+    requested_schedule = None if requests is None else requested_acquisition_schedule(groups, requests)
     for key, members in sorted(groups.items()):
         if requests is None:
             families = group_rates[key]
@@ -1081,8 +383,8 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
         for family in families:
             allowed = group_rates[key].get(family, [])
             if requests is None:
-                want = round_one_rates(allowed, band=parse_rate_band(getattr(args, "rate_band", None)),
-                    anchors=args.anchors, snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+                want = round_one_rates(allowed, band=parse_rate_band(placement.rate_band),
+                    anchors=placement.anchors, snap=snap, exhaustive_band=placement.exhaustive_rate_grid)
                 extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
             else:
                 proposed = [q for name in members for q in requests[name].get(family, [])]
@@ -1103,19 +405,6 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
     return schedule
 
 
-def _campaign_acquisition_deferred_families(schedule, menu_families):
-    """Exact deferred producer-menu/request families, never a price claim."""
-    return sorted((set(menu_families) | set(schedule))
-                  - {family for family, qs in schedule.items() if qs})
-
-
-def _campaign_acquisition_origin(acquisition, schedule, menus):
-    return {**acquisition["identity"],
-        "purpose": "actual_scalar_render_journal_and_wire_preparation",
-        "currency": CURRENCY,
-        "expanded_actual_work_count": sum(len(qs) for families in schedule.values() for qs in families.values()),
-        "deferred_domain": {name: _campaign_acquisition_deferred_families(
-            schedule[name], (r.family for r in menus[name])) for name in sorted(schedule)}}
 
 
 def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None):
@@ -1138,16 +427,11 @@ def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None
         raise ValueError(f"acquisition source weight identity differs for {name}")
 
 
-def _require_campaign_acquisition_anchor(anchor, schedule):
-    if (anchor.qname not in schedule or anchor.body_rate_q256 not in
-            schedule[anchor.qname].get(anchor.family, [])):
-        raise ValueError("acquisition refuses extra checkpoint/seed anchor work")
-
-
-def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
+def _prime_first_anchor_batch(row_stream, *, placement: AnchorPlacement, seed_checkpoint,
+                              batch_size, max_artifact_bpp, checkpoint, targets, menus,
                               weights, profile, expert_members, encode_structure,
                               projected_units, audit_units, route_cache,
-                              partitioned=False, acquisition_requests=None):
+                              partitioned=False, acquisition_requests=None, finalize_checkpoint=False):
     """Overlap a new head's exact first batch; never read ahead of resume gates.
 
     Use the existing group/anchor/batch mechanisms and row-local refusal memo.
@@ -1157,7 +441,7 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
     # A partition's legal grid depends on unpriced full-group siblings. Keep
     # its existing admit-time reads until this early-batch planner carries that
     # full-group contract; a subset-derived prime could disagree with admit.
-    if partitioned or args.seed_checkpoint or getattr(args, "finalize_checkpoint", False):
+    if partitioned or seed_checkpoint or finalize_checkpoint:
         return
     for path in (checkpoint, checkpoint.with_name(checkpoint.name + ".parts"),
                  checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX)):
@@ -1173,7 +457,7 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
             return None
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
-    cap = float(args.max_artifact_bpp)
+    cap = float(max_artifact_bpp)
     rates_by_unit = {}
     for name in targets:
         per_family = {}
@@ -1186,13 +470,13 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
     group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
         encode_structure=encode_structure, projected_units=projected_units,
         route_cache=route_cache)
-    schedule = _campaign_round_one_schedule(groups, group_rates, args=args,
+    schedule = _campaign_round_one_schedule(groups, group_rates, placement=placement,
         audit_units=audit_units, snap=snap, requests=acquisition_requests,
         rates_by_unit=rates_by_unit)
     pending = [(name, family, rate) for key, members in sorted(groups.items())
                for family in sorted({f for name in members for f in schedule[name]})
                for name in members for rate in schedule[name].get(family, [])]
-    batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
+    batches = cell_measurement.compatible_batches(pending, weights=weights, batch_size=batch_size,
                               structures=encode_structure)
     if batches:
         row_stream.prime([item[0] for item in batches[0]])
@@ -1258,8 +542,8 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
 #
 # A routed MoE stack is ONE decision: vLLM loads a packed ``[E, M, N]`` expert
 # tensor under a single quantization scheme, and PrismaQuant's union-find
-# serving-unit promotion already enforces that (``allocator_solver.
-# _packed_groups_by_profile`` keys ``...experts.gate_up_proj`` and
+# serving-unit promotion already enforces that (``NameProjection.serving_units``
+# keys ``...experts.gate_up_proj`` and
 # ``...experts.down_proj`` into the same ``__packed_format__`` group).  The
 # campaign measures separate expert Linears, optionally encoding compatible
 # units together. A full census still requires every expert's wire and score.
@@ -1300,134 +584,6 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
 # hardcoded ``gate_up_proj -> 2``.
 
 
-class StackSampleError(ValueError):
-    """A routed-stack sampling record cannot be turned into an honest row."""
-
-
-@dataclass(frozen=True)
-class StackExpertSample:
-    """Which experts of one packed stack were measured, and with what weight.
-
-    Built by the campaign driver from the PROBE row plus its own draw --
-    ``stack_sample_from_probe`` is the constructor that reads the profile so no
-    caller has to spell a projection split.  Everything here that describes the
-    stack (``num_experts``, ``stack_h_trace``, ``h_trace_per_expert``,
-    ``packed_experts_module``) is copied from the probe row, so the row this
-    record prices and the row the allocator multiplies are the same row.
-    """
-
-    #: The packed parameter's qname -- the key the stack row is written under,
-    #: and a key the probe already has (e.g.
-    #: ``model.layers.18.feed_forward.experts.gate_up_proj``).
-    packed_qname: str
-    #: ``_packed_experts_module`` from the probe row, copied onto the cost row
-    #: so ``tessera_serving_scope.unit_structure_from_stats`` resolves
-    #: ``routed_moe`` on its EXISTING packed branch rather than being taught a
-    #: new topology (principle 14: the scope may not invent structure).
-    packed_experts_module: str
-    #: ``gate_up_proj`` / ``down_proj``: the packed parameter, used only to ask
-    #: the profile for its projection names.
-    packed_param: str
-    num_experts: int
-    #: The probe row's ``h_trace`` -- the exact multiplier the allocator applies.
-    stack_h_trace: float
-    #: The probe row's ``h_trace_per_expert``; must sum to ``stack_h_trace``.
-    h_trace_per_expert: tuple[float, ...]
-    #: Expert ids actually encoded, ascending.
-    sampled_experts: tuple[int, ...]
-    #: pi_e for every sampled expert. 1.0 marks a certainty stratum (or a
-    #: census), which contributes zero sampling variance.
-    inclusion_prob: "Mapping[int, float]"
-    #: expert id -> the anchor qnames measured for it, one per projection.
-    members: "Mapping[int, tuple[str, ...]]"
-    #: The draw's seed, and its design name, carried for reproduction.
-    seed: int
-    design: str = "pps_wor"
-    #: The second tier of a two-tier schedule: the experts that were ALSO
-    #: encoded at the rungs the stack was not censused at, from which the
-    #: transfer law fits this stack's intercept
-    #: (``docs/results/glm_tessera_probe_reduction_regret_2026-09-10.md``
-    #: section 5).  Empty means one tier, which is every schedule before it:
-    #: every rung is measured on every expert in ``sampled_experts`` or it is
-    #: not priced at all.
-    transfer_law_experts: tuple[int, ...] = ()
-
-    @property
-    def is_census(self) -> bool:
-        return len(self.sampled_experts) == self.num_experts and all(
-            float(self.inclusion_prob[e]) == 1.0 for e in self.sampled_experts)
-
-
-def stack_sample_from_probe(
-    packed_qname: str,
-    probe_row: "Mapping[str, object]",
-    profile,
-    *,
-    sampled_experts,
-    inclusion_prob,
-    seed: int,
-    design: str = "pps_wor",
-    transfer_law_experts=(),
-) -> StackExpertSample:
-    """Build a sampling record from the PROBE row and the model profile.
-
-    The caller supplies only its draw.  Everything structural -- the expert
-    count, the Fisher weights, the packed module, and the per-expert member
-    qnames -- is read here from the probe row and the profile's packed-expert
-    accessors, because a driver-supplied weight that drifts from the probe
-    would break the currency invisibly: the allocator would still multiply by
-    the probe's ``h_trace``.
-    """
-    packed_param = str(probe_row.get("_packed_param") or "")
-    module = probe_row.get("_packed_experts_module")
-    num_experts = int(probe_row.get("num_experts", 0) or 0)
-    stack_h = float(probe_row.get("h_trace", 0.0) or 0.0)
-    per_expert = probe_row.get("h_trace_per_expert")
-    if not isinstance(module, str) or not module:
-        raise StackSampleError(
-            f"{packed_qname}: probe row has no _packed_experts_module; this is "
-            "not a packed routed stack and must not be priced as one")
-    if num_experts <= 0:
-        raise StackSampleError(f"{packed_qname}: probe row has no num_experts")
-    if not isinstance(per_expert, Sequence) or len(per_expert) != num_experts:
-        raise StackSampleError(
-            f"{packed_qname}: stack pricing requires "
-            f"h_trace_per_expert[{num_experts}] from the probe")
-    if not packed_param:
-        raise StackSampleError(f"{packed_qname}: probe row has no _packed_param")
-    if not packed_qname.endswith(packed_param):
-        raise StackSampleError(
-            f"{packed_qname}: does not end in its own _packed_param "
-            f"{packed_param!r}; refusing to guess the stem")
-    # The projection split comes from the profile, so a family whose leaves are
-    # ``w1/w3/w2`` and one whose leaves are ``gate_proj/up_proj/down_proj`` are
-    # both handled without this module knowing either spelling.
-    roles = tuple(profile.packed_expert_projection_names(packed_param))
-    if not roles:
-        raise StackSampleError(
-            f"{packed_qname}: profile declares no projections for "
-            f"{packed_param!r}")
-    stem = packed_qname[: -len(packed_param)].rstrip(".")
-    ordered = tuple(sorted(int(e) for e in sampled_experts))
-    if len(set(ordered)) != len(ordered):
-        raise StackSampleError(f"{packed_qname}: duplicate sampled expert id")
-    members = {e: tuple(f"{stem}.{e}.{role}" for role in roles) for e in ordered}
-    return StackExpertSample(
-        packed_qname=str(packed_qname),
-        packed_experts_module=module,
-        packed_param=packed_param,
-        num_experts=num_experts,
-        stack_h_trace=stack_h,
-        h_trace_per_expert=tuple(float(v) for v in per_expert),
-        sampled_experts=ordered,
-        inclusion_prob={int(e): float(p) for e, p in dict(inclusion_prob).items()},
-        members=members,
-        seed=int(seed),
-        design=str(design),
-        transfer_law_experts=tuple(sorted(int(e) for e in transfer_law_experts)),
-    )
-
-
 #: ``float32`` machine epsilon.  The probe accumulates the packed row's
 #: ``h_trace`` and its ``h_trace_per_expert`` vector from the same raw sums and
 #: divides both by the same global token count
@@ -1437,191 +593,6 @@ def stack_sample_from_probe(
 #: dtype and of how many terms are summed -- not a tolerance anyone chose.
 #: Measured on ``probe-02``'s two layer-18 packed rows: 2.0e-7 and 6.6e-8
 #: relative, against the bound below of 3.8e-6 at E=32.
-_FLOAT32_EPS = 1.1920928955078125e-07
-
-
-def _validate_stack_sample(sample: StackExpertSample) -> None:
-    """Refuse a record whose weights or probabilities cannot carry an estimate."""
-    q = sample.packed_qname
-    if len(sample.h_trace_per_expert) != sample.num_experts:
-        raise StackSampleError(
-            f"{q}: h_trace_per_expert has {len(sample.h_trace_per_expert)} "
-            f"entries for {sample.num_experts} experts")
-    if any(not math.isfinite(h) or h < 0.0 for h in sample.h_trace_per_expert):
-        raise StackSampleError(
-            f"{q}: per-expert Fisher weights must be finite and nonnegative")
-    total = math.fsum(sample.h_trace_per_expert)
-    if not math.isfinite(sample.stack_h_trace) or sample.stack_h_trace <= 0.0:
-        raise StackSampleError(f"{q}: probe h_trace must be finite and positive")
-    # E terms summed at float32 storage precision: the worst-case accumulated
-    # relative error is E * eps, so that IS the bound, computed per stack.
-    tolerance = sample.num_experts * _FLOAT32_EPS * sample.stack_h_trace
-    if abs(total - sample.stack_h_trace) > tolerance:
-        # The whole currency rests on this identity; a row written against a
-        # broken one would be multiplied by a number its weights do not sum to.
-        raise StackSampleError(
-            f"{q}: sum(h_trace_per_expert)={total!r} does not equal the probe "
-            f"row's h_trace={sample.stack_h_trace!r}; the stack row's currency "
-            "assumes the per-expert weights sum to the multiplier the "
-            f"allocator applies (tolerance {tolerance!r} = "
-            f"{sample.num_experts} * float32 eps)")
-    if not sample.sampled_experts:
-        raise StackSampleError(f"{q}: no sampled experts")
-    if len(set(sample.sampled_experts)) != len(sample.sampled_experts):
-        raise StackSampleError(f"{q}: duplicate sampled expert id")
-    for e in sample.sampled_experts:
-        if not 0 <= e < sample.num_experts:
-            raise StackSampleError(f"{q}: expert id {e} out of range")
-        if e not in sample.inclusion_prob:
-            raise StackSampleError(f"{q}: expert {e} has no inclusion probability")
-    # Older callers carry only sampled probabilities. When the full frame is
-    # supplied, validate the unsampled entries too: zero-probability positive
-    # contributions and omitted certainty units both bias the stack total.
-    for e, probability in sample.inclusion_prob.items():
-        if not 0 <= e < sample.num_experts:
-            raise StackSampleError(f"{q}: expert id {e} out of range")
-        pi = float(probability)
-        if pi == 0.0:
-            # A zero-probability unit contributes an exactly-zero term ONLY if
-            # its own weight is zero (a never-routed expert). Otherwise it is a
-            # unit the design can never draw, and HT is biased by exactly its
-            # contribution -- silently.
-            if sample.h_trace_per_expert[e] != 0.0:
-                raise StackSampleError(
-                    f"{q}: expert {e} has inclusion probability 0 but Fisher "
-                    f"weight {sample.h_trace_per_expert[e]!r}; a unit that "
-                    "cannot be drawn biases the estimate")
-            continue
-        if not 0.0 < pi <= 1.0:
-            raise StackSampleError(
-                f"{q}: expert {e} inclusion probability {pi!r} outside (0, 1]")
-        if pi == 1.0 and e not in sample.sampled_experts:
-            raise StackSampleError(f"{q}: certainty expert {e} is absent from the sample")
-    if sample.transfer_law_experts:
-        law = set(sample.transfer_law_experts)
-        if len(law) != len(sample.transfer_law_experts):
-            raise StackSampleError(f"{q}: duplicate transfer-law expert id")
-        if not law <= set(sample.sampled_experts):
-            raise StackSampleError(
-                f"{q}: the transfer-law tier names experts the sample does not "
-                "measure; a stack's intercept is fitted on experts that were "
-                "encoded at BOTH the reference rung and the predicted one")
-        if law == set(sample.sampled_experts):
-            raise StackSampleError(
-                f"{q}: the transfer-law tier is the whole sample, so nothing "
-                "would be predicted; drop it rather than declare a law over a "
-                "census")
-        if len(law) < 2:
-            raise StackSampleError(
-                f"{q}: {len(law)} transfer-law expert(s); an intercept fitted "
-                "on one expert has no residual spread to report")
-
-
-def _stack_member_weight(sample: StackExpertSample, expert: int, roles: int) -> float:
-    """The Fisher weight of ONE measured member of one expert.
-
-    ``h_trace_per_expert[e] / R`` -- the same equal split
-    ``expand_packed_expert_rows`` applies, so a census through this path and an
-    expansion through that one price the stack identically.
-    """
-    return float(sample.h_trace_per_expert[expert]) / float(roles)
-
-
-def _horvitz_thompson_stack(
-    sample: StackExpertSample,
-    member_dloss: "Mapping[int, float]",
-) -> "tuple[float, float, int]":
-    """Estimate ``sum_e h_e * mse_e`` and its standard error from the sample.
-
-    ``member_dloss`` maps a sampled expert id to that expert's h-weighted
-    contribution ``y_e = sum_roles (h_e/R) * mse_role`` already summed over the
-    packed parameter's projections.
-
-    Returns ``(T_hat, stderr, m)`` where ``m`` is the size of the random
-    stratum.
-
-    The point estimate is Horvitz-Thompson, ``sum_{e in S} y_e / pi_e``, which
-    is unbiased for the stack total under any design with known positive
-    inclusion probabilities.
-
-    The VARIANCE is Hartley-Rao's, over the non-certainty stratum only:
-
-        v = m/(m-1) * sum_{e in S_R} (1 - (m-1)/m * pi_e)
-                                     * (y_e/pi_e - T_R/m)^2
-
-    A unit with ``pi_e == 1`` is in every possible sample, so it contributes
-    exactly zero sampling variance and is excluded from the sum. This is a
-    plug-in Hartley-Rao approximation for randomized-order systematic PPS,
-    ``pi_i = min(1, c*h_i)``, after removing the take-all stratum. It is not
-    an exact design-unbiased variance estimator. Exact Sen-Yates-Grundy would
-    require joint inclusion probabilities averaged over the randomized order;
-    zero probabilities conditional on one fixed order do not establish zeros
-    under the randomized design.  The Hansen-Hurwitz with-replacement form
-    is NOT used: it ignores both the finite-population correction and the
-    certainty stratum, and overstates the standard error by 25-48% at E=32
-    (simulated on the LFM2.5 layer-18 Fisher vector). The approximation was
-    conservative in those simulations (+1% to +15%); that is not a guarantee
-    for other populations. With equal weights, its expected variance is
-    (N-m+1)/(N-m) times the exact SRS variance, reaching twice the exact value
-    for m=N-1. The current allocator does not consume this uncertainty field.
-    """
-    certainty = [e for e in sample.sampled_experts
-                 if float(sample.inclusion_prob[e]) == 1.0]
-    random = [e for e in sample.sampled_experts
-              if 0.0 < float(sample.inclusion_prob[e]) < 1.0]
-    total = math.fsum(member_dloss[e] for e in certainty)
-    t_random = math.fsum(member_dloss[e] / float(sample.inclusion_prob[e])
-                         for e in random)
-    total += t_random
-    m = len(random)
-    if m == 0:
-        # Every measured unit was certain: a census, or a fully take-all
-        # stratum. The estimate IS the total and the error is a true zero.
-        return total, 0.0, 0
-    if m < 2:
-        # 0.0 already means "no sampling error" on this row's siblings, and a
-        # single random draw is not that. The draw plan is supposed to refuse
-        # m == 1 before anything is encoded; refusing again here keeps a plan
-        # that did not from being laundered into a published zero.
-        raise StackSampleError(
-            f"{sample.packed_qname}: {m} non-certainty draw(s); a sampling "
-            "variance needs at least two, and writing 0.0 would claim the "
-            "zero that a census means")
-    mean_r = t_random / m
-    variance = (m / (m - 1)) * math.fsum(
-        (1.0 - ((m - 1) / m) * float(sample.inclusion_prob[e]))
-        * (member_dloss[e] / float(sample.inclusion_prob[e]) - mean_r) ** 2
-        for e in random)
-    return total, math.sqrt(max(variance, 0.0)), m
-
-
-def _stack_menu(sample: StackExpertSample, menus: "Mapping[str, list]") -> list:
-    """The menu the stack row is interpolated over.
-
-    Preferred source is a menu the driver keyed at the packed qname.  Failing
-    that the stack inherits its members' menu -- but only if every measured
-    member offers the SAME rungs, because a stack is one decision and a menu
-    that differs between the experts inside it is not a menu for that decision.
-    """
-    packed = menus.get(sample.packed_qname)
-    if packed:
-        return list(packed)
-    seen: dict[tuple, list] = {}
-    for expert in sample.sampled_experts:
-        for member in sample.members[expert]:
-            rungs = list(menus.get(member, []))
-            key = tuple(sorted(
-                (r.family, r.format_name, int(r.body_rate_q256)) for r in rungs))
-            seen.setdefault(key, rungs)
-    if not seen:
-        return []
-    if len(seen) > 1:
-        raise StackSampleError(
-            f"{sample.packed_qname}: the measured experts do not share one "
-            f"menu ({len(seen)} distinct rung sets); a packed stack is a "
-            "single serving decision and cannot be priced over a menu that "
-            "differs between the experts inside it")
-    return next(iter(seen.values()))
 
 
 #: The anchor fields that must agree across every measured member of one stack
@@ -1629,365 +600,6 @@ def _stack_menu(sample: StackExpertSample, menus: "Mapping[str, list]") -> list:
 #: value the way the dense interpolation path takes ``ordered[0]``'s would let
 #: one expert scored under a different activation contract, or without the
 #: Hessian, disappear into a stack average.
-_STACK_UNIFORM_FIELDS = (
-    "family", "body_rate_q256", "activation_contract",
-    "activation_quantized", "hessian_applied",
-)
-
-
-def _stack_cost_rows(
-    sample: StackExpertSample,
-    anchors: "Mapping[str, Mapping[str, list]]",
-    menus: "Mapping[str, list]",
-    hessian_identity: dict,
-    refused: list,
-    wire_backed: "frozenset[str] | set[str]" = frozenset(),
-    transfer_law: "Mapping[str, object] | None" = None,
-) -> "tuple[dict[str, dict], object]":
-    """Build every measured + interpolated row for one packed stack.
-
-    ``transfer_law`` maps a family to the ``StackTransferLaw`` fitted on the
-    OTHER stacks of that family.  It is consulted only for a rung that covers
-    exactly ``sample.transfer_law_experts`` -- the second tier of a two-tier
-    schedule -- and its rows are model predictions, written with
-    ``PROVENANCE_INTERPOLATED`` and a ``transfer_law`` block and never with
-    the Horvitz-Thompson fields, which describe a draw this value did not come
-    from.  ``None`` (the default) leaves every schedule that measured one tier
-    behaving exactly as before.
-    """
-    from .tessera_rate_surface import (
-        PROVENANCE_INTERPOLATED, PROVENANCE_MEASURED, TesseraRateSurface,
-        predict_stack_rates,
-    )
-
-    _validate_stack_sample(sample)
-    q = sample.packed_qname
-    roles = len(sample.members[sample.sampled_experts[0]])
-    if roles <= 0:
-        raise StackSampleError(f"{q}: sampled experts have no measured members")
-
-    # (format_name) -> {expert -> [anchor, ...]}, one anchor per member.
-    by_format: dict[str, dict[int, list]] = {}
-    for expert in sample.sampled_experts:
-        if len(sample.members[expert]) != roles:
-            raise StackSampleError(
-                f"{q}: expert {expert} contributes "
-                f"{len(sample.members[expert])} members, expert "
-                f"{sample.sampled_experts[0]} contributes {roles}")
-        for member in sample.members[expert]:
-            member_anchors = anchors.get(member)
-            if not member_anchors:
-                raise StackSampleError(
-                    f"{q}: sampled member {member} has no measured anchors")
-            for family_anchors in member_anchors.values():
-                for anchor in family_anchors:
-                    by_format.setdefault(
-                        anchor.format_name, {}).setdefault(expert, []).append(anchor)
-
-    rows: dict[str, dict] = {}
-    measured_by_family: dict[str, list[tuple[int, float, float]]] = {}
-    #: family -> [(format_name, rung), ...] measured on the law draw only.
-    law_tier: dict[str, list[tuple[str, int]]] = {}
-    law_experts = set(sample.transfer_law_experts)
-    for format_name in sorted(by_format):
-        per_expert = by_format[format_name]
-        missing = [e for e in sample.sampled_experts
-                   if len(per_expert.get(e, ())) != roles]
-        if missing:
-            covered = {e for e in sample.sampled_experts
-                       if len(per_expert.get(e, ())) == roles}
-            if law_experts and covered == law_experts:
-                # The second tier of a two-tier schedule: this rung was encoded
-                # on the transfer-law draw only, by design.  It is priced by
-                # the law below, not by HT -- the drawn experts here fit an
-                # intercept, they do not stand in for the stack.
-                contributing = [a for e in sorted(covered) for a in per_expert[e]]
-                families = {a.family for a in contributing}
-                if len(families) != 1:
-                    raise StackSampleError(
-                        f"{q}/{format_name}: transfer-law tier spans families "
-                        f"{sorted(families)}")
-                rates = {int(a.body_rate_q256) for a in contributing}
-                if len(rates) != 1:
-                    raise StackSampleError(
-                        f"{q}/{format_name}: transfer-law tier spans rungs "
-                        f"{sorted(rates)}")
-                law_tier.setdefault(next(iter(families)), []).append(
-                    (format_name, rates.pop()))
-                continue
-            # A rung measured on only some of the drawn experts is not a rung
-            # this sample can price: HT needs every drawn unit's y_e.
-            refused.append({
-                "qname": q, "format_name": format_name,
-                "reason": "stack_rung_incomplete_over_sample",
-                "detail": (f"{len(missing)} of {len(sample.sampled_experts)} "
-                           "sampled experts lack a full set of member anchors"),
-                "missing_experts": missing,
-            })
-            continue
-        contributing = [a for e in sample.sampled_experts for a in per_expert[e]]
-        uniform = {}
-        for field in _STACK_UNIFORM_FIELDS:
-            values = {getattr(a, field) for a in contributing}
-            if len(values) != 1:
-                raise StackSampleError(
-                    f"{q}/{format_name}: measured members disagree on {field} "
-                    f"({sorted(map(repr, values))}); a stack row may not "
-                    "average measurements taken under different contracts")
-            uniform[field] = next(iter(values))
-        member_dloss = {
-            e: math.fsum(_stack_member_weight(sample, e, roles) * float(a.dloss)
-                         for a in per_expert[e])
-            for e in sample.sampled_experts
-        }
-        total, stderr, n_random = _horvitz_thompson_stack(sample, member_dloss)
-        h_stack = float(sample.stack_h_trace)
-        rows[format_name] = {
-            # The h-weighted MEAN expert MSE -- see the section header. The
-            # allocator multiplies this by the PROBE row's h_trace, which the
-            # per-expert weights sum to, so 0.5*h_stack*output_mse reproduces
-            # the stack's summed per-expert predicted dloss.
-            "output_mse": total / h_stack,
-            "output_mse_measured": True,
-            # A rung encoded on EVERY expert of the stack with certainty is a
-            # census, not a sample: the value is the total, the HT variance is
-            # an exact zero, and nothing about it is an estimate.  It therefore
-            # carries the same ``cost_source`` a dense measured row does
-            # (#495 part 3).  That removes one refusal in
-            # ``tessera_joint_aura.load_measured_anchor_input`` but does not
-            # make a stack row consumable there: that reader matches the cost
-            # roster against the census's SOURCE units and a stack's key is the
-            # packed qname, which is debt D35(iii).  A rung covering only the
-            # draw keeps the sampled spelling.
-            "cost_source": ("tessera_campaign_measured" if sample.is_census
-                            else "tessera_campaign_measured_stack_sample"),
-            "currency": CURRENCY,
-            "tessera_provenance": PROVENANCE_MEASURED,
-            "tessera_family": uniform["family"],
-            "tessera_body_rate_q256": uniform["body_rate_q256"],
-            "activation_quantized": uniform["activation_quantized"],
-            "activation_contract": uniform["activation_contract"],
-            # The Horvitz-Thompson standard error, in the SAME currency as
-            # ``output_mse``.  REPORTED, NOT CONSUMED: the allocator's UCB
-            # hedge (``allocator_candidates._super_item_ucb_hedge``) skips
-            # rows priced from ``output_mse``, so no DP behaviour depends on
-            # this field today.  It is written because a sampled price whose
-            # sampling error is nowhere on the row is a sampled price nothing
-            # can audit.
-            "dloss_stderr": stderr / h_stack,
-            "dloss_stderr_currency": CURRENCY,
-            "dloss_stderr_consumed_by_allocator": False,
-            # Copied from the PROBE row so the explicit Tessera serving scope
-            # resolves ``routed_moe`` on ``unit_structure_from_stats``'s
-            # existing packed branch. The scope is not taught a new topology;
-            # it is handed the one the probe already recorded.
-            "_packed_experts_module": sample.packed_experts_module,
-            "num_experts": sample.num_experts,
-            "encode_seconds": math.fsum(float(a.seconds) for a in contributing),
-            "hessian_identity": {
-                **hessian_identity, "applied": bool(uniform["hessian_applied"]),
-            },
-            "sampled_experts": {
-                "design": sample.design,
-                "seed": sample.seed,
-                "n_experts": sample.num_experts,
-                "n_sampled": len(sample.sampled_experts),
-                "n_random_stratum": n_random,
-                "experts": list(sample.sampled_experts),
-                "inclusion_prob": {int(e): float(sample.inclusion_prob[e])
-                                   for e in sample.sampled_experts},
-                "packed_param": sample.packed_param,
-                "projections_per_expert": roles,
-                "estimator": "horvitz_thompson",
-                "variance_estimator": (
-                    "census" if n_random == 0 else "hartley_rao"),
-                "h_trace_stack": h_stack,
-                "h_trace_per_sampled_expert": {
-                    int(e): float(sample.h_trace_per_expert[e])
-                    for e in sample.sampled_experts},
-                # The per-member evidence the stack row was estimated from,
-                # kept on the row because the members are NOT cost keys: a
-                # stack price whose members are unreadable is unauditable.
-                "members": {
-                    int(e): [
-                        {"qname": a.qname, "dloss": float(a.dloss),
-                         "wire_bytes": int(a.wire_bytes),
-                         "memory_bytes": int(a.memory_bytes),
-                         "input_global_scale": (
-                             None if a.input_global_scale is None
-                             else float(a.input_global_scale))}
-                        for a in per_expert[e]]
-                    for e in sample.sampled_experts},
-            },
-        }
-        # No ``wire_bytes`` and no ``input_global_scale`` scalar on a stack
-        # row, deliberately.  Both are per-expert facts: a sample has neither a
-        # stack wire nor one A-side scale, and the per-member values are on the
-        # row above.  ``tessera_menu.priced_static_scales`` will therefore find
-        # no scale for a selected W4A4 stack and the export lane will refuse it
-        # by name -- which is the correct refusal until the driver calibrates
-        # a scale for every expert, sampled or not (reported, not papered over).
-        measured_by_family.setdefault(uniform["family"], []).append(
-            (int(uniform["body_rate_q256"]), total / h_stack, stderr / h_stack))
-
-    # Interpolation, on the STACK's own anchors: the same monotone surface the
-    # dense path uses, fitted to HT estimates rather than to one unit's
-    # measurements, and refusing to extrapolate for the same reason.
-    surfaces: dict[str, object] = {}
-    measured_names = set(rows)
-    for family, points in measured_by_family.items():
-        if family in law_tier:
-            # A two-tier family has ONE censused rung, so there is no bracket
-            # to interpolate between and the transfer law below is what prices
-            # its other rungs.  Skipping here rather than letting the surface
-            # refuse keeps a designed schedule out of the refusal record.
-            continue
-        ordered = sorted(points)
-        try:
-            surface = TesseraRateSurface(
-                unit_name=q, family=family, layout="tight", currency=CURRENCY,
-                anchor_q256=tuple(p[0] for p in ordered),
-                anchor_dloss=tuple(p[1] for p in ordered),
-                anchor_stderr=tuple(p[2] for p in ordered),
-            )
-        except Exception as exc:
-            refused.append({
-                "qname": q, "family": family,
-                "reason": "non_interpolable_anchors",
-                "detail": str(exc),
-                "anchor_q256": [p[0] for p in ordered],
-                "anchor_dloss": [p[1] for p in ordered],
-            })
-            continue
-        surfaces[family] = surface
-        if sample.is_census and all(
-                member in wire_backed for members in sample.members.values()
-                for member in members):
-            # A full census handed to the cached-wire exporter can select
-            # only rungs with actual member bytes. Keep its surface for
-            # diagnostics, as the dense path does, but never price an
-            # interpolated rung as though the corresponding wires existed.
-            continue
-        low, high = surface.q256_range
-        template = next(r for r in rows.values()
-                        if r["tessera_family"] == family)
-        for rung in _stack_menu(sample, menus):
-            if rung.family != family or rung.format_name in measured_names:
-                continue
-            if not low <= rung.body_rate_q256 <= high:
-                continue
-            rows[rung.format_name] = {
-                "output_mse": surface.predict(rung.body_rate_q256),
-                "output_mse_measured": False,
-                "cost_source": "tessera_campaign_interpolated",
-                "currency": CURRENCY,
-                "tessera_provenance": PROVENANCE_INTERPOLATED,
-                "tessera_family": family,
-                "tessera_body_rate_q256": rung.body_rate_q256,
-                "activation_contract": rung.admission.activation_contract,
-                "_packed_experts_module": sample.packed_experts_module,
-                "num_experts": sample.num_experts,
-                "hessian_identity": {
-                    **hessian_identity,
-                    "applied": bool(template["hessian_identity"]["applied"]),
-                },
-                # An interpolated stack row inherits the sample its bracketing
-                # anchors were estimated from; it is a prediction ABOUT that
-                # sample, so the sample travels with it -- but only the fields
-                # that describe the DRAW.  Built from an allowlist rather than
-                # by subtracting ``members``, because subtraction is how
-                # ``estimator: horvitz_thompson`` used to reach a row whose
-                # value no estimator produced (#495 part 3).
-                "sampled_experts": {
-                    **_stack_draw_description(template["sampled_experts"]),
-                    "interpolated_from": sorted(measured_names),
-                },
-            }
-
-    # The transfer-law tier: rungs encoded on the law draw only, predicted for
-    # every expert from its own censused reference value.  Model predictions,
-    # so they carry a ``transfer_law`` block and none of the sampling fields.
-    for family, entries in sorted(law_tier.items()):
-        pair = None if transfer_law is None else transfer_law.get(family)
-        if pair is None:
-            for format_name, rung in entries:
-                refused.append({
-                    "qname": q, "family": family, "format_name": format_name,
-                    "reason": "stack_transfer_law_absent",
-                    "detail": (f"rung {rung} was encoded on the transfer-law "
-                               "draw only and no law was fitted for this "
-                               "family; the rung is left unpriced rather than "
-                               "estimated from a partial draw"),
-                })
-            continue
-        record, law, reference_format = pair
-        try:
-            prediction = predict_stack_rates(record, law)
-        except Exception as exc:
-            for format_name, rung in entries:
-                refused.append({
-                    "qname": q, "family": family, "format_name": format_name,
-                    "reason": "stack_transfer_law_refused",
-                    "detail": str(exc),
-                })
-            continue
-        h_stack = float(sample.stack_h_trace)
-        template = rows[reference_format]
-        law_block = law.as_dict()
-        for format_name, rung in entries:
-            if format_name in rows:
-                raise StackSampleError(
-                    f"{q}/{format_name}: a transfer-law rung may not overwrite "
-                    "a measured row")
-            if rung not in prediction["predicted"]:
-                refused.append({
-                    "qname": q, "family": family, "format_name": format_name,
-                    "reason": "stack_transfer_law_rung_unfitted",
-                    "detail": (f"rung {rung} is not in the fitted law "
-                               f"{list(law.target_q256)}"),
-                })
-                continue
-            rows[format_name] = {
-                "output_mse": prediction["predicted"][rung] / h_stack,
-                "output_mse_measured": False,
-                "cost_source": "tessera_campaign_interpolated",
-                "currency": CURRENCY,
-                "tessera_provenance": PROVENANCE_INTERPOLATED,
-                "tessera_family": family,
-                "tessera_body_rate_q256": rung,
-                "activation_contract": template["activation_contract"],
-                "activation_quantized": template["activation_quantized"],
-                "_packed_experts_module": sample.packed_experts_module,
-                "num_experts": sample.num_experts,
-                "hessian_identity": {
-                    **hessian_identity,
-                    "applied": bool(template["hessian_identity"]["applied"]),
-                },
-                # Everything the prediction rests on, on the row: the pooled
-                # slopes and which stacks they were pooled over, this stack's
-                # own intercepts, the experts that fitted them, how many there
-                # were, and the residual spread of the pooled fit.  A reader
-                # can refit it; that is the point of writing it down.
-                "transfer_law": {
-                    **law_block,
-                    "predicted_q256": rung,
-                    "reference_format_name": reference_format,
-                    "intercept": {p: float(v) for p, v in sorted(
-                        prediction["intercept"][rung].items())},
-                    "sample_experts": list(prediction["sample_experts"]),
-                    "n": int(prediction["intercept_sample_size"]),
-                    "model_error": prediction["model_error"][rung],
-                },
-                # The draw that fitted the intercept, described as a draw and
-                # nothing more.  No ``estimator`` and no ``dloss_stderr``: this
-                # value came from a regression, and a sampling error would be a
-                # claim about a design that did not produce it.
-                "sampled_experts": {
-                    **_stack_draw_description(template["sampled_experts"]),
-                    "transfer_law_experts": sorted(law_experts),
-                },
-            }
-    return rows, surfaces
 
 
 #: The fields of a stack row's ``sampled_experts`` block that describe the
@@ -1995,468 +607,27 @@ def _stack_cost_rows(
 #: ``variance_estimator`` and ``n_random_stratum`` are deliberately absent:
 #: they name a Horvitz-Thompson computation, and a row whose value no
 #: estimator produced may not claim one (#495 part 3).
-_STACK_DRAW_FIELDS = (
-    "design", "seed", "n_experts", "n_sampled", "experts", "inclusion_prob",
-    "packed_param", "projections_per_expert", "h_trace_stack",
-    "h_trace_per_sampled_expert",
-)
-
-
-def _stack_draw_description(block: "Mapping[str, object]") -> dict:
-    """The draw's own fields, by allowlist -- never by subtraction."""
-    return {field: block[field] for field in _STACK_DRAW_FIELDS if field in block}
-
-
-def _stack_rate_evidence(sample: StackExpertSample, anchors, refused: list):
-    """One two-tier stack's evidence, per family, as a ``StackRateSample``.
-
-    A family qualifies only when exactly one of its rungs was encoded on every
-    expert of the frame (the census tier, which every prediction regresses on)
-    and at least one other was encoded on exactly the transfer-law draw.  A
-    family that fails either test is recorded and skipped: the rungs it does
-    hold are still priced by the measured path.
-
-    Returns ``{family: (record, reference_format_name)}``.
-    """
-    from .tessera_rate_surface import StackRateSample
-
-    if not sample.transfer_law_experts:
-        return {}
-    q = sample.packed_qname
-    roles = len(sample.members[sample.sampled_experts[0]])
-    projections = tuple(name.rsplit(".", 1)[-1]
-                        for name in sample.members[sample.sampled_experts[0]])
-    law_experts = tuple(sorted(sample.transfer_law_experts))
-    # (family, rung) -> {expert: {projection: mse}} plus the format name.
-    seen: dict[tuple[str, int], dict] = {}
-    names: dict[tuple[str, int], str] = {}
-    for expert in sample.sampled_experts:
-        members = sample.members[expert]
-        if len(members) != roles:
-            return {}
-        for index, member in enumerate(members):
-            for family_anchors in (anchors.get(member) or {}).values():
-                for anchor in family_anchors:
-                    key = (anchor.family, int(anchor.body_rate_q256))
-                    names.setdefault(key, anchor.format_name)
-                    seen.setdefault(key, {}).setdefault(
-                        expert, {})[projections[index]] = float(anchor.dloss)
-    frame = set(sample.sampled_experts)
-    law_set = set(law_experts)
-    records: dict[str, tuple] = {}
-    for family in sorted({key[0] for key in seen}):
-        census = [rung for (fam, rung), rows in sorted(seen.items())
-                  if fam == family
-                  and {e for e, row in rows.items() if len(row) == roles} == frame]
-        law_rungs = [rung for (fam, rung), rows in sorted(seen.items())
-                     if fam == family
-                     and {e for e, row in rows.items() if len(row) == roles} == law_set]
-        if not law_rungs:
-            continue
-        if len(census) != 1:
-            refused.append({
-                "qname": q, "family": family,
-                "reason": "stack_transfer_law_reference_missing",
-                "detail": (f"{len(census)} rung(s) of family {family} cover the "
-                           "whole frame; exactly one is needed, because every "
-                           "expert is predicted from its own measured "
-                           "reference value"),
-                "census_rungs": census,
-            })
-            continue
-        reference = census[0]
-        try:
-            record = StackRateSample(
-                stack=q, projections=projections,
-                experts=tuple(sample.sampled_experts),
-                reference_q256=reference,
-                reference_mse=seen[(family, reference)],
-                sampled_experts=law_experts,
-                sampled_mse={rung: {e: seen[(family, rung)][e] for e in law_experts}
-                             for rung in law_rungs},
-                weights={e: _stack_member_weight(sample, e, roles)
-                         for e in sample.sampled_experts},
-                currency=CURRENCY)
-        except Exception as exc:
-            refused.append({
-                "qname": q, "family": family,
-                "reason": "stack_transfer_law_refused",
-                "detail": str(exc),
-            })
-            continue
-        records[family] = (record, names[(family, reference)])
-    return records
-
-
-def _fit_stack_transfer_laws(samples, anchors, refused: list) -> dict:
-    """Fit one pooled law per family, leaving out the stack it will predict.
-
-    The slope pools every OTHER stack of the same family, which is exactly the
-    hold-out the study fitted every reported number under; a stack whose family
-    has no other two-tier stack gets no law, and its unmeasured rungs are left
-    unpriced rather than predicted from their own evidence.
-
-    Returns ``{packed_qname: {family: (record, law, reference_format_name)}}``.
-    """
-    from .tessera_rate_surface import fit_stack_transfer_law
-
-    evidence = {}
-    for packed_qname, sample in sorted(samples.items()):
-        found = _stack_rate_evidence(sample, anchors, refused)
-        if found:
-            evidence[packed_qname] = found
-    by_family: dict[str, dict[str, object]] = {}
-    for packed_qname, families in evidence.items():
-        for family, (record, _) in families.items():
-            by_family.setdefault(family, {})[packed_qname] = record
-    laws: dict[str, dict[str, tuple]] = {}
-    for packed_qname, families in evidence.items():
-        for family, (record, reference_format) in families.items():
-            population = by_family[family]
-            if len(population) < 2:
-                refused.append({
-                    "qname": packed_qname, "family": family,
-                    "reason": "stack_transfer_law_population_too_small",
-                    "detail": (f"family {family} has {len(population)} two-tier "
-                               "stack(s); a pooled slope needs at least one "
-                               "other stack to hold this one out against"),
-                })
-                continue
-            try:
-                law = fit_stack_transfer_law(population, hold_out=packed_qname)
-            except Exception as exc:
-                refused.append({
-                    "qname": packed_qname, "family": family,
-                    "reason": "stack_transfer_law_fit_refused",
-                    "detail": str(exc),
-                })
-                continue
-            laws.setdefault(packed_qname, {})[family] = (
-                record, law, reference_format)
-    return laws
 
 
 # ---------------------------------------------------------------------------
 # The dense payload
 # ---------------------------------------------------------------------------
 
-def canonical_refusals(refusals: Sequence[dict]) -> list[dict]:
-    """Order diagnostic records identically for a monolith and a shard union.
-
-    A surface refusal names a family; an incomplete sampled rung names a
-    format. Both are legitimate records. The full canonical record breaks
-    ties without depending on dictionary or shard insertion order.
-    """
-    return sorted(refusals, key=lambda entry: (
-        entry["qname"], entry.get("family", ""), entry.get("format_name", ""),
-        DIRECT_ASCII_STRICT.text(entry)))
-
-
-def campaign_cost_payload(
-    anchors: Mapping[str, Mapping[str, list[CampaignAnchor]]],
-    menus: Mapping[str, list],
-    *,
-    loo: Mapping[str, Mapping[str, dict]],
-    provenance: dict,
-    wire_backed: "frozenset[str] | set[str]" = frozenset(),
-    stack_samples: "Mapping[str, StackExpertSample] | None" = None,
-) -> dict:
-    """Turn measured anchors plus a legal menu into a cost payload.
-
-    Measured rungs keep their measurement and are marked so; every other legal
-    rung inside the measured envelope is interpolated and marked so; a rung
-    outside the envelope is **omitted**, because ``TesseraRateSurface.predict``
-    refuses to extrapolate and a menu row the surface will not price is a row
-    nothing measured.
-
-    ``wire_backed`` names the units whose priced wire IS the exported wire --
-    the producer-projected packed experts, which the export lane hands to the
-    exporter as cached bytes rather than re-encoding.  For those, an
-    interpolated row would price a rung that has no bytes to ship, so they get
-    measured rows only: the allocator can select for them exactly the rungs a
-    wire exists for (priced == written; PrismaQuant #183).
-
-    ``stack_samples`` maps a packed expert parameter's qname to the
-    ``StackExpertSample`` describing which of its experts were measured.  Each
-    one collapses its members' per-expert anchors into ONE stack-level row per
-    (family, rung) at the packed qname -- the key the probe already has, so the
-    row carries the packed topology the serving scope needs and the ``h_trace``
-    the allocator will multiply.  The members are then NOT top-level cost keys
-    (their measurements ride along on the stack row's ``sampled_experts``
-    block), which is what stops the same experts being priced twice: once as a
-    stack and once as themselves.
-    """
-    from .tessera_rate_surface import (
-        PROVENANCE_INTERPOLATED, PROVENANCE_MEASURED, TesseraRateSurface,
-    )
-
-    # One identity for every row this payload writes, so a cost table that is
-    # half H-aware and half weights-only is detectable downstream instead of
-    # being an invisible merge of two encoders -- the exact shape of the
-    # encoder-drift bug this project has already paid for once.
-    _prov = dict(provenance.get("provenance", {}))
-    _h = dict(_prov.get("hessian", {})) if isinstance(
-        _prov.get("hessian"), dict) else {}
-    hessian_identity = {
-        "supplied": bool(_h.get("supplied", False)),
-        # The legacy spelling, kept because ``assert_uniform_hessian_identity``
-        # compares tables written before Tessera's triple existed.
-        "text_sha": _h.get("text_sha"),
-        "token_count": _h.get("token_count"),
-        # Tessera's own required triple, so a row can be checked against the
-        # ActivationSource that would encode it.
-        "text_sha256": _h.get("text_sha256"),
-        "fit_ids_sha256": _h.get("fit_ids_sha256"),
-        "fit_tokens": _h.get("fit_tokens"),
-        # The content digest of the capture written for the export leg, so
-        # the allocation binds to the payload and not only to the draw's
-        # triple (RobTand/prismaquant#204); None on a weights-only campaign.
-        "capture_sha256": _h.get("capture_sha256"),
-        **({'reference_binding':dict(_h['reference_binding'])} if _h.get('reference_binding') is not None else {}),
-        "kwarg": tuple(_h.get("kwargs", ())) or _h.get("kwarg"),
-    }
-
-    costs: dict[str, dict[str, dict]] = {}
-    formats: set[str] = set()
-    surfaces: dict[str, dict[str, TesseraRateSurface]] = {}
-    refused: list[dict] = []
-    # Every unit that is a MEMBER of a sampled stack, and the stack that owns
-    # it. A member never becomes its own cost key: the DP would otherwise see
-    # the same experts twice -- once inside the packed stack row and once as
-    # standalone units -- and the union-find promotion cannot merge what it
-    # cannot see as one group.
-    samples: dict[str, StackExpertSample] = dict(stack_samples or {})
-    member_owner: dict[str, str] = {}
-    for packed_qname, sample in samples.items():
-        if sample.packed_qname != packed_qname:
-            raise StackSampleError(
-                f"{packed_qname}: sampling record names "
-                f"{sample.packed_qname!r}")
-        if packed_qname in anchors:
-            raise StackSampleError(
-                f"{packed_qname}: the packed stack itself carries measured "
-                "anchors; a stack that was measured whole is not a sample and "
-                "must not also be estimated from one")
-        for expert, members in sample.members.items():
-            for member in members:
-                owner = member_owner.setdefault(member, packed_qname)
-                if owner != packed_qname:
-                    raise StackSampleError(
-                        f"{member}: claimed by both {owner} and "
-                        f"{packed_qname}; a measured expert belongs to exactly "
-                        "one stack")
-    for qname, by_family in anchors.items():
-        if qname in member_owner:
-            continue
-        rows: dict[str, dict] = {}
-        measured_names: set[str] = set()
-        for family, family_anchors in by_family.items():
-            ordered = sorted(family_anchors, key=lambda a: a.body_rate_q256)
-            for anchor in ordered:
-                rows[anchor.format_name] = {
-                    # ``output_mse`` ONLY, deliberately no ``predicted_dloss``.
-                    # In this codebase ``output_mse`` is a raw MSE and
-                    # ``predicted_dloss`` is already the 1/2*h_trace*mse
-                    # product; writing the MSE into both fields would have the
-                    # weight-only branch price a Tessera rung ~h_trace/2 times
-                    # low against every other format on the menu. Leaving the
-                    # field out puts these rows on the same branch, in the same
-                    # currency, as production_render_cost's.
-                    "output_mse": anchor.dloss,
-                    "output_mse_measured": True,
-                    "cost_source": "tessera_campaign_measured",
-                    "currency": CURRENCY,
-                    "tessera_provenance": PROVENANCE_MEASURED,
-                    "tessera_family": family,
-                    "tessera_body_rate_q256": anchor.body_rate_q256,
-                    "activation_quantized": anchor.activation_quantized,
-                    "activation_contract": anchor.activation_contract,
-                    "wire_bytes": anchor.wire_bytes,
-                    "encode_seconds": anchor.seconds,
-                    "encode_seconds_accounting": ("unit" if anchor.encoding_batch_size == 1
-                        else "batch_wall_time_divided_by_batch_size"),
-                    "encoding_batch_size": anchor.encoding_batch_size,
-                    # The static A-side scale this row was scored under, when
-                    # its route executes the static NVFP4 contract; the value
-                    # identity the export's scale file must reproduce.
-                    **({"input_global_scale": float(anchor.input_global_scale)}
-                       if anchor.input_global_scale is not None else {}),
-                    "hessian_identity": {
-                        **hessian_identity, "applied": bool(anchor.hessian_applied),
-                    },
-                }
-                measured_names.add(anchor.format_name)
-                formats.add(anchor.format_name)
-            try:
-                surface = TesseraRateSurface(
-                    unit_name=qname,
-                    family=family,
-                    layout="tight",
-                    currency=CURRENCY,
-                    anchor_q256=tuple(a.body_rate_q256 for a in ordered),
-                    anchor_dloss=tuple(a.dloss for a in ordered),
-                    anchor_stderr=tuple(a.dloss_stderr for a in ordered),
-                )
-            except Exception as exc:
-                # A non-monotone anchor set is a measurement fact, and the
-                # surface refuses to launder it into a cost.  Record it and
-                # keep the measured rows; the family is then priced only where
-                # it was measured, which is the honest reduction.
-                refused.append({
-                    "qname": qname, "family": family,
-                    "reason": "non_interpolable_anchors",
-                    "detail": str(exc),
-                    "anchor_q256": [a.body_rate_q256 for a in ordered],
-                    "anchor_dloss": [a.dloss for a in ordered],
-                })
-                continue
-            surfaces.setdefault(qname, {})[family] = surface
-            if qname in wire_backed:
-                # Measured rows only: see the docstring.  The surface is still
-                # built so leave-one-out reporting covers these units.
-                continue
-            low, high = surface.q256_range
-            for rung in menus.get(qname, []):
-                if rung.family != family or rung.format_name in measured_names:
-                    continue
-                if not low <= rung.body_rate_q256 <= high:
-                    continue
-                rows[rung.format_name] = {
-                    # Same currency as the measured rows above, and for the
-                    # same reason: no ``predicted_dloss`` field.
-                    "output_mse": surface.predict(rung.body_rate_q256),
-                    "output_mse_measured": False,
-                    "cost_source": "tessera_campaign_interpolated",
-                    "currency": CURRENCY,
-                    "tessera_provenance": PROVENANCE_INTERPOLATED,
-                    "tessera_family": family,
-                    "tessera_body_rate_q256": rung.body_rate_q256,
-                    "activation_contract": rung.admission.activation_contract,
-                    # An interpolated row inherits the applicability of the
-                    # anchors it was interpolated between; they share a family,
-                    # so they share a scale plane and therefore an answer --
-                    # and, on a static-contract route, a unit-level A scale.
-                    **({"input_global_scale": float(ordered[0].input_global_scale)}
-                       if ordered[0].input_global_scale is not None else {}),
-                    "hessian_identity": {
-                        **hessian_identity,
-                        "applied": bool(ordered[0].hessian_applied),
-                    },
-                }
-                formats.add(rung.format_name)
-        if rows:
-            costs[qname] = rows
-    laws = _fit_stack_transfer_laws(samples, anchors, refused)
-    for packed_qname, sample in sorted(samples.items()):
-        stack_rows, stack_surfaces = _stack_cost_rows(
-            sample, anchors, menus, hessian_identity, refused,
-            wire_backed=wire_backed, transfer_law=laws.get(packed_qname))
-        if not stack_rows:
-            continue
-        costs[packed_qname] = stack_rows
-        formats.update(stack_rows)
-        if stack_surfaces:
-            surfaces.setdefault(packed_qname, {}).update(stack_surfaces)
-    payload = dict(provenance)
-    payload.update({
-        "schema": SCHEMA,
-        "costs": costs,
-        "formats": sorted(formats),
-        "currency": CURRENCY,
-        "leave_one_anchor_out": {
-            q: {f: dict(v) for f, v in by_f.items()} for q, by_f in loo.items()
-        },
-        "non_interpolable": canonical_refusals(refused),
-    })
-    # The attested objective this table prices (re-vet R2; read for reuse by
-    # `cost_currency.require_run_currency`, never from the environment). Every
-    # row here is an `output_mse` under the route's activation contract --
-    # the render-score objective -- so the stamp is unconditional: a caller
-    # claim of any other mode would launder cross-currency rows into that
-    # run's knapsack (RobTand/prismaquant#127).
-    from .cost_currency import RENDER_SCORE_COST_MODE
-
-    nested = payload.get("provenance")
-    if not isinstance(nested, dict):
-        nested = {}
-        payload["provenance"] = nested
-    nested["cost_mode"] = RENDER_SCORE_COST_MODE
-    return payload
-
 
 # ---------------------------------------------------------------------------
-# CLI
+# Checkpoint identity and resume
 # ---------------------------------------------------------------------------
 
-def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
-    return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
 
 
-def _campaign_wire_coordinates(cache, wire_dir):
-    """The wires this cache owns, independent of its rendered-only entries.
-
-    A pre-existing manifest contributes only destinations already present in
-    the wire directory. Snapshot that roster once: checking existence again
-    after an alias is published would misidentify a dense-only entry as the
-    new wire's owner. Fresh publications and resume/seed admission explicitly
-    add their coordinates, including wires with no rendered-manifest entry.
-    This is process-local campaign ownership, not a cross-process index.
-    """
-    coordinates = getattr(cache, "_campaign_wire_coordinates", None)
-    if coordinates is None:
-        coordinates = {key for key in cache.weights
-                       if _wire_path(wire_dir, *key).exists()}
-        # Batch admission may bootstrap while the ordered writer publishes.
-        # Install only once and adopt the winner's object, so a stale snapshot
-        # can never replace a roster another thread has created or updated.
-        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
-    return coordinates
 
 
-def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
-    """Check actual rendered and wire destinations before either write."""
-    from .production_weight_cache import require_injective_cache_filenames
-
-    coordinates = set(coordinates)
-    if cache.cache_dir:
-        require_injective_cache_filenames(
-            set(cache.weights).union(coordinates), where="campaign rendered weights")
-    _require_injective_wire_filenames(
-        wire_dir, _campaign_wire_coordinates(cache, wire_dir).union(coordinates))
 
 
-def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
-    """Reserve resume/seed wires before their links or receipt reads."""
-    # The roster belongs to the cache object: one cache, one wire_dir.
-    # This check/update is not atomic with the writer; register before publication.
-    coordinates = set(coordinates)
-    owned = _campaign_wire_coordinates(cache, wire_dir)
-    _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
-    owned.update(coordinates)
 
 
-def _require_injective_wire_filenames(wire_dir, coordinates):
-    # Resume and export consume _wire_path: its legacy dot-to-double-
-    # underscore spelling is different from the rendered-weight leaf.
-    owners = {}
-    for coordinate in sorted(coordinates):
-        filename = str(_wire_path(wire_dir, *coordinate).relative_to(wire_dir))
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"campaign wire shards: coordinates {previous!r} and "
-                f"{coordinate!r} map to one wire destination {filename!r}; "
-                "the wire shards would silently overwrite each other")
 
 
-def _checkpoint_identity_api():
-    try:
-        from tessera import cached_unit
-    except ImportError as exc:
-        raise RuntimeError(
-            "Tessera campaign checkpoint identity requires the producer's "
-            "cached_unit input/byte receipt API; refusing unbound resume") from exc
-    return cached_unit
 
 
 def _manifest_unit_receipts(identity, names):
@@ -2479,17 +650,19 @@ def _manifest_unit_receipts(identity, names):
     return receipts
 
 
-#: Producer provenance only; every recipe, input and sampling field still refuses.
-CAMPAIGN_CHECKPOINT_SEAL_FIELDS = frozenset({"prismaquant_source_sha256", "encoder_source_sha256"})
 
 
-def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
+def campaign_checkpoint_identity(*, weights, acts, hessians, menus, settings: Mapping[str, object],
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
                                   expert_projection=None, stack_sampling_identity=None,
                                   structure_by_unit=None, bound_units=None,
                                   unit_receipts=None):
     """Bind the priced population, including score inputs when H is off.
+
+    ``settings`` is the original raw CLI wire mapping, after acquisition
+    normalization. The operation copies it before applying the existing wire
+    filters; request/dataclass field names are never serialized here.
 
     ``unit_receipts`` (``{unit: {weight, scoring_rows, hessian}}``) are the
     streaming row head's per-entry receipts (``tessera_row_stream``): the same
@@ -2509,8 +682,9 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     """
     from .production_weight_cache import _production_cache_source_sha256
 
-    api = _checkpoint_identity_api()
-    settings = vars(args).copy()
+    api = campaign_wire.require_checkpoint_identity_api()
+    settings = dict(settings)
+    acquisition_source_weights = settings.get("acquisition_source_weights")
     # Locations and a duplicate digest are never scheduling identity. Opted-in
     # origin + exact atomic-expanded schedule below stay bound by value; unset
     # flags leave the historical settings bytes unchanged.
@@ -2613,8 +787,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
-                **({"acquisition_source_weight": dict(args.acquisition_source_weights[name])}
-                   if getattr(args, "acquisition_source_weights", None) is not None else {}),
+                **({"acquisition_source_weight": dict(acquisition_source_weights[name])}
+                   if acquisition_source_weights is not None else {}),
                 # A campaign hold creates this exact producer template once
                 # before journal admission.  The journal retains the same
                 # source/H records the former direct calls made, without a
@@ -2713,7 +887,7 @@ class _BoundCheckpointUnitIdentity:
         if self._calibration is None:
             return None
         import copy
-        api = _checkpoint_identity_api()
+        api = campaign_wire.require_checkpoint_identity_api()
         source = self._calibration
         # This is ActivationSource.config_block() minus its capture_sha256()
         # call. The producer receipt has already sealed H in `_template`; a
@@ -2895,7 +1069,7 @@ def _campaign_identity_anchor_roster(name, menu, *, calibration_source, static_s
             hessian_applied=(calibration_source is not None and
                              rung_accepts_hessian(entry.format_name, wire)),
             input_global_scale=(static_scales.get(name)
-                                if _format_executes_static_activation_contract(entry.format_name)
+                                if cell_measurement.executes_static_activation_contract(entry.format_name)
                                 else None)))
     return anchors
 
@@ -2953,7 +1127,7 @@ class _EncoderSourceSealAhead:
 
     @staticmethod
     def _take():
-        return _checkpoint_identity_api().encoder_source_sha256()
+        return campaign_wire.require_checkpoint_identity_api().encoder_source_sha256()
 
     def wait(self) -> str:
         return self._future.result()
@@ -3189,7 +1363,7 @@ def _stream_unit_identity(name, *, weight, inputs, hessian, source, menu, projec
     nothing has no holder and is receipted directly. Returns ``(holder,
     {weight, scoring_rows, hessian})``.
     """
-    api = _checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     holder = None
     try:
         weight_receipt = hessian_receipt = None
@@ -3215,7 +1389,7 @@ def _stream_unit_identity(name, *, weight, inputs, hessian, source, menu, projec
 
 
 def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
-    """Run ``_checkpoint_wire_record`` for every pending resumed row.
+    """Run ``tessera_campaign_wire.checkpoint_wire_record`` for pending resumed rows.
 
     ``pending`` is ``[(anchor, identity, existing), ...]`` in the adopt loop's
     own order and the records come back in that order; the first failure in
@@ -3226,12 +1400,12 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
     """
     threads = _identity_threads(threads)
     if threads == 1 or len(pending) <= 1:
-        return [_checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
+        return [campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
                 for anchor, identity, existing in pending]
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=min(threads, len(pending)),
                             thread_name_prefix="campaign-wire-verify") as pool:
-        futures = [pool.submit(_checkpoint_wire_record, anchor, wire_dir, identity,
+        futures = [pool.submit(campaign_wire.checkpoint_wire_record, anchor, wire_dir, identity,
                                existing=existing)
                    for anchor, identity, existing in pending]
         try:
@@ -3258,19 +1432,18 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     the unit is priced, the format is a Tessera rung on the current menu, the
     Hessian applicability is what ``rung_accepts_hessian`` says for that
     rung's wire, and the A-side contract on the row is what
-    :func:`_measure_anchor` stamps for that rung under this run's static
-    scales (:func:`_require_resumable_anchor`).  Only then is the producer's
+    :func:`cell_measurement.measure_cell` stamps for that rung under this run's static
+    scales (:func:`cell_measurement.require_resumable_cell`).  Only then is the producer's
     ``encoding_input_identity`` asked for, so the wire receipt is verified
     against a row already known to be a price of this run.
 
     ``structure`` is the unit's serving structure when the run declares one
     (#1502). It moves the stamped recipe to the wire that structure is served
-    on, exactly as :func:`_prepare_anchor` moves the encode, and is passed to
+    on, exactly as :meth:`cell_measurement.CellRecipe.prepare` moves the encode, and is passed to
     the producer's identity functions only when set, so a run that declares
     none stamps what it always stamped.
     """
-    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
-    from .tessera_render import rung_accepts_hessian
+    from .tessera_formats import parse_tessera_format_name
 
     if anchor.qname not in weights:
         raise RuntimeError(f"checkpoint anchor names an unknown unit: {anchor.qname!r}")
@@ -3282,17 +1455,10 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
         raise RuntimeError("checkpoint anchor family/rung disagrees with its format")
     if anchor.format_name not in {entry.format_name for entry in menus[anchor.qname]}:
         raise RuntimeError(f"checkpoint anchor is outside the current menu: {anchor.format_name}")
-    # A receipt is checked against the wire it was stamped on; whether that
-    # wire serves is the planner's refusal, not this reader's.
-    wire = tessera_served_wire_recipe(family, rung, structure=structure,
-                                      refuse_unattested=False)
-    activation = (calibration_source if calibration_source is not None
-                  and rung_accepts_hessian(anchor.format_name, wire) else None)
-    if bool(anchor.hessian_applied) != (activation is not None):
-        raise RuntimeError("checkpoint anchor Hessian applicability disagrees with the producer")
-    _require_resumable_anchor(anchor, static_scales,
-                             check_scoring_metadata=check_scoring_metadata, profile=profile)
-    api = _checkpoint_identity_api()
+    activation = cell_measurement.resume_cell_activation(
+        anchor, calibration_source, static_scales, structure=structure,
+        check_scoring_metadata=check_scoring_metadata, profile=profile)
+    api = campaign_wire.require_checkpoint_identity_api()
     projected = (projected_units or {}).get(anchor.qname)
     if bound_unit is not None:
         if not isinstance(bound_unit, _BoundCheckpointUnitIdentity):
@@ -3312,51 +1478,11 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     )
 
 
-def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
-    """Use the producer's one receipt grammar for fresh and resumed bytes."""
-    path = _wire_path(wire_dir, anchor.qname, anchor.format_name)
-    if path.is_symlink() or path.resolve().parent != wire_dir.resolve():
-        raise RuntimeError(f"checkpoint cached wire escapes its directory: {path}")
-    try:
-        blob = path.read_bytes()
-        api = _checkpoint_identity_api()
-        if existing is None:
-            record = api.make_unit_record(blob, identity, filename=path.name)
-        else:
-            record = existing
-            verification_identity = identity
-            producer_field = "encoder_source_sha256"
-            observed = record.get("identity") if isinstance(record, dict) else None
-            if (producer_field in CAMPAIGN_CHECKPOINT_SEAL_FIELDS
-                    and isinstance(observed, dict)
-                    and producer_field in observed and producer_field in identity
-                    and observed[producer_field] != identity[producer_field]):
-                # Defer only this declared producer seal. The real reader still
-                # verifies own bytes, grammar and every comparability field.
-                verification_identity = {**identity, producer_field: observed[producer_field]}
-            api.verify_cached_unit(blob, record, verification_identity)
-            if record.get("file") != path.name:
-                raise ValueError("cached wire filename differs from the priced unit/rung")
-        # CampaignAnchor.wire_bytes means the full blob, not plane-region bytes.
-        if anchor.wire_bytes != record["blob_bytes"]:
-            raise ValueError("cached wire length differs from the measured anchor")
-        if existing is not None and verification_identity is not identity:
-            from .dev_mode import seal_check
-
-            seal_check(f"campaign wire {producer_field}", observed[producer_field], identity[producer_field],
-                       where=f"{anchor.qname}@{anchor.format_name}",
-                       refusal=ValueError(f"cached unit {producer_field} identity mismatch"))
-        return record
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        raise RuntimeError(
-            f"checkpoint cached wire identity refused for {anchor.qname} "
-            f"{anchor.format_name}: {exc}") from exc
 
 
 # Job namespaces on the one publication queue. They exist so a completion
 # says which link of the chain finished: the files, the receipt read back off
 # them, or the journal write that cites the receipt.
-FILES_JOB = "files"
 RECEIPT_JOB = "receipt"
 CHECKPOINT_JOB = "checkpoint"
 
@@ -3523,7 +1649,7 @@ class _AnchorPublicationLedger:
     def _apply(self, keys) -> int:
         applied = 0
         for tag, *rest in keys:
-            if tag in (FILES_JOB, CHECKPOINT_JOB):
+            if tag in (cell_measurement.FILES_JOB, CHECKPOINT_JOB):
                 # Both exist to be ordered, not to be reported: the files a
                 # receipt reads and the journal write a receipt precedes.
                 continue
@@ -3597,7 +1723,7 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
             if (field not in seed_unit or field not in current_unit or
                     seed_unit[field] != current_unit[field]):
                 raise RuntimeError(f'seed checkpoint scoring identity mismatch at units.{name}.{field}')
-        state = _load_unit(path, stage='Tessera campaign', qname=name,
+        state = _load_unit(path, stage=STAGE, qname=name,
                            identity_sha256=seed_identity)
         if validate_state is not None:
             validate_state(name, state)
@@ -3608,7 +1734,7 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         for fmt, record in state.get("wire_records", {}).items():
             if not admits(name, fmt):
                 continue
-            _link_seed_wire(seed_wire, wire_dir, record.get("file"),
+            campaign_wire.link_seed_wire(seed_wire, wire_dir, record.get("file"),
                             qname=name, format_name=fmt)
         adopt(name, state, where=f"seed checkpoint {manifest}")
         adopted.append(name)
@@ -3623,412 +1749,10 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     }
 
 
-def _require_seed_wire_filename(wire_dir: Path, filename, *,
-                                qname: str, format_name: str) -> None:
-    """Refuse a seed receipt whose file name is not its unit/rung destination.
-
-    Pure name arithmetic: callers run it before they read or link the wire.
-    """
-    if not isinstance(filename, str) or not filename or "/" in filename:
-        raise RuntimeError(f"seed wire receipt names an unusable file: {filename!r}")
-    if filename != _wire_path(wire_dir, qname, format_name).name:
-        raise RuntimeError(f"{qname}: seed wire filename differs from priced unit/rung")
 
 
-def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
-                    qname: str, format_name: str) -> None:
-    """Put a seed's priced wire where this run's receipt check will read it."""
-    _require_seed_wire_filename(wire_dir, filename, qname=qname, format_name=format_name)
-    target = wire_dir / filename
-    if target.exists():
-        return
-    source = seed_wire / filename
-    if not source.is_file():
-        raise RuntimeError(f"seed checkpoint has no priced wire at {source}")
-    try:
-        os.link(source, target)
-    except OSError:
-        target.write_bytes(source.read_bytes())
 
 
-def _collect_activations(model, targets, tokens, max_rows: int, device,
-                         *, want_hessian: bool = False, profile=None,
-                         boundary_consumer=None, forward_batch=None, resource_check=None,
-                         shared_packed_inputs: bool = False, on_forwards_complete=None,
-                         expected_shared_input_groups=None, row_consumer=None):
-    """One model forward per batch, for dense and declared packed projections.
-
-    Returns ``(rows, hessians, token_counts, max_abs)``. Counts describe every
-    observed input row, including when Hessians and retained scoring rows are
-    disabled; they are calibration provenance, not a Hessian-computation flag.
-    ``resource_check(label)`` optionally enforces the caller's existing guard
-    before/after each output concat and Hessian CPU transfer. A refusal clears
-    owned output tensors before propagating; integer row observations remain
-    available for diagnostics. The default performs no additional checks.
-    ``on_forwards_complete()`` is an optional source-lifecycle boundary after
-    every original forward, hook removal and release of local packed weight
-    views. It runs before CPU output materialization, within failure cleanup.
-    The caller can release only exhausted source state while retaining the
-    next resident layer and current hidden boundaries. The default is None.
-
-    ``shared_packed_inputs`` is an experimental, default-off collector policy.
-    Only packed siblings with the same module, expert and derived input kind
-    share internal accumulation. The existing store retains private, bounded
-    FP32 device prefixes until output materialization; returned CPU H/X tensors
-    remain independent for every qname. This is not a new activation cache.
-
-    ``row_consumer(unit_names, flat_rows)`` is an optional, default-off research
-    seam. When given, it is called on the UNCAPPED flat rows of every unique
-    input group -- dense pre-hook or routed derivation, both feed ``accumulate``
-    -- once per group per batch, with the tuple of exact unit names sharing that
-    input (``group_members``). The call happens before the scoring-prefix cap
-    and independently of ``want_hessian``; zero-row calls never reach it. The
-    consumer owns its own copies; the collector retains no consumer state and
-    the default ``None`` keeps the historical behavior bit-identical.
-
-    Three different things come out of the same hook, and they have different
-    row budgets on purpose:
-
-    * ``rows`` is capped at ``max_rows`` because it feeds
-      ``_local_forward_render_score``, whose cost is linear in rows and whose
-      job is to *rank* rungs.
-    * ``hessians`` is ``XᵀX`` accumulated over **every** calibration row the
-      Linear sees, because it feeds the encoder, whose job is to *build* the
-      bytes.  Capping it at ``max_rows`` would hand a 3072-column
-      ``down_proj`` a rank-256 Hessian -- rank-deficient by a factor of
-      twelve, and wrong in a way no downstream check would catch.  So the
-      accumulation runs before the keep's early return, not after it.
-    * ``max_abs`` is ``max|x|`` over **every** calibration row, unconditional
-      and for the same reason the Hessian is uncapped: it calibrates the
-      static NVFP4 ``input_global_scale`` the W4A4 routes are priced and
-      served under, and a maximum over a prefix of the rows is a different
-      calibration than the one an exporter would take.
-
-    Hessians accumulate in fp32 on the model's device and move to CPU once at
-    the end. Legacy scoring chunks move to CPU as observed; the experimental
-    policy instead transfers their bounded device prefix at the end. Packed units use the existing
-    module-input collector and routing/SwiGLU derivation, and land in the SAME
-    three accumulators as a dense Linear -- rows, Hessian and ``max_abs`` --
-    so there is one notion of "what the campaign captured" for either
-    population, and ``write_export_inputs`` has one input to write.  The
-    score-row cap never caps routed rows before the Hessian or the maximum.
-    The main-entry gate requires profile-declared projections and the
-    producer's planning tool before calibration. The campaign later binds
-    that producer projection to these live views before pricing the units
-    and carrying their wire receipts into export (PrismaQuant #183).
-    """
-    import torch
-
-    store: dict[str, list] = {name: [] for name in targets}
-    kept: dict[str, int] = {name: 0 for name in targets}
-    hess: dict[str, object] = {name: None for name in targets}
-    seen: dict[str, int] = {name: 0 for name in targets}
-    amax: dict[str, float] = {name: 0.0 for name in targets}
-    # Singleton dense owners stay distinct. Packed groups below may replace
-    # only proven identical gate/up owners; seen remains a per-qname diagnostic.
-    group_members = {name: [name] for name in targets}
-    routed_seen: dict[str, int] = {}
-    handles = []
-    packed_collector = None
-    inventory = by_name = selected_by_module = parents = None
-    member = selected = unique = consume_packed = None
-    calibration_coordinates = None
-
-    def consume_boundary(qname, module, args, kwargs):
-        boundary_consumer(qname, module, args, kwargs, calibration_coordinates)
-
-    def accumulate(name, x):
-        # ONE accumulator for both populations: a dense Linear's pre-hook and
-        # a packed projection's routed rows land here, so the three outputs
-        # (score rows, Hessian, max|x|) are the same three for either, and a
-        # packed unit can feed ``_static_input_scales``/``write_export_inputs``
-        # by the same path a dense one does once the main-entry packed gate
-        # opens.  A zero-row call (an expert no token was routed to on this
-        # batch) contributes nothing to any of them.
-        flat = x.detach().reshape(-1, x.shape[-1])
-        if not flat.shape[0]:
-            return
-        for member_name in group_members[name]:
-            if member_name in routed_seen:
-                routed_seen[member_name] += int(flat.shape[0])
-            seen[member_name] += int(flat.shape[0])
-        batch_max = flat.abs().amax().float()
-        previous_max = amax[name]
-        if not isinstance(previous_max, torch.Tensor):
-            previous_max = torch.zeros((), dtype=torch.float32, device=batch_max.device)
-        # Python max(previous, NaN) preserves previous. fmax keeps that exact
-        # policy while avoiding a device-to-host scalar read on every batch.
-        amax[name] = torch.fmax(previous_max, batch_max)
-        if row_consumer is not None:
-            # Research seam: the full uncapped rows, once per unique input
-            # group, before any scoring-prefix cap and regardless of
-            # ``want_hessian``.  The consumer must own its bytes; the flat
-            # tensor may still alias a source/derived activation plane.
-            row_consumer(tuple(group_members[name]), flat)
-        if want_hessian:
-            # Every row, before any cap: see the docstring.
-            f32 = flat.to(dtype=torch.float32)
-            gram = f32.t() @ f32
-            if hess[name] is None:
-                hess[name] = gram
-            else:
-                hess[name] += gram
-        room = max_rows - kept[name]
-        if room <= 0:
-            return
-        if shared_packed_inputs:
-            # Never retain a view of a source/derived activation plane. One
-            # private prefix buffer is owned by the existing store, and copy_
-            # preserves the original row order and BF16-to-FP32 conversion.
-            take_rows = min(room, int(flat.shape[0]))
-            if not store[name]:
-                store[name].append(torch.empty(
-                    (max_rows, flat.shape[1]), dtype=torch.float32, device=flat.device))
-            store[name][0][kept[name]:kept[name] + take_rows].copy_(flat[:take_rows])
-            kept[name] += take_rows
-        else:
-            take = flat[:room].to(dtype=torch.float32, device="cpu")
-            store[name].append(take)
-            kept[name] += int(take.shape[0])
-
-    def make_hook(name):
-        def hook(_module, args):
-            if not args:
-                return
-            x = args[0]
-            if not isinstance(x, torch.Tensor):
-                return
-            accumulate(name, x)
-        return hook
-
-    modules = dict(model.named_modules())
-    missing_modules = set(targets) - modules.keys()
-    if missing_modules:
-        from .routed_experts import (
-            profile_declared_packed_expert_projections,
-            resolve_routed_expert_profile,
-        )
-        from .measure_quant_cost import (
-            _packed_experts_parent_module, derive_per_expert_activations,
-        )
-        from .production_weight_cache import _PackedExpertActivationCollector
-
-        profile = resolve_routed_expert_profile(model, profile)
-        inventory = profile_declared_packed_expert_projections(model, profile)
-        by_name = {member.qname: member for member in inventory}
-        unknown = missing_modules - by_name.keys()
-        if unknown:
-            raise RuntimeError(f"campaign activation targets are not declared units: {sorted(unknown)}")
-        selected_by_module = {}
-        # These are the input kinds published by the existing derivation,
-        # not a mapping to the producer's served role/group vocabulary.
-        from .routed_experts import packed_activation_input_kind
-        input_kind = {}
-        for name in sorted(missing_modules):
-            member = by_name[name]
-            if member.param_name not in input_kind:
-                input_kind[member.param_name] = packed_activation_input_kind(member.param_name)
-            selected_by_module.setdefault(member.module_qname, []).append(member)
-            routed_seen[name] = 0
-        parents = {name: _packed_experts_parent_module(model, name)
-                   for name in selected_by_module}
-        if shared_packed_inputs:
-            for module_qname, selected in selected_by_module.items():
-                owners = {}
-                unique = []
-                for member in selected:
-                    key = (module_qname, member.expert_id, input_kind[member.param_name])
-                    owner = owners.get(key)
-                    if owner is None:
-                        owners[key] = member.qname
-                        unique.append(member)
-                    else:
-                        group_members[owner].append(member.qname)
-                        del group_members[member.qname]
-                        for state in (store, kept, hess, amax):
-                            del state[member.qname]
-                        state = None
-                selected_by_module[module_qname] = unique
-
-        def consume_packed(module_qname, x):
-            selected = selected_by_module.get(module_qname)
-            if not selected:
-                return
-            derived = derive_per_expert_activations(
-                selected[0].module, x, parents[module_qname],
-                capture_down=any(input_kind[member.param_name] == "down"
-                                 for member in selected),
-                max_rows_per_expert=None,
-            )
-            for member in selected:
-                accumulate(member.qname,
-                           derived[input_kind[member.param_name]][member.expert_id])
-
-        packed_collector = _PackedExpertActivationCollector(
-            model, {member.module_qname for member in inventory},
-            module_token_budget=0, store_device=device, store_qnames=set(),
-            profile=profile, row_consumer=consume_packed,
-            boundary_consumer=(consume_boundary if boundary_consumer is not None else None),
-        )
-    try:
-        if expected_shared_input_groups is not None:
-            actual = sorted(sorted(names) for names in group_members.values())
-            expected = sorted(sorted(names) for names in expected_shared_input_groups.values())
-            if not shared_packed_inputs or actual != expected:
-                raise RuntimeError('actual capture input groups differ from memory admission')
-        for name in targets:
-            if name not in missing_modules:
-                handles.append(modules[name].register_forward_pre_hook(make_hook(name)))
-        if packed_collector is not None:
-            packed_collector.install()
-        with torch.no_grad():
-            sample_offset = 0
-            for batch in tokens:
-                if boundary_consumer is not None:
-                    if batch.ndim != 2:
-                        raise RuntimeError("boundary capture requires [sample, token] calibration IDs")
-                    sample_ids = torch.arange(sample_offset, sample_offset + batch.shape[0], dtype=torch.int64)
-                    positions = torch.arange(batch.shape[1], dtype=torch.int64)
-                    calibration_coordinates = torch.cartesian_prod(sample_ids, positions)
-                    sample_offset += batch.shape[0]
-                (model if forward_batch is None else forward_batch)(batch.to(device))
-    except BaseException as error:
-        if shared_packed_inputs or on_forwards_complete is not None:
-            store.clear()
-            hess.clear()
-            amax.clear()
-            if torch.device(device).type == 'cuda':
-                try:
-                    torch.cuda.empty_cache()
-                except Exception as cleanup_error:
-                    error.add_note(f'capture CUDA cache release failed: {cleanup_error!r}')
-        raise
-    finally:
-        for handle in handles:
-            handle.remove()
-        if packed_collector is not None:
-            packed_collector.remove()
-        if on_forwards_complete is not None:
-            # Hook removal alone leaves row_consumer's closure and these
-            # PackedExpertProjection.weight views owning the old packed slabs.
-            # Loop variables own views too, even after their dictionaries die.
-            packed_collector = None
-            inventory = by_name = selected_by_module = parents = None
-            member = selected = unique = consume_packed = None
-    unobserved = [name for name, count in routed_seen.items() if not count]
-    if unobserved:
-        if shared_packed_inputs or on_forwards_complete is not None:
-            store.clear()
-            hess.clear()
-            amax.clear()
-        raise RuntimeError(
-            "packed campaign units have no routed calibration rows: "
-            f"{sorted(unobserved)}; refusing a shared-Hessian or weight-only fallback")
-    # All forwards are complete. Keep integer `seen` available to failure
-    # diagnostics, but never pin a partial capture through this traceback.
-    rows, hessians = {}, {}
-    h = chunks = cpu_rows = cpu_h = None
-    try:
-        if on_forwards_complete is not None:
-            on_forwards_complete()
-        if resource_check is not None:
-            resource_check('before_output_materialization')
-        # Materialize each unit's maximum only once.
-        amax = {name: float(value.item()) if isinstance(value, torch.Tensor) else value
-                for name, value in amax.items()}
-        if shared_packed_inputs:
-            # Drain one unique group before making independent CPU siblings.
-            # The final CPU footprint is unchanged. GPU storage (including
-            # cached allocator blocks) must not accumulate behind those clones.
-            maxima = {}
-            for name, members in group_members.items():
-                if resource_check is not None:
-                    resource_check(f'before_output_group:{name}')
-                if resource_check is not None:
-                    resource_check(f'before_rows_concat:{name}')
-                chunks = store.pop(name)
-                # copy=True also compacts CPU qualification outputs: a short
-                # prefix must not serialize the uninitialized buffer tail.
-                cpu_rows = chunks[0][:kept[name]].to(device='cpu', copy=True) if chunks else None
-                released_cuda = bool(chunks and chunks[0].is_cuda)
-                chunks = None
-                if resource_check is not None:
-                    resource_check(f'after_rows_concat:{name}')
-                if want_hessian:
-                    if resource_check is not None:
-                        resource_check(f'before_hessian_cpu_transfer:{name}')
-                    h = hess.pop(name)
-                    cpu_h = None if h is None else h.to(device='cpu')
-                    released_cuda = released_cuda or (h is not None and h.is_cuda)
-                    h = None
-                    if resource_check is not None:
-                        resource_check(f'after_hessian_cpu_transfer:{name}')
-                if released_cuda:
-                    torch.cuda.empty_cache()
-                for index, member_name in enumerate(members):
-                    if resource_check is not None:
-                        resource_check(f'before_output_clone:{member_name}')
-                    rows[member_name] = (cpu_rows if index == 0 or cpu_rows is None
-                                         else cpu_rows.clone())
-                    if want_hessian:
-                        hessians[member_name] = (cpu_h if index == 0 or cpu_h is None
-                                                 else cpu_h.clone())
-                    maxima[member_name] = amax[name]
-                    if resource_check is not None:
-                        resource_check(f'after_output_clone:{member_name}')
-                cpu_rows = cpu_h = None
-                if resource_check is not None:
-                    resource_check(f'after_output_group:{name}')
-            amax = maxima
-        # Do not retain both original chunks and concatenated outputs for the
-        # whole scope. Full-model captures can hold GiB of scoring rows.
-        for name in list(store):
-            if resource_check is not None:
-                resource_check(f'before_rows_concat:{name}')
-            chunks = store.pop(name)
-            rows[name] = torch.cat(chunks, dim=0) if chunks else None
-            chunks = None
-            if resource_check is not None:
-                resource_check(f'after_rows_concat:{name}')
-        if want_hessian and not shared_packed_inputs:
-            # GB10 shares physical DRAM with CPU tensors. Periodically return
-            # cached CUDA blocks while transferring the full H, but also let
-            # the caller refuse before the next unit if reserved blocks stay
-            # resident. Python-reference release alone cannot prove fit.
-            released_cuda_bytes = 0
-            for name in list(hess):
-                if resource_check is not None:
-                    resource_check(f'before_hessian_cpu_transfer:{name}')
-                h = hess.pop(name)
-                hessians[name] = None if h is None else h.to(device='cpu')
-                if h is not None and h.is_cuda:
-                    released_cuda_bytes += h.numel() * h.element_size()
-                h = None
-                if released_cuda_bytes >= 256 * 1024**2:
-                    torch.cuda.empty_cache()
-                    released_cuda_bytes = 0
-                if resource_check is not None:
-                    resource_check(f'after_hessian_cpu_transfer:{name}')
-            if released_cuda_bytes:
-                torch.cuda.empty_cache()
-        if resource_check is not None:
-            resource_check('after_output_materialization')
-    except BaseException as error:
-        # Exception tracebacks keep this frame alive. Explicitly drain every
-        # output owner and loop temporary while retaining only row counters.
-        h = chunks = cpu_rows = cpu_h = None
-        store.clear()
-        hess.clear()
-        amax.clear()
-        rows.clear()
-        hessians.clear()
-        if (resource_check is not None or on_forwards_complete is not None) and torch.device(device).type == 'cuda':
-            try:
-                torch.cuda.empty_cache()
-            except Exception as cleanup_error:
-                error.add_note(f'capture CUDA cache release failed: {cleanup_error!r}')
-        raise
-    return rows, hessians, dict(seen), dict(amax)
 
 
 def _static_input_scales(max_abs: "Mapping[str, float]", *, profile=None):
@@ -4045,7 +1769,7 @@ def _static_input_scales(max_abs: "Mapping[str, float]", *, profile=None):
     per-member scale would price an A side no fused module executes.
 
     A unit whose calibration never saw a row keeps no scale; a W4A4 anchor on
-    it then refuses in :func:`_measure_anchor` rather than pricing dynamically.
+    it then refuses in :func:`cell_measurement.measure_cell` rather than pricing dynamically.
     """
     from .nvfp4_activation_contract import (
         input_global_scale_from_max_abs, resolve_input_global_scale_policy,
@@ -4089,12 +1813,12 @@ def _calibration_tokens(model_path: str, n: int, seqlen: int, seed: int):
     return out, text
 
 
-def _campaign_calibration_parameters(args) -> dict[str, object]:
+def _campaign_calibration_parameters(request) -> dict[str, object]:
     """Draw metadata, separate from the CLI seed when a saved draw is supplied."""
     parameters: dict[str, object] = {"source": "wikitext-2-raw-v1/train", "split_role": "calibration",
-                  "model": str(args.model), "seed": int(args.seed),
-                  "nsamples": int(args.nsamples), "seqlen": int(args.seqlen)}
-    receipt = getattr(args, "calibration_input_receipt", None)
+                  "model": str(request.model), "seed": int(request.seed),
+                  "nsamples": int(request.nsamples), "seqlen": int(request.seqlen)}
+    receipt = request.calibration_input_receipt
     if receipt is not None:
         provenance = receipt["provenance"]
         parameters.update(source=provenance["source"], seed=provenance["seed"],
@@ -4236,7 +1960,7 @@ def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
 #: values do not depend on what else the run priced.
 from prismaquant.tessera_campaign_selection import (
     UNITS_SCHEMA, UNITS_SCHEMA_V2, UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
-    selection_priced_units, validate_unit_selection,
+    selection_priced_units, validate_unit_selection, load_unit_selection,
 )
 
 #: The same selection, plus the planner's expert sample.  A ``v1`` file prices
@@ -4250,188 +1974,6 @@ from prismaquant.tessera_campaign_selection import (
 
 #: The calibration census ``--calibration-census`` reads and ``--census-out``
 #: writes: the per-unit calibration row counts of the whole priced scope.
-CENSUS_SCHEMA = "prismaquant.tessera_campaign_census.v1"
-
-
-def _keystream(seed: int, label: str):
-    """A stable, dependency-free stream of uniforms in [0, 1).
-
-    SHA-256 in counter mode rather than :mod:`random`, because the draw is
-    stamped into a checkpoint identity: a sample that changed when CPython
-    changed its sampler would silently re-key every journal it appears in.
-    """
-    import hashlib
-
-    counter = 0
-    while True:
-        digest = hashlib.sha256(
-            f"{int(seed)}:{label}:{counter}".encode()).digest()
-        for offset in range(0, 32, 8):
-            yield int.from_bytes(digest[offset:offset + 8], "big") / float(1 << 64)
-        counter += 1
-
-
-def _permute(names: "Sequence[str]", stream) -> list[str]:
-    """Fisher-Yates over ``names`` from ``stream``."""
-    order = list(names)
-    for index in range(len(order) - 1, 0, -1):
-        pick = int(next(stream) * (index + 1))
-        pick = min(pick, index)
-        order[index], order[pick] = order[pick], order[index]
-    return order
-
-
-def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
-                      seed: int, stack: str) -> dict:
-    """A fixed-size PPS draw over one stack's experts, with exact ``pi``.
-
-    Randomized systematic (Madow) probability-proportional-to-size sampling
-    without replacement, with a take-all stratum.  Three parts, each of which
-    is load-bearing:
-
-    **Proportional to what.** The stack total the allocator needs is
-    ``sum_e h_e * mse_e``.  ``h_e`` is free (the probe already has it) and
-    ``mse_e`` costs an encode, so drawing proportional to ``h_e`` leaves only
-    the spread of ``mse_e`` in the estimator's variance.  On LFM2.5 layer 18
-    the per-expert ``h_trace`` spans 9.6e4 to 7.7e6 (CV ~1.0) while the
-    cross-expert spread of ``mse`` at a fixed rung is CV 0.33-0.55, so this is
-    where the variance is. A uniform draw with the correct Horvitz-Thompson
-    weights remains unbiased, but carries the product's spread. The planner
-    requires Fisher weights and provides no uniform fallback.
-
-    **The take-all stratum.** With ``h`` this dispersed, ``n * h_i / sum(h)``
-    exceeds one for the largest experts.  Clipping that to one would leave
-    ``sum(pi) < n`` and bias the estimate low.  Instead those experts are
-    taken with certainty, removed from the frame, and the rest re-solved --
-    iterated to a fixed point, which is ``pi_i = min(1, c*h_i)`` for the
-    unique ``c`` with ``sum_i min(1, c*h_i) = n``.  The post-conditions
-    asserted below (``sum(pi) == n``, every ``pi`` in ``[0, 1]``) are what
-    make the Horvitz-Thompson estimator downstream exactly unbiased rather
-    than approximately so.
-
-    **The randomized order.** The frame is permuted from the seeded stream
-    before the systematic pass.  This is not cosmetic: the practical variance
-    estimator for this design (Hartley-Rao, which #290 applies to the prices)
-    is derived for randomized-order systematic sampling and is not justified
-    under expert-index or ``h``-sorted order.
-
-    Determinism, and what the seed is deliberately NOT: the stream is keyed on
-    ``(seed, stack)`` only, never on ``h``.  The probe is not bit-reproducible
-    across runs, and systematic sampling is continuous in ``pi``, so a
-    re-probed ``h`` perturbs this draw slightly; hashing ``h`` into the seed
-    would instead redraw the whole stack on every re-probe.
-
-    An expert with ``h_e == 0`` gets ``pi_e = 0`` and is never encoded, which
-    is exact rather than a rounding: under the campaign's Fisher convention a
-    token never routed to an expert contributes zero gradient, so its term in
-    the total is zero, not merely small.
-
-    Returns the whole draw, including everything a variance estimate needs:
-    ``units``, ``inclusion_probability`` (over the full frame), ``certainty``,
-    ``permutation``, ``start``, ``size``, ``size_sha256``, ``frame_size``,
-    ``random_draws`` and ``method``.
-    """
-    names = sorted(weights)
-    if not names:
-        raise RuntimeError(f"stack {stack}: no unit to sample")
-    sizes = {name: float(weights[name]) for name in names}
-    if any(not math.isfinite(value) for value in sizes.values()):
-        raise RuntimeError(f"stack {stack}: size weights must be finite")
-    if any(value < 0.0 for value in sizes.values()):
-        raise RuntimeError(f"stack {stack}: a size weight is negative")
-    digest = text_sha256hex("|".join(f"{name}={sizes[name]!r}" for name in names))
-    want = int(n)
-    if want < 1:
-        raise RuntimeError(f"stack {stack}: --stack-sample must be at least 1")
-
-    frame = [name for name in names if sizes[name] > 0.0]
-    zero = [name for name in names if sizes[name] <= 0.0]
-    common = {"size": sizes, "size_sha256": digest, "seed": int(seed),
-              "stack": str(stack), "frame_size": len(frame),
-              "zero_size": zero}
-    if want >= len(frame):
-        return {**common, "units": list(frame), "method": "census",
-                "inclusion_probability": {name: (1.0 if sizes[name] > 0.0 else 0.0)
-                                          for name in names},
-                "certainty": list(frame), "permutation": list(frame),
-                "start": None, "random_draws": 0}
-
-    certainty: list[str] = []
-    rest = list(frame)
-    remaining = want
-    while rest and remaining > 0:
-        total = sum(sizes[name] for name in rest)
-        over = [name for name in rest if remaining * sizes[name] / total >= 1.0]
-        if not over:
-            break
-        certainty.extend(over)
-        rest = [name for name in rest if name not in set(over)]
-        remaining -= len(over)
-    certainty.sort()
-
-    # A single random draw has no variance estimate. Stamping 0.0 for it would
-    # read downstream as "measured exactly", so it refuses here instead --
-    # before any GPU second is spent on a sample nothing can put an error bar
-    # on. Either take one more expert, or take the stack whole.
-    if remaining == 1:
-        raise RuntimeError(
-            f"stack {stack}: --stack-sample {want} leaves exactly one "
-            f"randomly drawn expert after {len(certainty)} certainty unit(s); "
-            "a one-draw sample admits no variance estimate. Use "
-            f"--stack-sample {want + 1} or price the stack whole.")
-
-    pi = {name: 0.0 for name in names}
-    pi.update({name: 1.0 for name in certainty})
-    drawn = list(certainty)
-    stream = _keystream(seed, f"pps:{stack}")
-    permutation = _permute(rest, stream) if rest else []
-    start = None
-    if remaining > 0 and rest:
-        total = sum(sizes[name] for name in rest)
-        pi.update({name: remaining * sizes[name] / total for name in rest})
-        start = next(stream)
-        cumulative = 0.0
-        ladder = []
-        for name in permutation:
-            cumulative += pi[name]
-            ladder.append((cumulative, name))
-        # Renormalise the last edge so float drift cannot drop the final draw.
-        ladder[-1] = (float(remaining), ladder[-1][1])
-        step = 0
-        for edge, name in ladder:
-            while step < remaining and start + step < edge:
-                drawn.append(name)
-                step += 1
-    total_pi = sum(pi.values())
-    if abs(total_pi - want) > 1e-9:
-        raise RuntimeError(
-            f"stack {stack}: inclusion probabilities sum to {total_pi!r}, not "
-            f"{want}; the estimator built on them would be biased")
-    if len(set(drawn)) != want:
-        raise RuntimeError(
-            f"stack {stack}: the systematic pass drew {len(set(drawn))} "
-            f"distinct units, not {want}")
-    return {**common, "units": sorted(drawn),
-            "method": "randomized_systematic_pps_with_take_all_v1",
-            "inclusion_probability": {name: float(pi[name]) for name in names},
-            "certainty": certainty, "permutation": permutation,
-            "start": start, "random_draws": int(remaining)}
-
-
-def audit_subsample(drawn: "Sequence[str]", *, rate: int = 10, seed: int = 0,
-                    stack: str = "") -> list[str]:
-    """A simple random subsample of the draw: one unit in ``rate``, at least 1.
-
-    Drawn from a stream of its own, so changing the audit fraction cannot
-    disturb the sample the prices are built from -- the audit buys evidence
-    about interpolation, and must not be able to move the estimate.
-    """
-    units = sorted(drawn)
-    if not units:
-        return []
-    count = max(1, len(units) // int(rate))
-    stream = _keystream(seed, f"audit:{stack}")
-    return sorted(_permute(units, stream)[:count])
 
 
 def anchor_group_key(name: str, *, profile, expert_members: Mapping) -> str:
@@ -4467,189 +2009,16 @@ def resolve_anchor_groups(targets: Sequence[str], *, profile,
     return groups
 
 
-def expert_partition_members(selection: Mapping, *, unit_records: Mapping,
-                             stack_of: Mapping, rate_band, max_rounds,
-                             seeded: bool = False) -> dict[str, list[str]]:
-    """Validate deterministic, expert-complete chunks against producer records.
-
-    This is not sampling: every projection of each selected expert is priced,
-    and the complete original group remains the identity/menu frame.
-    """
-    entries = selection.get("groups", [])
-    if selection.get("schema") != UNITS_SCHEMA_V3:
-        if any("partition" in entry for entry in entries):
-            raise RuntimeError("expert partition requires the v3 selection schema")
-        return {}
-    validate_unit_selection(selection, path="expert partition")
-    band = parse_rate_band(rate_band) if rate_band else None
-    if band is None or band[0] != band[1] or type(max_rounds) is not int or max_rounds != 1 or seeded:
-        raise RuntimeError("expert partition requires pinned rate-band, max-rounds=1 and no seeds")
-    if len(entries) != 1:
-        raise RuntimeError("expert partition selection must name one routed group")
-    result = {}
-    for entry in entries:
-        key = entry["key"]
-        full = entry["members"]
-        part = entry.get("partition")
-        fields = {"schema", "experts_per_row", "index", "count", "rate_q256", "members"}
-        if (not key.startswith("s:") or len(set(full)) != len(full)
-                or any(field in entry for field in ("sampled", "audit", "inclusion_probability", "stack_samples"))
-                or not isinstance(part, Mapping) or set(part) != fields
-                or part.get("schema") != EXPERT_PARTITION_SCHEMA):
-            raise RuntimeError("expert partition requires an unsampled routed group and a closed descriptor")
-        if (any(type(part[name]) is not int for name in ("experts_per_row", "index", "count", "rate_q256"))
-                or part["experts_per_row"] <= 0 or part["index"] < 0
-                or part["rate_q256"] != band[0]):
-            raise RuntimeError("expert partition has invalid size/index/rate")
-        by_expert = {}
-        for name in full:
-            record = unit_records.get(name)
-            if (not isinstance(record, Mapping) or type(record.get("expert")) is not int
-                    or record["expert"] < 0 or "s:" + str(stack_of.get(name)) != key):
-                raise RuntimeError(f"expert partition {key}: {name} is not a producer-bound expert")
-            by_expert.setdefault(record["expert"], []).append(name)
-        experts = sorted(by_expert)
-        # Each chunk carries every role/shape used by the full group's menu
-        # cache. Heterogeneous expert geometry needs a separately charged
-        # metadata contract rather than enlarging this row's cache silently.
-        signatures = {tuple(sorted((unit_records[name].get("projection"),
-                                    unit_records[name].get("rows"), unit_records[name].get("cols"))
-                                   for name in names)) for names in by_expert.values()}
-        if len(signatures) != 1:
-            raise RuntimeError("expert partition requires uniform per-expert projection geometry")
-        size = part["experts_per_row"]
-        count = (len(experts) + size - 1) // size
-        start = part["index"] * size
-        expected = sorted(name for expert in experts[start:start + size] for name in by_expert[expert])
-        if (part["count"] != count or part["index"] >= count or not expected
-                or part["members"] != expected):
-            raise RuntimeError("expert partition does not match its complete deterministic expert chunk")
-        result[key] = expected
-    return result
-
-
-def load_unit_selection(path) -> dict:
-    """Read a ``--units`` selection file through the shared metadata owner."""
-    return validate_unit_selection(json.loads(Path(path).read_text()), path=path)
-
-
 #: The size sources a stack draw may be proportional to.  ``probe`` is the
 #: per-expert Fisher vector, which is what the estimator's variance argument
 #: rests on; ``counts`` is the census's per-expert routed-row count, which is
 #: the ONLY per-expert size available when no probe exists -- a routed-token
 #: proxy for ``h_trace`` and never a substitute for it (RobTand/prismaquant#495
 #: part 1, and the report's section 3.6 bullet on sizes).
-STACK_SAMPLE_SIZE_SOURCES = ("probe", "counts")
 
 #: The design a ``counts``-sized draw declares, so a reader of ``units.json``
 #: can tell which vector the inclusion probabilities are proportional to
 #: without re-deriving it.
-STACK_SAMPLE_COUNTS_SUFFIX = "_counts"
-
-
-def _stack_draw_sizes(record: Mapping, sample: StackExpertSample) -> dict:
-    """The sizes a stack's draw was made proportional to.
-
-    A record that declares its own ``sizes`` replays on those; one that does
-    not is a probe-sized draw and replays on the Fisher vector, exactly as
-    every record written before #495 does.
-    """
-    sizes = record.get("sizes")
-    if sizes is None:
-        return {str(e): h for e, h in enumerate(sample.h_trace_per_expert)}
-    if str(sizes.get("source")) not in STACK_SAMPLE_SIZE_SOURCES:
-        raise StackSampleError(
-            f"{sample.packed_qname}: size source {sizes.get('source')!r} is "
-            f"not one of {list(STACK_SAMPLE_SIZE_SOURCES)}")
-    values = sizes.get("values")
-    if not isinstance(values, Mapping) or len(values) != sample.num_experts:
-        raise StackSampleError(
-            f"{sample.packed_qname}: a declared size vector must carry one "
-            f"value per expert ({sample.num_experts})")
-    return {str(e): float(values[str(e)]) for e in range(sample.num_experts)}
-
-
-def _stack_design(record: Mapping, draw: Mapping) -> str:
-    """The design name a draw carries, including which sizes it used."""
-    sizes = record.get("sizes")
-    method = str(draw["method"])
-    if sizes is None or str(sizes.get("source")) == "probe":
-        return method
-    return method + STACK_SAMPLE_COUNTS_SUFFIX
-
-
-def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExpertSample]:
-    """Rehydrate packed probe/draw records and bind them to the whole group.
-
-    A selection may narrow measured experts; it may not invent projections,
-    lose an expert from the frame, or give two roles different expert draws.
-    Legacy unsampled selections retain their existing per-unit behavior.
-    """
-    result = {}
-    for entry in selection["groups"]:
-        records = entry.get("stack_samples")
-        if records is None:
-            if entry.get("sampled") and str(entry["key"]).startswith("s:"):
-                raise StackSampleError(
-                    f"{entry['key']}: sampled stack requires original packed probe/draw records")
-            continue
-        if not isinstance(records, Mapping) or not records:
-            raise StackSampleError(f"{entry['key']}: stack_samples must name packed parameters")
-        frame_members, sampled_members, frame_pi, audit_members = set(), set(), {}, set()
-        for name, record in sorted(records.items()):
-            if name in result:
-                raise StackSampleError(f"{name}: duplicate packed sampling record")
-            sample = stack_sample_from_probe(
-                name, record["probe_row"], profile,
-                sampled_experts=record["sampled_experts"],
-                inclusion_prob=record["inclusion_prob"], seed=record["seed"],
-                design=record["design"],
-                transfer_law_experts=record.get("transfer_law_experts", ()))
-            _validate_stack_sample(sample)
-            replay = draw_stack_sample(
-                _stack_draw_sizes(record, sample),
-                len(sample.sampled_experts), seed=sample.seed, stack=name)
-            if (record.get("draw") != replay
-                    or sample.design != _stack_design(record, replay)
-                    or list(sample.sampled_experts) != sorted(int(e) for e in replay["units"])
-                    or dict(sample.inclusion_prob) != {
-                        int(e): p for e, p in replay["inclusion_probability"].items()}):
-                raise StackSampleError(f"{name}: packed draw receipt does not replay from probe and seed")
-            declared = record.get("sizes")
-            if declared is not None and str(declared.get("sha256")) != replay["size_sha256"]:
-                # The digest is what binds the DECLARED size vector to the one
-                # the draw was actually made proportional to; without it a
-                # record could name ``counts`` and carry a probe-sized draw.
-                raise StackSampleError(
-                    f"{name}: declared size digest does not match the draw's")
-            if set(sample.inclusion_prob) != set(range(sample.num_experts)):
-                raise StackSampleError(f"{name}: selection needs full-frame inclusion probabilities")
-            if entry["key"] != "s:" + sample.packed_experts_module:
-                raise StackSampleError(f"{name}: packed module disagrees with anchor group")
-            frame = stack_sample_from_probe(
-                name, record["probe_row"], profile,
-                sampled_experts=range(sample.num_experts),
-                inclusion_prob={e: 1.0 for e in range(sample.num_experts)},
-                seed=sample.seed, design="census")
-            for e, members in frame.members.items():
-                for member in members:
-                    if member in frame_members:
-                        raise StackSampleError(f"{member}: two packed parameters claim one projection")
-                    frame_members.add(member)
-                    frame_pi[member] = sample.inclusion_prob[e]
-                    if e in record.get("audit_experts", []):
-                        audit_members.add(member)
-            sampled_members.update(m for members in sample.members.values() for m in members)
-            result[name] = sample
-        if frame_members != set(entry["members"]):
-            raise StackSampleError(f"{entry['key']}: packed probe projections disagree with census members")
-        if sampled_members != set(entry.get("sampled", entry["members"])):
-            raise StackSampleError(f"{entry['key']}: packed draw disagrees with sampled members")
-        if audit_members != set(entry.get("audit", [])):
-            raise StackSampleError(f"{entry['key']}: packed audit disagrees with audit members")
-        if frame_pi != entry.get("inclusion_probability"):
-            raise StackSampleError(f"{entry['key']}: packed draw disagrees with full-frame probabilities")
-    return result
 
 
 def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[str]],
@@ -4675,34 +2044,7 @@ def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[
             "stack_estimate": False}
 
 
-def select_anchor_groups(selection: Mapping, resolved: Mapping[str, list[str]],
-                         *, where: str) -> list[str]:
-    """The selected group keys, refusing any disagreement with this run's scope.
-
-    The selection is checked against the grouping **this run** resolved, member
-    for member.  A plan written against another model, stride or profile names
-    a group whose membership differs here, and a shard that silently measured a
-    different set would leave the merged table short of rows nothing reported.
-    """
-    keys: list[str] = []
-    for entry in selection["groups"]:
-        key = entry["key"]
-        members = sorted(entry["members"])
-        if key not in resolved:
-            raise RuntimeError(
-                f"{where}: selection names anchor group {key!r}, which this "
-                f"run's scope does not contain")
-        if sorted(resolved[key]) != members:
-            raise RuntimeError(
-                f"{where}: anchor group {key!r} has members "
-                f"{sorted(resolved[key])} here and {members} in the selection")
-        if key in keys:
-            raise RuntimeError(f"{where}: anchor group {key!r} selected twice")
-        keys.append(key)
-    return keys
-
-
-def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
+def selected_capture_unit_names(selection, *, request, resolved) -> list[str]:
     """The exact unit scope one full-group ``--units`` fresh capture may take.
 
     A streamed capture today takes whole anchor groups, so a selection that
@@ -4715,14 +2057,15 @@ def selected_capture_unit_names(selection, *, args, resolved) -> list[str]:
     model rows (which resolve against the scope they loaded) call this one
     authority; :func:`select_anchor_groups` holds the selection to the
     resolved grouping member for member before a unit name is derived.
-    ``args`` supplies the campaign's model and layer stride, which the
-    selection file itself must declare.
+    ``request`` supplies the campaign's model and layer stride, which the
+    selection file itself must declare, and its ``units`` and
+    ``research_exact_member``; a request without them fails at the read.
     """
-    where = f"--units {getattr(args, 'units', None)}"
-    if (selection.get("model", args.model) != args.model
-            or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
+    where = f"--units {request.units}"
+    if (selection.get("model", request.model) != request.model
+            or selection.get("layer_stride", request.layer_stride) != request.layer_stride):
         raise StackSampleError("--units model/layer_stride disagrees with this campaign")
-    if getattr(args, "research_exact_member", None) is not None:
+    if request.research_exact_member is not None:
         raise RuntimeError(
             f"{where}: --research-exact-member prices one member, not the "
             "whole group a fresh capture records")
@@ -4794,23 +2137,29 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
     }
 
 
-def load_calibration_census(path, *, args) -> dict:
-    """Read a census and refuse one taken on a different draw or scope."""
+def load_calibration_census(path, *, request) -> dict:
+    """Read a census and refuse one taken on a different draw or scope.
+
+    ``request`` states the run's draw (``model``, ``nsamples``, ``seqlen``,
+    ``seed``, ``layer_stride``, ``calibration_input_receipt``) and its pinned
+    roster (``allow_pinned``, ``pinned_roster_only``). Every field is read, so
+    a request that lacks one fails here instead of reading as unset.
+    """
     census = json.loads(Path(path).read_text())
     if not isinstance(census, dict) or census.get("schema") != CENSUS_SCHEMA:
         raise RuntimeError(
             f"--calibration-census {path}: not a {CENSUS_SCHEMA} census")
-    for field, value in (("model", str(args.model)),
-                         ("nsamples", int(args.nsamples)),
-                         ("seqlen", int(args.seqlen)),
-                         ("seed", _campaign_calibration_parameters(args)["seed"]),
-                         ("layer_stride", int(args.layer_stride))):
+    for field, value in (("model", str(request.model)),
+                         ("nsamples", int(request.nsamples)),
+                         ("seqlen", int(request.seqlen)),
+                         ("seed", _campaign_calibration_parameters(request)["seed"]),
+                         ("layer_stride", int(request.layer_stride))):
         if census.get(field) != value:
             raise RuntimeError(
                 f"--calibration-census {path}: {field} is {census.get(field)!r} "
                 f"in the census and {value!r} in this run; the census must be "
                 "the same draw over the same scope")
-    _require_census_pinned_roster(census, args, path)
+    _require_census_pinned_roster(census, request, path)
     counts = census.get("counts")
     maxima = census.get("max_abs")
     if not isinstance(counts, dict) or not counts:
@@ -4854,8 +2203,9 @@ def census_token_counts(census: "Mapping | None", observed: Mapping[str, int]):
     equal to the monolith's -- without any shard asserting a count it did not
     see (principle 14).
 
-    A **derived** census (``mtp_extension``: the GLM MTP layer's census,
-    covering units the body never ran over the body's draw) takes the pair
+    A **derived** census (``mtp_extension``: the GLM MTP layer's census;
+    ``attention_extension``: the scoped attention census; each covers units
+    the body never ran over the body's draw) takes the pair
     from the hash-bound base census it names instead, because the capture
     identity it carries is the base draw's. The run's own rows are still
     checked against the derived census's counts.
@@ -4897,12 +2247,19 @@ def _derived_census_base(census: Mapping):
     (:func:`require_census_draw`'s fields); an extension of another schema is
     refused rather than read as a body census.
     """
-    extension = census.get("mtp_extension")
-    if extension is None:
+    present = [key for key in ("mtp_extension", "attention_extension")
+               if census.get(key) is not None]
+    if len(present) > 1:
+        raise RuntimeError(
+            f"calibration census carries two derived extensions {present!r}")
+    if not present:
         return None
-    from .glm_mtp_capture import CENSUS_EXTENSION_SCHEMA
+    from .glm_mtp_capture import ATTENTION_CENSUS_EXTENSION_SCHEMA, CENSUS_EXTENSION_SCHEMA
 
-    if extension.get("schema") != CENSUS_EXTENSION_SCHEMA:
+    schemas = {"mtp_extension": CENSUS_EXTENSION_SCHEMA,
+               "attention_extension": ATTENTION_CENSUS_EXTENSION_SCHEMA}
+    extension = census[present[0]]
+    if extension.get("schema") != schemas[present[0]]:
         raise RuntimeError(
             f"calibration census carries an unknown extension {extension.get('schema')!r}")
     ref = extension["base_census"]
@@ -4957,6 +2314,17 @@ def _campaign_layer_scope(names, layer_stride: int) -> list[str]:
 #: The census block that records a lifted-pin roster (PQ #1843). Absent from a
 #: census taken without ``--allow-pinned``, so a body census is byte-identical.
 PINNED_ROSTER_SCHEMA = "prismaquant.tessera_campaign.pinned_roster.v1"
+
+
+#: The canonical ``--allow-pinned`` spelling of the GLM scoped attention roster
+#: (PQ #1842, #2579): every KDA and MLA Linear, kv_b_proj among them, except
+#: the DSA indexer, which stays pinned (no AURA cotangent). Census and
+#: allocation read one spelling, so a lift never shrinks silently.
+GLM_ATTENTION_ALLOW_PINNED = (
+    "self_attn.q_proj,self_attn.k_proj,self_attn.v_proj,self_attn.b_proj,f_a_proj,"
+    "f_b_proj,self_attn.g_a_proj,self_attn.g_b_proj,self_attn.o_proj,self_attn.q_a_proj,"
+    "self_attn.q_b_proj,self_attn.kv_a_proj_with_mqa,self_attn.kv_b_proj"
+)
 
 
 @dataclass(frozen=True)
@@ -5035,25 +2403,25 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
     return CampaignRoster(dense=tuple(dense), pinned=tuple(pinned), lifted=tuple(lifted))
 
 
-def pinned_roster_block(args, roster: CampaignRoster):
+def pinned_roster_block(request, roster: CampaignRoster):
     """The census's record of a lifted-pin roster, or None without a lift."""
     from .fixed_head import parse_allow_pinned
 
-    tokens = parse_allow_pinned(getattr(args, "allow_pinned", None))
+    tokens = parse_allow_pinned(request.allow_pinned)
     if not tokens:
         return None
     return {"schema": PINNED_ROSTER_SCHEMA, "allow_pinned": list(tokens),
-            "pinned_roster_only": bool(getattr(args, "pinned_roster_only", False)),
+            "pinned_roster_only": bool(request.pinned_roster_only),
             "lifted": sorted(roster.lifted)}
 
 
-def _require_census_pinned_roster(census: Mapping, args, path) -> None:
+def _require_census_pinned_roster(census: Mapping, request, path) -> None:
     """Refuse a census whose lifted-pin roster is not this run's."""
     from .fixed_head import parse_allow_pinned
 
     block = census.get("pinned_roster")
-    tokens = list(parse_allow_pinned(getattr(args, "allow_pinned", None)))
-    only = bool(getattr(args, "pinned_roster_only", False))
+    tokens = list(parse_allow_pinned(request.allow_pinned))
+    only = bool(request.pinned_roster_only)
     if block is None and not tokens:
         return
     if block is not None and block.get("schema") != PINNED_ROSTER_SCHEMA:
@@ -5066,28 +2434,6 @@ def _require_census_pinned_roster(census: Mapping, args, path) -> None:
             f"--calibration-census {path}: its roster lifts {census_tokens!r} "
             f"(pinned roster only: {census_only}) and this run lifts {tokens!r} "
             f"(pinned roster only: {only}); the census must be the same scope")
-
-
-@dataclass(frozen=True)
-class ExpertPopulation:
-    """The packed expert population the bridge covers, and what it omits.
-
-    ``members`` are the profile-declared per-expert projections inside the
-    layer scope (``PackedExpertProjection``: the live 2-D view, its packed
-    parent and its stack); ``declared`` is ``{stack: {qname: (rows, cols)}}``
-    for the producer request; ``omitted_outside_layer_stride`` names the
-    packed parameters the stride left out, so the payload can say which
-    population was priced and which was not.
-    """
-
-    members: tuple
-    declared: dict
-    packed_in_scope: dict
-    omitted_outside_layer_stride: dict
-
-    @property
-    def qnames(self) -> list[str]:
-        return [member.qname for member in self.members]
 
 
 def _require_campaign_population(model, profile, layer_stride: int) -> ExpertPopulation:
@@ -5126,7 +2472,7 @@ def _require_campaign_population(model, profile, layer_stride: int) -> ExpertPop
         if member.packed_qname in set(in_scope)
     ]
     covered = {member.packed_qname for member in members}
-    # The same input-kind roster ``_collect_activations`` derives from; a
+    # The same input-kind roster ``capture_activation_statistics`` derives from; a
     # packed parameter the derivation cannot feed is one the bridge does not
     # cover, and it is named here rather than discovered mid-capture.
     supported_kinds = {"gate_up_proj", "down_proj"}
@@ -5535,7 +2881,6 @@ def _projected_cuda_reservation(weights):
     return total + sum(segment(count) for count in counts.values())
 
 
-
 @contextmanager
 def _parallel_projected_checks(units, *, weights, model_path, source,
                                resource_check, source_authentication,
@@ -5672,8 +3017,6 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         pending.clear(); inflight.clear(); futures.clear()
 
 
-
-
 def _settle_projected_unit_checks(checks) -> list:
     """Each check's mismatch description, or ``None``: one sync per device."""
     import torch
@@ -5728,11 +3071,6 @@ def _read_projected_unit(name, unit, *, model_path, source, release_source_pages
                 else source_authentication.descriptor_path(path),
                 [unit['source_tensor']], source_stat)
     return weight, release
-
-
-def _host_device():
-    import torch
-    return torch.device("cpu")
 
 
 #: What the stream head records beside the snapshot's own preparation record
@@ -5858,230 +3196,6 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     if mismatched:
         raise RuntimeError(PROJECTED_BYTES_REFUSAL.format(units=", ".join(mismatched)))
     return projected
-
-
-def _population_block(*, dense_targets, expert_targets, dense_all, pinned,
-                      population: ExpertPopulation, layer_stride: int,
-                      costs, menus, stack_samples=None, profile=None) -> dict:
-    """Distinguish selected targets from units with actual emitted prices."""
-    from .tessera_expert_projection import POPULATION_SCHEMA
-
-    dense_omitted = sorted(set(dense_all) - set(dense_targets))
-    priced = {name for name, rows in costs.items() if rows}
-    stack_decisions = {}
-    represented = set()
-    for packed_qname, sample in sorted((stack_samples or {}).items()):
-        if profile is None:
-            raise StackSampleError("stack population requires the model profile")
-        if (packed_qname != sample.packed_qname or
-                packed_qname not in population.packed_in_scope or
-                int(population.packed_in_scope[packed_qname][0]) != sample.num_experts):
-            raise StackSampleError(f"{packed_qname}: sample disagrees with packed population")
-        roles = tuple(profile.packed_expert_projection_names(sample.packed_param))
-        stem = packed_qname[: -len(sample.packed_param)].rstrip(".")
-        members = {f"{stem}.{e}.{role}" for e in range(sample.num_experts) for role in roles}
-        declared = set(population.declared.get(sample.packed_experts_module, {}))
-        measured = {member for group in sample.members.values() for member in group}
-        expected_measured = {f"{stem}.{e}.{role}" for e in sample.sampled_experts for role in roles}
-        if (not members or not members <= declared or measured != expected_measured
-                or not measured <= members):
-            raise StackSampleError(f"{packed_qname}: sample members disagree with declared population")
-        if represented & members:
-            raise StackSampleError(f"{packed_qname}: source members belong to multiple stack decisions")
-        if members & priced:
-            raise StackSampleError(f"{packed_qname}: both packed decision and source members are priced")
-        represented.update(members)
-        stack_decisions[packed_qname] = {
-            "stack": sample.packed_experts_module,
-            "members": sorted(members), "sampled_members": sorted(measured),
-        }
-    # Source experts represented by an HT row are neither separate prices nor
-    # unpriced BF16 units. Keep their full frame in the explicit decision map.
-    expert_targets = (set(expert_targets) - represented) | set(stack_decisions)
-    dense_priced = sorted(set(dense_targets) & priced)
-    expert_priced = sorted(set(expert_targets) & priced)
-    unpriced = {
-        kind: {name: ("no_admitted_menu" if not (menus.get(name) or
-                          any(menus.get(member) for member in
-                              stack_decisions.get(name, {}).get("sampled_members", ())))
-                      else "no_successful_anchor")
-               for name in sorted(set(targets) - priced)}
-        for kind, targets in (("dense", dense_targets),
-                              ("routed_experts", expert_targets))
-    }
-    represented_priced = priced | {
-        member for name, decision in stack_decisions.items() if name in priced
-        for member in decision["members"]}
-    complete_stacks = sorted(stack for stack, units in population.declared.items()
-                             if set(units) <= represented_priced)
-    packed = {name: list(shape) for name, shape
-              in sorted(population.packed_in_scope.items())}
-    packed_omitted = {name: list(shape) for name, shape
-                      in sorted(population.omitted_outside_layer_stride.items())}
-    result = {
-        "schema": POPULATION_SCHEMA,
-        "layer_stride": int(layer_stride),
-        "enumerated": {"dense": sorted(dense_targets),
-                       "routed_experts": sorted(expert_targets),
-                       "packed_parameters": packed,
-                       "stacks": sorted(population.declared)},
-        "unpriced": unpriced,
-        "priced": {
-            "dense": dense_priced,
-            "routed_experts": expert_priced,
-            "packed_parameters": {name: shape for name, shape in packed.items()
-                                  if name.rsplit(".", 1)[0] in complete_stacks},
-            "stacks": complete_stacks,
-        },
-        "omitted": {
-            "dense_outside_layer_stride": dense_omitted,
-            "packed_outside_layer_stride": packed_omitted,
-            "pinned": sorted(pinned),
-        },
-        "counts": {
-            "dense_priced": len(dense_priced),
-            "routed_experts_priced": len(expert_priced),
-            "dense_unpriced": len(unpriced["dense"]),
-            "routed_experts_unpriced": len(unpriced["routed_experts"]),
-            "dense_omitted": len(dense_omitted),
-            "packed_omitted": len(packed_omitted),
-            "pinned": len(pinned),
-        },
-    }
-    if stack_decisions:
-        result["stack_decisions"] = stack_decisions
-    return result
-
-
-def campaign_population_block(**kwargs) -> dict:
-    """The payload's population block, spelled for out-of-module callers.
-
-    The merge rebuilds this block over the whole census rather than over one
-    shard's selection, and it must be the same function that built the
-    monolith's or the merged table would report a coverage the campaign never
-    computed.
-    """
-    return _population_block(**kwargs)
-
-
-def _format_executes_static_activation_contract(format_name: str) -> bool:
-    """Does this rung's route execute a STATIC activation contract?
-
-    The one derivation (#205, #221): the route names the registry row whose
-    contract it executes (``activation_source_format``) and the ROW owns the
-    answer (``FormatSpec.static_activation_contract``) -- never a compare of
-    that row's NAME against ``"NVFP4"``.  It is
-    ``tessera_formats.route_static_activation_contract`` off the same route
-    ``synthesize_tessera_spec`` stamps onto the rung's spec, so the rung this
-    refuses to resume is exactly the rung ``_measure_anchor`` prices.
-
-    The row is read live, every time: it is a dictionary lookup, and the
-    registry is what a test (or a lane) replaces when a second row gains a
-    contract.  What is memoised is the pure part -- canonical name to serving
-    route -- sized by the format key space: the closed-roster bind asks it
-    once per format per unit, 1,793 routes for each of an 864-unit row's
-    holders, measured at ~1.1 s per unit on the CPU worker when each ask
-    synthesized a whole spec, a GPU-idle startup phase of a quarter hour per
-    row.
-    """
-    from . import format_registry as fr
-    from .tessera_lane import is_tessera_format_name
-
-    canonical = fr.canonical_format_name(format_name)
-    row = fr.REGISTRY.get(canonical)
-    if row is not None:
-        return row.static_activation_contract is not None
-    if not is_tessera_format_name(canonical):
-        fr.get_format(canonical)  # raises the registry's KeyError
-    from .tessera_formats import route_static_activation_contract
-
-    return route_static_activation_contract(_tessera_route_memo()(canonical)) is not None
-
-
-def _tessera_route(canonical: str):
-    from .tessera_formats import (
-        parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
-    )
-
-    family, rung = parse_tessera_format_name(canonical)
-    return tessera_serving_route(family, tessera_wire_recipe(family, rung), rung)
-
-
-@functools.lru_cache(maxsize=1)
-def _tessera_route_memo():
-    # Built on first use so this module keeps importing without the Tessera
-    # package; the memo itself is sized by the format key space on its first
-    # call, the way every wire-recipe memo is.
-    from .tessera_formats import lazily_sized_cache, recipe_cache_bound
-    return lazily_sized_cache(recipe_cache_bound)(_tessera_route)
-
-
-def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
-                              check_scoring_metadata: bool = True, profile=None) -> None:
-    """Refuse a resumed anchor priced under a different activation contract.
-
-    This is the per-row half of the resume identity rule, shared by pre-link
-    seed admission and :func:`_checkpoint_anchor_identity`. The run-level
-    half, :func:`_campaign_checkpoint_identity`, binds this run's static scales
-    and policy into the journal. Resume merges checkpoint rows into
-    this run's table, and the table's rows must be one currency.  A W4A4
-    anchor with no ``input_global_scale`` was measured under the pre-#194
-    dynamic FP32-scale quantiser; one with a *different* scale was measured
-    on a different calibration; a dynamic-route row carrying a scale was
-    stamped by no producer this campaign has.  None is a price of this run's
-    served A side, and merging one silently is the exact mixed-table failure
-    the Hessian identity guard exists to catch on its own axis.
-    """
-    from . import format_registry as fr
-
-    spec = fr.get_format(anchor.format_name)
-    if spec.static_activation_contract is None:
-        if anchor.input_global_scale is not None:
-            raise ActivationScaleContractError(
-                f"checkpoint anchor {anchor.qname} {anchor.format_name} "
-                f"carries input_global_scale={anchor.input_global_scale!r} "
-                "but its route keeps the serving format's dynamic activation "
-                "quantiser: no producer of this campaign stamps a static scale "
-                "on that route, so the row is not one of this run's prices.")
-    elif anchor.input_global_scale is None:
-        raise ActivationScaleContractError(
-            f"checkpoint anchor {anchor.qname} {anchor.format_name} carries "
-            "no input_global_scale: it was priced under the pre-served-"
-            "contract dynamic activation quantiser and cannot be merged into "
-            "a served-contract table. Delete the checkpoint (or pass a fresh "
-            "--checkpoint) to re-measure these anchors."
-        )
-    elif (static_scales.get(anchor.qname) is None or
-          float(anchor.input_global_scale) != float(static_scales[anchor.qname])):
-        expected = static_scales.get(anchor.qname)
-        raise ActivationScaleContractError(
-            f"checkpoint anchor {anchor.qname} {anchor.format_name} was "
-            f"priced at input_global_scale={anchor.input_global_scale!r} but "
-            f"this run's calibration yields {expected!r}. A resumed anchor "
-            "must have been scored under this run's own static scales, or "
-            "the table mixes two activation calibrations under one identity."
-        )
-    # The closed-roster identity template is built before scoring from input
-    # descriptors. It has no measured contract/observation to validate. Only
-    # that caller opts out; actual published and reused rows use the default.
-    if check_scoring_metadata is False:
-        return
-    # The same declaration _finish_anchor stamps on a fresh measured row.
-    # Producer wire/input integrity does not authenticate scoring metadata.
-    # Direct consumers use the same contract as the measured row.
-    direct_contract = _direct_consumer_activation_contract(anchor.qname, profile=profile)
-    expected_contract = direct_contract or str(spec.act_dtype_name or "a16")
-    if anchor.activation_contract != expected_contract:
-        raise ActivationScaleContractError(
-            f"checkpoint anchor {anchor.qname} {anchor.format_name} activation contract "
-            f"{anchor.activation_contract!r} differs from the expected {expected_contract!r}")
-    # A direct consumer never quantizes its input rows.
-    allows_quantized = direct_contract is None and spec.act_quant_changes_input
-    if (type(anchor.activation_quantized) is not bool or
-            (anchor.activation_quantized and not allows_quantized)):
-        raise ActivationScaleContractError(
-            f"checkpoint anchor {anchor.qname} {anchor.format_name} activation observation "
-            f"{anchor.activation_quantized!r} is incompatible with {expected_contract!r}")
 
 
 def _save_hessian_capture_with_page_release(payload, path, *, resource_check=None):
@@ -6334,35 +3448,42 @@ def _require_automatic_capture_recording(args):
         store.require_automatic_capture_source_recording()
 
 
-def _run_capture_chain_bookends(args, saved_calibration):
-    """A capture chain's prep or join row (PQ #1885): no model, no forward."""
-    _require_automatic_capture_recording(args)
-    from . import capture_layer_chain as chain
-    if args.capture_chain == "join":
-        record = chain.join(args.capture_calibration_out, census_path=args.calibration_census)
-        print(f"[campaign] joined streamed calibration capture: {record['manifest']}", flush=True)
-        return 0
+def run_capture_chain_join(request: CaptureJoinRequest) -> int:
+    """Publish a completed chain after the existing automatic-source gate."""
     from . import tessera_calibration_cache as store
-    census = load_calibration_census(args.calibration_census, args=args)
+    store.require_automatic_capture_source_recording()
+    from . import capture_layer_chain as chain
+    record = chain.join(request.capture_calibration_out,
+                        census_path=request.calibration_census)
+    print(f"[campaign] joined streamed calibration capture: {record['manifest']}", flush=True)
+    return 0
+
+
+def run_capture_chain_prep(request: CapturePrepRequest, saved_calibration) -> int:
+    """Seal a chain's draw, source identity, scope and layer-boundary plan."""
+    from . import tessera_calibration_cache as store
+    store.require_automatic_capture_source_recording()
+    from . import capture_layer_chain as chain
+    census = load_calibration_census(request.calibration_census, request=request)
     # The prep has no model: the selected scope is derived from the census's
     # own anchor groups, through the same helper the model rows confirm with.
     unit_names = None
-    if args.units:
+    if request.units:
         unit_names = selected_capture_unit_names(
-            load_unit_selection(args.units), args=args,
+            load_unit_selection(request.units), request=request,
             resolved=census["anchor_groups"])
         print(f"[campaign] --units full-group capture takes {len(unit_names)} "
               "units of the census scope", flush=True)
     tokens, corpus_text = (saved_calibration if saved_calibration is not None else
-                           _calibration_tokens(args.model, args.nsamples, args.seqlen, args.seed))
+                           _calibration_tokens(request.model, request.nsamples, request.seqlen, request.seed))
     # The prep reads no payload (PQ #1896): it seals the traversal identity,
     # the quanta record the digests of what they read, and the join binds them.
-    with store.record_capture_source(args.calibration_census, model=args.model) as source:
-        record = chain.prepare(args.capture_calibration_out, census_path=args.calibration_census,
-            ranges=args.capture_chain_ranges, n_batches=len(tokens),
-            boundary_storage=args.capture_chain_boundary_storage,
-            identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
-                attention_implementation=args.attention_implementation,
+    with store.record_capture_source(request.calibration_census, model=request.model) as source:
+        record = chain.prepare(request.capture_calibration_out, census_path=request.calibration_census,
+            ranges=request.capture_chain_ranges, n_batches=len(tokens),
+            boundary_storage=request.capture_chain_boundary_storage,
+            identity=lambda: _streamed_capture_identity(request, census, tokens, corpus_text,
+                attention_implementation=request.attention_implementation,
                 source_authentication=source, unit_names=unit_names))
     print(f"[campaign] prepped streamed calibration capture chain: {record['path']}", flush=True)
     return 0
@@ -6380,7 +3501,34 @@ def _write_capture_load_execution(args, writer, *, guard, resources):
         (DIRECT_ASCII_INDENT2_LAX.text(execution_record)+'\n').encode())
 
 
-def _run_streamed_calibration(args, runner, profile, *, mode, population,
+def run_census(request: CensusRequest, *, counts, maxima, groups,
+               dense_targets, expert_targets, shapes, identity, expert_projection,
+               model_load_contract, attention_implementation, capture_runtime,
+               pinned_roster, expected_units) -> int:
+    """Publish the counted scope only when every expected unit was observed."""
+    payload = calibration_census(
+        counts, maxima, args=request, groups=groups,
+        dense_targets=dense_targets,
+        expert_targets=expert_targets,
+        shapes=shapes,
+        identity=identity, expert_projection=expert_projection,
+        model_load_contract=model_load_contract,
+        attention_implementation=attention_implementation,capture_runtime=capture_runtime,
+        pinned_roster=pinned_roster)
+    if set(payload["counts"]) != set(expected_units):
+        raise RuntimeError(
+            "the census did not observe every unit in scope: missing "
+            + ", ".join(sorted(set(expected_units) - set(payload["counts"]))))
+    out = Path(request.census_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload) + "\n")
+    print(f"[campaign] wrote {out}: {len(payload['counts'])} units, rows "
+          f"{min(payload['counts'].values())}..{max(payload['counts'].values())}, "
+          f"{len(payload['anchor_groups'])} anchor groups", flush=True)
+    return 0
+
+
+def run_streamed_calibration(request: CensusRequest | CaptureRequest, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
                               attention_implementation, capture_runtime,
@@ -6398,6 +3546,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     from .routed_experts import refresh_packed_expert_projections
     from .tessera_menu import PARALLEL_NONE
 
+    capture = request if isinstance(request, CaptureRequest) else None
     targets = [*dense_targets, *expert_targets]
     modules = dict(runner.model.named_modules())
     # Meta views are used only for shape/menu/projection planning. Live views
@@ -6415,26 +3564,26 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     # The capture's unit scope is the whole selection's, before a quantum
     # narrows ``targets`` to its own layer range: the prep sealed exactly
     # this identity, and every quantum must re-derive the same one.
-    capture_unit_names = sorted(targets) if getattr(args, 'units', None) else None
+    capture_unit_names = sorted(targets) if (capture is not None and capture.units) else None
     names_by_layer = {}
     for name in targets:
         names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
-    menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
+    menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=request.tp_degree,
         parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-        family_restriction=getattr(args, "family_restriction", None),
+        family_restriction=request.family_restriction,
         structure_by_unit=structure_by_unit, profile=profile)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
         projection, _ = _project_expert_population(population, weights=weights,
-            menus=menus, model_path=args.model, cache_dir=Path(args.cache_dir),
+            menus=menus, model_path=request.model, cache_dir=Path(request.cache_dir),
             measured=set(), projection=None if census is None else census.get('expert_projection'))
     del weights
 
-    capture_policy = getattr(args, 'streaming_capture_policy', 'legacy')
+    capture_policy = 'legacy' if capture is None else capture.streaming_capture_policy
     shared_capture = capture_policy in ('shared-inputs-release-v1', 'shared-inputs-bounded-v1')
     bounded_capture = capture_policy == 'shared-inputs-bounded-v1'
-    capture_load_policy = getattr(args, 'capture_load_policy', None)
+    capture_load_policy = None if capture is None else capture.capture_load_policy
     guard = capture_guard
     if guard is None and bounded_capture and runner.device.type == 'cuda':
         from .memory_management import CaptureMemoryGuard
@@ -6445,9 +3594,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     # A capture chain quantum (PQ #1885) runs layers [start, stop) of this
     # same traversal; everything else about the capture is unchanged.
     quantum = None
-    if getattr(args, 'capture_chain', None) == 'quantum':
+    if capture is not None and isinstance(capture.phase, CaptureQuantum):
         from .capture_layer_chain import ChainQuantum
-        quantum = ChainQuantum(args.capture_calibration_out, args.capture_layer_range,
+        quantum = ChainQuantum(capture.capture_calibration_out, capture.phase.layer_range,
                                num_layers=runner.num_layers,
                                source_authentication=runner.context.source_authentication)
     layer_stop = runner.num_layers if quantum is None else quantum.stop
@@ -6463,13 +3612,13 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         # binds what was read.
         if not getattr(source, 'is_recording', False):
             raise RuntimeError('a streamed capture reads its source through its recording owner')
-        identity = _streamed_capture_identity(args, census, tokens, corpus_text,
+        identity = _streamed_capture_identity(request, census, tokens, corpus_text,
             attention_implementation=attention_implementation, source_authentication=source,
             unit_names=capture_unit_names)
         if quantum is not None:
             identity = quantum.require_identity(identity, n_batches=len(tokens))
-        writer = store.CaptureWriter(args.capture_calibration_out,
-            census_path=args.calibration_census, identity=identity,
+        writer = store.CaptureWriter(capture.capture_calibration_out,
+            census_path=capture.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
             resource_check=None if guard is None else guard.check,
             verified_load_policy=capture_load_policy)
@@ -6479,11 +3628,11 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     counts, maxima, telemetry = {}, {}, []
     if guard is not None:
         from .autoscale import streamed_calibration_resources
-        resources = streamed_calibration_resources(args.model, unit_shapes=shapes,
-            counts=census['counts'], nsamples=args.nsamples, seqlen=args.seqlen,
-            max_act_rows=args.max_act_rows, cache_slots=args.streaming_cache_slots,
-            prefetch_workers=args.streaming_prefetch_workers,
-            headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy,
+        resources = streamed_calibration_resources(request.model, unit_shapes=shapes,
+            counts=census['counts'], nsamples=request.nsamples, seqlen=request.seqlen,
+            max_act_rows=capture.max_act_rows, cache_slots=capture.streaming_cache_slots,
+            prefetch_workers=capture.streaming_prefetch_workers,
+            headroom_gb=capture.streaming_cache_headroom_gb, capture_policy=capture_policy,
             capture_load_policy=capture_load_policy,
             source_recording=getattr(source, 'is_recording', False))
         if resources['memory_bytes'] > guard.cap_bytes:
@@ -6494,9 +3643,9 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             # taken no reading yet.
             raise RuntimeError(
                 'capture cgroup budget is smaller than its checked phase plan: '
-                + json.dumps(memory_admission_detail(
+                + DIRECT_ASCII_SPACED_LAX.text(memory_admission_detail(
                     plan_bytes=resources['memory_bytes'],
-                    cap_bytes=guard.cap_bytes), sort_keys=True))
+                    cap_bytes=guard.cap_bytes)))
         if 'source_retained_page_bytes' in resources:
             # Clean page cache, outside the plan (PQ #1896). Past the slack the
             # kernel reclaims retained pages and their ranges are read again,
@@ -6520,7 +3669,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         live = refresh_packed_expert_projections(members, profile)
         if live:
             _checked_projected_units(projection['stacks'],
-                weights={m.qname: m.weight for m in live}, model_path=args.model,
+                weights={m.qname: m.weight for m in live}, model_path=request.model,
                 source=projection['producer']['source'], measured={m.qname for m in live},
                 resource_check=None if guard is None else guard.check,
                 release_source_pages=guard is not None,
@@ -6544,7 +3693,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             from .routed_experts import declared_shared_capture_groups
             expected_groups = declared_shared_capture_groups({name: shapes[name] for name in names}, profile)
             if guard is not None:
-                capture_bytes = sum(4*(shapes[name][1]**2+args.max_act_rows*shapes[name][1])
+                capture_bytes = sum(4*(shapes[name][1]**2+capture.max_act_rows*shapes[name][1])
                                     for name in expected_groups)
                 guard.check('before_capture_tensor_growth', reserve_bytes=capture_bytes)
         def checked_forward(batch):
@@ -6554,8 +3703,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             return value
 
         before = time.perf_counter()
-        acts, hessians, rows, amax = _collect_activations(runner.model, names, tokens,
-            args.max_act_rows if writer is not None else 0, runner.device,
+        acts, hessians, rows, amax = calibration_forward.capture_activation_statistics(runner.model, names, tokens,
+            capture.max_act_rows if writer is not None else 0, runner.device,
             want_hessian=writer is not None, profile=profile,
             forward_batch=forward_batch if guard is None else checked_forward,
             shared_packed_inputs=shared_capture,
@@ -6609,14 +3758,14 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         if guard is not None:
             from .cost_stage_checkpoint import atomic_write_bytes
             failure = dict(completed_layers=telemetry, physical_memory_guard=guard.snapshot())
-            atomic_write_bytes(Path(args.cache_dir)/'capture-memory-refusal.json',
-                (json.dumps(failure, indent=2, sort_keys=True)+'\n').encode())
+            atomic_write_bytes(Path(request.cache_dir)/'capture-memory-refusal.json',
+                (DIRECT_ASCII_INDENT2_LAX.text(failure)+'\n').encode())
         raise
     if quantum is not None:
-        _write_capture_load_execution(args, writer, guard=guard,
+        _write_capture_load_execution(request, writer, guard=guard,
                                       resources=resources if guard is not None else None)
-        Path(args.cache_dir, 'streamed-calibration-telemetry.json').write_text(
-            json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
+        Path(request.cache_dir, 'streamed-calibration-telemetry.json').write_text(
+            DIRECT_ASCII_INDENT2_LAX.text(telemetry)+'\n')
         print(f"[campaign] capture chain layers {quantum.start}:{quantum.stop} complete: "
               f"{fragment}", flush=True)
         return 0
@@ -6625,7 +3774,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         raise RuntimeError('streamed calibration did not observe every in-scope unit')
     hi, lo = census_token_counts(census, counts)
     calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
-        **_campaign_calibration_parameters(args), fit_tokens_min=lo)
+        **_campaign_calibration_parameters(request), fit_tokens_min=lo)
     if writer is not None:
         census_max_abs(census, maxima)
         # The files the forward never read (MTP sidecars, tokenizer assets)
@@ -6633,24 +3782,24 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         source_receipt = source.authenticate_complete_source()
         receipt = writer.finish(model_load_contract=contract,
                                 source_files=source.recorded_source_files())
-        _write_capture_load_execution(args, writer, guard=guard,
+        _write_capture_load_execution(request, writer, guard=guard,
                                       resources=resources if guard is not None else None)
         from .cost_stage_checkpoint import atomic_write_bytes
-        atomic_write_bytes(Path(args.cache_dir)/'capture-source-authentication.json',
+        atomic_write_bytes(Path(request.cache_dir)/'capture-source-authentication.json',
                            indent2_json_file_bytes(source_receipt))
         print(f"[campaign] complete streamed calibration capture: {receipt}", flush=True)
     else:
-        payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
+        payload = calibration_census(counts, maxima, args=request, groups=scope_groups,
             dense_targets=dense_targets, expert_targets=expert_targets, shapes=shapes,
             identity=calibration, expert_projection=projection, model_load_contract=contract,
             attention_implementation=attention_implementation, capture_runtime=capture_runtime,
             pinned_roster=pinned_roster)
         from .cost_stage_checkpoint import atomic_write_bytes
-        atomic_write_bytes(Path(args.census_out),
+        atomic_write_bytes(Path(request.census_out),
             indent2_json_file_bytes(payload))
-        print(f"[campaign] wrote streamed calibration census {args.census_out}", flush=True)
-    telemetry_path = Path(args.cache_dir)/'streamed-calibration-telemetry.json'
-    telemetry_path.write_text(json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
+        print(f"[campaign] wrote streamed calibration census {request.census_out}", flush=True)
+    telemetry_path = Path(request.cache_dir)/'streamed-calibration-telemetry.json'
+    telemetry_path.write_text(DIRECT_ASCII_INDENT2_LAX.text(telemetry)+'\n')
     return 0
 
 
@@ -6669,10 +3818,10 @@ def _prefetch_selected_capture(args, *, expected_identity, census, names, device
     if execution is None:
         return values, capture, None
     return values, capture, _publish_capture_load_execution(
-        args, capture=capture, execution=execution, resources=resources, guard=guard)
+        args.cache_dir, capture=capture, execution=execution, resources=resources, guard=guard)
 
 
-def _publish_capture_load_execution(args, *, capture, execution, resources, guard=None):
+def _publish_capture_load_execution(cache_dir, *, capture, execution, resources, guard=None):
     """Write one row's capture load execution record; ``{path, sha256}``.
 
     The one writer for both row heads: the load-all prefetch's folded record,
@@ -6688,7 +3837,7 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
     digest = bytes_sha256hex(raw)
     # A later refused/interrupted resume must not replace execution evidence
     # already referenced by a surviving priced output.
-    output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
+    output = Path(cache_dir)/f'capture-load-execution-{digest}.json'
     atomic_write_bytes(output, raw)
     return dict(path=str(output.resolve()), sha256=digest)
 
@@ -6702,222 +3851,390 @@ def main(argv: "Sequence[str] | None" = None) -> int:
         return result
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedCampaignScope:
+    """The loaded model's full scope and the exact subset this row prices."""
+    population: ExpertPopulation
+    roster: CampaignRoster
+    pinned_roster: dict | None
+    dense_targets: list[str]
+    expert_targets: list[str]
+    expert_members: dict
+    census_dense_targets: list[str]
+    census_expert_targets: list[str]
+    scope_groups: dict[str, list[str]]
+    census: dict | None
+    census_only: bool
+    selection: dict | None
+    stack_samples: dict
+    exact_member_scope: dict | None
+    partition_menu_targets: list[str] | None
+    partition_unit_records: dict
+    selected_groups: list[str]
+    audit_units: set[str]
+    inclusion_probability: dict[str, float]
+    context_by_unit: dict | None
+    structure_by_unit: dict | None
+    encode_structure: dict | None
+    acquisition: dict | None
+
+
+def resolve_campaign_scope(request: CampaignScopeRequest, model, profile, *,
+                           mode, device, serving_target, selected_capture_census,
+                           capture_unit_names, acquisition) -> ResolvedCampaignScope:
+    """Resolve and refuse roster, draw, selection and topology in one order."""
+    from .tessera_serving_scope import context_by_unit_from_stats, unit_structure_from_stats
+
+    # The packed expert population the producer bridge covers, or a refusal by
+    # name before calibration.  Its members are priced as the producer's
+    # projected units below (PrismaQuant #183).
+    # A pinned-roster-only campaign prices the lifted Linears and no expert
+    # (PQ #1843); its census records that the population was left out.
+    population = (ExpertPopulation(members=(), declared={}, packed_in_scope={},
+                                   omitted_outside_layer_stride={})
+                  if request.pinned_roster_only else
+                  _require_campaign_population(model, profile, request.layer_stride))
+    # Names only: no module is retained after source teardown.
+    roster = campaign_roster(
+        profile.campaign_dense_unit_names(model, allow_pinned=request.allow_pinned),
+        profile, allow_pinned=request.allow_pinned, pinned_roster_only=request.pinned_roster_only)
+    all_dense = list(roster.dense)
+    pinned = list(roster.pinned)
+    pinned_roster = pinned_roster_block(request, roster)
+    if pinned_roster is not None:
+        print(f"[campaign] --allow-pinned {pinned_roster['allow_pinned']} lifts "
+              f"{len(roster.lifted)} profile-pinned Linears"
+              + (" (pinned roster only)" if request.pinned_roster_only else ""), flush=True)
+    dense_targets = _campaign_layer_scope(all_dense, request.layer_stride)
+    expert_targets = population.qnames
+    expert_members = {member.qname: member for member in population.members}
+    targets = [*dense_targets, *expert_targets]
+    # The whole priced scope, before any selection narrows the encoding work.
+    # It is what the census counts, what the population block enumerates, and
+    # what a merge checks a set of shards covers.
+    census_dense_targets = list(dense_targets)
+    census_expert_targets = list(expert_targets)
+    census_targets = list(targets)
+    scope_groups = resolve_anchor_groups(
+        census_targets, profile=profile, expert_members=expert_members)
+    print(f"[campaign] {len(dense_targets)} target Linears + {len(expert_targets)} "
+          f"projected expert units in {len(population.declared)} stacks, "
+          f"{len(scope_groups)} anchor groups, mode={mode}, "
+          f"device={device}", flush=True)
+
+    # The census quantum: the whole prologue over the whole scope -- one
+    # calibration forward that counts rows and calibrates the static A-side
+    # maxima, and one producer projection request -- written out and stopped
+    # before a single anchor is encoded.  Every later shard reads it, so no
+    # shard re-derives a scope-wide answer and none of them can disagree
+    # about one.
+    census_only = bool(request.census_out)
+    if census_only and request.units:
+        raise RuntimeError(
+            "--census-out takes the whole scope; it cannot be narrowed by --units")
+    if census_only and request.calibration_census:
+        raise RuntimeError("--census-out writes a census; it does not read one")
+
+    selection = None
+    stack_samples = {}
+    exact_member_scope = None
+    partition_members = {}
+    partition_menu_targets = None
+    partition_unit_records = {}
+    full_expert_members = expert_members
+    census = (selected_capture_census if selected_capture_census is not None else
+              (None if not request.calibration_census
+               else load_calibration_census(request.calibration_census, request=request)))
+    selected_groups: list[str] = sorted(scope_groups)
+    audit_units: set = set()
+    inclusion_probability: dict = {}
+    if request.units:
+        selection = load_unit_selection(request.units)
+        if (selection.get("model", request.model) != request.model
+                or selection.get("layer_stride", request.layer_stride) != request.layer_stride):
+            raise StackSampleError("--units model/layer_stride disagrees with this campaign")
+        if selection.get("schema") == UNITS_SCHEMA_V3:
+            if census is None or request.research_exact_member is not None:
+                raise RuntimeError("expert partition requires a census and excludes research exact-member")
+            from .tessera_expert_projection import carried_units
+            _source, partition_unit_records, partition_stacks = carried_units(census["expert_projection"])
+            partition_members = expert_partition_members(
+                selection, unit_records=partition_unit_records, stack_of=partition_stacks,
+                rate_band=request.rate_band, max_rounds=request.max_rounds,
+                seeded=bool(request.seed_checkpoint or request.seed_wire_dir))
+            partition_menu_targets = sorted(name for entry in selection["groups"] for name in entry["members"])
+            # Existing unit receipts bind the local subset; the scope-wide
+            # producer projection binds the full group geometry/source frame.
+        stack_samples = selection_stack_samples(selection, profile)
+        selected_groups = select_anchor_groups(
+            selection, scope_groups, where=f"--units {request.units}")
+        priced, audit_units, inclusion_probability = selection_priced_units(
+            selection)
+        if request.research_exact_member is not None:
+            if (mode != "research" or not request.calibration_census or
+                    not request.calibration_cache or parse_rate_band(request.rate_band) is None):
+                raise RuntimeError("--research-exact-member requires research menu, "
+                                   "calibration census/cache and --rate-band")
+            exact_member_scope = research_exact_member_scope(
+                selection, scope_groups, request.research_exact_member)
+            priced = {exact_member_scope["member"]}
+            audit_units = set()
+            inclusion_probability = {}
+        if request.capture_calibration_out:
+            # The census-derived scope the pre-model check derived; the run's
+            # own grouping must resolve the selection to exactly that set.
+            confirmed = selected_capture_unit_names(selection, request=request,
+                                                    resolved=scope_groups)
+            if confirmed != capture_unit_names:
+                raise RuntimeError(
+                    f"--units {request.units}: this run's grouping resolves the "
+                    f"selection to {confirmed} but its census to "
+                    f"{capture_unit_names}; the scope is not exact")
+        # The group's membership was already checked whole; what the sample
+        # narrows is only which of those members this run encodes. Keeping the
+        # two separate is what lets a sampled run stay identity-honest: the
+        # checkpoint's ``units`` map holds exactly the priced units, so a
+        # different draw is a different identity and cannot silently resume
+        # over this one.
+        keep = {name for key in selected_groups for name in scope_groups[key]
+                if name in priced}
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items()
+                          if name in keep}
+        targets = [*dense_targets, *expert_targets]
+        sampled_groups = sum(1 for entry in selection["groups"]
+                             if entry.get("sampled"))
+        print(f"[campaign] --units selects {len(selected_groups)} of "
+              f"{len(scope_groups)} anchor groups: {len(dense_targets)} dense + "
+              f"{len(expert_targets)} projected expert units"
+              + (f"; {sampled_groups} group(s) sampled, "
+                 f"{len(audit_units)} audit unit(s)" if sampled_groups else ""),
+              flush=True)
+        if not targets:
+            raise RuntimeError(
+                f"--units {request.units}: the selection prices no unit")
+    elif request.research_exact_member is not None:
+        raise RuntimeError("--research-exact-member requires --units")
+
+    if acquisition is not None:
+        acquisition, selected_groups, keep = campaign_acquisition_row_scope(
+            acquisition, scope_groups, selected=targets if request.units else None)
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items() if name in keep}
+        targets = [*dense_targets, *expert_targets]
+
+    context_by_unit = None
+    structure_by_unit = None
+    if serving_target is not None or request.family_restriction is not None:
+        from .sensitivity_probe import discover_moe_structure
+        routed = discover_moe_structure(model, profile=profile)
+        topology = {
+            name: dict(zip(("router_path", "expert_id"), routed.get(name, (None, None))))
+            for name in dense_targets
+        }
+        topology_experts = ({name: full_expert_members[name] for name in partition_menu_targets}
+                            if partition_menu_targets is not None else expert_members)
+        topology_targets = partition_menu_targets or targets
+        for name, member in topology_experts.items():
+            if name not in topology_targets:
+                continue
+            # The packed facts the probe would record for this unit: its
+            # packed module and expert count, never a shape guess.
+            topology[name] = {
+                "_packed_experts_module": member.module_qname,
+                "num_experts": int(getattr(member.module, member.param_name).shape[0]),
+            }
+        context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
+        if request.family_restriction is not None:
+            if len(set(topology_targets)) != len(topology_targets) or set(topology) != set(topology_targets):
+                raise ValueError("family restriction requires unambiguous topology for every target")
+            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
+                                 for name in topology_targets}
+    # The serving structure each unit's wire is resolved on (#1502): the
+    # restriction's authoritative map when there is one, else the serving
+    # context's. A run that declares neither prices the research recipe it
+    # always priced, and stamps that it did (``encode_structure: null``).
+    encode_structure = (dict(structure_by_unit) if structure_by_unit is not None
+                        else None if context_by_unit is None
+                        else {name: context.structure for name, context in context_by_unit.items()})
+
+    return ResolvedCampaignScope(
+        population=population,
+        roster=roster,
+        pinned_roster=pinned_roster,
+        dense_targets=dense_targets,
+        expert_targets=expert_targets,
+        expert_members=expert_members,
+        census_dense_targets=census_dense_targets,
+        census_expert_targets=census_expert_targets,
+        scope_groups=scope_groups,
+        census=census,
+        census_only=census_only,
+        selection=selection,
+        stack_samples=stack_samples,
+        exact_member_scope=exact_member_scope,
+        partition_menu_targets=partition_menu_targets,
+        partition_unit_records=partition_unit_records,
+        selected_groups=selected_groups,
+        audit_units=audit_units,
+        inclusion_probability=inclusion_probability,
+        context_by_unit=context_by_unit,
+        structure_by_unit=structure_by_unit,
+        encode_structure=encode_structure,
+        acquisition=acquisition,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PartitionCampaignMenu:
+    full_menus: dict
+    encode_structure: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCampaignMenu:
+    """Resolved menus and the exact projection/structure they describe."""
+    menus: dict
+    context_by_unit: dict | None
+    structure_by_unit: dict | None
+    encode_structure: dict | None
+    no_admitted_rung: list[str]
+    expert_projection: dict | None
+    projected_units: dict
+    partition: PartitionCampaignMenu | None
+
+
+def resolve_campaign_menu(weights, scope: ResolvedCampaignScope, profile, *,
+                          mode, tp_degree, family_restriction, model_path, cache_dir,
+                          selected_source, streaming_head, source_authentication,
+                          selected_guard) -> ResolvedCampaignMenu:
+    """Resolve full-group grids, local menus and producer-bound structure."""
+    import torch
+    from .tessera_menu import PARALLEL_NONE
+
+    partition_menu_targets = scope.partition_menu_targets
+    census = scope.census
+    context_by_unit = scope.context_by_unit
+    structure_by_unit = scope.structure_by_unit
+    encode_structure = scope.encode_structure
+    population = scope.population
+    expert_targets = scope.expert_targets
+    targets = [*scope.dense_targets, *expert_targets]
+    if partition_menu_targets is not None:
+        # Geometry-only menu inputs: no unpriced W/X/H is loaded or cached.
+        menu_weights = {name: torch.empty(census["unit_shapes"][name], device="meta")
+                        for name in partition_menu_targets}
+        full_partition_menus = expand_menus_for_targets(
+            menu_weights, partition_menu_targets, mode=mode, tp_degree=tp_degree,
+            parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
+            family_restriction=family_restriction, structure_by_unit=structure_by_unit,
+            profile=profile)
+        menus = {name: full_partition_menus[name] for name in targets}
+        partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
+        # Consumers and identity receipts describe only this row's priced units.
+        context_by_unit = (None if context_by_unit is None else
+                           {name: context_by_unit[name] for name in targets})
+        structure_by_unit = (None if structure_by_unit is None else
+                             {name: structure_by_unit[name] for name in targets})
+        encode_structure = {name: "routed_moe" for name in targets}
+    else:
+        menus = expand_menus_for_targets(
+            weights, targets, mode=mode, tp_degree=tp_degree,
+            parallel_kind=PARALLEL_NONE,
+            context_by_unit=context_by_unit,
+            family_restriction=family_restriction,
+            structure_by_unit=structure_by_unit,
+            profile=profile,
+        )
+    # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
+    # ``attested`` without a dev pin, ``readable`` against a contract that
+    # publishes no reader for these shapes -- used to resolve to nothing and
+    # let the run finish successfully with ``costs: {}``. A zero-row cost
+    # table is not a cheap answer, it is a missing one, and downstream it is
+    # indistinguishable from a scope that legitimately holds no unit. So the
+    # run refuses, and says which mode and which contract produced the
+    # emptiness. This is principle 1's line: the platform reports the gap
+    # instead of shipping a table nobody can tell is empty on purpose.
+    no_admitted_rung = report_empty_menus(menus, mode=mode)
+
+    # The producer's projection of every in-scope stack, asked for ONCE (it
+    # hashes the whole checkpoint), bound exactly to the profile-declared
+    # units, and its source bytes checked against the live views this run
+    # prices.  What the producer will read at export is what is priced here.
+    expert_projection = None
+    projected_units: dict[str, dict] = {}
+    # The projection is a SCOPE-wide answer, always: the block a shard carries
+    # covers every declared stack, because the allocation rebinds the
+    # producer's answer against every stack the block names
+    # (``carried_units``), and a block trimmed to one shard's stacks would be
+    # refused there. What narrows is only the byte-check and the priced units.
+    # A shard therefore reads the census's projection rather than asking the
+    # producer again -- the request hashes the whole checkpoint, so asking per
+    # row would put the campaign's most expensive serial step on every row and
+    # let two rows answer it differently.
+    if population.declared:
+        expert_projection, projected_units = _project_expert_population(
+            population, weights=weights, menus=menus,
+            model_path=model_path, cache_dir=cache_dir,
+            measured=set(expert_targets),
+            projection=(None if census is None else census.get("expert_projection")),
+            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
+                    release_source_pages=True, source_authentication=source_authentication)
+               if selected_source else {}),
+            # The stream head reads each unit's source tensor on its reader
+            # threads and prices it directly, so there is no snapshot view to
+            # check against it (PQ #1654).
+            check_units=not streaming_head)
+        print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
+              f"{len(projected_units)} expert units priced here"
+              + ("; their source tensors are read on the row stream's readers"
+                 if streaming_head and projected_units else ""), flush=True)
+    # A projected unit is a routed stack member whatever the run declares:
+    # Tessera's export intake reads a projection as ``routed_moe`` and expects
+    # the routed served wire in its receipt (tessera#662), so pricing one on
+    # the unstructured spelling would write a receipt the exporter refuses.
+    if projected_units:
+        declared_dense = sorted(name for name in projected_units
+                                if (encode_structure or {}).get(name, "routed_moe") != "routed_moe")
+        if declared_dense:
+            raise ValueError(f"projected expert units declared non-routed: {declared_dense[:4]}")
+        encode_structure = {**(encode_structure or {}),
+                            **{name: "routed_moe" for name in projected_units}}
+
+    return ResolvedCampaignMenu(
+        menus=menus,
+        context_by_unit=context_by_unit,
+        structure_by_unit=structure_by_unit,
+        encode_structure=encode_structure,
+        no_admitted_rung=no_admitted_rung,
+        expert_projection=expert_projection,
+        projected_units=projected_units,
+        partition=(PartitionCampaignMenu(full_partition_menus, partition_encode_structure)
+                   if partition_menu_targets is not None else None))
+
+
 def _main(argv, *, source_scope, waits) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
 
     from . import format_registry as fr
     from .production_weight_cache import ProductionWeightCache
-    from .tessera_menu import MENU_MODES, PARALLEL_NONE, menu_mode
+    from .tessera_menu import menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
     from .tessera_publication import PublicationError
     from .tessera_render import (
         HessianContractError, tessera_encoder_hessian_status,
     )
     from .tessera_serving_scope import (
-        add_serving_scope_arguments, serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance, unit_structure_from_stats,
+        serving_target_from_args,
+        scope_provenance,
     )
 
-    ap = argparse.ArgumentParser(description=__doc__)
-    add_serving_scope_arguments(ap)
-    ap.add_argument("--model", required=True)
-    ap.add_argument("--out", required=True, help="cost payload (.pkl)")
-    ap.add_argument("--cache-dir", required=True)
-    ap.add_argument("--checkpoint", default=None,
-                    help="identity-bound JSON manifest with sibling .parts "
-                         "unit shards; defaults beside --out")
-    ap.add_argument("--menu-mode", default=None, choices=sorted(MENU_MODES))
-    ap.add_argument("--family-restriction", default=None, type=parse_family_restriction,
-                    help="Opt-in JSON prismaquant.tessera_campaign_family_restriction.v1 "
-                         "with explicit dense and routed_moe canonical family lists. "
-                         "Narrows pricing only; grants no serving support. Restricted "
-                         "seed imports refuse incompatible families or rate-band anchors.")
-    ap.add_argument("--nsamples", type=int, default=8)
-    ap.add_argument("--seqlen", type=int, default=512)
-    ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--calibration-input", default=None,
-                    help="Optional immutable calibration_ids safetensors draw; requires its SHA256 and real corpus.")
-    ap.add_argument("--calibration-input-sha256", default=None,
-                    help="Independent SHA256 of --calibration-input, binding its draw provenance.")
-    ap.add_argument("--calibration-corpus", default=None,
-                    help="Actual UTF-8 corpus file matching the pinned draw's provenance.text_sha256.")
-    ap.add_argument("--max-act-rows", type=int, default=512)
-    ap.add_argument("--layer-stride", type=int, default=1,
-                    help="price every Nth decoder layer (1 = every Linear)")
-    ap.add_argument("--anchors", type=int, default=ROUND_ONE_ANCHORS)
-    ap.add_argument("--anchor-batch-size", type=int, default=1,
-                    help="maximum compatible expert anchors in one producer "
-                         "batch within this action (1 = scalar). Does not "
-                         "change the anchor schedule or PB placement.")
-    ap.add_argument("--campaign-identity-bytes", type=int, default=0,
-                    help="experimental closed-roster producer identity hold reservation. "
-                         "0 keeps the feature off; a positive value is charged by "
-                         "selected-source PB admission and runtime refuses a larger plan.")
-    from .tessera_row_stream import ROW_HEAD_STREAM, ROW_HEADS
-    ap.add_argument("--campaign-identity-threads", type=int, default=None,
-                    help="threads that read, verify and receipt selected capture "
-                         "entries (the streaming row head), or that build the "
-                         "closed-roster identity hold and verify resumed wire "
-                         "receipts (the load-all head). Default: the CPUs this row "
-                         "was admitted with. The selected-source plan charges N "
-                         "in-flight host copies.")
-    ap.add_argument("--row-head", default=ROW_HEAD_STREAM, choices=ROW_HEADS,
-                    help="how a selected-source row gets its X and H. 'stream' "
-                         "(default) starts encoding once the first batch's capture "
-                         "entries are verified and resident, keeps two batches "
-                         "resident, and writes the six identity-bound outputs at "
-                         "finalize; a row that needs the whole set first runs "
-                         "'load-all' instead and prints the dependency. 'load-all' "
-                         "makes every selected X and H resident before the first encode.")
-    ap.add_argument("--publication-overlap-bytes", type=int, default=0,
-                    help="stage up to N bytes of already-encoded render/wire "
-                         "artifacts on one writer thread so the next batch "
-                         "encodes while they are written (0 = publish "
-                         "synchronously on the encode thread, the default and "
-                         "byte-for-byte the historical path). An anchor is "
-                         "still journalled only after its own files exist.")
-    ap.add_argument("--max-rounds", type=int, default=0,
-                    help="hard stop on adaptive rounds (0 = governed by "
-                         "--anchor-budget instead). Rounds are not the "
-                         "budget: a round adds ONE anchor to each surface "
-                         "that is still failing its gate, so capping rounds "
-                         "caps how far the worst surface can be improved, "
-                         "which is the opposite of what the adaptive loop is "
-                         "for.")
-    ap.add_argument("--rate-band", default=None,
-                    help="'lo,hi' in q256 body-rate units. Round one puts a "
-                         "window family's two anchors at the ends of this "
-                         "band instead of at the ends of its whole realisable "
-                         "range, and an audited unit gets a third inside it. "
-                         "Unset reproduces every artifact built before "
-                         "2026-09-06.")
-    ap.add_argument("--exhaustive-rate-grid", action="store_true",
-                    help="Research-only: in the declared --rate-band, measure every "
-                         "legal family rung in round one. This changes neither the "
-                         "family's legal domain nor serving/export admission.")
-    ap.add_argument("--anchor-budget", type=int, default=12,
-                    help="max anchors per (fused group, family) surface. The "
-                         "adaptive loop keeps splitting the worst-predicted "
-                         "interval until every member's LOO clears "
-                         "--loo-gate or this budget is spent, and the payload "
-                         "records which of the two stopped each surface.")
-    ap.add_argument("--loo-gate", type=float, default=0.25,
-                    help="max |log2 error| an interpolated surface may carry")
-    ap.add_argument("--tp-degree", type=int, default=1)
-    ap.add_argument("--max-artifact-bpp", type=float, default=0.0,
-                    help="cap the MEASURED envelope at this artifact bpp "
-                         "(0 = each family's whole legal range). A budget "
-                         "decision, not a menu one: rungs above the envelope "
-                         "stay in the menu and are simply not priced, because "
-                         "the surface refuses to extrapolate.")
-    ap.add_argument("--hessian", default="require", choices=("require", "off"),
-                    help="'require' (default) prices every rung with the "
-                         "per-unit XtX from this run's calibration "
-                         "activations, which is what the encoder's shipping "
-                         "default consumes; it REFUSES if the pinned encoder "
-                         "cannot take one. 'off' prices weights-only "
-                         "deliberately and stamps hessian.supplied=false on "
-                         "every row, so a weights-only price can never be "
-                         "read as a shipping one.")
-    ap.add_argument("--deadline-seconds", type=float, default=0.0,
-                    help="stop starting new anchors after this much wall time")
-    ap.add_argument("--units", default=None,
-                    help="JSON selection of fused anchor groups to MEASURE "
-                         "(prismaquant.tessera_campaign_units.v1). The scope "
-                         "resolution, the census and the menus are unchanged; "
-                         "only the encoding work narrows, and the checkpoint "
-                         "identity narrows with it, so two invocations over "
-                         "disjoint selections never contend. Omitted: measure "
-                         "every group in scope, exactly as before.")
-    ap.add_argument("--research-exact-member", default=None,
-                    help="Research-only scalar endpoint for one named member of a "
-                         "fully validated --units group. Requires a complete "
-                         "calibration census/cache and one rate-band; carries no "
-                         "allocator or stack-estimate licence.")
-    ap.add_argument("--calibration-census", default=None,
-                    help="JSON per-unit calibration row counts for the WHOLE "
-                         "priced scope (prismaquant.tessera_campaign_census.v1, "
-                         "written by --census-out). Every unit this run hooks "
-                         "is checked against it; the run then stamps the "
-                         "scope's fit_tokens rather than its own selection's, "
-                         "which is what makes a sharded campaign's Hessian "
-                         "identity the monolith's.")
-    ap.add_argument("--seed-checkpoint", default=None,
-                    help="another campaign's checkpoint manifest whose already "
-                         "measured anchors this run may adopt for the units it "
-                         "prices. Every adopted row goes through the SAME "
-                         "per-row gates a resume does -- the producer's input "
-                         "identity recomputed from this run's weights, menu, "
-                         "Hessian and static scale, and the cached wire "
-                         "re-verified against it -- so a row is adopted only "
-                         "when its bytes are the bytes this run would have "
-                         "encoded. The run-level identities need not match: "
-                         "that is the point, and the difference is stamped.")
-    ap.add_argument("--seed-wire-dir", default=None,
-                    help="the seed checkpoint's wire cache; its blobs are "
-                         "linked into this run's wire dir before verification. "
-                         "Defaults to <seed cache>/wire beside the manifest.")
-    ap.add_argument("--census-out", default=None,
-                    help="collect the calibration census over the whole scope, "
-                         "write it here and exit. No Hessians, no retained "
-                         "scoring rows, no encodes.")
-    ap.add_argument("--attention-implementation", choices=("eager", "sdpa"), default=None,
-                    help="Explicit HF attention backend required for canonical census/capture.")
-    ap.add_argument("--streaming", action="store_true",
-                    help="Use the source layer cache for census/capture or selected anchors from a complete capture.")
-    ap.add_argument("--streaming-cache-slots", type=int, default=2)
-    ap.add_argument("--source-snapshot-policy", default="whole-layer-v1",
-                    choices=("whole-layer-v1", "selected-tensors-v1"),
-                    help="selected-tensors-v1 loads authenticated weight dependencies only; requires selected streaming capture reuse")
-    ap.add_argument("--source-scope", default=None,
-                    help="A profile-declared source outside the decoder body (ModelProfile.source_scope, "
-                         "e.g. GLM's 'mtp'); requires --source-snapshot-policy selected-tensors-v1 and a "
-                         "census carrying the scope's load contract (PQ #1316).")
-    ap.add_argument("--allow-pinned", default=None,
-                    help="Comma-separated tokens: a profile-pinned Linear whose name contains one "
-                         "enters the roster (the allocator's --allow-pinned grammar). A token that "
-                         "lifts nothing refuses. The census records the lift (PQ #1843).")
-    ap.add_argument("--pinned-roster-only", action="store_true",
-                    help="Price only the Linears --allow-pinned lifts: the unpinned body and the "
-                         "expert population leave the roster (a scoped campaign, e.g. GLM "
-                         "attention; PQ #1843). Requires --allow-pinned.")
-    ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
-    ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
-    ap.add_argument("--streaming-capture-policy", default="legacy",
-                    choices=("legacy", "shared-inputs-release-v1", "shared-inputs-bounded-v1"),
-                    help="Opt-in shared capture; bounded also checks phase ownership and physical memory.")
-    ap.add_argument("--capture-load-policy", type=json.loads, default=None,
-                    help="Explicit verified activation load v1 JSON policy; requires bounded capture or hash-bound selected streaming reuse.")
-    ap.add_argument('--export-hessian-reference-policy', type=json.loads, default=None,
-                    help='Opt-in canonical H reference load-policy JSON; requires selected reuse of a complete capture.')
-    ap.add_argument("--capture-calibration-out", default=None,
-                    help="Capture full-census float32 prefix X and uncapped H once, then exit.")
-    ap.add_argument("--capture-chain", default=None, choices=("prep", "quantum", "join"),
-                    help="Run the streamed capture as layer-chain quanta (PQ #1885): prep seals "
-                         "the identity and ranges once, each quantum captures one layer range "
-                         "from its predecessor's boundary, and join publishes the manifest.")
-    ap.add_argument("--capture-layer-range", default=None,
-                    help="A capture chain quantum's source layers A:B.")
-    ap.add_argument("--capture-chain-ranges", default=None,
-                    help="A capture chain prep's layer ranges A:B,B:C,... tiling every source layer.")
-    ap.add_argument("--capture-chain-boundary-storage", type=json.loads, default=None,
-                    help="A capture chain prep's boundary storage policy JSON: where the quanta "
-                         "pass hidden states along, and its byte ceilings.")
-    ap.add_argument("--calibration-cache", default=None,
-                    help="Verified capture manifest; prefetch selected X/H before encoding.")
-    ap.add_argument("--calibration-cache-sha256", default=None,
-                    help="Expected capture manifest hash, sealed by the campaign planner.")
-    ap.add_argument("--source-identity-cache", default=None,
-                    help="A prismaquant.streamed_model.identity_cache.v1 proof of every source "
-                         "shard's full-file SHA256. A selected-source row adopts it before any "
-                         "payload read instead of hashing the shards it reads; a proof that "
-                         "refuses leaves every read to hash fresh (PQ #1497).")
-    ap.add_argument("--source-identity-cache-sha256", default=None,
-                    help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
-    ap.add_argument("--acquisition-request", default=None,
-                    help="Opt-in authenticated joint full-domain acquisition request; schedules exact research render/wire work only.")
-    ap.add_argument("--acquisition-request-sha256", default=None,
-                    help="Independent SHA256 of --acquisition-request; both flags are required together.")
+    from .tessera_campaign_cli import campaign_argument_parser
+    ap = campaign_argument_parser(description=__doc__)
     args = ap.parse_args(argv)
     acquisition = _load_campaign_acquisition(args, ap)
     calibration_options = (args.calibration_input, args.calibration_input_sha256,
@@ -7013,7 +4330,7 @@ def _main(argv, *, source_scope, waits) -> int:
                      "capture chain prep's, and the prep names both")
         from .capture_layer_chain import (CaptureChainRefused, parse_layer_range,
                                           parse_layer_ranges, require_layer_tiling)
-        from .cost_streaming import check_boundary_storage
+        from .streamed_boundary_artifacts import check_boundary_storage
         try:
             if args.capture_layer_range is not None:
                 args.capture_layer_range = parse_layer_range(args.capture_layer_range)
@@ -7038,7 +4355,10 @@ def _main(argv, *, source_scope, waits) -> int:
     _require_automatic_capture_recording(args)
     if args.capture_chain in ("prep", "join"):
         # Neither runs a forward, so neither loads the model.
-        return _run_capture_chain_bookends(args, saved_calibration)
+        request = capture_chain_bookend_request(args)
+        if isinstance(request, CaptureJoinRequest):
+            return run_capture_chain_join(request)
+        return run_capture_chain_prep(request, saved_calibration)
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -7138,9 +4458,9 @@ def _main(argv, *, source_scope, waits) -> int:
         if acquisition is not None:
             ap.error("--acquisition-request narrows the run's priced scope; a "
                      "--units fresh capture takes exactly the selection's whole groups")
-        selected_capture_census = load_calibration_census(args.calibration_census, args=args)
+        selected_capture_census = load_calibration_census(args.calibration_census, request=args)
         capture_unit_names = selected_capture_unit_names(
-            load_unit_selection(args.units), args=args,
+            load_unit_selection(args.units), request=args,
             resolved=selected_capture_census["anchor_groups"])
         print(f"[campaign] --units full-group capture takes {len(capture_unit_names)} "
               "units of the census scope", flush=True)
@@ -7231,180 +4551,16 @@ def _main(argv, *, source_scope, waits) -> int:
         capture_runtime = dict(torch=torch.__version__,cuda=torch.version.cuda,
             transformers=importlib.metadata.version("transformers"))
 
-    # The packed expert population the producer bridge covers, or a refusal by
-    # name before calibration.  Its members are priced as the producer's
-    # projected units below (PrismaQuant #183).
-    # A pinned-roster-only campaign prices the lifted Linears and no expert
-    # (PQ #1843); its census records that the population was left out.
-    population = (ExpertPopulation(members=(), declared={}, packed_in_scope={},
-                                   omitted_outside_layer_stride={})
-                  if args.pinned_roster_only else
-                  _require_campaign_population(model, profile, args.layer_stride))
-    # Names only: no module is retained after source teardown.
-    roster = campaign_roster(
-        profile.campaign_dense_unit_names(model, allow_pinned=args.allow_pinned),
-        profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
-    all_dense = list(roster.dense)
-    pinned = list(roster.pinned)
-    pinned_roster = pinned_roster_block(args, roster)
-    if pinned_roster is not None:
-        print(f"[campaign] --allow-pinned {pinned_roster['allow_pinned']} lifts "
-              f"{len(roster.lifted)} profile-pinned Linears"
-              + (" (pinned roster only)" if args.pinned_roster_only else ""), flush=True)
-    dense_targets = _campaign_layer_scope(all_dense, args.layer_stride)
-    expert_targets = population.qnames
-    expert_members = {member.qname: member for member in population.members}
+    scope = resolve_campaign_scope(campaign_scope_request(args), model, profile,
+        mode=mode, device=device, serving_target=serving_target,
+        selected_capture_census=selected_capture_census,
+        capture_unit_names=capture_unit_names, acquisition=acquisition)
+    # The scope stays one record: the census, the priced targets and the
+    # census-only flag are read throughout, every other field at its use.
+    census, census_only = scope.census, scope.census_only
+    dense_targets, expert_targets = scope.dense_targets, scope.expert_targets
     targets = [*dense_targets, *expert_targets]
-    # The whole priced scope, before any selection narrows the encoding work.
-    # It is what the census counts, what the population block enumerates, and
-    # what a merge checks a set of shards covers.
-    census_dense_targets = list(dense_targets)
-    census_expert_targets = list(expert_targets)
-    census_targets = list(targets)
-    scope_groups = resolve_anchor_groups(
-        census_targets, profile=profile, expert_members=expert_members)
-    print(f"[campaign] {len(dense_targets)} target Linears + {len(expert_targets)} "
-          f"projected expert units in {len(population.declared)} stacks, "
-          f"{len(scope_groups)} anchor groups, mode={mode}, "
-          f"device={device}", flush=True)
-
-    # The census quantum: the whole prologue over the whole scope -- one
-    # calibration forward that counts rows and calibrates the static A-side
-    # maxima, and one producer projection request -- written out and stopped
-    # before a single anchor is encoded.  Every later shard reads it, so no
-    # shard re-derives a scope-wide answer and none of them can disagree
-    # about one.
-    census_only = bool(args.census_out)
-    if census_only and args.units:
-        raise RuntimeError(
-            "--census-out takes the whole scope; it cannot be narrowed by --units")
-    if census_only and args.calibration_census:
-        raise RuntimeError("--census-out writes a census; it does not read one")
-
-    selection = None
-    stack_samples = {}
-    exact_member_scope = None
-    partition_members = {}
-    partition_menu_targets = None
-    partition_unit_records = {}
-    full_expert_members = expert_members
-    census = (selected_capture_census if selected_capture_census is not None else
-              (None if not args.calibration_census
-               else load_calibration_census(args.calibration_census, args=args)))
-    selected_groups: list[str] = sorted(scope_groups)
-    audit_units: set = set()
-    inclusion_probability: dict = {}
-    if args.units:
-        selection = load_unit_selection(args.units)
-        if (selection.get("model", args.model) != args.model
-                or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
-            raise StackSampleError("--units model/layer_stride disagrees with this campaign")
-        if selection.get("schema") == UNITS_SCHEMA_V3:
-            if census is None or args.research_exact_member is not None:
-                raise RuntimeError("expert partition requires a census and excludes research exact-member")
-            from .tessera_expert_projection import carried_units
-            _source, partition_unit_records, partition_stacks = carried_units(census["expert_projection"])
-            partition_members = expert_partition_members(
-                selection, unit_records=partition_unit_records, stack_of=partition_stacks,
-                rate_band=args.rate_band, max_rounds=args.max_rounds,
-                seeded=bool(args.seed_checkpoint or args.seed_wire_dir))
-            partition_menu_targets = sorted(name for entry in selection["groups"] for name in entry["members"])
-            # Existing unit receipts bind the local subset; the scope-wide
-            # producer projection binds the full group geometry/source frame.
-        stack_samples = selection_stack_samples(selection, profile)
-        selected_groups = select_anchor_groups(
-            selection, scope_groups, where=f"--units {args.units}")
-        priced, audit_units, inclusion_probability = selection_priced_units(
-            selection)
-        if args.research_exact_member is not None:
-            if (mode != "research" or not args.calibration_census or
-                    not args.calibration_cache or parse_rate_band(args.rate_band) is None):
-                raise RuntimeError("--research-exact-member requires research menu, "
-                                   "calibration census/cache and --rate-band")
-            exact_member_scope = research_exact_member_scope(
-                selection, scope_groups, args.research_exact_member)
-            priced = {exact_member_scope["member"]}
-            audit_units = set()
-            inclusion_probability = {}
-        if args.capture_calibration_out:
-            # The census-derived scope the pre-model check derived; the run's
-            # own grouping must resolve the selection to exactly that set.
-            confirmed = selected_capture_unit_names(selection, args=args,
-                                                    resolved=scope_groups)
-            if confirmed != capture_unit_names:
-                raise RuntimeError(
-                    f"--units {args.units}: this run's grouping resolves the "
-                    f"selection to {confirmed} but its census to "
-                    f"{capture_unit_names}; the scope is not exact")
-        # The group's membership was already checked whole; what the sample
-        # narrows is only which of those members this run encodes. Keeping the
-        # two separate is what lets a sampled run stay identity-honest: the
-        # checkpoint's ``units`` map holds exactly the priced units, so a
-        # different draw is a different identity and cannot silently resume
-        # over this one.
-        keep = {name for key in selected_groups for name in scope_groups[key]
-                if name in priced}
-        dense_targets = [name for name in dense_targets if name in keep]
-        expert_targets = [name for name in expert_targets if name in keep]
-        expert_members = {name: member for name, member in expert_members.items()
-                          if name in keep}
-        targets = [*dense_targets, *expert_targets]
-        sampled_groups = sum(1 for entry in selection["groups"]
-                             if entry.get("sampled"))
-        print(f"[campaign] --units selects {len(selected_groups)} of "
-              f"{len(scope_groups)} anchor groups: {len(dense_targets)} dense + "
-              f"{len(expert_targets)} projected expert units"
-              + (f"; {sampled_groups} group(s) sampled, "
-                 f"{len(audit_units)} audit unit(s)" if sampled_groups else ""),
-              flush=True)
-        if not targets:
-            raise RuntimeError(
-                f"--units {args.units}: the selection prices no unit")
-    elif args.research_exact_member is not None:
-        raise RuntimeError("--research-exact-member requires --units")
-
-    if acquisition is not None:
-        acquisition, selected_groups, keep = _campaign_acquisition_row_scope(
-            acquisition, scope_groups, selected=targets if args.units else None)
-        dense_targets = [name for name in dense_targets if name in keep]
-        expert_targets = [name for name in expert_targets if name in keep]
-        expert_members = {name: member for name, member in expert_members.items() if name in keep}
-        targets = [*dense_targets, *expert_targets]
-
-    context_by_unit = None
-    structure_by_unit = None
-    if serving_target is not None or args.family_restriction is not None:
-        from .sensitivity_probe import discover_moe_structure
-        routed = discover_moe_structure(model, profile=profile)
-        topology = {
-            name: dict(zip(("router_path", "expert_id"), routed.get(name, (None, None))))
-            for name in dense_targets
-        }
-        topology_experts = ({name: full_expert_members[name] for name in partition_menu_targets}
-                            if partition_menu_targets is not None else expert_members)
-        topology_targets = partition_menu_targets or targets
-        for name, member in topology_experts.items():
-            if name not in topology_targets:
-                continue
-            # The packed facts the probe would record for this unit: its
-            # packed module and expert count, never a shape guess.
-            topology[name] = {
-                "_packed_experts_module": member.module_qname,
-                "num_experts": int(getattr(member.module, member.param_name).shape[0]),
-            }
-        context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
-        if args.family_restriction is not None:
-            if len(set(topology_targets)) != len(topology_targets) or set(topology) != set(topology_targets):
-                raise ValueError("family restriction requires unambiguous topology for every target")
-            structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
-                                 for name in topology_targets}
-    # The serving structure each unit's wire is resolved on (#1502): the
-    # restriction's authoritative map when there is one, else the serving
-    # context's. A run that declares neither prices the research recipe it
-    # always priced, and stamps that it did (``encode_structure: null``).
-    encode_structure = (dict(structure_by_unit) if structure_by_unit is not None
-                        else None if context_by_unit is None
-                        else {name: context.structure for name, context in context_by_unit.items()})
+    census_targets = [*scope.census_dense_targets, *scope.census_expert_targets]
 
     if saved_calibration is None:
         tokens, corpus_text = _calibration_tokens(
@@ -7419,12 +4575,12 @@ def _main(argv, *, source_scope, waits) -> int:
     if census is not None:
         # Validate the whole scope before a selected unit's artifact is read.
         if (set(census["counts"]) != set(census_targets) or
-                census["anchor_groups"] != scope_groups):
+                census["anchor_groups"] != scope.scope_groups):
             raise RuntimeError("calibration census scope differs from the loaded model")
         scope_shapes = {name: list(dict(model.named_modules())[name].weight.shape)
-                        for name in census_dense_targets}
+                        for name in scope.census_dense_targets}
         scope_shapes.update({member.qname: list(member.weight.shape)
-                             for member in population.members})
+                             for member in scope.population.members})
         if census["unit_shapes"] != scope_shapes:
             raise RuntimeError("calibration census geometry differs from the loaded model")
     completed_capture_reuse = bool(args.capture_calibration_out and args.capture_chain is None
@@ -7436,12 +4592,12 @@ def _main(argv, *, source_scope, waits) -> int:
         runner = None
     if runner is not None and not selected_source and not completed_capture_reuse:
         try:
-            return _run_streamed_calibration(args, runner, profile, mode=mode, population=population,
+            return run_streamed_calibration(streamed_calibration_request(args), runner, profile, mode=mode, population=scope.population,
                 dense_targets=dense_targets, expert_targets=expert_targets,
-                scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
-                context_by_unit=context_by_unit, attention_implementation=attention_implementation,
-                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,
-                pinned_roster=pinned_roster, capture_guard=capture_guard)
+                scope_groups=scope.scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
+                context_by_unit=scope.context_by_unit, attention_implementation=attention_implementation,
+                capture_runtime=capture_runtime, structure_by_unit=scope.structure_by_unit,
+                pinned_roster=scope.pinned_roster, capture_guard=capture_guard)
         finally:
             runner.shutdown()
     if selected_source:
@@ -7644,7 +4800,7 @@ def _main(argv, *, source_scope, waits) -> int:
         if selected_guard is not None and not streaming_head:
             selected_guard.check('after_selected_capture_prefetch')
     else:
-        acts, hessians, hessian_rows, act_max_abs = _collect_activations(
+        acts, hessians, hessian_rows, act_max_abs = calibration_forward.capture_activation_statistics(
             model, targets, tokens, 0 if census_only else args.max_act_rows, device,
             want_hessian=want_h, profile=profile)
     hessian_token_count, hessian_token_min = census_token_counts(census, hessian_rows)
@@ -7688,10 +4844,86 @@ def _main(argv, *, source_scope, waits) -> int:
     else:
         weights = {name: dict(model.named_modules())[name].weight.detach()
                    for name in dense_targets}
-        for name, member in expert_members.items():
+        for name, member in scope.expert_members.items():
             weights[name] = member.weight.detach()
         del model
     torch.cuda.empty_cache()
+
+    checkpoint_settings = vars(args).copy()
+    request = loaded_campaign_request(args, mode=mode, selected_source=selected_source,
+        streaming_head=streaming_head, wire_dir=wire_dir, checkpoint=checkpoint,
+        identity_threads=identity_threads_requested)
+    return run_loaded_campaign(request, weights=weights,
+        statistics=calibration_forward.CalibrationStatistics(acts, hessians, hessian_rows, act_max_abs),
+        hessian_identity=hessian_identity, hessian_token_count=hessian_token_count,
+        hessian_token_min=hessian_token_min, scope=scope, profile=profile,
+        static_scales=static_scales, static_scale_policy=static_scale_policy,
+        device=device, cache_dir=cache_dir, calibration_cache=calibration_cache,
+        capture_identity=capture_identity, hessian_status=hessian_status,
+        model_load_contract=model_load_contract, attention_implementation=attention_implementation,
+        capture_runtime=capture_runtime, serving_target=serving_target,
+        source_scope=source_scope, waits=waits, encoder_seal_ahead=encoder_seal_ahead,
+        source_authentication=source_authentication,
+        selected_source_preparation=selected_source_preparation,
+        selected_resources=selected_resources if selected_source else None,
+        selected_guard=selected_guard, checkpoint_settings=checkpoint_settings)
+
+
+def run_loaded_campaign(request: LoadedCensusRequest | LoadedPricingRequest, *,
+                        weights, statistics: calibration_forward.CalibrationStatistics,
+                        hessian_identity, hessian_token_count, hessian_token_min,
+                        scope: ResolvedCampaignScope, profile, static_scales,
+                        static_scale_policy, device, cache_dir,
+                        calibration_cache, capture_identity, hessian_status,
+                        model_load_contract, attention_implementation, capture_runtime,
+                        serving_target, source_scope, waits, encoder_seal_ahead,
+                        source_authentication, selected_source_preparation,
+                        selected_resources, selected_guard, checkpoint_settings) -> int:
+    """Execute one loaded scope with its existing source and publication custody.
+
+    Census and pricing share the established source/memo/cache/menu construction.
+    The caller retains source-scope lifetime and calibration/source authority;
+    this operation owns the synchronous row stream, journals and publisher.
+    Raw checkpoint settings are only a wire input, never a policy fallback.
+    """
+    import torch
+    from .production_weight_cache import ProductionWeightCache
+    from .tessera_publication import PublicationError
+    from .tessera_rate_surface import leave_one_anchor_out
+    from .tessera_render import HessianContractError
+    from .tessera_serving_scope import scope_provenance
+    from .tessera_row_stream import RECEIPT_FIELDS, checkpoint_present
+
+    census_only = isinstance(request, LoadedCensusRequest)
+    if census_only:
+        mode = request.menu_mode
+        tp_degree = request.census.tp_degree
+        family_restriction = request.census.family_restriction
+        model_path = request.census.model
+        identity_bytes = 0  # Actual CLI admits no census identity budget.
+        source = ResidentCampaignWeights()
+        want_h = False
+    else:
+        mode = request.encoding.mode
+        tp_degree = request.encoding.tp_degree
+        family_restriction = request.encoding.family_restriction
+        model_path = request.draw.model
+        identity_bytes = request.encoding.identity_bytes
+        source = request.source
+        want_h = request.encoding.hessian == 'require'
+    selected_source = isinstance(source, SelectedCampaignWeights)
+    streaming_head = selected_source and source.head == 'stream'
+    if selected_source:
+        from . import tessera_calibration_cache as calibration_store
+
+    context_by_unit = scope.context_by_unit
+    structure_by_unit = scope.structure_by_unit
+    encode_structure = scope.encode_structure
+    all_dense = list(scope.roster.dense)
+    pinned = list(scope.roster.pinned)
+    targets = [*scope.dense_targets, *scope.expert_targets]
+    census_targets = [*scope.census_dense_targets, *scope.census_expert_targets]
+    acts, hessians, hessian_rows, act_max_abs = statistics
 
     # ONE ActivationSource for the whole campaign, and ONE set of encoder
     # keywords per unit PER SCALE PLANE. The block-LDL is a function of the
@@ -7713,7 +4945,7 @@ def _main(argv, *, source_scope, waits) -> int:
     # The stream head builds one source per entry on its reader threads.
     if want_h and not streaming_head:
         calibration_source = th.activation_source(hessians, hessian_identity)
-        if args.campaign_identity_bytes > 0:
+        if identity_bytes > 0:
             # The producer's capture seal, taken now on a helper thread so it
             # runs under the projection and the identity plan rather than as
             # the first receipt of the hold.  Joined before the hold and, on
@@ -7722,7 +4954,7 @@ def _main(argv, *, source_scope, waits) -> int:
             source_scope.callback(seal_ahead.finish)
 
     def activation_kwargs_for(source):
-        return _activation_kwargs_memo(source, weights, device,
+        return cell_measurement.encoder_kwargs_memo(source, weights, device,
             # The capacity the plan CHARGED, not the batch width it was derived
             # from, so the memo policy has one owner (RobTand/prismaquant#389 can
             # move it without the charge and the construction drifting apart).
@@ -7745,86 +4977,21 @@ def _main(argv, *, source_scope, waits) -> int:
         metadata={"schema": SCHEMA, "menu_mode": mode,
                   **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
-    if partition_menu_targets is not None:
-        # Geometry-only menu inputs: no unpriced W/X/H is loaded or cached.
-        menu_weights = {name: torch.empty(census["unit_shapes"][name], device="meta")
-                        for name in partition_menu_targets}
-        full_partition_menus = expand_menus_for_targets(
-            menu_weights, partition_menu_targets, mode=mode, tp_degree=args.tp_degree,
-            parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit,
-            profile=profile)
-        menus = {name: full_partition_menus[name] for name in targets}
-        partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
-        # Consumers and identity receipts describe only this row's priced units.
-        context_by_unit = (None if context_by_unit is None else
-                           {name: context_by_unit[name] for name in targets})
-        structure_by_unit = (None if structure_by_unit is None else
-                             {name: structure_by_unit[name] for name in targets})
-        encode_structure = {name: "routed_moe" for name in targets}
-    else:
-        menus = expand_menus_for_targets(
-            weights, targets, mode=mode, tp_degree=args.tp_degree,
-            parallel_kind=PARALLEL_NONE,
-            context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction,
-            structure_by_unit=structure_by_unit,
-            profile=profile,
-        )
-    # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
-    # ``attested`` without a dev pin, ``readable`` against a contract that
-    # publishes no reader for these shapes -- used to resolve to nothing and
-    # let the run finish successfully with ``costs: {}``. A zero-row cost
-    # table is not a cheap answer, it is a missing one, and downstream it is
-    # indistinguishable from a scope that legitimately holds no unit. So the
-    # run refuses, and says which mode and which contract produced the
-    # emptiness. This is principle 1's line: the platform reports the gap
-    # instead of shipping a table nobody can tell is empty on purpose.
-    no_admitted_rung = report_empty_menus(menus, mode=mode)
-
-    # The producer's projection of every in-scope stack, asked for ONCE (it
-    # hashes the whole checkpoint), bound exactly to the profile-declared
-    # units, and its source bytes checked against the live views this run
-    # prices.  What the producer will read at export is what is priced here.
-    expert_projection = None
-    projected_units: dict[str, dict] = {}
-    # The projection is a SCOPE-wide answer, always: the block a shard carries
-    # covers every declared stack, because the allocation rebinds the
-    # producer's answer against every stack the block names
-    # (``carried_units``), and a block trimmed to one shard's stacks would be
-    # refused there. What narrows is only the byte-check and the priced units.
-    # A shard therefore reads the census's projection rather than asking the
-    # producer again -- the request hashes the whole checkpoint, so asking per
-    # row would put the campaign's most expensive serial step on every row and
-    # let two rows answer it differently.
-    if population.declared:
-        expert_projection, projected_units = _project_expert_population(
-            population, weights=weights, menus=menus,
-            model_path=args.model, cache_dir=cache_dir,
-            measured=set(expert_targets),
-            projection=(None if census is None else census.get("expert_projection")),
-            **(dict(resource_check=None if selected_guard is None else selected_guard.check,
-                    release_source_pages=True, source_authentication=source_authentication)
-               if selected_source else {}),
-            # The stream head reads each unit's source tensor on its reader
-            # threads and prices it directly, so there is no snapshot view to
-            # check against it (PQ #1654).
-            check_units=not streaming_head)
-        print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
-              f"{len(projected_units)} expert units priced here"
-              + ("; their source tensors are read on the row stream's readers"
-                 if streaming_head and projected_units else ""), flush=True)
-    # A projected unit is a routed stack member whatever the run declares:
-    # Tessera's export intake reads a projection as ``routed_moe`` and expects
-    # the routed served wire in its receipt (tessera#662), so pricing one on
-    # the unstructured spelling would write a receipt the exporter refuses.
-    if projected_units:
-        declared_dense = sorted(name for name in projected_units
-                                if (encode_structure or {}).get(name, "routed_moe") != "routed_moe")
-        if declared_dense:
-            raise ValueError(f"projected expert units declared non-routed: {declared_dense[:4]}")
-        encode_structure = {**(encode_structure or {}),
-                            **{name: "routed_moe" for name in projected_units}}
+    menu = resolve_campaign_menu(weights, scope, profile, mode=mode,
+        tp_degree=tp_degree, family_restriction=family_restriction,
+        model_path=model_path, cache_dir=cache_dir,
+        selected_source=selected_source, streaming_head=streaming_head,
+        source_authentication=source_authentication, selected_guard=selected_guard)
+    menus = menu.menus
+    context_by_unit = menu.context_by_unit
+    structure_by_unit = menu.structure_by_unit
+    encode_structure = menu.encode_structure
+    no_admitted_rung = menu.no_admitted_rung
+    expert_projection = menu.expert_projection
+    projected_units = menu.projected_units
+    if menu.partition is not None:
+        full_partition_menus = menu.partition.full_menus
+        partition_encode_structure = menu.partition.encode_structure
 
     def close_source_authentication():
         """Record the source owner's receipt, then release its descriptors.
@@ -7839,22 +5006,23 @@ def _main(argv, *, source_scope, waits) -> int:
 
     route_cache: dict[tuple, str | None] = {}
     acquisition_schedule = None
-    if acquisition is not None:
-        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+    if isinstance(request, LoadedPricingRequest) and scope.acquisition is not None:
+        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=scope.expert_members)
         acquisition_rates = {name: {} for name in targets}
         for name in targets:
             for rung in menus[name]:
-                if args.max_artifact_bpp > 0 and rung.bpp > args.max_artifact_bpp:
+                if request.recipe.max_artifact_bpp > 0 and rung.bpp > request.recipe.max_artifact_bpp:
                     continue
                 acquisition_rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
         acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
             encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
         acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
-            args=args, audit_units=audit_units, snap=None, requests=acquisition["requests"],
+            placement=request.recipe.placement, audit_units=scope.audit_units, snap=None, requests=scope.acquisition["requests"],
             rates_by_unit=acquisition_rates)
-        args.acquisition_schedule = acquisition_schedule
-        args.acquisition_origin = _campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
-        args.acquisition_source_weights = acquisition["source_weights"]
+        checkpoint_settings["acquisition_schedule"] = acquisition_schedule
+        acquisition_origin = campaign_acquisition_origin(scope.acquisition, acquisition_schedule, menus)
+        checkpoint_settings["acquisition_origin"] = acquisition_origin
+        checkpoint_settings["acquisition_source_weights"] = scope.acquisition["source_weights"]
 
     if not streaming_head:
         close_source_authentication()
@@ -7864,27 +5032,28 @@ def _main(argv, *, source_scope, waits) -> int:
         # two heads' cost payloads stay byte-identical.
         selected_source_preparation['source_authentication'] = None
 
-    if census_only:
-        payload = calibration_census(
-            hessian_rows, act_max_abs, args=args, groups=scope_groups,
-            dense_targets=census_dense_targets,
-            expert_targets=census_expert_targets,
+    if isinstance(request, LoadedCensusRequest):
+        return run_census(request.census, counts=hessian_rows, maxima=act_max_abs,
+            groups=scope.scope_groups, dense_targets=scope.census_dense_targets,
+            expert_targets=scope.census_expert_targets,
             shapes={name: tuple(weight.shape) for name, weight in weights.items()},
             identity=hessian_identity, expert_projection=expert_projection,
             model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,capture_runtime=capture_runtime,
-            pinned_roster=pinned_roster)
-        if set(payload["counts"]) != set(census_targets):
-            raise RuntimeError(
-                "the census did not observe every unit in scope: missing "
-                + ", ".join(sorted(set(census_targets) - set(payload["counts"]))))
-        out = Path(args.census_out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        print(f"[campaign] wrote {out}: {len(payload['counts'])} units, rows "
-              f"{min(payload['counts'].values())}..{max(payload['counts'].values())}, "
-              f"{len(payload['anchor_groups'])} anchor groups", flush=True)
-        return 0
+            attention_implementation=attention_implementation, capture_runtime=capture_runtime,
+            pinned_roster=scope.pinned_roster, expected_units=census_targets)
+
+    recipe = request.recipe
+    placement = recipe.placement
+    publication = request.publication
+    outputs = request.outputs
+    draw = request.draw
+    checkpoint = outputs.checkpoint
+    wire_dir = outputs.wire_dir
+    seed_checkpoint = None if request.seed is None else request.seed.checkpoint
+    seed_wire_dir = None if request.seed is None else request.seed.wire_dir
+    identity_threads_requested = publication.requested_identity_threads
+
+    checkpoint_settings = MappingProxyType(checkpoint_settings)
 
     from .cost_stage_checkpoint import prepare_journal, write_unit
     from .prismabuild_progress import report as report_progress
@@ -7899,7 +5068,7 @@ def _main(argv, *, source_scope, waits) -> int:
     # empty-menu refusal path instead of constructing a synthetic holder.
     # The stream head builds each unit's holder on its reader thread, inside
     # the window, so it never holds the population's.
-    reuse_campaign_identity = bool(not streaming_head and args.campaign_identity_bytes > 0
+    reuse_campaign_identity = bool(not streaming_head and identity_bytes > 0
                                    and all(menus.values()))
     # The plan charges the requested builder count; the row never runs more
     # builders, readers or wire verifiers than the CPUs it was admitted with.
@@ -7915,7 +5084,7 @@ def _main(argv, *, source_scope, waits) -> int:
                 threads=identity_threads_requested)
         identity_metadata_bytes = sum(identity_metadata_bounds.values())
         if selected_source:
-            reserved_identity_bytes = int(args.campaign_identity_bytes)
+            reserved_identity_bytes = int(identity_bytes)
             if identity_metadata_bytes + identity_planning_scratch_bytes > reserved_identity_bytes:
                 raise RuntimeError('campaign identity closed-roster plan exceeds --campaign-identity-bytes')
             if selected_guard is not None:
@@ -7943,18 +5112,18 @@ def _main(argv, *, source_scope, waits) -> int:
         print(f"[campaign] campaign identity hold: {len(bound_checkpoint_units)} units, "
               f"observed metadata {identity_metadata_observed_bytes} B, planned bound "
               f"{sum(identity_metadata_bounds.values())} B + scratch "
-              f"{identity_planning_scratch_bytes} B, reserved {args.campaign_identity_bytes} B; "
+              f"{identity_planning_scratch_bytes} B, reserved {identity_bytes} B; "
               f"{identity_threads} threads, {identity_hold_seconds:.1f} s"
               + ("" if seal_ahead is None else
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
-    if acquisition is not None and not streaming_head:
+    if scope.acquisition is not None and not streaming_head:
         for name in sorted(targets):
             receipt = (bound_checkpoint_units[name].campaign_inputs()["source"]
                        if bound_checkpoint_units else None)
             _require_campaign_acquisition_source(name, weights[name],
-                acquisition["source_weights"][name], receipt=receipt)
+                scope.acquisition["source_weights"][name], receipt=receipt)
 
     row_stream = None
     if streaming_head:
@@ -7967,8 +5136,8 @@ def _main(argv, *, source_scope, waits) -> int:
             projected_units=projected_units, static_scales=static_scales,
             threads=stream_threads)
         window_metadata_bytes = window_scratch_bytes + sum(sorted(
-            window_bounds.values(), reverse=True)[:2 * args.anchor_batch_size + stream_threads])
-        if 0 < args.campaign_identity_bytes < window_metadata_bytes:
+            window_bounds.values(), reverse=True)[:2 * publication.batch_size + stream_threads])
+        if 0 < identity_bytes < window_metadata_bytes:
             raise RuntimeError('row stream identity window plan exceeds --campaign-identity-bytes')
         if selected_guard is not None:
             selected_guard.check('before_row_stream_identity_window',
@@ -7979,7 +5148,7 @@ def _main(argv, *, source_scope, waits) -> int:
             _require_streamed_projection(
                 streamed_units, projected_units, expert_projection['producer']['source'],
                 selected_resources.get('source_tensor_keys')
-                if args.source_snapshot_policy == 'selected-tensors-v1' else None)
+                if source.snapshot_policy == 'selected-tensors-v1' else None)
 
         def load_projected_source(name):
             """One projected unit's source tensor, on a reader thread (PQ #1654).
@@ -7989,7 +5158,7 @@ def _main(argv, *, source_scope, waits) -> int:
             copy is taken.
             """
             weight, release = _read_projected_unit(
-                name, projected_units[name], model_path=args.model,
+                name, projected_units[name], model_path=model_path,
                 source=expert_projection['producer']['source'], release_source_pages=True,
                 source_authentication=source_authentication)
             release()
@@ -8003,9 +5172,9 @@ def _main(argv, *, source_scope, waits) -> int:
                 menu=menus[name], projected_unit=projected_units.get(name),
                 static_scales=static_scales, metadata_bound=window_bounds[name])
             try:
-                if acquisition is not None and name not in acquisition_source_checked:
+                if scope.acquisition is not None and name not in acquisition_source_checked:
                     _require_campaign_acquisition_source(name, weight,
-                        acquisition["source_weights"][name], receipt=receipts["weight"])
+                        scope.acquisition["source_weights"][name], receipt=receipts["weight"])
                     acquisition_source_checked.add(name)
             except BaseException:
                 if holder is not None:
@@ -8016,12 +5185,12 @@ def _main(argv, *, source_scope, waits) -> int:
             return holder, receipts
 
         row_stream = RowStream(
-            capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
-            expected_identity=capture_identity, census=census, names=targets,
-            policy=args.capture_load_policy, weights=weights, hessian_identity=hessian_identity,
+            capture_path=source.capture, expected_sha256=source.capture_sha256,
+            expected_identity=capture_identity, census=scope.census, names=targets,
+            policy=source.load_policy, weights=weights, hessian_identity=hessian_identity,
             bind=bind_stream_unit,
             load_unit=load_projected_source if streamed_units else None,
-            threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
+            threads=stream_threads, batch_size=publication.batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
             wait_sink=waits.ledger.sink,
@@ -8029,35 +5198,37 @@ def _main(argv, *, source_scope, waits) -> int:
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
         calibration_cache = row_stream.capture
-        _prime_first_anchor_batch(row_stream, args=args, checkpoint=checkpoint,
+        _prime_first_anchor_batch(row_stream, placement=placement, seed_checkpoint=seed_checkpoint,
+            batch_size=publication.batch_size, max_artifact_bpp=recipe.max_artifact_bpp,
+            checkpoint=checkpoint,
             targets=targets, menus=menus, weights=weights, profile=profile,
-            expert_members=expert_members, encode_structure=encode_structure,
-            projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
-            partitioned=partition_menu_targets is not None,
-            acquisition_requests=None if acquisition is None else acquisition["requests"])
+            expert_members=scope.expert_members, encode_structure=encode_structure,
+            projected_units=projected_units, audit_units=scope.audit_units, route_cache=route_cache,
+            partitioned=scope.partition_menu_targets is not None,
+            acquisition_requests=None if scope.acquisition is None else scope.acquisition["requests"])
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
         # including the static A-side contract (scales + policy) the W4A4 rows
         # are scored under.  A checkpoint from another calibration or policy is
         # refused here, by field, before a row of it is read.
-        return _campaign_checkpoint_identity(
-            weights=weights, acts=acts, hessians=hessians, menus=menus, args=args,
+        return campaign_checkpoint_identity(
+            weights=weights, acts=acts, hessians=hessians, menus=menus, settings=checkpoint_settings,
             calibration_identity=hessian_identity,
             serving_scope=(scope_provenance(serving_target, context_by_unit)
                            if serving_target is not None else None),
             static_scales=static_scales, static_scale_policy=static_scale_policy,
             expert_projection=expert_projection,
             stack_sampling_identity={name: record
-                for entry in (selection or {}).get("groups", [])
+                for entry in (scope.selection or {}).get("groups", [])
                 for name, record in entry.get("stack_samples", {}).items()},
             structure_by_unit=structure_by_unit, **receipts)
 
     def open_journal(identity):
         return prepare_journal(
             checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
-            stage="Tessera campaign", resume=True, identity=identity,
-            qnames=targets, seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
+            stage=STAGE, resume=True, identity=identity,
+            qnames=targets, seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
         )
 
     # Under the stream head the identity, and so the journal, exist only at
@@ -8100,7 +5271,7 @@ def _main(argv, *, source_scope, waits) -> int:
         stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
             checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
             stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
-            seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
+            seal_fields=campaign_wire.CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
             identity=run_identity(unit_receipts={
                 name: dict.fromkeys(RECEIPT_FIELDS, STREAM_JOURNAL_RECEIPT)
                 for name in weights}))
@@ -8115,27 +5286,27 @@ def _main(argv, *, source_scope, waits) -> int:
     unservable: dict[str, dict[str, dict]] = {}
     wire_records = {name: {} for name in targets}
     dirty_checkpoint_units = set()
-    restricted_rate_band = (parse_rate_band(args.rate_band)
-                            if args.family_restriction is not None else None)
+    restricted_rate_band = (parse_rate_band(placement.rate_band)
+                            if family_restriction is not None else None)
 
     def validate_seed_scope(name, state):
-        require_seed_family_scope(name, state, family_restriction=args.family_restriction,
+        require_seed_family_scope(name, state, family_restriction=family_restriction,
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band, profile=profile)
         on_menu = {entry.format_name for entry in menus[name]}
         for row in state["anchors"]:
             if row["format_name"] in on_menu:
-                _require_resumable_anchor(CampaignAnchor(**row), static_scales, profile=profile)
+                cell_measurement.require_resumable_cell(CampaignAnchor(**row), static_scales, profile=profile)
         if acquisition_schedule is not None:
             for row in state["anchors"]:
-                _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
+                require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
             if state.get("unservable"):
                 raise ValueError("acquisition refuses unservable checkpoint/seed anchor work")
         # Resume does not reconstruct cache.weights; seed wires are linked
         # before adopt_state reads them. Reserve every admitted coordinate
         # here, before either path touches those bytes, including stale rows
         # whose seed files are linked but whose prices are not adopted.
-        _register_campaign_wire_coordinates(
+        campaign_wire.register_wire_coordinates(
             cache, wire_dir,
             ((row["qname"], row["format_name"]) for row in state["anchors"]
              if row["format_name"] in on_menu))
@@ -8202,7 +5373,7 @@ def _main(argv, *, source_scope, waits) -> int:
                     "adopted_from": where,
                 }
                 continue
-            stale = _stale_served_wire(anchor, state["wire_records"][anchor.format_name],
+            stale = cell_measurement.stale_wire_reason(anchor, state["wire_records"][anchor.format_name],
                                        structure=(encode_structure or {}).get(name))
             if stale is not None:
                 # On the menu, but stamped on a wire this unit's structure is
@@ -8235,7 +5406,7 @@ def _main(argv, *, source_scope, waits) -> int:
             if deferred is not None:
                 deferred.append((name, anchor, identity, existing))
             else:
-                wire_records[name][anchor.format_name] = _checkpoint_wire_record(
+                wire_records[name][anchor.format_name] = campaign_wire.checkpoint_wire_record(
                     anchor, wire_dir, identity, existing=existing)
             measured.setdefault(name, {}).setdefault(anchor.family, []).append(anchor)
         if formats != set(state["wire_records"]):
@@ -8275,8 +5446,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # units stay dirty, so the finalized journal carries them.
         adopt_started = _time.monotonic()
         names = sorted(stream_resumed)
-        chunks = [names[start:start + args.anchor_batch_size]
-                  for start in range(0, len(names), args.anchor_batch_size)]
+        chunks = [names[start:start + publication.batch_size]
+                  for start in range(0, len(names), publication.batch_size)]
         row_stream.plan(chunks)
         for index, chunk in enumerate(chunks):
             row_stream.admit(index)
@@ -8308,8 +5479,8 @@ def _main(argv, *, source_scope, waits) -> int:
         # load-all resume, they are not rewritten.
         adopt_started = _time.monotonic()
         names = sorted(window_resumed)
-        chunks = [names[start:start + args.anchor_batch_size]
-                  for start in range(0, len(names), args.anchor_batch_size)]
+        chunks = [names[start:start + publication.batch_size]
+                  for start in range(0, len(names), publication.batch_size)]
         row_stream.plan(chunks)
         for index, chunk in enumerate(chunks):
             row_stream.admit(index)
@@ -8325,9 +5496,9 @@ def _main(argv, *, source_scope, waits) -> int:
               f"window in {_time.monotonic() - adopt_started:.1f} s", flush=True)
 
     seed_provenance = None
-    if args.seed_checkpoint:
+    if seed_checkpoint:
         seed_provenance = _adopt_seed_checkpoint(
-            args.seed_checkpoint, args.seed_wire_dir,
+            seed_checkpoint, seed_wire_dir,
             targets=[name for name in targets if name not in resumed],
             wire_dir=wire_dir, adopt=adopt_state,
             admits=lambda name, fmt: any(
@@ -8358,15 +5529,15 @@ def _main(argv, *, source_scope, waits) -> int:
         return write_export_inputs(
             cache_dir,
             hessians=export_hessians if want_h else None,
-            hessian_rows=(hessian_rows if census is None else census["counts"]),
+            hessian_rows=(hessian_rows if scope.census is None else scope.census["counts"]),
             hessian_identity=hessian_identity,
             static_scales=static_scales,
             static_scale_policy=static_scale_policy,
             **(dict(hessian_reference=dict(canonical_capture=calibration_cache,
-                    census_path=args.calibration_census,load_policy=args.export_hessian_reference_policy),
+                    census_path=source.census,load_policy=outputs.hessian_reference_policy),
                     **({} if hessian_identities is None
                        else dict(hessian_identities=hessian_identities)))
-               if args.export_hessian_reference_policy is not None else {}),
+               if outputs.hessian_reference_policy is not None else {}),
             **(dict(release_file_pages=True,
                     resource_check=None if selected_guard is None else selected_guard.check)
                if selected_source else {}),
@@ -8408,11 +5579,11 @@ def _main(argv, *, source_scope, waits) -> int:
         # Every projected unit's source bytes have now been checked on a
         # reader, so the owner's receipt covers the reads the serial check made.
         close_source_authentication()
-        census_token_counts(census, row_stream.observed_counts())
-        census_max_abs(census, row_stream.observed_max_abs())
+        census_token_counts(scope.census, row_stream.observed_counts())
+        census_max_abs(scope.census, row_stream.observed_max_abs())
         receipts = row_stream.unit_identities()
         selected_source_preparation['capture_load_execution'] = _publish_capture_load_execution(
-            args, capture=row_stream.capture, execution=row_stream.load_execution(),
+            cache_dir, capture=row_stream.capture, execution=row_stream.load_execution(),
             resources=selected_resources, guard=selected_guard)
         checkpoint_identity = run_identity(unit_receipts=receipts)
         if journal is None:
@@ -8436,7 +5607,7 @@ def _main(argv, *, source_scope, waits) -> int:
                 phase['export_input_page_window_bytes'])
         # Geometry-only stand-ins: every H commitment is the receipt its
         # reader sealed while the entry was resident, so no H is read again.
-        stand_ins = {name: torch.empty([census['unit_shapes'][name][1]] * 2,
+        stand_ins = {name: torch.empty([scope.census['unit_shapes'][name][1]] * 2,
                                        dtype=torch.float32, device='meta')
                      for name in sorted(targets)}
         hessian_capture_path, input_scales_path, capture_sha256 = publish_export_inputs(
@@ -8456,7 +5627,7 @@ def _main(argv, *, source_scope, waits) -> int:
               f"peak {record['peak_resident_units']} units; finalize "
               f"{record['finalize_seconds']} s)", flush=True)
 
-    if args.export_hessian_reference_policy is not None and not streaming_head:
+    if outputs.hessian_reference_policy is not None and not streaming_head:
         # Resume was checked before any export input changed. Now reuse the
         # commitments just computed from these same resident tensors, so the
         # first anchor does not hash the full population again. Both encoder
@@ -8523,7 +5694,7 @@ def _main(argv, *, source_scope, waits) -> int:
 
     ledger = _AnchorPublicationLedger(
         publisher=None,
-        make_record=lambda anchor, identity: _checkpoint_wire_record(
+        make_record=lambda anchor, identity: campaign_wire.checkpoint_wire_record(
             anchor, wire_dir, identity),
         journal_anchor=journal_anchor)
 
@@ -8587,7 +5758,7 @@ def _main(argv, *, source_scope, waits) -> int:
 
         def write():
             for name, state in states:
-                write_unit(journal, stage="Tessera campaign", qname=name,
+                write_unit(journal, stage=STAGE, qname=name,
                            identity_sha256=identity_sha256, state=state)
             # After the shards are on disk, never before.  This is what tells
             # PrismaBuild the row is working rather than merely running, and
@@ -8606,7 +5777,7 @@ def _main(argv, *, source_scope, waits) -> int:
         flush_checkpoint()
 
     started = time.time()
-    deadline = float(args.deadline_seconds)
+    deadline = float(publication.deadline_seconds)
     stopped_early = False
     # Every (unit, format) whose last attempt failed to price, with its error.
     # The loop keeps pricing past a failure, so the round's successes are
@@ -8621,10 +5792,10 @@ def _main(argv, *, source_scope, waits) -> int:
     # Capped by --max-artifact-bpp, which is a wall-clock budget and says so:
     # the menu keeps every legal rung, and the ones above the envelope are
     # left unpriced rather than extrapolated into.
-    cap = float(args.max_artifact_bpp)
+    cap = float(recipe.max_artifact_bpp)
     rates_by_unit: dict[str, dict[str, set[int]]] = {}
-    rate_menu_targets = partition_menu_targets or targets
-    rate_menus = full_partition_menus if partition_menu_targets is not None else menus
+    rate_menu_targets = scope.partition_menu_targets or targets
+    rate_menus = full_partition_menus if scope.partition_menu_targets is not None else menus
     for name in rate_menu_targets:
         per_family: dict[str, set[int]] = {}
         for rung in rate_menus[name]:
@@ -8647,10 +5818,10 @@ def _main(argv, *, source_scope, waits) -> int:
     # do with Tessera. One grid per group, from the intersection of its
     # members' realisable sets, and every member measures the same rungs.
     def _group_key(name: str) -> str:
-        return anchor_group_key(name, profile=profile, expert_members=expert_members)
+        return anchor_group_key(name, profile=profile, expert_members=scope.expert_members)
 
     anchor_groups = resolve_anchor_groups(
-        targets, profile=profile, expert_members=expert_members)
+        targets, profile=profile, expert_members=scope.expert_members)
 
     # The rungs every member of the group can realise, per family. A family
     # missing from one member is not a group family at all: a shared grid over
@@ -8660,15 +5831,15 @@ def _main(argv, *, source_scope, waits) -> int:
     # read off the pinned contract: kept in the menu, not measured, and
     # recorded here with the contract's reason rather than hidden.
     route_refused: dict[str, dict[str, dict[str, dict]]] = {}
-    rate_groups = ({entry["key"]: entry["members"] for entry in selection["groups"]}
-                   if partition_menu_targets is not None else anchor_groups)
+    rate_groups = ({entry["key"]: entry["members"] for entry in scope.selection["groups"]}
+                   if scope.partition_menu_targets is not None else anchor_groups)
     group_rates, route_refused = anchor_group_rate_grids(
         rate_groups, rates_by_unit,
-        encode_structure=(partition_encode_structure if partition_menu_targets is not None else encode_structure),
-        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units),
+        encode_structure=(partition_encode_structure if scope.partition_menu_targets is not None else encode_structure),
+        projected_units=(scope.partition_unit_records if scope.partition_menu_targets is not None else projected_units),
         route_cache=route_cache)
-    if partition_menu_targets is not None:
-        fixed_rate = parse_rate_band(args.rate_band)[0]
+    if scope.partition_menu_targets is not None:
+        fixed_rate = parse_rate_band(placement.rate_band)[0]
         if any(not any(fixed_rate in rates for rates in families.values())
                for families in group_rates.values()):
             raise RuntimeError("expert partition pinned rate has no legal full-group family/grid")
@@ -8695,41 +5866,41 @@ def _main(argv, *, source_scope, waits) -> int:
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
     round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
-        args=args, audit_units=audit_units, snap=_snap,
-        requests=None if acquisition is None else acquisition["requests"], rates_by_unit=rates_by_unit)
+        placement=placement, audit_units=scope.audit_units, snap=_snap,
+        requests=None if scope.acquisition is None else scope.acquisition["requests"], rates_by_unit=rates_by_unit)
 
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.
-    budget = int(args.anchor_budget)
+    budget = int(recipe.anchor_budget)
     # Why the group's own worst member drives the split: the grid is shared,
     # so a rung added for one sibling is measured for all of them anyway. The
     # gate closes for a GROUP surface only when it closes for every member.
     surface_stop: dict[tuple[str, str], str] = {}
-    rate_band = parse_rate_band(getattr(args, "rate_band", None))
+    rate_band = parse_rate_band(placement.rate_band)
     if rate_band is not None:
         print(f"[campaign] rate band q256 {rate_band[0]}..{rate_band[1]}: two "
               "anchors per window family at the band ends"
-              + (f", a third for {len(audit_units)} audit unit(s)"
-                 if audit_units else ""), flush=True)
+              + (f", a third for {len(scope.audit_units)} audit unit(s)"
+                 if scope.audit_units else ""), flush=True)
     # The publisher owns a thread; every exit from the pricing loop,
     # including one that raises, has to go past its close. Close drains
     # what is queued, so files already computed still land, and it cannot
     # raise, so it cannot mask the exception that brought us here.
     try:
-        if int(args.publication_overlap_bytes) > 0:
+        if int(publication.overlap_bytes) > 0:
             from .tessera_publication import BoundedPublisher
             publisher = BoundedPublisher(
-                budget_bytes=int(args.publication_overlap_bytes))
+                budget_bytes=int(publication.overlap_bytes))
             ledger.open(publisher)
             print(f"[campaign] publication overlap: staging up to "
-                  f"{int(args.publication_overlap_bytes)} bytes on one writer "
+                  f"{int(publication.overlap_bytes)} bytes on one writer "
                   "thread", flush=True)
 
         round_index = 0
         while True:
             round_index += 1
-            if int(args.max_rounds) > 0 and round_index > int(args.max_rounds):
-                print(f"[campaign] --max-rounds {args.max_rounds} reached",
+            if int(placement.max_rounds) > 0 and round_index > int(placement.max_rounds):
+                print(f"[campaign] --max-rounds {placement.max_rounds} reached",
                       flush=True)
                 break
             pending: list[tuple[str, str, int]] = []
@@ -8785,7 +5956,7 @@ def _main(argv, *, source_scope, waits) -> int:
                     elif not interpolable:
                         surface_stop.setdefault((key, family), "non_interpolable")
                         continue
-                    elif worst <= args.loo_gate:
+                    elif worst <= recipe.loo_gate:
                         surface_stop.setdefault((key, family), "gate_closed")
                         continue
                     nxt = next_anchor_rate(grid, worst_loo)
@@ -8806,10 +5977,10 @@ def _main(argv, *, source_scope, waits) -> int:
                 break
             print(f"[campaign] round {round_index}: {len(pending)} anchors",
                   flush=True)
-            batches = _anchor_batches(
+            batches = cell_measurement.compatible_batches(
                 [item for item in pending
                  if row_stream is not None or acts.get(item[0]) is not None],
-                weights=weights, batch_size=args.anchor_batch_size,
+                weights=weights, batch_size=publication.batch_size,
                 structures=encode_structure)
             if row_stream is not None:
                 row_stream.plan([[item[0] for item in batch] for batch in batches])
@@ -8862,21 +6033,13 @@ def _main(argv, *, source_scope, waits) -> int:
                             ((_activation_kwargs_for if row_stream is None
                               else row_stream.encoder_kwargs) if want_h else None)),
                         hessian_required=want_h, publisher=publisher, profile=profile)
-                    if len(batch) == 1:
-                        name = names[0]
-                        anchors = [_measure_anchor(
-                            qname=name, weight=weights[name].to(device),
-                            activations=scoring_rows[name].to(device),
-                            static_input_scale=static_scales.get(name),
-                            structure=(encode_structure or {}).get(name), **common)]
-                    else:
-                        anchors = _measure_anchor_batch(
-                            qnames=names,
-                            weights=[weights[name].to(device) for name in names],
-                            activations=[scoring_rows[name].to(device) for name in names],
-                            static_input_scales=static_scales,
-                            structures=encode_structure, **common)
-                except (HessianContractError, ActivationScaleContractError,
+                    anchors = cell_measurement.measure_cells(
+                        qnames=names,
+                        weights=[weights[name].to(device) for name in names],
+                        activations=[scoring_rows[name].to(device) for name in names],
+                        static_input_scales=static_scales,
+                        structures=encode_structure, **common)
+                except (HessianContractError, _ActivationScaleContractError,
                         PublicationError, ServedQuantizerUnboundError):
                     # A staged artifact that did not reach its disk is not one
                     # batch's bad luck: the writer has stopped and everything
@@ -8949,7 +6112,7 @@ def _main(argv, *, source_scope, waits) -> int:
                 completed += len(anchors)
                 # Commit every joined quantum before advancing. The scalar mode
                 # keeps its existing ten-anchor flush cadence.
-                if args.anchor_batch_size > 1 or (completed - 1) % 10 == 0:
+                if publication.batch_size > 1 or (completed - 1) % 10 == 0:
                     flush_checkpoint()
                     print(f"[campaign] r{round_index} {completed}/{len(pending)} "
                           f"batch={len(anchors)} {fmt} "
@@ -9047,9 +6210,9 @@ def _main(argv, *, source_scope, waits) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
-            **({"acquisition": args.acquisition_origin,
+            **({"acquisition": acquisition_origin,
                 "acquisition_schedule": acquisition_schedule,
-                "acquisition_source_weights": acquisition["source_weights"]} if acquisition is not None else {}),
+                "acquisition_source_weights": scope.acquisition["source_weights"]} if scope.acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means
             # the default: every render and wire published on the encode
             # thread before the next batch started. Present means one bounded
@@ -9081,24 +6244,24 @@ def _main(argv, *, source_scope, waits) -> int:
             "rate_band": (None if rate_band is None
                           else [int(rate_band[0]), int(rate_band[1])]),
             "unit_selection_sample": {
-                "audit_units": sorted(audit_units),
+                "audit_units": sorted(scope.audit_units),
                 "inclusion_probability": {
-                    name: float(inclusion_probability[name])
-                    for name in sorted(inclusion_probability)},
+                    name: float(scope.inclusion_probability[name])
+                    for name in sorted(scope.inclusion_probability)},
             },
-            **({"research_exact_member_scope": exact_member_scope}
-               if exact_member_scope is not None else {}),
-            "tp_degree": int(args.tp_degree),
-            "model": str(args.model),
-            "nsamples": int(args.nsamples),
-            "seqlen": int(args.seqlen),
-            "max_act_rows": int(args.max_act_rows),
-            "layer_stride": int(args.layer_stride),
+            **({"research_exact_member_scope": scope.exact_member_scope}
+               if scope.exact_member_scope is not None else {}),
+            "tp_degree": int(tp_degree),
+            "model": str(model_path),
+            "nsamples": int(draw.nsamples),
+            "seqlen": int(draw.seqlen),
+            "max_act_rows": int(draw.max_act_rows),
+            "layer_stride": int(draw.layer_stride),
             **({PROJECTION_KEY: expert_projection}
                if expert_projection is not None else {}),
-            "anchors_round_one": int(args.anchors),
-            "max_rounds": int(args.max_rounds),
-            "anchor_budget": int(args.anchor_budget),
+            "anchors_round_one": int(placement.anchors),
+            "max_rounds": int(placement.max_rounds),
+            "anchor_budget": int(recipe.anchor_budget),
             "rounds_run": int(round_index),
             "anchor_placement": "fused_group",
             "anchor_groups": {
@@ -9111,36 +6274,36 @@ def _main(argv, *, source_scope, waits) -> int:
             # Rows this run did not encode itself, and where they came from.
             # None when every row was measured here.
             "seed_checkpoint": seed_provenance,
-            "unit_selection": ({**selection, "selected": True} if selection else {
+            "unit_selection": ({**scope.selection, "selected": True} if scope.selection else {
                 "schema": UNITS_SCHEMA,
-                "selected": True if args.units else False,
+                "selected": True if request.selection_requested else False,
                 "groups": [
-                    {"key": key, "members": list(scope_groups[key])}
-                    for key in sorted(selected_groups)
+                    {"key": key, "members": list(scope.scope_groups[key])}
+                    for key in sorted(scope.selected_groups)
                 ],
             }),
             # The scope every shard shares: the enumeration the population
             # block is built from, the full grouping, and the census the
             # Hessian identity's token counts came from.
             "campaign_scope": {
-                "dense_targets": sorted(census_dense_targets),
-                "expert_targets": sorted(census_expert_targets),
+                "dense_targets": sorted(scope.census_dense_targets),
+                "expert_targets": sorted(scope.census_expert_targets),
                 "dense_all": sorted(all_dense),
                 "pinned": sorted(pinned),
                 "declared_stacks": {
                     stack: {name: list(shape) for name, shape in sorted(units.items())}
-                    for stack, units in sorted(population.declared.items())},
+                    for stack, units in sorted(scope.population.declared.items())},
                 "packed_in_scope": {
                     name: list(shape) for name, shape
-                    in sorted(population.packed_in_scope.items())},
+                    in sorted(scope.population.packed_in_scope.items())},
                 "packed_outside_layer_stride": {
                     name: list(shape) for name, shape
-                    in sorted(population.omitted_outside_layer_stride.items())},
+                    in sorted(scope.population.omitted_outside_layer_stride.items())},
                 "anchor_groups": {
-                    key: list(members) for key, members in sorted(scope_groups.items())},
+                    key: list(members) for key, members in sorted(scope.scope_groups.items())},
                 "calibration_census": (
-                    None if census is None else
-                    {"counts": dict(census["counts"]),
+                    None if scope.census is None else
+                    {"counts": dict(scope.census["counts"]),
                      "token_count": int(hessian_token_count),
                      "token_count_min": int(hessian_token_min)}),
             },
@@ -9162,10 +6325,10 @@ def _main(argv, *, source_scope, waits) -> int:
                         # and a zero here would read as the former.
                         "loo_max_abs_log2_error": _surface_loo(
                             loo_pre.get(name, {}).get(family),
-                            float(args.loo_gate))[0],
+                            float(recipe.loo_gate))[0],
                         "gate_closed": _surface_loo(
                             loo_pre.get(name, {}).get(family),
-                            float(args.loo_gate))[1],
+                            float(recipe.loo_gate))[1],
                         "non_interpolable": _loo_refused(
                             loo_pre.get(name, {}).get(family) or {}),
                         "stopped_by": (
@@ -9196,11 +6359,11 @@ def _main(argv, *, source_scope, waits) -> int:
             "encode_structure": (None if encode_structure is None else {
                 structure: sum(1 for value in encode_structure.values() if value == structure)
                 for structure in sorted(set(encode_structure.values()))}),
-            "loo_gate": float(args.loo_gate),
-            "max_artifact_bpp": float(args.max_artifact_bpp),
-            **({"family_restriction": {"policy": args.family_restriction,
+            "loo_gate": float(recipe.loo_gate),
+            "max_artifact_bpp": float(recipe.max_artifact_bpp),
+            **({"family_restriction": {"policy": family_restriction,
                  "structure_by_unit": dict(sorted(structure_by_unit.items()))}}
-               if args.family_restriction is not None else {}),
+               if family_restriction is not None else {}),
             "stopped_early": bool(stopped_early),
             "wall_seconds": time.time() - started,
             "cache_dir": str(cache_dir),
@@ -9228,7 +6391,7 @@ def _main(argv, *, source_scope, waits) -> int:
             },
             "hessian": {
                 "supplied": bool(want_h),
-                "mode": str(args.hessian),
+                "mode": str(request.encoding.hessian),
                 "reason": str(hessian_status["reason"]),
                 "consumed_by": (
                     "prismaquant.tessera_render.encode_tessera_unit"
@@ -9244,7 +6407,7 @@ def _main(argv, *, source_scope, waits) -> int:
                                  else str(hessian_capture_path)),
                 **({'reference_binding':calibration_store.hessian_reference_binding(
                     calibration_cache['sha256'],capture_identity['census_sha256'])}
-                   if args.export_hessian_reference_policy is not None else {}),
+                   if outputs.hessian_reference_policy is not None else {}),
                 # The content digest of that payload (Tessera's own seal
                 # rule), stamped on every row so the allocation binds to
                 # the capture BY CONTENT, not by the draw's triple alone
@@ -9274,14 +6437,14 @@ def _main(argv, *, source_scope, waits) -> int:
             acquisition_schedule[name].get(rung.family, [])] for name in targets}
     payload = campaign_cost_payload(
         measured, payload_menus, loo=loo, provenance=provenance,
-        wire_backed=frozenset(projected_units), stack_samples=stack_samples)
+        wire_backed=frozenset(projected_units), stack_samples=scope.stack_samples)
     # Empty menus, failed anchors and interrupted work do not establish a
     # price. Publish coverage only after the cost rows have been constructed.
-    payload["provenance"][POPULATION_KEY] = _population_block(
-        dense_targets=dense_targets, expert_targets=expert_targets,
-        dense_all=all_dense, pinned=pinned, population=population,
-        layer_stride=int(args.layer_stride), costs=payload["costs"], menus=menus,
-        stack_samples=stack_samples, profile=profile)
+    payload["provenance"][POPULATION_KEY] = campaign_population_block(
+        dense_targets=scope.dense_targets, expert_targets=scope.expert_targets,
+        dense_all=all_dense, pinned=pinned, population=scope.population,
+        layer_stride=int(draw.layer_stride), costs=payload["costs"], menus=menus,
+        stack_samples=scope.stack_samples, profile=profile)
     if projected_units:
         # The producer's receipts for every priced expert wire, keyed by unit
         # then rung; the allocator carries the selected rung's receipt into
@@ -9291,11 +6454,12 @@ def _main(argv, *, source_scope, waits) -> int:
             name: {fmt: dict(record) for fmt, record in sorted(wire_records[name].items())}
             for name in sorted(projected_units) if wire_records.get(name)
         }
-    if _SERVED_QUANTIZER_RECORD is not None:
+    served_quantizer = cell_measurement.served_quantizer_record()
+    if served_quantizer is not None:
         # Which build of the served activation quantiser priced this table's
         # served-contract rungs (RobTand/prismaquant#1481). Absent when the run
         # priced none, so an A8/A16 table's bytes are unchanged.
-        payload["provenance"]["served_quantizer"] = dict(_SERVED_QUANTIZER_RECORD)
+        payload["provenance"]["served_quantizer"] = served_quantizer
     payload["menu_sizes"] = {n: len(m) for n, m in menus.items()}
     payload["anchor_counts"] = {
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()
@@ -9312,13 +6476,13 @@ def _main(argv, *, source_scope, waits) -> int:
             f"campaign row priced no rung out of a non-empty menu "
             f"({sum(len(m) for m in menus.values())} admitted rungs over "
             f"{sum(1 for m in menus.values() if m)} units); no cost table was written")
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(outputs.out).parent.mkdir(parents=True, exist_ok=True)
     # Canonical bytes: a resumed or adopted row is an equal but distinct object
     # from the one a fresh encode shares, and plain ``pickle.dump`` would make
     # the file's digest depend on which path built it (PQ #1403).
     from .digests import canonical_pickle_bytes
-    Path(args.out).write_bytes(canonical_pickle_bytes(payload))
-    print(f"[campaign] wrote {args.out}: {len(payload['costs'])} units, "
+    Path(outputs.out).write_bytes(canonical_pickle_bytes(payload))
+    print(f"[campaign] wrote {outputs.out}: {len(payload['costs'])} units, "
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
           flush=True)
     return 0

@@ -1,7 +1,7 @@
 """Per-row repricing for recorded allocator selections.
 
 The allocator prices a raw ``(Linear, format)`` cost row through
-``allocator_candidates.cost_entry_predicted_dloss``.  That precedence is
+``priced_cell.cost_entry_predicted_dloss``.  That precedence is
 load-bearing: measured ``output_mse`` already includes the activation path,
 whereas a weight-only row receives P5a's per-family multiplicative correction.
 Aggregated serving-unit rows carry ``activation_pricing_applied=True`` because
@@ -31,8 +31,9 @@ from .activation_fair_pricing import (
     BRANCH_UNCALIBRATED,
     REASON_KILL_SWITCH,
 )
-from .allocator_candidates import (
-    SOURCE_PASSTHROUGH_FORMATS,
+from prismaquant.source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
+from prismaquant.priced_cell import (
+    CostPricingPolicy,
     cost_entry_predicted_dloss,
     synthesized_source_passthrough_cost_entry,
 )
@@ -123,6 +124,7 @@ def reprice_assignment(
     *,
     activation_pricing: Mapping[str, Any] | RecordedActivationFairPricing | None,
     calibrated_gains: Mapping[str, float] | None = None,
+    pricing_policy: CostPricingPolicy | None = None,
 ) -> dict[str, float]:
     """Price every layer-config row with the allocator's exact precedence.
 
@@ -133,6 +135,8 @@ def reprice_assignment(
     while entries carrying ``activation_pricing_applied=True`` pass through
     unchanged via ``cost_entry_predicted_dloss``.
     """
+    pricing_policy = (CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     canonical = canonicalize_assignment(assignment)
     stat_rows = _stats_rows(stats)
     cost_rows = _cost_rows(costs)
@@ -160,6 +164,7 @@ def reprice_assignment(
                 per_format,
                 activation_pricing=pricing,
                 calibrated_gains=calibrated_gains,
+                pricing_policy=pricing_policy,
             )
         except KeyError:
             missing.append(f"{qname}: missing cost for {format_name}")
@@ -179,6 +184,7 @@ def price_row(
     *,
     activation_pricing: Mapping[str, Any] | RecordedActivationFairPricing | None,
     calibrated_gains: Mapping[str, float] | None = None,
+    pricing_policy: CostPricingPolicy | None = None,
 ) -> float:
     """Price one canonical ``(qname, format)`` row.
 
@@ -186,6 +192,8 @@ def price_row(
     build a candidate matrix.  It shares the same alias, source-passthrough,
     gain, applied-marker, and P5a semantics.
     """
+    pricing_policy = (CostPricingPolicy.from_environment()
+                      if pricing_policy is None else pricing_policy)
     pricing = (
         RecordedActivationFairPricing.from_dict(activation_pricing)
         if isinstance(activation_pricing, Mapping)
@@ -202,6 +210,7 @@ def price_row(
         gain=gain,
         format_name=format_name,
         activation_pricing=pricing,
+        policy=pricing_policy,
     )
 
 

@@ -92,7 +92,6 @@ from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
 
 QUANTUM_COUNTERS_SCHEMA = "prismaquant.joint_layer_quantum.counters.v1"
 QUANTUM_STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
-QUANTUM_RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 
 #: The entry-point string the plan block and the adjoint read manifest carry
 #: (contract §5.1/§4.1). ``prismaquant.joint_cost_stage_a`` is the executing
@@ -1612,15 +1611,15 @@ def _shared_state_by_name(shared_adjoint, shared_pass, name: str):
         f"exact boundary checkpoint has no shared state {name!r}")
 
 
-def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
+def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     """One small checkpoint file, staged-pinned under policy.
 
     Serves the shared-state pickles and ``checkpoint.json``; refusal
     reasons name which of the two diverged.
 
     Under the active allowed-tier policy the bytes come from a
-    lifetime-pinned window (RAM leg refused fast for want of RAM-mover
-    covers, SSD re-acquired honestly): exact length plus one probe byte
+    lifetime-pinned window (RAM with qualified covers, SSD re-acquired
+    after an availability refusal): exact length plus one probe byte
     through the held descriptor, the SDK serving record registered at the
     successful actual open, the descriptor closed and the exact ref
     released before the caller deserializes. Unmapped/unfenced refuses
@@ -1634,7 +1633,7 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
     label = ("checkpoint-manifest" if entry.get("name") == CHECKPOINT_MANIFEST_NAME
              else "shared-state")
     from .residency_map import residency_resolver
-    from .staged_lease import LeaseRefused, acquire_entry_window
+    from .staged_lease import LeaseRefused
     size = entry.get("file_bytes")
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise RuntimeError(
@@ -1651,60 +1650,9 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes:
     staged = resolver.staged_read(path, expected_sha256=sha)
     if staged is None:
         raise LeaseRefused("staged-not-serving", kind="availability")
-    window, key = acquire_entry_window(resolver, path, staged)
-    with window:
-        try:
-            fd, serving = window.open(key)
-        except LeaseRefused as refusal:
-            resolver.record_fallback(path, str(refusal))
-            raise
-        tier = window.serving_tier or "stage"
-        resolver.record_serving_tier(
-            path, tier, pin_id=str(serving.get("pin_id") or ""),
-            range_ref=str(serving.get("range_ref") or ""))
-        # Sealed bounds before allocation: the manifest size must equal
-        # the staged entry's, and the held descriptor's size must match
-        # both — no unbounded allocation, no read-then-check.
-        if size != staged["bytes"]:
-            raise LeaseRefused(f"{label}-size-divergent",
-                               kind="integrity")
-        first = os.fstat(fd)
-        if first.st_size != size:
-            raise LeaseRefused(f"{label}-changed-under-pin",
-                               kind="integrity")
-        # One owned buffer, filled in place: no parts list, no joined
-        # copy, no second pass. The caller's digest hashes these bytes.
-        raw = bytearray(size)
-        view = memoryview(raw)
-        remaining = size
-        offset = 0
-        while remaining > 0:
-            try:
-                moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
-            except OSError as exc:
-                raise LeaseRefused(
-                    f"{label}-unreadable: {exc.strerror}",
-                    kind="availability") from None
-            if moved <= 0:
-                break
-            offset += moved
-            remaining -= moved
-        view.release()
-        if remaining:
-            raise LeaseRefused(f"{label}-truncated", kind="integrity")
-        if os.pread(fd, 1, size):
-            raise LeaseRefused(f"{label}-grew-during-read",
-                               kind="integrity")
-        last = os.fstat(fd)
-        if (last.st_ino, last.st_size, last.st_mtime_ns) != (
-                first.st_ino, first.st_size, first.st_mtime_ns):
-            raise LeaseRefused(f"{label}-changed-under-pin",
-                               kind="integrity")
-    if tier == "ram":
-        resolver.record_ram_read(path, len(raw))
-    else:
-        resolver.record_stage_read(path, len(raw))
-    return raw
+    from .staged_whole_file import read_staged_buffer
+
+    return read_staged_buffer(resolver, path, staged, label=label, expected_bytes=size)
 
 
 def _await_checkpoint_entry(entry, *, deadline):
@@ -1790,7 +1738,7 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
         else:
             shared_pass[int(parts[2])] = state
         if shared_state_max_bytes is not None:
-            from .cost_streaming import _state_storage_bytes
+            from .streamed_boundary_artifacts import _state_storage_bytes
             shared_tensor_bytes += _state_storage_bytes(state)
             if shared_tensor_bytes > shared_state_max_bytes:
                 raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
@@ -1823,7 +1771,7 @@ def _load_packed_shared_states(stored: dict, *, deadline,
         kind, key = shared_state_slot(name)
         (shared_adjoint if kind == "adjoint" else shared_pass)[key] = state
         if shared_state_max_bytes is not None:
-            from .cost_streaming import _state_storage_bytes
+            from .streamed_boundary_artifacts import _state_storage_bytes
             shared_tensor_bytes += _state_storage_bytes(state)
             if shared_tensor_bytes > shared_state_max_bytes:
                 raise RuntimeError("adjoint shared-state tensors exceed auxiliary byte ceiling")
@@ -2248,7 +2196,7 @@ def _chain_group_batch(runner, batches, indices, cache):
     B-row forward builds for itself; a mask built for one row is never
     broadcast to B (GLM's DSA mask is a ``[B, S]`` padding mask).
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
 
     key = tuple(indices)
     group = cache.get(key)
@@ -2731,7 +2679,7 @@ def _render_free_probe_passes(
 
     At ``batch_size`` 1 this is the original loop, call for call.
     """
-    from .cost_streaming import prefetched_boundary_batches
+    from .streamed_boundary_artifacts import prefetched_boundary_batches
 
     batch_size = int(batch_size)
     if storage is not None and int(storage.config["prefetch_batches"]) % batch_size:
@@ -2866,10 +2814,7 @@ def _render_free_fused_passes(
     ``x_in.grad`` is cleared before each so every probe's input cotangent is
     its own, never a sum.
     """
-    from .cost_streaming import (
-        fused_window_batches,
-        prefetched_fused_boundary_windows,
-    )
+    from .streamed_boundary_artifacts import fused_window_batches, prefetched_fused_boundary_windows
 
     device, dtype = runner.device, runner.dtype
     n_probes = int(n_probes)
@@ -3031,7 +2976,7 @@ def wall_clock_seconds(started: float) -> float:
 __all__ = [
     "ADJOINT_CAPTURE_ENTRY_POINT", "ADJOINT_CHECKPOINT_SCHEMA",
     "ADJOINT_RECEIPT_SCHEMA", "DEFAULT_STRIDE",
-    "KernelTimeProfiler", "QUANTUM_COUNTERS_SCHEMA", "QUANTUM_RECORD_SCHEMA",
+    "KernelTimeProfiler", "QUANTUM_COUNTERS_SCHEMA",
     "QUANTUM_STATUS_SCHEMA", "adjoint_space", "adjoint_receipt_path",
     "boundary_entry_directory", "chain_layers_for", "checkpoint_directory",
     "derive_checkpoint_boundaries", "dev_mode_enabled", "dev_mode_stamp",

@@ -16,7 +16,7 @@ that rounding would have run past the file before asserting that it does not.
 import json
 import struct
 
-from experiments.glm_arc_prewarm import RECORD_SIZE, Campaign
+from prismaquant.campaign_data_manifests import RECORD_SIZE, Campaign
 
 #: Ends 512 KiB into a record, so rounding its end out leaves the file.
 TENSOR_BYTES = (3 * RECORD_SIZE) + (RECORD_SIZE // 2)

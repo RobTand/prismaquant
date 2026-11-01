@@ -91,7 +91,8 @@ larger part of R4; the `git mv` was the smaller.
   (`CUDAGraphRegistry`, `_replay_lane_kl_totals`, `_clone_static_tree`,
   `assignment_bit_total`, `l2_cost_value`, …) are re-imported from
   `prismaquant.kl_measurement`, which still exports them. Verified importable
-  at wall time.
+  at wall time. That stopped holding in the 2026-10 refactor; see
+  *Resurrection status (2026-10-16)* below.
 
 **Tools** (`tools/`) — `sensitivity_propagated_group_report.py`,
 `build_propagated_sensitivity_cost_sweep.py`,
@@ -147,9 +148,55 @@ as a local shim and keeps every assertion (sweep OFF by default since
 ## To resurrect
 
 Move `prismaquant/*.py` back to `prismaquant/` (renaming
-`kl_measurement_l3.py` or importing it as-is — it needs no edits), restore the
+`kl_measurement_l3.py` or importing it as-is), make the import edits and
+restores listed under *Resurrection status (2026-10-16)*, restore the
 allocator surface from `allocator_propagated_surface.py`, restore the five
 `ALLOC_PROPAGATED_*` defaults and the pass-through in `run-pipeline.sh`, and
 delete the `exit 2` gate. **Before doing so, read §11**: the three measurements
 above are the reason it left, and reviving it wants a *new* measurement, not a
 new argument.
+
+## Resurrection status (2026-10-16)
+
+The statement above that `kl_measurement_l3.py` "needs no edits" was true at
+wall time and at the refactor base `138069b799`. It is false after the 2026-10
+refactor. A static AST check of every `prismaquant` import in this wall, run
+at the commit that added this section, found these gaps.
+
+Introduced by the 2026-10 refactor:
+
+- `prismaquant.layer_state_cache` (`prismaquant/kl_measurement_l3.py:57`,
+  `prismaquant/kl_sensitivity_probe.py:31`) and `prismaquant.weight_session`
+  (`prismaquant/kl_sensitivity_probe.py:2764`, weight-session mode only) were
+  deleted on 2026-10-14. Restore both from
+  `archive/state_prototypes_2026-10-14/`.
+- `prismaquant.allocator_candidates` no longer defines
+  `_stats_indicates_packed_expert`, `cost_entry_predicted_dloss`,
+  `cost_entry_is_bit_exact`, `cost_entry_uses_measured_output_mse` or
+  `cost_entry_source`. They are in `prismaquant/priced_cell.py`. Edit the
+  imports in `prismaquant/kl_measurement_l3.py:46`,
+  `prismaquant/propagated_sensitivity_costs.py:9`,
+  `prismaquant/sensitivity_response.py:24` and
+  `tests/test_propagated_sensitivity_costs.py:27`.
+- `prismaquant.sensitivity_probe.load_calibration` is now
+  `prismaquant.calibration_data.load_calibration`. Edit
+  `prismaquant/kl_sensitivity_probe.py:39` and
+  `tools/sensitivity_propagated_group_report.py:25`.
+
+Present since this wall was built (`08612a4a46`):
+
+- `prismaquant/kl_sensitivity_probe.py:40`,
+  `tests/test_kl_measurement_override_cache.py:6`,
+  `tests/test_kl_sensitivity_probe.py:33` and
+  `tools/sensitivity_propagated_group_report.py:20` import L3 names from
+  `prismaquant.kl_measurement`. Those names are defined in this wall's
+  `kl_measurement_l3.py`, which is what the rename note above refers to.
+- `prismaquant/propagated_sensitivity_costs.py:14` and
+  `tools/sensitivity_propagated_group_report.py:23` import
+  `prismaquant.mse_promotion`, archived separately at
+  `archive/mse_promotion_2026-07-30/`.
+
+All other `prismaquant` imports here resolve in the live tree. Resolution is
+not behavior: the moved pricing functions are the refactor's rewrite, so a
+resurrection still needs its own tests and measurements. The static check and
+its output are recorded with Claude review finding R3B-04.

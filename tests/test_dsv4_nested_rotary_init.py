@@ -15,7 +15,8 @@ torch = pytest.importorskip("torch")
 # Own the DSv4 namespace in a shared session: an earlier test that imports
 # transformers' native deepseek_v4 makes register_deepseek_v4() refuse (#2279).
 # The refusal itself stays visible in its own controls.
-pytestmark = pytest.mark.own_process
+pytestmark = [pytest.mark.own_process,
+              pytest.mark.usefixtures("pinned_pb_source")]
 
 
 def _tiny_cfg():

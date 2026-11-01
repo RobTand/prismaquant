@@ -305,6 +305,63 @@ def _performance_stack_differences(
     return sorted(key for key in set(a) | set(b) if a.get(key) != b.get(key))
 
 
+def _recorded_population(payload: Mapping[str, Any], metric: str) -> dict | None:
+    """The recorded population and metric settings, excluding arm identity."""
+    fields = ["schema", "n_samples", "seqlen", "spec_decode_detected"]
+    if metric in {"ppl", "mean_nll", "max_chunk_mean_nll"}:
+        fields += ["split", "n_tokens_requested", "n_tokens_scored"]
+    else:
+        fields += ["mode", "score_positions", "prompt_top_k", "vocab_size",
+                   "n_positions", "student_tail_model"]
+        if "confident" in metric:
+            fields += ["n_confident", "confident_top1_probability"]
+    population_keys = set(fields) - {"schema"}
+    population_keys.update(("calibration_contract", "calibration_contract_sha256",
+                            "teacher_evidence"))
+    if (not population_keys.intersection(payload)
+            and not str(payload.get("schema", "")).startswith("prismaquant.served_")):
+        return None
+    try:
+        from . import measure_served_gold as gold
+    except ImportError:  # script mode
+        import measure_served_gold as gold  # type: ignore
+
+    contract = gold.recorded_calibration_contract(payload)
+    current = payload.get("schema") in (gold.SERVED_KL_SCHEMA, gold.SERVED_PPL_SCHEMA)
+    if current:
+        missing = set(fields) - payload.keys()
+        if missing:
+            raise ValueError(f"metric population missing {sorted(missing)}")
+        counts = ("n_samples", "seqlen") + (
+            ("n_tokens_requested", "n_tokens_scored")
+            if metric in {"ppl", "mean_nll", "max_chunk_mean_nll"}
+            else ("prompt_top_k", "vocab_size", "n_positions"))
+        for key in counts:
+            if key in payload and (type(payload[key]) is not int or payload[key] <= 0):
+                raise ValueError(f"invalid metric population {key}")
+        if payload["spec_decode_detected"] is not False:
+            raise ValueError("metric population has unverified speculative decoding")
+    projection = {field: payload[field] for field in fields if field in payload}
+    projection["calibration_contract"] = contract
+    if "teacher_evidence" in payload:
+        teacher = payload["teacher_evidence"]
+        required = ("schema", "dump_sha256", "prompt_top_k", "n_positions",
+                    "spec_decode_detected")
+        if not isinstance(teacher, Mapping) or set(required) - teacher.keys():
+            raise ValueError("incomplete teacher population evidence")
+        if not _sha256(teacher["dump_sha256"]):
+            raise ValueError("invalid teacher dump identity")
+        if current and (teacher["schema"] != gold.TEACHER_ARM_SCHEMA
+                        or teacher["spec_decode_detected"] is not False
+                        or teacher["prompt_top_k"] != payload.get("prompt_top_k")
+                        or teacher["n_positions"] != payload.get("n_positions")):
+            raise ValueError("inconsistent teacher population evidence")
+        projection["teacher_evidence"] = {key: teacher[key] for key in required}
+    elif payload.get("schema") == gold.SERVED_KL_SCHEMA:
+        raise ValueError("missing teacher population evidence")
+    return projection
+
+
 def compare(
     a: Mapping[str, Any],
     b: Mapping[str, Any],
@@ -316,6 +373,10 @@ def compare(
 ) -> tuple[int, list[str]]:
     """Return `(exit_code, lines)` — the whole verdict, no printing."""
     va, vb = float(a[metric]), float(b[metric])
+    if not (math.isfinite(va) and math.isfinite(vb)):
+        return 3, [f"metric: {metric}",
+                   "REFUSED: both decision metrics must be finite; "
+                   "no comparable delta or cross-stack range."]
     delta = vb - va
     rel = (delta / va) if va else float("nan")
 
@@ -352,6 +413,23 @@ def compare(
             "a current attested result. Re-measure both arms under one current "
             "performance stack.")
         return 3, lines
+
+    try:
+        population_a = _recorded_population(a, metric)
+        population_b = _recorded_population(b, metric)
+    except (ValueError, TypeError) as exc:
+        lines.append(f"REFUSED: invalid recorded population: {exc}")
+        return 3, lines
+    if population_a != population_b:
+        lines.append("REFUSED: recorded calibration or metric populations differ; "
+                     "no comparable delta or cross-stack range.")
+        return 3, lines
+    if population_a is None:
+        lines.append("WARNING: legacy population was not recorded; input and metric "
+                     "population equivalence is not established.")
+    else:
+        lines.append("comparison scope: recorded calibration and metric settings; "
+                     "unrecorded equivalence is not established.")
 
     if pa and pb and pa != pb:
         differing = _performance_stack_differences(ma, mb)

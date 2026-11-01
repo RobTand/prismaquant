@@ -43,7 +43,7 @@ _MP_BASES = {"multiprocessing", "mp", "ctx"}
 # key -> (site count, provisional role). Shrink only.
 ALLOWED: dict[str, tuple[int, str]] = {
     "prismaquant/cost_stage_checkpoint.py::_drive_ordered_units": (1, "reader"),
-    "prismaquant/cost_streaming.py::_hash_source_shards": (1, "hasher"),
+    'prismaquant/streamed_model_identity.py::_hash_source_shards': (1, "hasher"),
     "prismaquant/incremental_probe.py::_run_body_streaming_shard": (1, "writer"),
     # The one sampler thread every periodic sampler is built on (PQ #1299).
     "prismaquant/io_spans.py::PeriodicSampler.__init__": (1, "sampler"),

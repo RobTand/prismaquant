@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]
 
@@ -25,17 +27,19 @@ def row_case(tmp_path, monkeypatch):
     census = {"anchor_groups": {STACK: MEMBERS, "g:dense": ["dense"]},
               "unit_shapes": {name: [8, 4 + index % 3]
                               for index, name in enumerate([*MEMBERS, "dense"])}}
-    spec = {"model": str(tmp_path / "model"), "campaign_argv": [],
+    spec = {"model": str(tmp_path / "model"),
+            "campaign_argv": ["--max-act-rows", "32"],
             "cwd": str(tmp_path), "python": "python3", "env": {},
             "process_baseline_bytes": 0, "headroom_gb": 0,
-            "max_act_rows": 32, "box_memory_gb": 64}
+            "box_memory_gb": 64}
     row = {"argv": ["python3", "-m", "prismaquant.tessera_campaign",
                     "--model", spec["model"], "--units", str(selection_path),
                     "--out", str(workspace / "cost.pkl"),
+                    "--max-act-rows", "32",
                     "--max-rounds", "1", "--rate-band", "832,1088"],
            "demand": {"mem_gb": 8}}
     model_reads = []
-    monkeypatch.setattr(dispatch, "_model_bytes",
+    monkeypatch.setattr(campaign_rows, "_model_bytes",
                         lambda model: model_reads.append(model) or 256)
 
     def publish(selection):
@@ -87,7 +91,7 @@ def test_valid_whole_groups_keep_their_derived_demand(row_case):
     spec, census, row, reads, publish = row_case
     publish(selection(whole_group(), {"key": "g:dense", "members": ["dense"]}))
     result = dispatch.verify_row_demand(spec, census, row, label="whole")
-    expected = dispatch._row_memory_demand(spec, [*MEMBERS, "dense"], census)
+    expected = campaign_rows.row_memory_demand(spec, [*MEMBERS, "dense"], census)
     assert {key: result[key] for key in expected} == expected
     assert reads == [spec["model"], spec["model"]]
 
@@ -104,9 +108,9 @@ def test_schema_valid_sample_keeps_own_member_demand_and_whole_group_identity(ro
                        "inclusion_probability": {name: 0.5 for name in sampled}},
                       schema=V2))
     result = dispatch.verify_row_demand(spec, census, row)
-    expected = dispatch._row_memory_demand(spec, sampled, census)
+    expected = campaign_rows.row_memory_demand(spec, sampled, census)
     assert {key: result[key] for key in expected} == expected
-    whole = dispatch._row_memory_demand(spec, MEMBERS, census)
+    whole = campaign_rows.row_memory_demand(spec, MEMBERS, census)
     assert result["plan_bytes"] < whole["plan_bytes"]
 
 
@@ -126,3 +130,26 @@ def test_check_and_submit_refuse_before_manifest_or_submission_work(row_case,
     assert reads == []
     assert called == []
     assert {path.name: path.read_bytes() for path in args.workspace.iterdir()} == before
+
+
+def test_row_demand_uses_the_actual_final_model_and_selection(tmp_path):
+    """Real file sizes and a real selection bind the same argv execution sees."""
+    model = tmp_path / 'actual-model'
+    model.mkdir()
+    (model / 'model.safetensors').write_bytes(b'owned checkpoint bytes' * 100)
+    selection_path = tmp_path / 'actual-selection.json'
+    selection_path.write_text(json.dumps(selection(
+        {'key': 'g:one', 'members': ['one']})))
+    census = {'anchor_groups': {'g:one': ['one'], 'g:two': ['two']},
+              'unit_shapes': {'one': [8, 4], 'two': [8, 100]}}
+    spec = {'model': 'unrelated-spec-model', 'campaign_argv': [],
+            'process_baseline_bytes': 0, 'headroom_gb': 0}
+    argv = ['--model', 'unused-first-model', '--mod=' + str(model),
+            '--units', str(tmp_path / 'missing-first-selection'),
+            '--units=' + str(selection_path), '--max-act-rows', '2']
+    row = {'argv': ['python3', '-m', 'prismaquant.tessera_campaign', *argv],
+           'demand': {'mem_gb': 8}}
+    result = dispatch.verify_row_demand(spec, census, row)
+    expected = (model / 'model.safetensors').stat().st_size + 4 * 4 * 4 + 2 * 4 * 4
+    assert result['plan_bytes'] == expected
+    assert dispatch._row_label(argv, 0) == 'actual-selection'

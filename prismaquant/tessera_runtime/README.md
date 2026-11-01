@@ -854,8 +854,11 @@ p.write_text(head + sep + body + close + rest)
 EDIT_COPIES
 ```
 
-A contract whose bytes moved also moves `TESSERA_DEV_PIN_ANSWER`: regenerate
-it with `contract_answer` on the new bytes (see below) and review the diff.
+A contract whose gate-read values moved also moves the reviewed admission
+answer. Regenerate `prismaquant/tessera_runtime/reviewed_answer.json` with
+`contract_answer` on the new bytes and review the data diff. Prose-only byte
+drift leaves the development answer unchanged; the serving pin still binds
+the exact reviewed bytes.
 Hash `src/tessera/grammar.py` and `src/tessera/export.py` at the new commit
 before touching `tessera_legal_domain.py`'s prose; new bytes there are a
 re-measurement, not a re-transcription.
@@ -884,11 +887,11 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
 ```
 
 **A moved contract is a re-review, not a bump.** The development pin
-(`TESSERA_DEV_PIN_COMMIT` / `TESSERA_DEV_PIN_CONTRACT_SHA256` /
-`TESSERA_DEV_PIN_ANSWER` in `prismaquant/tessera_runtime_contract.py`) names
+(`TESSERA_DEV_PIN_COMMIT` / `TESSERA_DEV_PIN_CONTRACT_SHA256` in
+`prismaquant/tessera_runtime_contract.py`, plus the reviewed answer data) names
 the SAME Tessera object, and `tests/test_tessera_serving_pin.py` refuses a
 drift between the two. So moving the serving pin means regenerating the
-dev-pin answer in the same commit, and the git diff of that literal IS the
+dev-pin answer in the same commit, and the git diff of that data IS the
 review: it shows every value an admission gate decides on, including each
 cell's `evidence` block. That is the mechanism which keeps promoting a
 `routed_moe` cell a human decision under principle 9, rather than a

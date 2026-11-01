@@ -14,11 +14,9 @@ c) E8M0 `0xFF` decodes every element of its block to NaN (per the OCP
    spec), not `+inf`.
 d) The batched shape-group decode matches the reference across chunk
    boundaries.
-e) The declaration's SCOPE is every expert tensor it speaks for — routed
-   (per-expert index) and shared (no index, `mlp.shared_experts.*`).
-   Widening the scope did not widen the trigger: no declaration still
-   means no nibble decode, the packed grid is still an assertion, and
-   non-expert tensors still flow through `_check_fp8_scale_grid`.
+e) The declaration covers routed experts with a per-expert index. Shared
+   experts retain block-FP8 decoding. No declaration means no nibble
+   decode, and the packed grid remains an assertion.
 """
 import json
 import math
@@ -37,7 +35,8 @@ from prismaquant.layer_streaming import (
 # importing native DSv4 before these tests detect their synthetic checkpoints.
 # Reuse the suite's existing child-process isolation rather than weaken that
 # correctly fatal vendor-identity guard or rewrite another module's imports.
-pytestmark = pytest.mark.own_process
+pytestmark = [pytest.mark.own_process,
+              pytest.mark.usefixtures("pinned_pb_source")]
 
 CPU = torch.device("cpu")
 
@@ -365,17 +364,6 @@ def test_batched_decode_matches_reference_across_chunks(tmp_path, monkeypatch):
         _assert_bitwise_equal_bf16(
             out[_live(eid)], _scalar_reference_decode(packed, scale))
 
-
-# ---------------------------------------------------------------------------
-# e) the declaration covers SHARED experts too (issue #26)
-#
-# DSv4's shared experts are `mlp.shared_experts.*` — one MLP per layer, so
-# no per-expert index — and the routed-only `\.experts\.\d+\.` pattern
-# excluded them structurally. A declared-MXFP4 shared expert therefore fell
-# through to the block-FP8 broadcast and died on its scale-grid assertion.
-# The trigger is still only the config declaration; the packed grid is still
-# only an assertion.
-# ---------------------------------------------------------------------------
 
 def test_shared_expert_is_not_covered_by_the_declaration(tmp_path):
     """VERIFIED against deepseek-ai/DeepSeek-V4-Flash, not assumed.

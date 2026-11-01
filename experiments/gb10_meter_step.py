@@ -104,7 +104,7 @@ def main():
                 rise_power_half=first(lambda r: (r.get('power') or 0) >= idle_p + 0.5 * (plateau_p - idle_p), ph['start']),
                 rise_power_90=first(lambda r: (r.get('power') or 0) >= idle_p + 0.9 * (plateau_p - idle_p), ph['start']),
                 rise_instant_half=first(lambda r: (r.get('instant') or 0) >= idle_p + 0.5 * (plateau_p - idle_p), ph['start']),
-                fall_util_le10=first(lambda r: (r.get('util') or 100) <= 10, ph['end']),
+                fall_util_le10=first(lambda r: r.get('util') is not None and r['util'] <= 10, ph['end']),
                 fall_power_half=first(lambda r: (r.get('power') or 1e9) <= idle_p + 0.5 * (plateau_p - idle_p), ph['end']),
                 fall_instant_half=first(lambda r: (r.get('instant') or 1e9) <= idle_p + 0.5 * (plateau_p - idle_p), ph['end']),
             )

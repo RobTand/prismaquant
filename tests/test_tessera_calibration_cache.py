@@ -1,4 +1,9 @@
 """A reusable calibration keeps full-H/prefix-X bytes and refuses stale inputs."""
+
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
+from prismaquant import tessera_campaign_table as campaign_table
 import copy
 import importlib.metadata
 import prismaquant
@@ -125,7 +130,7 @@ def _torn_second_stat(monkeypatch, method, target):
 @pytest.mark.parametrize('fence', ['metadata_owner', 'proof_digests', 'validate_cached'])
 def test_torn_during_read_fences_refuse_in_both_modes(
         monkeypatch, mode, fence, capture, checkpoint):
-    from prismaquant import cost_streaming as cs
+    from prismaquant import streamed_model_identity as cs_identity
     from test_source_identity_validate_derivation import _build_cache, _llama_config_dict
 
     if mode is None:
@@ -156,11 +161,10 @@ def test_torn_during_read_fences_refuse_in_both_modes(
         config = _llama_config_dict()
         config['_name_or_path'] = str(root)
         cache, _identity = _build_cache(root, shards, config)
-        monkeypatch.setattr(cs, 'live_streaming_runner_config', lambda _source: config)
+        monkeypatch.setattr(cs_identity, 'live_streaming_runner_config', lambda _source: config)
         _torn_second_stat(monkeypatch, 'stat', root / 'config.json')
         with pytest.raises(RuntimeError, match='source config changed while validating'):
-            cs.validate_cached_streamed_model_identity(str(root), cache)
-
+            cs_identity.validate_cached_streamed_model_identity(str(root), cache)
 
 
 def test_dev_prefetch_identity_metadata_adopts_stored_draw(capture, monkeypatch, capsys):
@@ -198,11 +202,6 @@ def test_dev_selected_source_uses_stored_digest_without_proof_or_hash(capture, m
         assert receipt['payload_bytes_hashed'] == 0
         assert receipt['verified_files'][0]['sha256'] == capture_id['source_files']['config.json']
     assert '[DEV-MODE]' in capsys.readouterr().out
-
-
-
-
-
 
 
 @pytest.mark.parametrize('mode', [None, '1', '0'])
@@ -402,20 +401,15 @@ def test_completed_anchor_page_release_does_not_reread_the_entries(monkeypatch, 
                                   metadata={'release_completed_anchor_file_pages': True})
     weight = torch.arange(64, dtype=torch.float32).reshape(8, 8) / 64
     activations = torch.ones(4, 8)
-    spec = types.SimpleNamespace(
-        bits_for_shape=lambda shape: 4 * shape[0] * shape[1],
-        memory_bytes_for_shape=lambda shape: shape[0] * shape[1] // 2,
-        act_dtype_name=None)
-    prepared = dict(spec=spec, family=types.SimpleNamespace(name='fixture'),
-                    rung=1024, activation_qdq=lambda x: x, input_scale=None,
-                    activation_kwargs={})
-    anchor = campaign._finish_anchor(qname='layers.0.q_proj', weight=weight,
-        activations=activations, format_name='FIXTURE_R4', cache=cache,
-        wire_dir=wire_dir, prepared=prepared, render=weight.clone(),
-        blob=b'wire-bytes', elapsed=0.0)
-    rendered = cache.weights[('layers.0.q_proj', 'FIXTURE_R4')]
+    from prismaquant import tessera_render
+    monkeypatch.setattr(tessera_render, 'encode_tessera_unit',
+                        lambda *_args, **_kwargs: (weight.clone(), b'wire-bytes'))
+    anchor = cell_measurement.measure_cell(qname='layers.0.q_proj', weight=weight,
+        activations=activations, format_name='TESSERA_E4M3_K1_R1024', cache=cache,
+        wire_dir=wire_dir, hessian_required=False)
+    rendered = cache.weights[('layers.0.q_proj', 'TESSERA_E4M3_K1_R1024')]
     assert sorted(released) == sorted([Path(rendered).name,
-                                       'layers__0__q_proj__FIXTURE_R4.tessera'])
+                                       'layers__0__q_proj__TESSERA_E4M3_K1_R1024.tessera'])
     assert anchor.wire_bytes == len(b'wire-bytes')
 
 
@@ -532,7 +526,7 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
              '--calibration-census',str(census_path)]
     root = tmp_path/'full-capture'
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
-    monkeypatch.setattr(tc,'_collect_activations',lambda *a,**k: pytest.fail('repeated forward'))
+    monkeypatch.setattr(calibration_forward,'capture_activation_statistics',lambda *a,**k: pytest.fail('repeated forward'))
     assert tc.main([*argv,'--capture-calibration-out',str(root)]) == 0
     if streamed_selection:
         from prismaquant import cost_streaming, autoscale
@@ -551,18 +545,30 @@ def test_cli_capture_then_reuse_never_repeats_forward(monkeypatch,tmp_path,strea
             encoder_memo_capacity=1,
             phases={'resident_anchors': {'factorization_scratch_bytes': 4*256**2*4}}))
         selection = tmp_path/'units.json'
-        selection.write_text(json.dumps(dict(schema=tc.UNITS_SCHEMA,
+        selection.write_text(json.dumps(dict(schema=campaign_selection.UNITS_SCHEMA,
             groups=[dict(key='u:'+UNIT, members=[UNIT])])))
         argv += ['--streaming', '--units', str(selection),
                  '--calibration-cache-sha256', cc.sha256(root/'capture_manifest.json')]
+    from prismaquant.tessera_campaign_requests import ResidentCampaignWeights, SelectedCampaignWeights
+    real_loaded = tc.run_loaded_campaign
+    loaded = []
+    def run_loaded(request, **kwargs):
+        loaded.append((request.source, kwargs['calibration_cache']))
+        return real_loaded(request, **kwargs)
+    monkeypatch.setattr(tc, 'run_loaded_campaign', run_loaded)
     assert tc.main([*argv,'--calibration-cache',str(root/'capture_manifest.json')]) == tc.EXIT_EMPTY_MENU
+    assert len(loaded) == 1
+    source_request, actual_capture = loaded[0]
+    assert isinstance(source_request, SelectedCampaignWeights if streamed_selection else ResidentCampaignWeights)
+    assert actual_capture['path'] == str((root/'capture_manifest.json').resolve())
+    assert actual_capture['sha256'] == cc.sha256(root/'capture_manifest.json')
     if streamed_selection:
         assert source_calls == [[UNIT], 'shutdown']
 
 
 def test_driver_capture_and_plan_bind_one_complete_capture(capture, monkeypatch):
     from tools import dispatch_tessera_campaign as dispatch
-    from experiments import glm_data_manifests
+    from prismaquant import campaign_data_manifests as glm_data_manifests
     root,path,census,identity,acts,hessians,record = capture
     # ``plan`` builds each row's data manifest (#638), which refuses any read-set
     # entry outside the shared mount. This capture lives under pytest's tmp_path,
@@ -598,8 +604,8 @@ def test_merge_refuses_disagreeing_capture_bindings():
     payloads = _payloads()
     for index,payload in enumerate(payloads.values()):
         payload['provenance']['calibration_cache'] = dict(path='/capture.json',sha256=str(index))
-    with pytest.raises(dispatch.MergeRefused,match='calibration_cache'):
-        dispatch.merge_payloads(payloads,census={'counts':{'a':16384,'b':16384}},capture_sha256='merged')
+    with pytest.raises(campaign_table.MergeRefused,match='calibration_cache'):
+        campaign_table.merge_payloads(payloads,census={'counts':{'a':16384,'b':16384}},capture_sha256='merged')
 
 
 @pytest.mark.parametrize('field',['model_load_contract','attention_implementation','capture_runtime'])
@@ -664,7 +670,7 @@ def test_campaign_boundary_coordinates_follow_batched_calibration_ids():
     model = TokenModel()
     tokens = [torch.tensor([[0,1],[1,0]]),torch.tensor([[0,1]])]
     captures = []
-    values = tc._collect_activations(model,[EXPERT_PREFIX+'.0.w1',EXPERT_PREFIX+'.1.w1'],
+    values = calibration_forward.capture_activation_statistics(model,[EXPERT_PREFIX+'.0.w1',EXPERT_PREFIX+'.1.w1'],
         tokens,2,'cpu',want_hessian=True,
         boundary_consumer=lambda name,module,args,kwargs,coords:captures.append((args[0].clone(),coords.clone())))
     assert len(captures) == 2
@@ -835,14 +841,14 @@ def test_cli_cache_reader_requires_coverage_not_equal_output_scope(
         counts={name: 4 for name in names}, maxima={name: maxima[name] for name in names})
     requested_name = "model.layers.0." + requested
     selection = tmp_path / "units.json"
-    selection.write_text(json.dumps({"schema": tc.UNITS_SCHEMA, "model": str(source),
+    selection.write_text(json.dumps({"schema": campaign_selection.UNITS_SCHEMA, "model": str(source),
         "layer_stride": 1, "groups": [{"key": "u:" + requested_name,
                                        "members": [requested_name]}]}))
     argv += ["--attention-implementation", "eager", "--nsamples", "32", "--seqlen", "512",
              "--layer-stride", "1", "--calibration-census", str(census_path),
              "--units", str(selection), "--calibration-cache", record["path"],
              "--calibration-cache-sha256", record["sha256"]]
-    monkeypatch.setattr(tc, "_collect_activations",
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics",
                         lambda *_args, **_kwargs: pytest.fail("cache reader repeated the forward"))
     actual_prefetch = cc.prefetch_capture
     observed = []

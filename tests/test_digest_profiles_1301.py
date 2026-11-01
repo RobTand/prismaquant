@@ -9,7 +9,6 @@ type, ``str()`` and chained cause. Those outcomes are frozen in
 against them.
 """
 from __future__ import annotations
-
 import ast
 import hashlib
 import importlib
@@ -20,6 +19,8 @@ import sys
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import aura_checkpoint_journal
 from prismaquant import cost_stage_checkpoint, digests
 from prismaquant.digests import (
     DIRECT_ASCII_LAX,
@@ -32,7 +33,7 @@ from prismaquant.digests import (
 from tests.golden_table import GoldenTable, outcome
 
 
-GOLDEN = GoldenTable("digest_profiles_1301")
+GOLDEN = GoldenTable("digest_profiles_1301", every_row_used=True)
 
 
 _CYCLE_LIST: list = []
@@ -107,12 +108,7 @@ SITE_INPUTS = {
         {"a": 1, "pre_render_recipe_identity_sha256": "x", "p": PurePosixPath("/x")},
         {"n": float("nan"), "s": {3}},
     ),
-    ("prismaquant.sample_parallel_probe", "_runtime_snapshot_closure_sha256"): (
-        [{"path": "a", "sha256": "0" * 64}, {"path": "b", "sha256": "1" * 64}],
-        ({"b": 1},),
-        [{"café": "ü"}],
-        [{"x": float("nan")}],
-    ),
+
     ("prismaquant.artifact_registry", "canonical_layer_config_json"): (
         {"model.layers.0.self_attn.q_proj": {"format": "NVFP4"}},
     ),
@@ -128,14 +124,14 @@ _WHERE = {"where": "digest fixture"}
 
 #: Every replaced function: (module, name, keyword arguments).
 SITES = (
-    ("prismaquant.aura_cost", "_canonical_json", _WHERE),
-    ("prismaquant.aura_cost", "_canonical_json_sha256", _WHERE),
+    ("prismaquant.aura_checkpoint_journal", "_canonical_json", _WHERE),
+    ("prismaquant.aura_checkpoint_journal", "_checkpoint_json_sha256", _WHERE),
     ("prismaquant.artifact_collection", "_canonical_bytes", _WHERE),
     ("prismaquant.glm_capture_compatibility", "_digest", {}),
     ("prismaquant.boundary_control", "digest", {}),
-    ("prismaquant.sample_parallel_probe", "_canonical_sha256", _WHERE),
-    ("prismaquant.sample_parallel_probe", "_runtime_snapshot_closure_sha256", {}),
-    ("prismaquant.joint_aura", "identity_sha256", {}),
+    ("prismaquant.sample_parallel_artifacts", "_sample_artifact_sha256", _WHERE),
+
+    ("prismaquant.joint_aura_rows", "joint_identity_sha256", {}),
     ("prismaquant.measured_runtime_prices", "identity_sha256", {}),
     ("prismaquant.glm_mtp_capture", "_json_sha256", {}),
     ("prismaquant.streaming_model", "_initialization_digest", {}),
@@ -144,7 +140,7 @@ SITES = (
     ("prismaquant.native_operator_panel", "operator_route_identity", {}),
     ("prismaquant.artifact_registry", "canonical_layer_config_json", {}),
     ("prismaquant.artifact_registry", "layer_config_sha256", {}),
-    ("prismaquant.cost_streaming", "canonical_fingerprint_key", {}),
+    ('prismaquant.streamed_model_identity', "canonical_fingerprint_key", {}),
     ("prismaquant.production_recache", "assignment_digest", {}),
     ("prismaquant.tessera_sampled_stack_proposal", "selected_assignment_sha256", {}),
     ("prismaquant.runtime_provenance", "_source_tree_identity", {}),
@@ -172,7 +168,9 @@ def _check_inputs(function, inputs, kwargs) -> set:
 
 
 @pytest.mark.parametrize(("module_name", "name", "kwargs"), SITES,
-                         ids=[f"{module}.{name}" for module, name, _ in SITES])
+                         # Oracle keys retain the pre-migration measured site names.
+                         ids=[f"{module.replace('aura_checkpoint_journal', 'aura_cost').replace('joint_aura_rows', 'joint_aura')}.{name.replace('_checkpoint_json_sha256', '_canonical_json_sha256').replace('joint_identity_sha256', 'identity_sha256')}"
+                              for module, name, _ in SITES])
 def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
     new = getattr(importlib.import_module(module_name), name)
     kinds = _check_inputs(new, _inputs(module_name, name), kwargs)
@@ -181,17 +179,19 @@ def test_site_keeps_its_bytes_and_refusals(module_name, name, kwargs):
 
 
 def test_joint_aura_keeps_the_validated_identity_short_circuit():
-    from prismaquant import joint_aura
-
-    identity = object.__new__(joint_aura._ValidatedProbeIdentity)
+    identity = object.__new__(joint_aura_rows._ValidatedProbeIdentity)
     object.__setattr__(identity, "_fields", ())
     object.__setattr__(identity, "_sha256", "f" * 64)
-    assert joint_aura.identity_sha256(identity) == "f" * 64
+    assert joint_aura_rows.joint_identity_sha256(identity) == "f" * 64
 
 
 @pytest.mark.parametrize("name", ROUND_TRIP_NAMES)
 def test_round_trip_keeps_its_bytes(name):
-    """The old ``cost_stage_checkpoint`` import path hands out the owner's function."""
+    """The byte owner keeps its actual value and malformed-input behavior.
+
+    ``cost_stage_checkpoint`` still re-exports these names for its many import
+    sites; that path must hand out the owner's function, not a second copy.
+    """
     assert getattr(cost_stage_checkpoint, name) is getattr(digests, name)
     inputs = GENERIC_INPUTS + ({"k": "v", "n": [1, 2.5, None]},)
     _check_inputs(getattr(digests, name), inputs, _WHERE)
@@ -208,7 +208,7 @@ PROFILE_BINDINGS = (
     ("prismaquant.perturbed_x_cache", "_exact_activation_json", DIRECT_ASCII_STRICT, "text"),
     ("prismaquant.artifact_registry", "canonical_layer_config_json", DIRECT_ASCII_LAX, "text"),
     ("prismaquant.artifact_registry", "layer_config_sha256", DIRECT_ASCII_LAX, "sha256"),
-    ("prismaquant.cost_streaming", "canonical_fingerprint_key", DIRECT_ASCII_LAX, "text"),
+    ('prismaquant.streamed_model_identity', "canonical_fingerprint_key", DIRECT_ASCII_LAX, "text"),
     ("prismaquant.model_walk", "_canonical", DIRECT_ASCII_LAX_DEFAULT_STR, "text"),
 )
 
@@ -222,9 +222,7 @@ def test_binding_is_the_profile_method(module_name, name, profile, method):
 
 
 def test_aura_round_trip_binding_is_the_owner():
-    from prismaquant import aura_cost
-
-    assert aura_cost._canonical_json is digests.canonical_json
+    assert aura_checkpoint_journal._canonical_json is digests.canonical_json
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +297,8 @@ def test_round_trip_and_direct_order_integer_keys_differently():
 
 def test_profile_names_are_unique():
     profiles = [value for value in vars(digests).values() if isinstance(value, JsonProfile)]
-    assert len(profiles) == 9
+    # A digest profile is a byte identity: adding one updates this count.
+    assert len(profiles) == 11
     assert len({profile.name for profile in profiles}) == len(profiles)
 
 

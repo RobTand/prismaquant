@@ -16,6 +16,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from experiments.sparse_rate_family_transfer import load_seal
+
 
 ROOT = Path("/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01")
 FILES = {
@@ -74,11 +76,10 @@ def join_curves(*paths: Path) -> tuple[np.ndarray, np.ndarray]:
     return rates, values
 
 
-def predictions(path: Path, forms: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    seal = load(path)
+def predictions(seal: dict, forms: list[str]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     rows = seal.get("predictions")
     if not isinstance(rows, list) or not rows:
-        raise ValueError(f"{path}: missing prediction rows")
+        raise ValueError("prediction seal: missing prediction rows")
     result = {}
     rates = np.asarray([row["rate"] for row in rows], dtype=float)
     for form in forms:
@@ -129,17 +130,18 @@ def main() -> None:
     terminal_r, terminal_v = curve(paths["e2_terminal"])
     if len(terminal_r) != 1 or terminal_r[0] in e2_r:
         raise ValueError("E2 terminal must be one separate rate")
-    e4_pred = predictions(paths["e4_seal"], e4_forms)
-    e2_pred = predictions(paths["e2_seal"], e2_forms)
+    seals = {family: load_seal(paths[f"{family}_seal"]) for family in ("e4", "e2")}
+    e4_pred = predictions(seals["e4"], e4_forms)
+    e2_pred = predictions(seals["e2"], e2_forms)
     e4_audit, e2_audit = load(paths["e4_audit"]), load(paths["e2_audit"])
     if e4_audit.get("family") != "e4" or e2_audit.get("family") != "e2":
         raise ValueError("audit family labels do not match")
-    for family, audit, protocol, seal_key, interior_key in (
-            ("e4", e4_audit, e4_protocol, "e4_seal", "e4_interior"),
-            ("e2", e2_audit, e2_protocol, "e2_seal", "e2_interior")):
+    for family, audit, protocol, interior_key in (
+            ("e4", e4_audit, e4_protocol, "e4_interior"),
+            ("e2", e2_audit, e2_protocol, "e2_interior")):
         if audit.get("protocol_sha256") != protocol.get("protocol_sha256"):
             raise ValueError(f"{family} audit protocol hash does not match protocol")
-        if audit.get("seal_sha256") != load(paths[seal_key]).get("seal_sha256"):
+        if audit.get("seal_sha256") != seals[family].get("seal_sha256"):
             raise ValueError(f"{family} audit seal hash does not match seal")
         if audit.get("interior_curve_sha256") != digest(paths[interior_key]):
             raise ValueError(f"{family} audit interior hash does not match plotted curve")

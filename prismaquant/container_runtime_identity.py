@@ -208,6 +208,19 @@ def _identity_diff(
     )
 
 
+def _verify_stored_identity(destination: Path, expected: Mapping[str, str]) -> None:
+    observed = _validate_identity(
+        _load_json_object(destination, where="stored container runtime identity"),
+        where="stored container runtime identity",
+    )
+    differing = _identity_diff(expected, observed)
+    if differing:
+        raise RuntimeIdentityError(
+            "container runtime differs from the resumable campaign in: "
+            + ", ".join(differing)
+        )
+
+
 def write_or_verify_identity(
     *,
     identity_path: Path,
@@ -248,16 +261,7 @@ def write_or_verify_identity(
             f"runtime identity must live under checkpoint root {checkpoint}"
         )
     if destination.exists():
-        observed = _validate_identity(
-            _load_json_object(destination, where="stored container runtime identity"),
-            where="stored container runtime identity",
-        )
-        differing = _identity_diff(payload, observed)
-        if differing:
-            raise RuntimeIdentityError(
-                "container runtime differs from the resumable campaign in: "
-                + ", ".join(differing)
-            )
+        _verify_stored_identity(destination, payload)
         return payload
 
     # Never retroactively bless checkpoints made before image/source identity
@@ -290,8 +294,15 @@ def write_or_verify_identity(
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, destination)
-        temporary = None
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            _verify_stored_identity(destination, payload)
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

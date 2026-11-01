@@ -235,7 +235,8 @@ def test_lane_gate_slots_reads_the_lane_declaration():
     assert "route.census" not in lane_gate_slots("gguf")
     # A card with no lane keeps exactly its historical requirement.
     assert lane_gate_slots(None) == ()
-    assert lane_gate_slots("no_such_lane") == ()
+    with pytest.raises(KeyError, match="no_such_lane"):
+        lane_gate_slots("no_such_lane")
 
 
 def test_a_lane_declaring_a_slot_the_shipcard_has_no_name_for_is_REFUSED(
@@ -244,7 +245,7 @@ def test_a_lane_declaring_a_slot_the_shipcard_has_no_name_for_is_REFUSED(
     """Not filtered away. #162 closed the roster but kept the refusal.
 
     `lane_gate_slots` admits a declared slot that is in the base set or names
-    a verifier in `shipcard.LANE_SLOT_VERIFIERS`. Dropping any other slot
+    a verifier in `shipcard_slots.CORE_LANE_SLOTS`. Dropping any other slot
     would mean the lane declared a gate, the card never opened it, and
     `verify` passed an artifact that closed nothing -- the same silence one
     link earlier that #119 reported. So it raises, and the refusal names the
@@ -472,7 +473,7 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
         f"lane-declared slot(s) {missing} name no verifier: a record with "
         "passed=True would close them on the generic checks alone. Register "
         "the verifier with the lane's plugin (shipcard_slot_verifiers), or in "
-        "shipcard.LANE_SLOT_VERIFIERS for a data-only lane")
+        "shipcard_slots.CORE_LANE_SLOTS for a data-only lane")
     for slot in derived:
         assert callable(verifiers[slot]), f"{slot}: verifier is not callable"
 
@@ -481,7 +482,7 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     """`route.census` refuses silence, and refuses a wrong census.
 
     The replay is the #136 priced-vs-served comparison, dispatched through
-    `shipcard.LANE_SLOT_VERIFIERS`: a bare `passed=True` record with no
+    `shipcard_slots.CORE_LANE_SLOTS`: a bare `passed=True` record with no
     carried census is refused, a receipt whose records replay to agreement
     closes the slot, and a `passed=true` over substitute-decoder records is
     refused at publication.
@@ -492,7 +493,7 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     refusal the pinned table gives the same rows).
     """
     import prismaquant.tessera_route_receipt as receipt
-    from prismaquant.shipcard import make_record
+    from prismaquant.shipcard_slots import make_record
     from prismaquant.tessera_shipcard import make_route_census_record
 
     def _absent():
@@ -560,12 +561,10 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
     import dataclasses
 
     import prismaquant.shipcard as shipcard_mod
+    from prismaquant import shipcard_slots
     from prismaquant import lane_spec as lane_spec_mod
 
-    verifiers = getattr(shipcard_mod, "LANE_SLOT_VERIFIERS", None)
-    assert verifiers is not None, (
-        "shipcard has no verifier registry: a fourth lane's novel slot still "
-        "needs a roster edit (RobTand/prismaquant#162)")
+    verifiers = shipcard_slots.CORE_LANE_SLOTS
 
     def _verify_entropy(slot, record, *, card=None, model_dir=None):
         block = record.get("route_entropy")
@@ -577,7 +576,8 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
                     f"{block.get('match')!r}, not True"]
         return []
 
-    monkeypatch.setitem(verifiers, "route.entropy", _verify_entropy)
+    monkeypatch.setitem(verifiers, "route.entropy",
+                        shipcard_slots.ShipSlot("route.entropy", _verify_entropy))
     real = lane_spec_for_container("tessera")
     bogus = dataclasses.replace(
         real,
@@ -594,7 +594,7 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
         {"lane": "tessera", "slots": {}})
 
     sha = "abc"
-    passing = shipcard_mod.make_record(
+    passing = shipcard_slots.make_record(
         slot="route.entropy", tool="true", passed=True, model_sha=sha,
         extra={"route_entropy": {"match": True}})
     problems = shipcard_mod.verify(
@@ -617,6 +617,7 @@ def test_preflight_without_card_reports_every_slot_without_writes(
     tmp_path, monkeypatch, capsys,
 ):
     from prismaquant import lane_shipcard as cli
+    from prismaquant import shipcard
 
     root = _artifact(tmp_path)
     before = {p.name: p.read_bytes() for p in root.iterdir()}
@@ -624,7 +625,10 @@ def test_preflight_without_card_reports_every_slot_without_writes(
     def no_write(*args, **kwargs):
         pytest.fail("preflight attempted to write a shipcard")
 
-    monkeypatch.setattr(cli, "write_shipcard", no_write)
+    # The lane module writes only through open_shipcard; the card module's
+    # writer is the one every open reaches.
+    monkeypatch.setattr(cli, "open_shipcard", no_write)
+    monkeypatch.setattr(shipcard, "write_shipcard", no_write)
     assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 1
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "refused"

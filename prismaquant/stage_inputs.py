@@ -72,29 +72,55 @@ def bound_stat_fence(path):
 _BOUND_BYTES = {}
 
 
-#: A process-wide reader for :func:`read_bound`'s bytes, ``(path, sha256,
-#: label) -> bytes``. None reads the path. The Stage B preparation installs
-#: its strict staged reader here (``stage_b_prep_io.bind_staged_reads``,
-#: PQ #1092), so the control documents it reads come off the stage.
+#: A process-wide reader for bound bytes: (path, sha256, label, *, max_bytes).
+#: The reader must enforce an explicit limit before allocation.
+#: Stage B preparation installs its strict staged reader here.
 BOUND_READER = None
 
 
-def read_bound(record, label):
-    """The bytes of a bound ``{"path", "sha256"}`` record, verified."""
+class BoundReadLimitExceeded(ValueError):
+    """A bound input cannot fit the caller's explicit byte limit."""
+
+
+def read_bound(record, label, *, max_bytes: int | None = None):
+    """Verify bound bytes, with an optional payload limit before allocation.
+
+    Bounded local reads use the existing IO reader and one EOF sentinel byte.
+    The same limit reaches staged readers and applies to memo hits.
+    """
     require(isinstance(record, dict) and set(record) == {'path', 'sha256'}, f'{label}: bound path and SHA256 required')
+    require(max_bytes is None or (type(max_bytes) is int and max_bytes >= 0),
+            f'{label}: read bound must be a nonnegative integer')
     path = Path(record['path'])
     key = (str(path), record['sha256'])
     try:
         fence = bound_stat_fence(path)
     except OSError:
         fence = None
+    if max_bytes is not None and fence is not None and fence[3] > max_bytes:
+        raise BoundReadLimitExceeded(f'{label}: input exceeds its read bound')
     if fence is not None:
         hit = _BOUND_BYTES.get(key)
         if hit is not None and hit[0] == fence:
+            if max_bytes is not None and len(hit[1]) > max_bytes:
+                raise BoundReadLimitExceeded(f'{label}: memo exceeds its read bound')
             return hit[1]
-    raw = (path.read_bytes() if BOUND_READER is None
-           else BOUND_READER(path, record['sha256'], label))
-    same(bytes_sha256hex(raw), record['sha256'], f'{label}: owned bytes')
+    receipt = None
+    if BOUND_READER is not None:
+        raw = BOUND_READER(path, record['sha256'], label, max_bytes=max_bytes)
+    elif max_bytes is None:
+        raw = path.read_bytes()
+    else:
+        from .io_engine import read_file
+
+        try:
+            raw, receipt, _signature = read_file(path.resolve(strict=True), max_bytes)
+        except RuntimeError as error:
+            raise ValueError(str(error)) from error
+    if max_bytes is not None and len(raw) > max_bytes:
+        raise BoundReadLimitExceeded(f'{label}: owned bytes exceed their read bound')
+    digest = receipt['sha256'] if receipt is not None else bytes_sha256hex(raw)
+    same(digest, record['sha256'], f'{label}: owned bytes')
     if fence is not None and len(raw) == fence[3]:
         _BOUND_BYTES[key] = (fence, raw)
     return raw

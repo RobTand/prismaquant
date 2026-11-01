@@ -5,13 +5,12 @@ only a prebuilt binary with the packaged numerical qualification; compilation
 belongs to the separately admitted build/qualification workflow.
 """
 from __future__ import annotations
+from prismaquant import joint_projection_contract
 
 from collections.abc import Mapping
 from copy import deepcopy
-from functools import lru_cache
 import importlib.machinery
 import importlib.util
-import json
 import os
 from pathlib import Path
 import platform
@@ -22,12 +21,8 @@ import torch
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .kernels import joint_projection_reduce as kernel
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import file_sha256hex
 
-SCHEMA = 'prismaquant.joint_projection_backend.v1'
-FUSED_NAME = 'fused_fp32_v1'
-QUALIFICATION_PATH = Path(__file__).with_name('kernels') / 'joint_projection_reduce_qualification.json'
-REFERENCE_IDENTITY = {'schema': SCHEMA, 'name': 'torch', 'expression': '(left * right).sum()'}
 #: The executing image identity, stamped into the container by
 #: ``tools/tessera_campaign_container.py`` from ``docker image inspect`` of the
 #: image it launched. It is the only in-container source of that identity that
@@ -43,17 +38,6 @@ _WARMED_DEVICES = set()
 _sha = file_sha256hex
 
 
-@lru_cache(maxsize=1)
-def _qualification():
-    # Immutable package metadata, like the loaded code; row admission must not
-    # reopen the qualification file for every format/probe result.
-    data = QUALIFICATION_PATH.read_bytes()
-    value = json.loads(data)
-    if value.get('schema') != 'prismaquant.joint_projection_qualification.v1' or value.get('status') != 'qualified':
-        raise RuntimeError('joint projection backend has no qualified packaged runtime')
-    return value, bytes_sha256hex(data)
-
-
 def normalize_projection_backend(config=None):
     """Validate the complete plan selector without accessing CUDA or a compiler."""
     if config is None:
@@ -63,14 +47,14 @@ def normalize_projection_backend(config=None):
     config = deepcopy(dict(config))
     if config == {'name': 'torch'}:
         return config
-    if set(config) != {'name', 'binary'} or config['name'] != FUSED_NAME:
+    if set(config) != {'name', 'binary'} or config['name'] != joint_projection_contract.FUSED_NAME:
         raise ValueError('unsupported joint projection backend or selector fields')
     binary = config['binary']
     if (not isinstance(binary, dict) or set(binary) != {'path', 'sha256'}
             or not isinstance(binary['path'], str) or not binary['path']
             or not isinstance(binary['sha256'], str) or re.fullmatch('[a-f0-9]{64}', binary['sha256']) is None):
         raise ValueError('fused joint projection requires an independently bound binary path/SHA256')
-    qualification, _ = _qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     if binary['sha256'] != qualification['build']['binary_sha256']:
         raise ValueError('joint projection binary is outside the packaged qualification')
     return config
@@ -109,7 +93,7 @@ def _environment_identity():
     ``torch.cuda.get_device_properties`` and is added by ``_runtime_identity``.
     """
     include = Path(torch.__file__).parent / 'include'
-    qualification, _ = _qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     return {'torch': str(torch.__version__), 'torch_git': torch.version.git_version,
             'cuda': torch.version.cuda, 'machine': platform.machine(),
             'headers': {name: _header_digest(include / name) for name in qualification['runtime']['headers']},
@@ -133,7 +117,7 @@ def _runtime_identity(device):
 def _image_label(value):
     if value is None:
         return 'unidentified (no container launcher identity)'
-    record = _qualification()[0].get('image') or {}
+    record = joint_projection_contract.projection_qualification()[0].get('image') or {}
     if record.get('content_sha256') == value and record.get('reference'):
         return '%s (content sha256 %s)' % (record['reference'], value)
     return 'content sha256 ' + value
@@ -169,26 +153,13 @@ def require_qualified_environment():
     same check is usable both in the CPU-only plan-preflight container and on
     the GB10 that executes the pass.
     """
-    qualification, _ = _qualification()
+    qualification, _ = joint_projection_contract.projection_qualification()
     expected = {key: value for key, value in qualification['runtime'].items() if key != 'device'}
     actual = _environment_identity()
     if torch.cuda.is_available():
         expected['device'] = qualification['runtime']['device']
         actual['device'] = _device_identity(torch.device('cuda', torch.cuda.current_device()))
     _require_runtime(actual, expected)
-
-
-def validate_projection_backend_identity(identity):
-    """Validate the serialized arithmetic contract without loading GPU code."""
-    if identity == REFERENCE_IDENTITY:
-        return
-    qualification, digest = _qualification()
-    expected = {'schema': SCHEMA, 'name': FUSED_NAME, 'qualification_sha256': digest,
-                'build': qualification['build'], 'runtime': qualification['runtime'],
-                'qualified_shapes': qualification['qualified_shapes'],
-                'ineligible_layout': 'torch_reference'}
-    if identity != expected:
-        raise ValueError('joint projection arithmetic has an unqualified backend identity')
 
 
 def qualified_shapes(config=None):
@@ -203,7 +174,7 @@ def qualified_shapes(config=None):
     if config['name'] == 'torch':
         return None
     return frozenset(tuple(int(size) for size in shape)
-                     for shape in _qualification()[0]['qualified_shapes'])
+                     for shape in joint_projection_contract.projection_qualification()[0]['qualified_shapes'])
 
 
 def check_qualified_shapes(config, shapes, *, where, refusal=RuntimeError):
@@ -231,11 +202,11 @@ def check_qualified_shapes(config, shapes, *, where, refusal=RuntimeError):
     listed = sorted(qualified)
     message = ('%s: joint projection matrix shapes are outside the packaged qualification of %s: '
                '%d of %d reduction shapes are unqualified %s; qualified shapes %s'
-               % (where, FUSED_NAME, len(unqualified), len(shapes), unqualified, listed))
+               % (where, joint_projection_contract.FUSED_NAME, len(unqualified), len(shapes), unqualified, listed))
     seal_check('joint projection qualified shapes', listed, unqualified, same=not unqualified,
                where='%s; %d of %d reduction shapes run the reference arithmetic '
                      '(left * right).sum(): actual lists them, expected is the qualification of %s'
-                     % (where, len(unqualified), len(shapes), FUSED_NAME),
+                     % (where, len(unqualified), len(shapes), joint_projection_contract.FUSED_NAME),
                refusal=lambda: refusal(message))
     return unqualified
 
@@ -243,7 +214,7 @@ def check_qualified_shapes(config, shapes, *, where, refusal=RuntimeError):
 class _TorchProjection:
     @property
     def identity(self):
-        return deepcopy(REFERENCE_IDENTITY)
+        return deepcopy(joint_projection_contract.REFERENCE_IDENTITY)
 
     def require_device(self, device):
         pass
@@ -330,7 +301,7 @@ def prewarm_projection_backend(config=None, *, device):
         raise RuntimeError('qualified joint projection requires a CUDA device')
     if device.index is None:
         device = torch.device('cuda', torch.cuda.current_device())
-    qualification, digest = _qualification()
+    qualification, digest = joint_projection_contract.projection_qualification()
     runtime = _runtime_identity(device)
     _require_runtime(runtime, qualification['runtime'])
     build = qualification['build']
@@ -364,9 +335,9 @@ def prewarm_projection_backend(config=None, *, device):
                 raise RuntimeError('joint projection prewarm changed reference reduction bits')
         del zeros, actual, expected
         _WARMED_DEVICES.add(warm_key)
-    identity = {'schema': SCHEMA, 'name': FUSED_NAME, 'qualification_sha256': digest,
+    identity = {'schema': joint_projection_contract.SCHEMA, 'name': joint_projection_contract.FUSED_NAME, 'qualification_sha256': digest,
                 'build': deepcopy(build), 'runtime': runtime,
                 'qualified_shapes': deepcopy(qualification['qualified_shapes']),
                 'ineligible_layout': 'torch_reference'}
-    validate_projection_backend_identity(identity)
+    joint_projection_contract.validate_projection_backend_identity(identity)
     return _FusedProjection(module, device, identity, seal=_PREWARM_SEAL)

@@ -1601,18 +1601,33 @@ def plan_moe_checkpoint(
         }
     tensor_rows = tensor_metadata["tensors"]
 
+    def validate_requested_plan(candidate: Mapping[str, object]) -> None:
+        candidate_source = candidate.get("source")
+        candidate_probe = candidate.get("probe")
+        candidate_model = candidate.get("model")
+        if (
+            candidate.get("schema") not in {MOE_PLAN_SCHEMA, MOE_PLAN_SET_SCHEMA}
+            or candidate.get("producer") != producer
+            or candidate.get("profile") != profile.name
+            or candidate.get("search") != moe_search_contract(config)
+            or candidate.get("tensor_metadata") != tensor_metadata
+            or candidate.get("tensor_metadata_binding") != tensor_binding
+            or not isinstance(candidate_source, Mapping)
+            or candidate_source.get("portable_identity") != portable
+            or not isinstance(candidate_probe, Mapping)
+            or candidate_probe.get("sha256") != probe_sha256
+            or not isinstance(candidate_model, Mapping)
+            or candidate_model.get("planned_layers") != requested_layers
+            or candidate_model.get("layer_count") != layer_count
+            or candidate_model.get("hidden_size") != hidden_size
+        ):
+            raise RuntimeError("resumed PrismaSnap MoE plan belongs to different requested inputs")
+
     output = Path(output_dir)
     if os.path.lexists(output):
         if resume and not output.is_symlink() and output.is_dir():
             existing, _ = checkpoint.load_plan(output)
-            if (
-                existing.get("schema") not in {MOE_PLAN_SCHEMA, MOE_PLAN_SET_SCHEMA}
-                or existing.get("producer") != producer
-                or existing.get("source", {}).get("portable_identity") != portable
-                or existing.get("probe", {}).get("sha256") != probe_sha256
-                or existing.get("model", {}).get("planned_layers") != requested_layers
-            ):
-                raise RuntimeError("resumed PrismaSnap MoE plan belongs to different inputs")
+            validate_requested_plan(existing)
             return existing
         raise RuntimeError(f"PrismaSnap MoE plan output exists: {output}")
     staging = output.with_name(output.name + ".prismasnap-plan-incomplete")
@@ -1621,6 +1636,7 @@ def plan_moe_checkpoint(
             raise RuntimeError(f"stale PrismaSnap MoE plan staging exists: {staging}")
         if (staging / checkpoint.PLAN_JSON).is_file() and (staging / checkpoint.PLAN_SCALES).is_file():
             existing, _ = checkpoint.load_plan(staging)
+            validate_requested_plan(existing)
             os.replace(staging, output)
             checkpoint._fsync_dir(output.parent)
             return existing

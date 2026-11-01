@@ -6,9 +6,11 @@ import sys
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch  # pyright: ignore[reportMissingImports]
-from experiments import glm_data_manifests
+from prismaquant import campaign_data_manifests as glm_data_manifests
 from test_tessera_campaign_fanout import _plan_args, _write_model
 
 
@@ -227,7 +229,7 @@ def test_memory_fit_still_declines_packed_rows_without_shrinking_demand(campaign
         seen.append(list(members))
         return 70 if len(members) > 2 else 5
 
-    monkeypatch.setattr(dispatch, "_row_memory_gb", demand)
+    monkeypatch.setattr(campaign_rows, "row_memory_gb", demand)
     assert dispatch.cmd_plan(_plan_args(spec, workspace, row_work_profile=profile)) == 0
     plan = json.loads((workspace / "plan.json").read_text())
     assert len(plan["inadmissible_rows"]) == 2

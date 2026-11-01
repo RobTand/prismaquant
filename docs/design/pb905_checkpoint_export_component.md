@@ -40,8 +40,12 @@ Authentication retains only one serialized body at a time; export retains one
 group. All original sources remain read-only. Each mode publishes fresh
 evidence outside the output prefix and refuses overwrite/reuse of that path.
 
-Only `FrozenArmBackend.submit_group` adds the fixed `paced` argument. The
-existing owners still claim canonical prewrites, reserve the local spool,
+The component's `FrozenArmBackend.submit_group` adds the fixed `paced` argument.
+`StreamedBoundaryArtifacts.write_produced_files` and `ProducedOutputSpool.submit`
+also accept a per-group `paced=True|False` override for application callers
+(PQ #3056). Omitted or `None` leaves the backend keyword absent and preserves
+the sealed default. The component keeps its original frozen-arm adapter.
+The existing owners still claim canonical prewrites, reserve the local spool,
 write bytes, seal PB exports, retry those sealed exports, wait for checked
 acknowledgements, commit origins and release spool groups. There is no new
 scheduler. Authentication cohorts go through `pbcampaign`; paired export is

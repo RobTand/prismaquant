@@ -1,0 +1,76 @@
+{
+  "activation_contract": "fp8_per_token_dynamic",
+  "audit_region_correction": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.audit-region-correction-01.json",
+    "sha256": "93edf467e6cc8cef8905a30228d9a2da198041850d35c58ca665043d8c155458"
+  },
+  "audit_regions": {
+    "e4m3_around_1024": []
+  },
+  "calibration_identity": {
+    "attention_implementation": "eager",
+    "capture_manifest": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/capture_manifest.json",
+    "capture_manifest_sha256": "f4bcbf408d3aa81b04c1fabd1d2d7457176a95dcccdd5ed368800de5c37e277c",
+    "census": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-r1024-02/workspace/census.json",
+    "census_sha256": "b63f7bf6c4320714b4ceb38fbd6996e032e0f0c9b82ac2a30a8337d846e358fd",
+    "hessian": "require",
+    "max_act_rows": 512,
+    "nsamples": 512,
+    "seed": 0,
+    "seqlen": 512,
+    "streaming": "selected-tensors-v1",
+    "tp_degree": 1
+  },
+  "currency": "output_mse_under_route_activation_contract",
+  "curve_id": "l20_shared_down_e4m3_endpoint_r832",
+  "family": "TESSERA_E4M3_K1",
+  "legal_rates": [
+    832
+  ],
+  "measurement_kind": "measured",
+  "measurement_plan": {
+    "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.measurement-plan.json",
+    "sha256": "dc135ffe3d65515572808fd97d020414d1cb19524ecc5000ea8d461bcd8fa1e3"
+  },
+  "qname": "model.language_model.layers.20.mlp.shared_experts.down_proj",
+  "rates": [
+    832
+  ],
+  "receipts": [
+    {
+      "kind": "measured",
+      "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/sparse-rate-20260911/prospective-shared-down-l20-01/l20_shared_down_e4m3_endpoint_r832.curve.rate-832.json",
+      "rate": 832,
+      "sha256": "de11287be7127157d3cb13f50473f69ffdef4a58b66c2783e60dde9a666651da",
+      "value": 1.4394205209100619e-05
+    }
+  ],
+  "recipe_identity": {
+    "activation_contract": "fp8_per_token_dynamic",
+    "body": "window",
+    "grid": "E4M3",
+    "scale_plane": "channel"
+  },
+  "schema": "prismaquant.complete_rate_curve.v1",
+  "source_identity": {
+    "campaign_source": {
+      "base_commit": "352d0fda21",
+      "campaign_module_sha256": "93785e0915ecd7e7e5fdb053f23c3c0182c71566700043b19d1a729790a57266"
+    },
+    "model": "/mnt/shared/models/GLM-5.3-Flash-BF16",
+    "producer": {
+      "commit": "d403cc5a3199a348cc7ee6262f4adbdab8138745",
+      "pin": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/identity-reseal-20260911/rollout-inputs/pins-059ee574f8-d403cc5a31.json",
+      "pin_sha256": "4513ee7cf77a258868dce29ae3149b5ee94630852820f86417498cb7c34ed753",
+      "source_sha256": "0833671bbddbc3fb7186bdbed0a905ef248c23ffdf1aeee0c083322680d20f6b"
+    },
+    "weight_identity": {
+      "schema": "prismaquant.streaming_initialization.v1",
+      "source_map_sha256": "ad7900d15f9a45dc52407ee1e983562e5c067198c13d81595ef642090cc94669",
+      "state_sha256": "e0f48d644e8d72e9935bb130b135a12740f3d0a59dd2a52ff78769b5d97f0cf5"
+    }
+  },
+  "values": [
+    1.4394205209100619e-05
+  ]
+}

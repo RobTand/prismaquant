@@ -120,11 +120,11 @@ class ToyMoE(nn.Module):
         self.experts = ToyExperts(HIDDEN, INTER, NUM_EXPERTS)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        from prismaquant.measure_quant_cost import _packed_router_topk
+        from prismaquant.routed_experts import packed_router_topk
 
         shp = x.shape
         xf = x.reshape(-1, x.shape[-1])
-        idx, w = _packed_router_topk(self.gate, xf)
+        idx, w = packed_router_topk(self.gate, xf)
         y = self.experts(xf, idx, w)
         return y.reshape(shp)
 
@@ -238,11 +238,11 @@ def _write_act_cache(model, calib_ids, dense_qnames, experts_qnames, cache_dir,
 
 
 def _load_key(cache, cache_dir, key):
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     value = cache.weights[key]
     path = cache_dir / (
-        value if isinstance(value, str) else _cache_weight_filename(*key)
+        value if isinstance(value, str) else cache_weight_filename(*key)
     )
     return torch.load(path, map_location="cpu", weights_only=False)
 
@@ -273,7 +273,9 @@ def _equivalence_body(workdir: Path) -> None:
     calib_ids = torch.randint(0, VOCAB, (2, 8))
     dense_qnames = _dense_qnames(model, profile)
 
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     experts_qnames = [
         n for n, m in model.named_modules()

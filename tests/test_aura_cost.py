@@ -252,7 +252,7 @@ def test_additivity_gate_reports_uncovered_and_passthrough():
 
 
 def test_cost_ucb_z_charges_stderr(monkeypatch):
-    from prismaquant.allocator_candidates import cost_entry_predicted_dloss
+    from prismaquant.priced_cell import cost_entry_predicted_dloss
 
     stats = {"h_trace": 1.0}
     row = {"predicted_dloss": 0.010, "predicted_dloss_stderr": 0.002,
@@ -514,7 +514,7 @@ def test_source_digest_mismatch_names_the_package_inputs():
     """A ``producer_source_sha256`` refusal must name files, not just digests (#2218)."""
     from pathlib import Path
 
-    from prismaquant.aura_cost import _checkpoint_identity_mismatch
+    from prismaquant.aura_checkpoint_journal import _checkpoint_identity_mismatch
 
     from prismaquant import production_weight_cache as cache
 

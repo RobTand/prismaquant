@@ -1,8 +1,7 @@
 """Original Qwen3 producer profile: dense and routed-MoE text models.
 
-The producer id is deliberately ``qwen3`` for both variants.  That spelling
-is the one Gridbook's runtime contract serves; ``qwen3_moe`` is an HF/vLLM
-model-type/module spelling, not a producer-contract id.
+Both variants use the ``qwen3`` producer id; ``qwen3_moe`` is an HF/vLLM
+model-type/module spelling.
 
 The routed model selected for the serving smoke is
 ``Qwen/Qwen3-30B-A3B`` / ``Qwen3MoeForCausalLM``.  Its checkpoint stores

@@ -3,6 +3,7 @@
 Needs transformers' ``glm5_next`` (the ``-tf516`` venv) and, for the campaign
 CLI, the pinned Tessera producer.
 """
+
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from prismaquant import tessera_calibration_forward as calibration_forward
 from test_glm_campaign_streaming import glm_checkpoint, write_original_layout_checkpoint  # noqa: F401
 from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
@@ -43,12 +45,12 @@ class _Frontier:
 
 def _visit(runner, tokens, targets, *, start=None, stop_layer=None):
     """Captured X/H/rows/max per unit, the hidden after the last layer, and the visited layers."""
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
     captured, final, visited = [{}, {}, {}, {}], [], []
 
     def visit(layer, forward_batch):
         names = [name for name in targets if runner.layer_index_for_qname(name) == layer]
-        values = _collect_activations(runner.model, names, tokens, 7, "cpu",
+        values = capture_activation_statistics(runner.model, names, tokens, 7, "cpu",
             want_hessian=True, profile=runner.profile, forward_batch=forward_batch)
         for actual, local in zip(captured, values):
             actual.update(local)
@@ -176,7 +178,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     tensor a quantum writes and of every one its successor reads.
     """
     from prismaquant import capture_layer_chain as chain
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_boundary_artifacts as cost_streaming_boundaries
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_campaign as campaign
     # Controlled legacy-mechanism fixture, not a qualified immutable provider.
@@ -229,18 +232,18 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
             return original(path, *args, **kwargs)
         return hash_file
     monkeypatch.setattr(cache, "sha256", spy(cache.sha256))
-    monkeypatch.setattr(cost_streaming, "_file_sha256", spy(cost_streaming._file_sha256))
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", spy(cost_streaming_identity._file_sha256))
 
     # Where each boundary tensor lives as a quantum writes it, and as its
     # successor's frontier hands it to the forward (which moves it to the
     # runner's device).
     written, read = [], []
-    write = cost_streaming.StreamedBoundaryArtifacts.write
+    write = cost_streaming_boundaries.StreamedBoundaryArtifacts.write
 
     def recording_write(self, tensor, **kwargs):
         written.append(tensor.device.type)
         return write(self, tensor, **kwargs)
-    monkeypatch.setattr(cost_streaming.StreamedBoundaryArtifacts, "write", recording_write)
+    monkeypatch.setattr(cost_streaming_boundaries.StreamedBoundaryArtifacts, "write", recording_write)
     hidden_batches = chain._BoundaryFrontier.hidden_batches
 
     def recording_hidden_batches(self):
@@ -378,40 +381,40 @@ def test_selected_capture_scope_refusals():
               "model": "src", "layer_stride": 1, "groups": [
         {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
     assert campaign.selected_capture_unit_names(
-        routed, args=args, resolved=resolved) == ["m.a", "m.b"]
+        routed, request=args, resolved=resolved) == ["m.a", "m.b"]
     mixed = {"schema": "prismaquant.tessera_campaign_units.v1",
              "model": "src", "layer_stride": 1, "groups": [
         {"key": "g:model.layers.0.mlp.up_proj", "members": ["d.a", "d.b"]},
         {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
     assert campaign.selected_capture_unit_names(
-        mixed, args=args, resolved=resolved) == ["d.a", "d.b", "m.a", "m.b"]
+        mixed, request=args, resolved=resolved) == ["d.a", "d.b", "m.a", "m.b"]
     sampled = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         routed["groups"][0], sampled=["m.a"],
         inclusion_probability={"m.a": 0.5})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(sampled, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(sampled, request=args, resolved=resolved)
     partition = {"schema": "prismaquant.tessera_campaign_units.v3", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         partition={"schema": "prismaquant.tessera_campaign_expert_partition.v1",
                    "experts_per_row": 8, "index": 0, "count": 2, "rate_q256": 64,
                    "members": ["m.a"]})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(partition, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(partition, request=args, resolved=resolved)
     exact = SimpleNamespace(**{**vars(args), "research_exact_member": "m.a"})
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(routed, args=exact, resolved=resolved)
+        campaign.selected_capture_unit_names(routed, request=exact, resolved=resolved)
     other_model = SimpleNamespace(**{**vars(args), "model": "other"})
     with pytest.raises(ValueError):
-        campaign.selected_capture_unit_names(routed, args=other_model, resolved=resolved)
+        campaign.selected_capture_unit_names(routed, request=other_model, resolved=resolved)
     outside = {"schema": "prismaquant.tessera_campaign_units.v1",
                "groups": [{"key": "elsewhere", "members": ["m.a", "m.b"]}]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(outside, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(outside, request=args, resolved=resolved)
     partial = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         sampled=["m.a", "m.b"], inclusion_probability={"m.a": 0.5, "m.b": 0.25})]}
     with pytest.raises(RuntimeError):
-        campaign.selected_capture_unit_names(partial, args=args, resolved=resolved)
+        campaign.selected_capture_unit_names(partial, request=args, resolved=resolved)
 
 
 def test_chain_quantum_empty_range_scope_rules():
@@ -472,17 +475,17 @@ def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
     capture_units = [*capture, '--units', str(units_path)]
 
     forwards = []
-    real_collect = campaign._collect_activations
+    real_collect = calibration_forward.capture_activation_statistics
 
     def counting_collect(*args, **kwargs):
         forwards.append(1)
         return real_collect(*args, **kwargs)
-    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', counting_collect)
     monolith = tmp_path / 'monolith'
     assert campaign.main([*capture_units, '--cache-dir', str(tmp_path / 'monolith-cache'),
                           '--capture-calibration-out', str(monolith)]) == 0
     assert forwards, "the monolith capture never collected activations"
-    monkeypatch.setattr(campaign, '_collect_activations',
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics',
                         lambda *_: (_ for _ in ()).throw(
                             AssertionError("a completed-capture reuse repeated the forward")))
     manifest = _manifest(monolith)
@@ -520,7 +523,7 @@ def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
                        '--cache-dir', str(tmp_path / 'monolith-fullreuse-cache'),
                        '--capture-calibration-out', str(monolith)])
     # The chain rows forward for real again.
-    monkeypatch.setattr(campaign, '_collect_activations', counting_collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', counting_collect)
 
     storage = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
                "directory": str(tmp_path / "boundaries"), "max_resident_bytes": 64 << 20,

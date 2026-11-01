@@ -1645,7 +1645,7 @@ def artifact_binding(
     *,
     launch_model: str | os.PathLike | None = None,
 ) -> dict[str, Any]:
-    """Bind a live server manifest to the exact mounted CB artifact."""
+    """Bind a live server manifest to the exact mounted model artifact."""
     root = Path(model_dir)
     try:
         resolved_root = root.resolve(strict=True)
@@ -2488,8 +2488,8 @@ def main(argv: list[str] | None = None) -> int:
     p_write.add_argument("--image", default=None,
                          help="container image tag the server runs in")
     p_write.add_argument("--pid", type=int, default=None,
-                         help="inspect only this pid (default: auto-discover "
-                              "the vLLM server + engine processes)")
+                         help="retained argument; refuses partial server attestation. "
+                              "Omit to discover all server and engine processes")
     p_write.add_argument(
         "--artifact-dir",
         default=None,

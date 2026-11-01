@@ -359,7 +359,8 @@ class VerifiedRunTransition:
         return identity
 
     def final_provenance(self):
-        from .aura_cost import _aura_unit_checkpoint_path, _load_aura_unit_checkpoint
+        from .cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
+        from .aura_checkpoint_journal import (load_unit as _load_aura_unit_checkpoint)
         root = Path(self._checkpoint_dir)
         manifest = json.loads((root / "manifest.json").read_bytes())
         if (manifest["identity"]["git_commit"] != _CONTRACT["git_commit"]

@@ -99,6 +99,24 @@ def _read_config_alias_with_fallback(explicit, declared, *names):
     return _read_config_alias(declared, *names)
 
 
+def load_complete_mtp_state_dict(
+    profile,
+    mtp_module: nn.Module,
+    raw: dict,
+    *,
+    where: str,
+) -> None:
+    """Admit a complete source before an MTP module is measured or emitted."""
+    unmatched_source, module_unset = profile.load_mtp_state_dict(mtp_module, raw)
+    if unmatched_source or module_unset:
+        raise RuntimeError(
+            f"{where}: MTP source/module coverage failure: "
+            f"unmatched_source={unmatched_source[:8]} "
+            f"module_params_unset={module_unset[:8]}; "
+            "provide a complete checkpoint matching this MTP module"
+        )
+
+
 class ModelProfile(ABC):
     """Base class for all PrismaQuant architecture profiles.
 
@@ -264,12 +282,13 @@ class ModelProfile(ABC):
     def _ensure_vllm_class(self):
         if self._vllm_cls_loaded:
             return
-        self._vllm_cls_loaded = True
         arch = self.vllm_architecture_class()
         if arch is None:
+            self._vllm_cls_loaded = True
             return
         from .vllm_registry import vllm_class_for_architecture
         self._vllm_cls = vllm_class_for_architecture(arch)
+        self._vllm_cls_loaded = True
 
     def campaign_dense_unit_names(self, model, *, allow_pinned=None) -> list[str]:
         """Return actual parameter owners for the existing dense input hooks."""
@@ -321,18 +340,15 @@ class ModelProfile(ABC):
         Prefer vLLM metadata when available, then the declarative
         model-structure spec.
         """
-        try:
-            self._ensure_vllm_class()
-            from .vllm_registry import packed_modules_mapping_from_class
+        self._ensure_vllm_class()
+        from .vllm_registry import packed_modules_mapping_from_class
 
-            mapping = packed_modules_mapping_from_class(self._vllm_cls)
-            if mapping:
-                return {
-                    str(fused): tuple(str(member) for member in members)
-                    for fused, members in mapping.items()
-                }
-        except Exception:
-            pass
+        mapping = packed_modules_mapping_from_class(self._vllm_cls)
+        if mapping:
+            return {
+                str(fused): tuple(str(member) for member in members)
+                for fused, members in mapping.items()
+            }
 
         spec = self.structure_spec()
         if spec is None:
@@ -649,6 +665,8 @@ class ModelProfile(ABC):
             layers.N.mlp.experts.{e}.up_proj.weight   -> ...experts.gate_up_proj[e, I:]
             layers.N.mlp.experts.{e}.down_proj.weight -> ...experts.down_proj[e]
 
+        Partial loads are allowed. A packed parent remains in the unset
+        list until every expert projection has a full source matrix.
         Dense MTP blocks simply never match that pattern and fall
         through to the exact-name path."""
         sd = mtp_module.state_dict()
@@ -656,6 +674,7 @@ class ModelProfile(ABC):
         mapped: dict = {}
         missing: list[str] = []
         loaded_module_keys: set[str] = set()
+        loaded_packed_slices: dict[str, set[tuple[int, str]]] = {}
         packed_pat = re.compile(
             r"^(layers\.\d+\.mlp\.experts)\.(\d+)\."
             r"(gate_proj|up_proj|down_proj)\.weight$"
@@ -674,28 +693,41 @@ class ModelProfile(ABC):
 
             prefix, expert_id_s, proj = m.groups()
             expert_id = int(expert_id_s)
-            if proj == "down_proj":
-                packed_name = f"{prefix}.down_proj"
-                packed = params.get(packed_name)
-                if packed is None:
-                    missing.append(k)
-                    continue
-                packed.data[expert_id].copy_(
-                    v.to(device=packed.device, dtype=packed.dtype))
-                loaded_module_keys.add(packed_name)
-                continue
-
-            packed_name = f"{prefix}.gate_up_proj"
+            packed_leaf = "down_proj" if proj == "down_proj" else "gate_up_proj"
+            packed_name = f"{prefix}.{packed_leaf}"
             packed = params.get(packed_name)
             if packed is None:
                 missing.append(k)
                 continue
-            rows = v.shape[0]
-            start = 0 if proj == "gate_proj" else rows
-            packed.data[expert_id, start:start + rows].copy_(
-                v.to(device=packed.device, dtype=packed.dtype)
-            )
-            loaded_module_keys.add(packed_name)
+            if packed.ndim != 3 or expert_id >= packed.shape[0]:
+                raise RuntimeError(
+                    "MTP source/module coverage failure: "
+                    f"source={k!r} cannot address packed shape={tuple(packed.shape)}"
+                )
+            if proj == "down_proj":
+                target = packed.data[expert_id]
+            else:
+                if packed.shape[1] % 2:
+                    raise RuntimeError(
+                        "MTP source/module coverage failure: "
+                        f"packed gate/up parent {packed_name!r} has odd row count"
+                    )
+                rows = packed.shape[1] // 2
+                start = 0 if proj == "gate_proj" else rows
+                target = packed.data[expert_id, start:start + rows]
+            if tuple(v.shape) != tuple(target.shape):
+                raise RuntimeError(
+                    "MTP source/module coverage failure: "
+                    f"source={k!r} shape={tuple(v.shape)} "
+                    f"expected={tuple(target.shape)}"
+                )
+            target.copy_(v.to(device=packed.device, dtype=packed.dtype))
+            loaded_packed_slices.setdefault(packed_name, set()).add((expert_id, proj))
+
+        for packed_name, slices in loaded_packed_slices.items():
+            projections_per_expert = 1 if packed_name.endswith(".down_proj") else 2
+            if len(slices) == params[packed_name].shape[0] * projections_per_expert:
+                loaded_module_keys.add(packed_name)
 
         # Load exact-name tensors through state_dict for everything that
         # isn't a packed expert tensor filled manually above.
@@ -1168,8 +1200,8 @@ class ModelProfile(ABC):
         """`EXPORT_CONTAINER` lanes this architecture is actually wired for.
 
         Lane eligibility is a per-architecture fact, not an operator
-        preference: the CB lane needs the pinned external Gridbook runtime to
-        declare the arch's expert layout in its packaged runtime contract, and the GGUF lane needs
+        preference: the Tessera lane needs the pinned external reader to
+        declare the arch's expert layout in its packaged runtime contract, and the deprecated GGUF lane needs
         a llama.cpp-side arch. Where that wiring is missing the run still
         *completes* and the artifact serves uninitialised memory — coherent
         garbage, not a crash (commit `9a79963`, Laguna). So the honest lane
@@ -1383,6 +1415,21 @@ class ModelProfile(ABC):
         """Full visual namespaces declared by the model structure contract."""
         spec = self.structure_spec()
         return spec.visual_root_prefixes if spec is not None else ()
+
+    def visual_linear_roster(
+        self, model_path: str, *, strict: bool = True
+    ) -> dict[str, dict[str, object]]:
+        """Quantizable vision/merger roster under the declared roots.
+
+        Each entry carries its exact source shape, its name source
+        (`checkpoint_index` or `source_header`) and the admitting
+        `visual_root`. Embedding, conv, norm, router and fixed parts
+        stay out by name; body, audio and MTP names never enter.
+        Fail-closed: a missing checkpoint or unreadable shard raises.
+        """
+        from ..allocator import visual_linear_roster as _roster
+
+        return _roster(str(model_path), profile=self, strict=strict)
 
     def visual_layer_prefix(self) -> str | None:
         """Prefix used for visual-encoder block names, or None if this
@@ -1847,10 +1894,9 @@ class ModelProfile(ABC):
     def structure_spec(self):
         """Return this profile's declarative structure spec, if present.
 
-        The spec is an additive, no-behavior-change description of naming,
-        grouping, passthrough, and decomposition rules.  Existing production
-        paths continue to use the executable profile methods until call sites
-        explicitly opt into a ``ModelGraph``.
+        Profile methods use its naming, grouping, passthrough, and
+        decomposition rules. Explicit Python overrides remain available;
+        ``build_model_graph`` exposes the resolved structure to graph consumers.
         """
         from .structure import load_structure_spec
 

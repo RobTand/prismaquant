@@ -48,7 +48,7 @@ def _stager_mode(request, monkeypatch):
     ``test_stage_a_produced_stager``'s subject.
     """
 
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts as Owner
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts as Owner
 
     owners = []
     start = getattr(Owner, "_produced_start_stager", None)
@@ -272,7 +272,7 @@ def test_the_window_the_dispatcher_seals_is_the_group_count_the_owner_derives():
     from prismaquant.staged_lease import set_lease_helper_root
     set_lease_helper_root(str(pb_repo))
     from dispatch_joint_quanta import build_stage_a_produced_template
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.stage_a_produced_output import (
         boundary_group_ceiling_bytes)
 
@@ -643,7 +643,7 @@ def _shortfall(group):
 
 
 def test_a_full_window_surfaces_at_the_fund_step_and_is_still_a_shortfall():
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     kind = StreamedBoundaryArtifacts._produced_refill_refusal_kind
     assert kind(_shortfall({"batch_id": "b"})) == "shortfall"
 
@@ -663,7 +663,7 @@ def test_a_full_window_surfaces_at_the_fund_step_and_is_still_a_shortfall():
 
 
 def test_read_ahead_given_up_first_is_the_group_read_last():
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     order = StreamedBoundaryArtifacts._produced_surrender_order
     held = [("boundary", 7, -1, 0),      # the plane this layer is reading
             ("boundary", 6, -1, 3),      # the next layer's plane
@@ -857,8 +857,7 @@ def test_what_the_owner_learned_as_it_closed_is_in_its_report(
 
 
 def test_an_unbound_owner_reports_nothing(tmp_path):
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
     storage = StreamedBoundaryArtifacts({
         "schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(tmp_path / "x"),
         "max_resident_bytes": 1 << 20, "max_auxiliary_bytes": 1 << 20,
@@ -872,7 +871,7 @@ def test_the_capture_declares_its_last_roll_unread(tmp_path, monkeypatch):
     from test_layer_major_boundary_capture import fixture, draw
     from test_streamed_boundary_artifacts import _policy
     from test_streamed_cost_checkpoints import _model_identity
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
 
     seen = []
@@ -913,7 +912,7 @@ def _capture_receipt(tmp_path, monkeypatch, report):
     from test_layer_major_boundary_capture import fixture, draw
     from test_streamed_boundary_artifacts import _policy
     from test_streamed_cost_checkpoints import _model_identity
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
 
     closed = []

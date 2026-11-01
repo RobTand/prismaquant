@@ -17,9 +17,7 @@ import pickle
 from .cluster_campaign import _atomic_write_new_bytes as atomic_write_bytes
 from .cost_stage_checkpoint import canonical_json_sha256
 from .dev_mode import seal_check
-from .joint_aura import (
-    prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo,
-)
+from prismaquant.joint_aura_rows import prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo
 from .stage_inputs import read_bound as _read_bound, require as _require, same as _same
 from .tessera_joint_aura import (
     HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA,

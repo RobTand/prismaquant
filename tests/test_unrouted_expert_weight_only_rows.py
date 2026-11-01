@@ -87,7 +87,7 @@ def test_passthrough_rows_are_not_stamped_with_a_cost_source() -> None:
     row would then read as BRANCH_MEASURED off its output_mse=0.0 — claiming a
     measurement that never happened.
     """
-    from prismaquant.allocator_candidates import cost_entry_is_bit_exact
+    from prismaquant.priced_cell import cost_entry_is_bit_exact
 
     passthrough = {"weight_mse": 0.0, "output_mse": 0.0, "rel_output_mse": 0.0}
     assert cost_entry_is_bit_exact(passthrough, "BF16")
@@ -97,7 +97,7 @@ def test_passthrough_rows_are_not_stamped_with_a_cost_source() -> None:
 
 
 def test_weight_only_row_is_not_read_as_a_measured_row() -> None:
-    from prismaquant.allocator_candidates import _has_measured_output_mse
+    from prismaquant.priced_cell import _has_measured_output_mse
 
     row = {"weight_mse": 1e-4, "output_mse": 0.0, "rel_output_mse": 0.0,
            "output_mse_measured": False,

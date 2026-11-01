@@ -1,31 +1,12 @@
 #!/usr/bin/env python3
-"""streaming_model.py — shared streaming-skeleton infrastructure.
+"""Shared meta skeleton, source decoding, layer cache and prefetch ownership.
 
-Factored out of `incremental_probe.py` so the cost-measurement side
-(`incremental_measure_quant_cost.py`) can reuse the exact same
-"skeleton-on-meta, head-resident, decoder-layers-swap" plumbing without
-copy-pasting.
-
-What lives here:
-
-  - `StreamingContext`: holds the model, per-layer install resolvers,
-    weight map, LayerCache, and a single-worker prefetch pool. Built once,
-    reused across every shard.
-  - `_build_streaming_context`: one-time setup (AutoConfig, empty
-    skeleton, `from_pretrained` with explicit device_map pinning head
-    resident and decoder layers to disk, strip accelerate hooks, unload
-    layers back to meta).
-  - `_classify_shard`: maps a shard-include regex to one of
-    {"body", "mtp", "visual", "lm_head"}.
-
-What stays in `incremental_probe`:
-  - `build_layer_shard_regexes` / `build_extended_shard_regexes`
-  - `load_num_hidden_layers`
-  - Body/MTP shard runners (those are Fisher-semantics-specific).
-
-The cost side will import from both this module and
-`incremental_probe` (for the regex builders) — the regex helpers are
-stable public API that both sides share.
+``_build_streaming_context`` constructs the configured model without loading
+HF payloads, materializes the declared resident head, and leaves body layers
+for the existing source reader. ``StreamingContext`` owns their prefetch and
+installation. ``load_resident_source_model`` uses those same owners to deliver
+an admitted complete text model. Probe and cost measurement semantics remain
+with their callers.
 """
 from __future__ import annotations
 
@@ -36,7 +17,7 @@ import threading
 import time
 from contextlib import contextmanager
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
-from typing import Any
+from typing import Any, Iterator, NamedTuple
 from pathlib import Path
 
 import torch
@@ -143,59 +124,6 @@ def merge_selected_initialization_witnesses(witnesses):
         "source_map_sha256": first["source_map_sha256"],
     })
 
-
-_MTP_LAYER_INITIALIZATION_SCHEMA = "prismaquant.mtp_layer_initialization.v1"
-
-
-def validate_mtp_layer_initialization_contract(value):
-    """Read a completed checkpoint load of one MTP layer.
-
-    The MTP layer is outside the streamed text forward (see
-    ``_StreamingInitializationAudit``), so a capture over it cannot carry that
-    forward's witness. This contract says what that capture ran instead:
-
-    * ``state``: every tensor of the loaded layer, with a SHA-256 of its bytes,
-      so a load that packed or cast anything differently is a different
-      contract;
-    * ``source_map_sha256``: the checkpoint keys the load read and the shard
-      of each, whose bytes the capture's source roster authenticates;
-    * ``input``: the hash-bound manifest of the hidden states the layer ran
-      on, which carries the witness of the run that produced them.
-    """
-    keys = {"schema", "scope", "status", "transformers_version", "model_class",
-            "dtype", "layer_prefix", "experts_implementation", "checkpoint_tensors",
-            "state", "state_sha256", "source_map_sha256", "input"}
-    hex64 = re.compile(r"[0-9a-f]{64}")
-    if (not isinstance(value, dict) or set(value) != keys or
-            value.get("schema") != _MTP_LAYER_INITIALIZATION_SCHEMA or
-            value.get("scope") != "mtp_layer_checkpoint_load" or
-            value.get("status") != "completed" or
-            any(not isinstance(value.get(k), str) or not value[k]
-                for k in ("transformers_version", "model_class", "dtype", "layer_prefix",
-                          "experts_implementation")) or
-            type(value.get("checkpoint_tensors")) is not int or value["checkpoint_tensors"] < 1 or
-            not isinstance(value.get("source_map_sha256"), str) or
-            not hex64.fullmatch(value["source_map_sha256"])):
-        raise ValueError("Missing or incomplete MTP layer initialization contract")
-    state = value["state"]
-    if not isinstance(state, dict) or not state:
-        raise ValueError("MTP layer initialization contract names no loaded state")
-    for name, record in state.items():
-        if (not isinstance(name, str) or not name or not isinstance(record, dict) or
-                set(record) != {"shape", "dtype", "sha256"} or
-                not isinstance(record["shape"], list) or
-                any(type(n) is not int or n < 0 for n in record["shape"]) or
-                not isinstance(record["dtype"], str) or not record["dtype"] or
-                not isinstance(record["sha256"], str) or not hex64.fullmatch(record["sha256"])):
-            raise ValueError("Invalid MTP layer tensor witness")
-    if value["state_sha256"] != _initialization_digest(state):
-        raise ValueError("MTP layer state digest differs from its tensor witnesses")
-    source = value["input"]
-    if (not isinstance(source, dict) or set(source) != {"schema", "path", "sha256"} or
-            any(not isinstance(source.get(k), str) or not source[k] for k in source) or
-            not hex64.fullmatch(source["sha256"])):
-        raise ValueError("MTP layer initialization contract has no hash-bound input")
-    return json.loads(json.dumps(value))
 
 
 class _StreamingInitializationAudit:
@@ -600,6 +528,117 @@ def _estimate_layer_cache_bytes(
     return (max(nonzero) if nonzero else 0), sizes
 
 
+class _ResidentSourceDemand(NamedTuple):
+    final_bytes: dict[str, int]
+    cpu_transient_bytes: int
+    device_transient_bytes: int
+    tensor_dtypes: dict[str, torch.dtype]
+
+    def admit(self, resource_check, device, remaining, label):
+        from .memory_management import reserve_allocation
+
+        if device.type == "cpu":
+            reserve_allocation(resource_check, label,
+                               cpu_bytes=remaining + self.device_transient_bytes)
+        else:
+            reserve_allocation(resource_check, label,
+                               cpu_bytes=self.cpu_transient_bytes,
+                               device_bytes=remaining + self.device_transient_bytes)
+
+
+def _resident_source_demand(model, *, dtype, heads, layers_prefix, num_layers,
+                            weight_shard, weight_ckpt, fp8_scale_inv_map,
+                            pack_experts, merge_concat):
+    """Bound final state and one serialized head/layer source window.
+
+    R is its raw payload, S its scale payload, and X its logical bytes at
+    the wider of BF16 and installed precision. The existing gather/decode
+    owners can hold raw/stack copies, BF16 code/product/tail-scale planes,
+    and a packed/concat/compaction or final-cast destination. Charge
+    2R+2X+2S to host staging and 2R+5X+2S to device transients. These are
+    conservative allocation bounds, not a measured peak. FP8 tail repeats
+    are capped by logical axes. Overlapping repeated planes use below 4X;
+    scale conversion and other decoded values keep that stage within 5X.
+    """
+    from .source_read_plan import read_safetensors_header, tensor_span
+
+    windows = {"head": tuple(heads), **{
+        str(index): (f"{layers_prefix}{index}.",) for index in range(num_layers)}}
+    final = dict.fromkeys(windows, 0)
+    expanded = dict.fromkeys(windows, 0)
+    plan = _model_tensor_dtypes(model, dtype)
+    live_shapes = {}
+    seen_heads = set()
+    for name, value in [*model.named_parameters(remove_duplicate=False),
+                        *model.named_buffers(remove_duplicate=False)]:
+        policy = plan.get(name, dtype) if value.is_floating_point() else value.dtype
+        plan[name] = policy
+        live_shapes[name] = tuple(value.shape)
+        for window, prefixes in windows.items():
+            if any(name.startswith(prefix) for prefix in prefixes):
+                if window == "head":
+                    if id(value) in seen_heads:
+                        break
+                    seen_heads.add(id(value))
+                width = torch.empty((), dtype=policy).element_size()
+                final[window] += value.numel() * width
+                expanded[window] += value.numel() * (
+                    max(2, width) if value.is_floating_point() else width)
+                break
+
+    headers = {}
+
+    def payload_bytes(pairs):
+        total = 0
+        for shard, key in set(pairs):
+            if shard not in headers:
+                headers[shard] = read_safetensors_header(shard)
+            header, base, size = headers[shard]
+            _, begin, end = tensor_span(header, base, size, shard, key)
+            total += end - begin
+        return total
+
+    cpu_peak = device_peak = 0
+    for window, prefixes in windows.items():
+        selected = select_source_tensors(weight_shard, weight_ckpt, prefixes)
+        weights = [(shard, key) for shard, pairs in selected.items()
+                   for _, key in pairs]
+        scales = [fp8_scale_inv_map[name] for pairs in selected.values()
+                  for name, _ in pairs if name in fp8_scale_inv_map]
+        raw, scale = payload_bytes(weights), payload_bytes(scales)
+        geometry = {}
+        for shard, pairs in selected.items():
+            header = headers[shard][0]
+            for name, key in pairs:
+                shape = header[key].get("shape")
+                if (not isinstance(shape, list)
+                        or any(type(dim) is not int or dim < 0 for dim in shape)):
+                    raise ValueError(f"{name}: source shape is invalid: {shape!r}")
+                geometry[name] = torch.empty(shape, device="meta", dtype=torch.float32)
+        if window != "head":
+            if pack_experts is not None:
+                pack_experts(geometry)
+            if merge_concat is not None:
+                merge_concat(geometry)
+        for name, tensor in geometry.items():
+            expected = live_shapes.get(name)
+            if tuple(tensor.shape) != expected:
+                raise ValueError(
+                    f"{name}: source shape {tuple(tensor.shape)} != configured shape {expected}")
+        del geometry
+        width = expanded[window]
+        cpu_peak = max(cpu_peak, 2 * raw + 2 * width + 2 * scale)
+        device_peak = max(device_peak, 2 * raw + 5 * width + 2 * scale)
+    return _ResidentSourceDemand(final, cpu_peak, device_peak, plan)
+
+
+def _cast_resident_source_tensors(tensors, tensor_dtypes, dtype):
+    for name in tensors:
+        value = tensors[name]
+        if value.is_floating_point():
+            tensors[name] = value.to(dtype=tensor_dtypes.get(name, dtype))
+
+
 def _auto_prefetch_workers(cache_bytes: int, layer_bytes: int,
                            requested: Any = None) -> tuple[int, str]:
     raw = requested
@@ -695,6 +734,26 @@ def _is_prefetch_availability(exc: BaseException) -> bool:
         return False
     from .staged_tier_policy import StagedRangeNotLanded
     return isinstance(exc, StagedRangeNotLanded)
+
+
+class InstalledBlock:
+    """One installed block's lifetime, borrowed when the runner pins it."""
+
+    def __init__(self, context, layer: int, source: str | None, *, owned: bool):
+        self.layer = layer
+        self.source = source
+        self._context = context if owned else None
+
+    def __enter__(self):
+        return self
+
+    def close(self) -> None:
+        context, self._context = self._context, None
+        if context is not None:
+            context.unload(self.layer)
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
 
 
 class StreamingContext:
@@ -1171,12 +1230,16 @@ class StreamingContext:
         return tensors, "cold"
 
     def install(self, L: int, *, require_prefetched: bool = False,
-                prefetch_following: bool = True, snapshot: bool = False):
+                prefetch_following: bool = True, snapshot: bool = False,
+                resident_tensor_dtypes=None):
         if getattr(self, 'source_snapshot_only', False) and (not snapshot or prefetch_following):
             raise RuntimeError('snapshot-only source cannot install a forward layer')
         tensors, src = self.ensure_loaded(
             L, require_prefetched=require_prefetched,
         )
+        if resident_tensor_dtypes is not None:
+            self.layer_cache.discard(L)
+            _cast_resident_source_tensors(tensors, resident_tensor_dtypes, self.dtype)
         _fast_install(self.install_resolvers[L], tensors, self.device, model=self.model)
         audit = getattr(self, "_source_initialization_audit", None)
         if audit is not None:
@@ -1225,6 +1288,37 @@ class StreamingContext:
     def unload(self, L: int, *, trim_cache: bool = True):
         _unload(self.model, [f"{self.layers_prefix}{L}."])
         return self.layer_cache.trim_for_memory_pressure() if trim_cache else 0
+
+    @contextmanager
+    def walk_layers(self, order: range, *, prefetch_lookahead: int,
+                    require_prefetched: bool = False,
+                    pinned_layer: int | None = None) -> Iterator[Iterator[InstalledBlock]]:
+        """Own an ordinary sequential walk through the existing source cache.
+
+        A block scope closes before post-work progress or memory observations.
+        The walk also closes its current block on early break or an exception.
+        Sealed source-phase and selected-snapshot walks retain their own policy.
+        """
+        for depth in range(prefetch_lookahead):
+            self.schedule_prefetch(order.start + depth * order.step)
+
+        def blocks():
+            for layer in order:
+                owned = layer != pinned_layer
+                block = InstalledBlock(self, layer, None, owned=owned)
+                try:
+                    if owned:
+                        block.source = self.install(layer, require_prefetched=require_prefetched)
+                    self.schedule_prefetch(layer + prefetch_lookahead * order.step)
+                    yield block
+                finally:
+                    block.close()
+
+        walk = blocks()
+        try:
+            yield walk
+        finally:
+            walk.close()
 
     def source_files_by_layer(self) -> dict[int, frozenset[str]]:
         """``{layer: source files its read opens}``: its weights' and FP8 scales' shards.
@@ -1618,6 +1712,8 @@ def _resolve_declared_model_cls(config, default_cls):
     `AutoModelForCausalLM`'s silent text-only downgrade for multimodal
     umbrella configs (e.g. Qwen3_5MoeConfig → Qwen3_5MoeForCausalLM
     text-only, which drops `model.visual.*`)."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     try:
         import transformers
         arch_names = getattr(config, "architectures", None) or []
@@ -1817,6 +1913,8 @@ def _skeleton_config_and_class(config, *, multimodal: bool,
 def load_streaming_auto_config(source_model: str, staged_model: str, *,
                                local_files_only: bool = False):
     """Keep stock HF config loading behind one streaming input boundary."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     options = {"local_files_only": True} if local_files_only else {}
@@ -1835,6 +1933,8 @@ def load_streaming_auto_config(source_model: str, staged_model: str, *,
 
 def _streaming_auto_config_from_bytes(source_model, raw, *, resource_check=None):
     """The existing stock AutoConfig adapter over privately sealed config bytes."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
     from .io_engine import SealedBuffer
 
@@ -1897,6 +1997,8 @@ def build_streaming_skeleton(config, *, multimodal: bool,
                              log_prefix: str = "[streaming]",
                              attn_implementation: str | None = None):
     """Construct the actual streaming model on meta, without loading weights."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM
 
     config, model_cls = _skeleton_config_and_class(
@@ -1995,6 +2097,7 @@ def _build_streaming_context(model_path: str, *,
                              sealed_head_tensors=None,
                              planned_source_window_bytes: int | None = None,
                              source_scope: str | None = None,
+                             resident_resource_check=None,
                              ) -> StreamingContext:
     """One-time setup: AutoConfig + empty skeleton, then manually
     materialize only the always-resident head pieces. Decoder layers
@@ -2147,9 +2250,6 @@ def _build_streaming_context(model_path: str, *,
     base_prefix = _resolve_base_prefix(skeleton, skel_base)
     num_layers = len(skel_layers) if scope is None else scope.num_layers
 
-    # Find the visual module on the skeleton so we know which names to
-    # keep resident in device_map. We rebuild these after `from_pretrained`
-    # on the real model anyway — skeleton lookup only tells us the path.
     _skel_visual, skel_visual_prefix = _find_visual_module(skeleton)
 
     layers_prefix = f"{base_prefix}.layers." if base_prefix else "layers."
@@ -2195,6 +2295,21 @@ def _build_streaming_context(model_path: str, *,
         model_path, multimodal=multimodal, **authenticated,
         **({'profile': original_profile, 'config': original_config} if original_material else {}))
     fp4_source = declared_fp4_expert_dtype(model_path, **({'config': original_config} if original_material else {}))
+    expert_packer = _build_expert_packer(model, weight_ckpt)
+    concat_merger = _build_concat_merger(model, weight_ckpt)
+    resident_demand = None
+    if resident_resource_check is not None:
+        if source_snapshot_only or source_scope is not None or materialize_visual or fp4_source:
+            raise ValueError("resident source delivery requires a text body without packed FP4")
+        resident_demand = _resident_source_demand(
+            model, dtype=dtype, heads=_head_prefixes(model, base_prefix),
+            layers_prefix=layers_prefix, num_layers=num_layers,
+            weight_shard=weight_shard, weight_ckpt=weight_ckpt,
+            fp8_scale_inv_map=fp8_scale_inv_map or {},
+            pack_experts=expert_packer, merge_concat=concat_merger)
+        resident_demand.admit(resident_resource_check, device,
+                              sum(resident_demand.final_bytes.values()),
+                              "resident_source:before_payload")
     if source_snapshot_only and (fp8_scale_inv_map or fp4_source):
         raise RuntimeError('selected tensor snapshots require unscaled floating source weights')
     if fp8_scale_inv_map:
@@ -2202,239 +2317,318 @@ def _build_streaming_context(model_path: str, *,
               f"weights will be dequanted inline at layer-load",
               flush=True)
 
-    if not source_snapshot_only:
-        head_pfxs = _head_prefixes(model, base_prefix)
-        if sealed_head_tensors is not None:
-            check_sealed_selection(
-                select_source_tensors(weight_shard, weight_ckpt, head_pfxs),
-                sealed_head_tensors, what="resident head")
-        loaded_head = _materialize(
-            model,
-            head_pfxs,
-            weight_shard,
-            weight_ckpt,
-            device,
-            dtype,
-            fp8_scale_inv_map=fp8_scale_inv_map,
+    prefetch_pool = None
+    try:
+        if not source_snapshot_only:
+            head_pfxs = _head_prefixes(model, base_prefix)
+            if sealed_head_tensors is not None:
+                check_sealed_selection(
+                    select_source_tensors(weight_shard, weight_ckpt, head_pfxs),
+                    sealed_head_tensors, what="resident head")
+            loaded_head = _materialize(
+                model,
+                head_pfxs,
+                weight_shard,
+                weight_ckpt,
+                device,
+                dtype,
+                fp8_scale_inv_map=fp8_scale_inv_map,
+                **authenticated,
+            )
+            # Weight tying: a `tie_word_embeddings` checkpoint ships no
+            # `lm_head.weight`, so `_materialize` above has nothing to install and
+            # the head stays on meta — the first `model.lm_head(...)` (probe
+            # Phase-2 CE) or `m.weight.to(device)` (cost stage) then dies with
+            # "Cannot copy out of meta tensor". Resolve the alias through
+            # transformers' own embedding accessors (no name hardcoded: the VL
+            # wrapper's `model.language_model.embed_tokens` resolves like the
+            # plain `model.embed_tokens`).
+            resolve_tied_output_embedding(model, log_prefix=log_prefix)
+            _init_rotary_inplace(base_model, device, dtype)
+            print(f"{log_prefix} head materialized ({loaded_head} tensors, "
+                  f"rotary re-init) in {time.time()-t0:.1f}s", flush=True)
+
+            # Constructor-derived NON-PERSISTENT head buffers (e.g. gemma4_unified's
+            # `embed_scale = sqrt(hidden)`) are absent from the checkpoint, so
+            # `_materialize` never assigns them and they stay on `meta` — and
+            # PrismaQuant suppresses skeleton `_initialize_weights` (prismaquant/__init__),
+            # so the modeling's `_init_weights` that would set them never runs. The
+            # first forward op (`embed_tokens(ids)` multiplies by `embed_scale`) then
+            # faults "Tensor on device meta". Re-create such buffers on `device` from
+            # the owning module's retained python scalar (`scalar_<attr>`). Generic
+            # (any arch following this pattern); scoped to non-`layers` modules since
+            # streaming decoder buffers load per shard. Persistent buffers (e.g.
+            # `layer_scalar`) come from the checkpoint and are untouched.
+            _meta_fixed = 0
+            for _bname, _buf in list(base_model.named_buffers(recurse=True)):
+                if _buf is None or not _buf.is_meta or _bname.split(".", 1)[0] == "layers":
+                    continue
+                _mod_name, _, _attr = _bname.rpartition(".")
+                _owner = base_model.get_submodule(_mod_name) if _mod_name else base_model
+                if _attr not in getattr(_owner, "_non_persistent_buffers_set", set()):
+                    continue  # persistent buffers are loaded from the checkpoint
+                _scalar = getattr(_owner, "scalar_" + _attr, None)
+                if _scalar is None:
+                    continue
+                _owner.register_buffer(
+                    _attr, torch.tensor(_scalar, device=device, dtype=_buf.dtype),
+                    persistent=False)
+                _meta_fixed += 1
+            _stuck = [n for n, b in base_model.named_buffers(recurse=True)
+                      if b is not None and b.is_meta and n.split(".", 1)[0] != "layers"]
+            if _stuck:
+                raise RuntimeError(
+                    f"{log_prefix} head buffers left on meta after materialization "
+                    f"(no scalar_ init source): {_stuck[:8]} — extend the "
+                    f"non-persistent-buffer sweep in _build_streaming_context")
+            if _meta_fixed:
+                print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
+                      f"buffer(s) off meta (e.g. embed_scale)", flush=True)
+
+        # Locate the visual module on the meta skeleton. When the CALLER declared
+        # visual inputs, fully materialize the visual tower onto `device`; body
+        # layers remain meta and stream per shard. A skeleton that is multimodal
+        # only because the family has no text-only construction route leaves the
+        # tower on meta - nothing on a token-ID path can reach it, and reading it
+        # would pull the vision shards into the run's readset.
+        visual_module = None
+        visual_prefix: str | None = None
+        if materialize_visual and not source_snapshot_only:
+            visual_module, visual_prefix = _find_visual_module(model)
+            if visual_module is not None and visual_prefix:
+                remove_hook_from_module(visual_module, recurse=True)
+                vis_keys = [k for k in weight_shard if k.startswith(visual_prefix + ".")]
+                # Load all visual tensors from safetensors onto device.
+                tensors = _read_layer_to_device(
+                    visual_prefix + ".",
+                    weight_shard, weight_ckpt, dtype, device,
+                    fp8_scale_inv_map=fp8_scale_inv_map,
+                    buffer_dtypes=_model_tensor_dtypes(model, dtype), **authenticated)
+                print(f"{log_prefix} materializing visual tower: "
+                      f"{len(tensors)}/{len(vis_keys)} tensors -> {device}", flush=True)
+                if _module_has_meta_tensors(visual_module):
+                    visual_module.to_empty(device=device, recurse=True)
+                for model_name, t in tensors.items():
+                    install_dtype = t.dtype if t.is_floating_point() else None
+                    set_module_tensor_to_device(
+                        model, model_name, device, value=t, dtype=install_dtype)
+                # Some visual towers carry non-checkpoint buffers initialized by
+                # the module constructor. Keep them colocated with checkpoint
+                # tensors before the multimodal streaming probe calls visual
+                # helpers such as get_image_features.
+                visual_module.to(device=device)
+                if visual_requires_grad:
+                    # Enable grad on every Linear's weight + bias so backward
+                    # hooks fire on the reverse sweep. Embeddings and norms
+                    # stay frozen (no Fisher tracked for those).
+                    import torch.nn as nn
+                    n_grad = 0
+                    for n, m in visual_module.named_modules():
+                        if isinstance(m, nn.Linear):
+                            for p in m.parameters(recurse=False):
+                                p.requires_grad_(True)
+                                n_grad += 1
+                    print(f"{log_prefix} visual: enabled grad on "
+                          f"{n_grad} Linear params", flush=True)
+        print(f"{log_prefix} model ready in {time.time()-t0:.1f}s", flush=True)
+
+        print(f"{log_prefix} building install resolvers for {num_layers} layers ...",
+              flush=True)
+        t_res = time.time()
+        install_resolvers = [
+            _build_install_resolver(model, f"{layers_prefix}{L}".rstrip("."))
+            if L in source_layers else {}
+            for L in range(num_layers)
+        ]
+        print(f"{log_prefix} resolvers built: "
+              f"{sum(len(r) for r in install_resolvers)} tensors across "
+              f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
+
+        free_bytes = mem_available_bytes()
+        # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
+        resolved_headroom_gb = cache_headroom_gb
+        autoscale_diag = None
+        if resolved_headroom_gb is None:
+            env_val = os.environ.get("CACHE_HEADROOM_GB")
+            if env_val not in (None, "", "auto", "AUTO"):
+                resolved_headroom_gb = float(env_val)
+            else:
+                try:
+                    from .autoscale import pick_cache_headroom_gb
+                    resolved_headroom_gb, autoscale_diag = pick_cache_headroom_gb(
+                        model_path,
+                        layers_per_shard=int(os.environ.get("LAYERS_PER_SHARD", "1") or 1)
+                            if str(os.environ.get("LAYERS_PER_SHARD", "")).isdigit() else 1,
+                        nsamples=int(os.environ.get("NSAMPLES", "32")),
+                        seqlen=int(os.environ.get("SEQLEN", "1024")),
+                    )
+                except Exception as e:
+                    print(f"{log_prefix} autoscale failed ({e!r}); falling back to 75 GB headroom",
+                          flush=True)
+                    resolved_headroom_gb = 75.0
+        cache_bytes = max(int(free_bytes) - int(resolved_headroom_gb * 1024 ** 3),
+                          8 * 1024 ** 3)
+        layer_cache = LayerCache(
+            max_bytes=cache_bytes,
+            max_entries=max_cache_slots,
+        )
+        # v20 step 3+4: enable dynamic budget with the same headroom reserve
+        # used to size the static max. The cache shrinks when host memory
+        # tightens (other processes growing, gradient transients) and grows
+        # back to static_max when slack returns.
+        layer_cache.configure_dynamic_budget(int(resolved_headroom_gb * 1024 ** 3))
+        src = "explicit" if autoscale_diag is None else "autoscaled"
+        print(f"{log_prefix} layer cache budget={cache_bytes/(1024**3):.1f} GB "
+              f"(free={free_bytes/(1024**3):.1f} GB, headroom={resolved_headroom_gb:.1f} GB, "
+              f"dynamic_reserve={resolved_headroom_gb:.1f} GB, {src})",
+              flush=True)
+        if autoscale_diag is not None:
+            print(f"{log_prefix}   autoscale: shard_working={autoscale_diag['shard_working_gb']:.1f} GB "
+                  f"+ safety={autoscale_diag['safety_gb']:.1f} GB "
+                  f"(lps={autoscale_diag['layers_per_shard']})", flush=True)
+
+        estimated_layer_bytes, layer_bytes = _estimate_layer_cache_bytes(
+            weight_shard=weight_shard,
+            weight_ckpt=weight_ckpt,
+            layers_prefix=layers_prefix,
+            num_layers=num_layers,
+            target_dtype=dtype,
+            fp4_experts=fp4_source,
+            tensor_dtypes=_source_tensor_dtypes(model, dtype, concat_merger),
             **authenticated,
         )
-        # Weight tying: a `tie_word_embeddings` checkpoint ships no
-        # `lm_head.weight`, so `_materialize` above has nothing to install and
-        # the head stays on meta — the first `model.lm_head(...)` (probe
-        # Phase-2 CE) or `m.weight.to(device)` (cost stage) then dies with
-        # "Cannot copy out of meta tensor". Resolve the alias through
-        # transformers' own embedding accessors (no name hardcoded: the VL
-        # wrapper's `model.language_model.embed_tokens` resolves like the
-        # plain `model.embed_tokens`).
-        resolve_tied_output_embedding(model, log_prefix=log_prefix)
-        _init_rotary_inplace(base_model, device, dtype)
-        print(f"{log_prefix} head materialized ({loaded_head} tensors, "
-              f"rotary re-init) in {time.time()-t0:.1f}s", flush=True)
+        worker_count, worker_src = _auto_prefetch_workers(
+            cache_bytes, estimated_layer_bytes, requested=prefetch_workers)
+        if max_cache_slots is not None:
+            worker_count = min(worker_count, max_cache_slots)
+            worker_src = f"{worker_src}, capped by max_cache_slots"
+        min_available_bytes, min_available_src = _auto_prefetch_min_available_bytes(
+            estimated_layer_bytes, requested=prefetch_min_available_gb)
+        cache_slots = (
+            int(cache_bytes // estimated_layer_bytes)
+            if estimated_layer_bytes > 0 else 0
+        )
+        memory_slots = 0
+        if estimated_layer_bytes > 0:
+            memory_slots = max(
+                0, int((free_bytes - min_available_bytes) // estimated_layer_bytes))
+        print(f"{log_prefix} prefetch auto: workers={worker_count} "
+              f"({worker_src}), cache_slots={cache_slots}, "
+              f"max_cache_slots={max_cache_slots}, "
+              f"memory_slots={memory_slots}, "
+              f"est_layer={estimated_layer_bytes/(1024**3):.1f} GB, "
+              f"min_avail={min_available_bytes/(1024**3):.1f} GB "
+              f"({min_available_src})", flush=True)
+        note = _prefetch_widening_note(
+            max_cache_slots=max_cache_slots, cache_slots=cache_slots,
+            memory_slots=memory_slots, estimated_layer_bytes=estimated_layer_bytes,
+            planned_source_window_bytes=planned_source_window_bytes)
+        if note is not None:
+            print(f"{log_prefix} {note}", flush=True)
 
-        # Constructor-derived NON-PERSISTENT head buffers (e.g. gemma4_unified's
-        # `embed_scale = sqrt(hidden)`) are absent from the checkpoint, so
-        # `_materialize` never assigns them and they stay on `meta` — and
-        # PrismaQuant suppresses skeleton `_initialize_weights` (prismaquant/__init__),
-        # so the modeling's `_init_weights` that would set them never runs. The
-        # first forward op (`embed_tokens(ids)` multiplies by `embed_scale`) then
-        # faults "Tensor on device meta". Re-create such buffers on `device` from
-        # the owning module's retained python scalar (`scalar_<attr>`). Generic
-        # (any arch following this pattern); scoped to non-`layers` modules since
-        # streaming decoder buffers load per shard. Persistent buffers (e.g.
-        # `layer_scalar`) come from the checkpoint and are untouched.
-        _meta_fixed = 0
-        for _bname, _buf in list(base_model.named_buffers(recurse=True)):
-            if _buf is None or not _buf.is_meta or _bname.split(".", 1)[0] == "layers":
-                continue
-            _mod_name, _, _attr = _bname.rpartition(".")
-            _owner = base_model.get_submodule(_mod_name) if _mod_name else base_model
-            if _attr not in getattr(_owner, "_non_persistent_buffers_set", set()):
-                continue  # persistent buffers are loaded from the checkpoint
-            _scalar = getattr(_owner, "scalar_" + _attr, None)
-            if _scalar is None:
-                continue
-            _owner.register_buffer(
-                _attr, torch.tensor(_scalar, device=device, dtype=_buf.dtype),
-                persistent=False)
-            _meta_fixed += 1
-        _stuck = [n for n, b in base_model.named_buffers(recurse=True)
-                  if b is not None and b.is_meta and n.split(".", 1)[0] != "layers"]
-        if _stuck:
-            raise RuntimeError(
-                f"{log_prefix} head buffers left on meta after materialization "
-                f"(no scalar_ init source): {_stuck[:8]} — extend the "
-                f"non-persistent-buffer sweep in _build_streaming_context")
-        if _meta_fixed:
-            print(f"{log_prefix} materialized {_meta_fixed} non-persistent head "
-                  f"buffer(s) off meta (e.g. embed_scale)", flush=True)
+        prefetch_pool = ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="prefetch")
 
-    # Locate the visual module on the meta skeleton. When the CALLER declared
-    # visual inputs, fully materialize the visual tower onto `device`; body
-    # layers remain meta and stream per shard. A skeleton that is multimodal
-    # only because the family has no text-only construction route leaves the
-    # tower on meta - nothing on a token-ID path can reach it, and reading it
-    # would pull the vision shards into the run's readset.
-    visual_module = None
-    visual_prefix: str | None = None
-    if materialize_visual and not source_snapshot_only:
-        visual_module, visual_prefix = _find_visual_module(model)
-        if visual_module is not None and visual_prefix:
-            remove_hook_from_module(visual_module, recurse=True)
-            vis_keys = [k for k in weight_shard if k.startswith(visual_prefix + ".")]
-            # Load all visual tensors from safetensors onto device.
-            tensors = _read_layer_to_device(
-                visual_prefix + ".",
-                weight_shard, weight_ckpt, dtype, device,
-                fp8_scale_inv_map=fp8_scale_inv_map,
-                buffer_dtypes=_model_tensor_dtypes(model, dtype), **authenticated)
-            print(f"{log_prefix} materializing visual tower: "
-                  f"{len(tensors)}/{len(vis_keys)} tensors -> {device}", flush=True)
-            if _module_has_meta_tensors(visual_module):
-                visual_module.to_empty(device=device, recurse=True)
-            for model_name, t in tensors.items():
-                install_dtype = t.dtype if t.is_floating_point() else None
-                set_module_tensor_to_device(
-                    model, model_name, device, value=t, dtype=install_dtype)
-            # Some visual towers carry non-checkpoint buffers initialized by
-            # the module constructor. Keep them colocated with checkpoint
-            # tensors before the multimodal streaming probe calls visual
-            # helpers such as get_image_features.
-            visual_module.to(device=device)
-            if visual_requires_grad:
-                # Enable grad on every Linear's weight + bias so backward
-                # hooks fire on the reverse sweep. Embeddings and norms
-                # stay frozen (no Fisher tracked for those).
-                import torch.nn as nn
-                n_grad = 0
-                for n, m in visual_module.named_modules():
-                    if isinstance(m, nn.Linear):
-                        for p in m.parameters(recurse=False):
-                            p.requires_grad_(True)
-                            n_grad += 1
-                print(f"{log_prefix} visual: enabled grad on "
-                      f"{n_grad} Linear params", flush=True)
-    print(f"{log_prefix} model ready in {time.time()-t0:.1f}s", flush=True)
+        if source_authentication is not None:
+            source_authentication.require_unchanged()
 
-    print(f"{log_prefix} building install resolvers for {num_layers} layers ...",
-          flush=True)
-    t_res = time.time()
-    install_resolvers = [
-        _build_install_resolver(model, f"{layers_prefix}{L}".rstrip("."))
-        if L in source_layers else {}
-        for L in range(num_layers)
-    ]
-    print(f"{log_prefix} resolvers built: "
-          f"{sum(len(r) for r in install_resolvers)} tensors across "
-          f"{num_layers} layers in {time.time()-t_res:.1f}s", flush=True)
-
-    free_bytes = mem_available_bytes()
-    # Resolve headroom: env override > explicit arg > autoscale > legacy 75 GB default.
-    resolved_headroom_gb = cache_headroom_gb
-    autoscale_diag = None
-    if resolved_headroom_gb is None:
-        env_val = os.environ.get("CACHE_HEADROOM_GB")
-        if env_val not in (None, "", "auto", "AUTO"):
-            resolved_headroom_gb = float(env_val)
-        else:
+        context = StreamingContext(
+            model=model, base_model=base_model, layers=layers,
+            layers_prefix=layers_prefix, num_layers=num_layers,
+            install_resolvers=install_resolvers,
+            weight_shard=weight_shard, weight_ckpt=weight_ckpt,
+            layer_cache=layer_cache, prefetch_pool=prefetch_pool,
+            device=device, dtype=dtype, offload_folder=offload_folder,
+            visual_module=visual_module,
+            visual_prefix=visual_prefix,
+            multimodal=multimodal,
+            fp8_scale_inv_map=fp8_scale_inv_map,
+            estimated_layer_bytes=estimated_layer_bytes,
+            prefetch_workers=worker_count,
+            prefetch_min_available_bytes=min_available_bytes,
+            expert_packer=expert_packer,
+            concat_merger=concat_merger,
+            source_snapshot_only=source_snapshot_only,
+            source_fp4_experts=fp4_source,
+            source_layers=source_layers,
+            source_scope=None if scope is None else scope.name,
+            **authenticated,
+        )
+        context._resident_source_demand = resident_demand
+        return context
+    except BaseException as error:
+        if prefetch_pool is not None:
             try:
-                from .autoscale import pick_cache_headroom_gb
-                resolved_headroom_gb, autoscale_diag = pick_cache_headroom_gb(
-                    model_path,
-                    layers_per_shard=int(os.environ.get("LAYERS_PER_SHARD", "1") or 1)
-                        if str(os.environ.get("LAYERS_PER_SHARD", "")).isdigit() else 1,
-                    nsamples=int(os.environ.get("NSAMPLES", "32")),
-                    seqlen=int(os.environ.get("SEQLEN", "1024")),
-                )
-            except Exception as e:
-                print(f"{log_prefix} autoscale failed ({e!r}); falling back to 75 GB headroom",
-                      flush=True)
-                resolved_headroom_gb = 75.0
-    cache_bytes = max(int(free_bytes) - int(resolved_headroom_gb * 1024 ** 3),
-                      8 * 1024 ** 3)
-    layer_cache = LayerCache(
-        max_bytes=cache_bytes,
-        max_entries=max_cache_slots,
-    )
-    # v20 step 3+4: enable dynamic budget with the same headroom reserve
-    # used to size the static max. The cache shrinks when host memory
-    # tightens (other processes growing, gradient transients) and grows
-    # back to static_max when slack returns.
-    layer_cache.configure_dynamic_budget(int(resolved_headroom_gb * 1024 ** 3))
-    src = "explicit" if autoscale_diag is None else "autoscaled"
-    print(f"{log_prefix} layer cache budget={cache_bytes/(1024**3):.1f} GB "
-          f"(free={free_bytes/(1024**3):.1f} GB, headroom={resolved_headroom_gb:.1f} GB, "
-          f"dynamic_reserve={resolved_headroom_gb:.1f} GB, {src})",
-          flush=True)
-    if autoscale_diag is not None:
-        print(f"{log_prefix}   autoscale: shard_working={autoscale_diag['shard_working_gb']:.1f} GB "
-              f"+ safety={autoscale_diag['safety_gb']:.1f} GB "
-              f"(lps={autoscale_diag['layers_per_shard']})", flush=True)
+                prefetch_pool.shutdown(wait=True, cancel_futures=True)
+            except BaseException as cleanup_error:
+                error.add_note(f"streaming factory shutdown failed: {cleanup_error!r}")
+        try:
+            _unload(model, [""])
+        except BaseException as cleanup_error:
+            error.add_note(f"streaming factory release failed: {cleanup_error!r}")
+        raise
 
-    concat_merger = _build_concat_merger(model, weight_ckpt)
-    estimated_layer_bytes, layer_bytes = _estimate_layer_cache_bytes(
-        weight_shard=weight_shard,
-        weight_ckpt=weight_ckpt,
-        layers_prefix=layers_prefix,
-        num_layers=num_layers,
-        target_dtype=dtype,
-        fp4_experts=fp4_source,
-        tensor_dtypes=_source_tensor_dtypes(model, dtype, concat_merger),
-        **authenticated,
-    )
-    worker_count, worker_src = _auto_prefetch_workers(
-        cache_bytes, estimated_layer_bytes, requested=prefetch_workers)
-    if max_cache_slots is not None:
-        worker_count = min(worker_count, max_cache_slots)
-        worker_src = f"{worker_src}, capped by max_cache_slots"
-    min_available_bytes, min_available_src = _auto_prefetch_min_available_bytes(
-        estimated_layer_bytes, requested=prefetch_min_available_gb)
-    cache_slots = (
-        int(cache_bytes // estimated_layer_bytes)
-        if estimated_layer_bytes > 0 else 0
-    )
-    memory_slots = 0
-    if estimated_layer_bytes > 0:
-        memory_slots = max(
-            0, int((free_bytes - min_available_bytes) // estimated_layer_bytes))
-    print(f"{log_prefix} prefetch auto: workers={worker_count} "
-          f"({worker_src}), cache_slots={cache_slots}, "
-          f"max_cache_slots={max_cache_slots}, "
-          f"memory_slots={memory_slots}, "
-          f"est_layer={estimated_layer_bytes/(1024**3):.1f} GB, "
-          f"min_avail={min_available_bytes/(1024**3):.1f} GB "
-          f"({min_available_src})", flush=True)
-    note = _prefetch_widening_note(
-        max_cache_slots=max_cache_slots, cache_slots=cache_slots,
-        memory_slots=memory_slots, estimated_layer_bytes=estimated_layer_bytes,
-        planned_source_window_bytes=planned_source_window_bytes)
-    if note is not None:
-        print(f"{log_prefix} {note}", flush=True)
 
-    prefetch_pool = ThreadPoolExecutor(
-        max_workers=worker_count, thread_name_prefix="prefetch")
+def load_resident_source_model(model_path: str, *, device: torch.device,
+                               dtype: torch.dtype, offload_folder: str,
+                               resource_check, attn_implementation: str | None = None,
+                               requires_grad: bool = False):
+    """Load one admitted resident text model through the source decoder.
 
-    if source_authentication is not None:
-        source_authentication.require_unchanged()
-
-    return StreamingContext(
-        model=model, base_model=base_model, layers=layers,
-        layers_prefix=layers_prefix, num_layers=num_layers,
-        install_resolvers=install_resolvers,
-        weight_shard=weight_shard, weight_ckpt=weight_ckpt,
-        layer_cache=layer_cache, prefetch_pool=prefetch_pool,
-        device=device, dtype=dtype, offload_folder=offload_folder,
-        visual_module=visual_module,
-        visual_prefix=visual_prefix,
-        multimodal=multimodal,
-        fp8_scale_inv_map=fp8_scale_inv_map,
-        estimated_layer_bytes=estimated_layer_bytes,
-        prefetch_workers=worker_count,
-        prefetch_min_available_bytes=min_available_bytes,
-        expert_packer=_build_expert_packer(model, weight_ckpt),
-        concat_merger=concat_merger,
-        source_snapshot_only=source_snapshot_only,
-        source_fp4_experts=fp4_source,
-        source_layers=source_layers,
-        source_scope=None if scope is None else scope.name,
-        **authenticated,
-    )
+    ``resource_check`` is the existing memory guard's required callback.
+    Source decoding keeps its declared-grid BF16 arithmetic, then installed
+    tensors take the requested dtype and the model's strict dtype plan.
+    """
+    if resource_check is None:
+        raise ValueError("resident source loading requires a memory guard")
+    device = torch.device(device)
+    context = None
+    heads = []
+    failure = None
+    try:
+        context = _build_streaming_context(
+            model_path, device=device, dtype=dtype, offload_folder=offload_folder,
+            cache_headroom_gb=0, max_cache_slots=2, prefetch_workers=1,
+            prefetch_min_available_gb=0, attn_implementation=attn_implementation,
+            resident_resource_check=resource_check)
+        demand = context._resident_source_demand
+        model = context.model
+        heads = _head_prefixes(model, _resolve_base_prefix(model, context.base_model))
+        for name, value in [*model.named_parameters(remove_duplicate=False),
+                            *model.named_buffers(remove_duplicate=False)]:
+            if (any(name.startswith(prefix) for prefix in heads)
+                    and value.is_floating_point()):
+                value.data = value.to(dtype=demand.tensor_dtypes[name])
+        value = None
+        remaining = sum(demand.final_bytes.values()) - demand.final_bytes["head"]
+        context.begin_source_initialization_audit()
+        for layer in context.source_layers:
+            demand.admit(resource_check, device, remaining,
+                         f"resident_source:before_layer:{layer}")
+            context.schedule_prefetch(layer)
+            context.install(layer, require_prefetched=True, prefetch_following=False,
+                            resident_tensor_dtypes=demand.tensor_dtypes)
+            remaining -= demand.final_bytes[str(layer)]
+        model._prismaquant_resident_source_initialization = context.source_initialization_contract()
+        resource_check("resident_source:complete")
+        model.requires_grad_(requires_grad)
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        if context is not None:
+            try:
+                context.shutdown()
+            except BaseException as error:
+                if failure is None:
+                    failure = error
+                    raise
+                failure.add_note(f"resident source shutdown failed: {error!r}")
+            finally:
+                if failure is not None:
+                    try:
+                        context.layer_cache.clear()
+                        _unload(context.model, [*heads, context.layers_prefix])
+                    except Exception as error:
+                        failure.add_note(f"resident source release failed: {error!r}")
+    return model

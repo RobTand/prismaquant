@@ -59,13 +59,13 @@ import re
 import sys
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
     cost_entry_is_anchored_aura_supersurrogate,
     cost_entry_is_bit_exact,
-    serialized_candidate_payload,
 )
+from prismaquant.allocator_candidates import serialized_candidate_payload
 from prismaquant.anchored_cost import (
     anchors_from_results,
     plan_anchor_requests,
@@ -568,7 +568,7 @@ def inventory_checks(
         "PASS" if not missing_norm else "BLOCK",
         (
             "every row carrying h_trace_raw also carries "
-            "h_trace_norm_tokens, so allocator.renormalize_probe_fisher "
+            "h_trace_norm_tokens, so probe_statistics.renormalize_probe_fisher "
             "cannot SystemExit on a missing norm stamp"
             if not missing_norm
             else f"{len(missing_norm)} row(s) carry h_trace_raw with no "
@@ -942,6 +942,24 @@ def run_campaign_from_artifacts(
     if not isinstance(measured, Mapping):
         raise Glm53StockError("harvest AURA payload carries no cost rows")
     packed_names = _quantizable_packed_units(probe_census)
+    source_binding = None
+    if any(row.get("source_kind") == "fp8"
+           for row in (checkpoint_census.get("units") or {}).values()):
+        from .prepriced_cost import require_native_cost_source_binding
+        from .streamed_model_identity import validate_streamed_model_identity
+
+        model_identity = validate_streamed_model_identity(
+            harvest.get("model_identity"), where="native stock harvest model identity")
+        source_binding = require_native_cost_source_binding(
+            expert_payload, harvest.get("source_binding"), where="native stock expert input")
+        recorded_shards = sorted((row["size"], row["sha256"])
+                                 for row in model_identity["shards"])
+        bound_shards = sorted((row["size"], row["sha256"])
+                              for row in source_binding["checkpoint"]["shards"])
+        if bound_shards != recorded_shards:
+            raise Glm53StockError(
+                "native harvest source binding shard digests differ from its model identity; "
+                "run a fresh harvest and reprice")
     empirical = expert_empirical_rows(expert_payload)
     plugin = StockAnchoredFormatPlugin(
         arm_identity=arm_identity,
@@ -964,7 +982,7 @@ def run_campaign_from_artifacts(
         },
         "probe_census_calib_hash": probe_meta.get("calib_hash"),
     }
-    return run_stock_anchor_campaign(
+    payload = run_stock_anchor_campaign(
         declarations=dense,
         pinned=pinned,
         plugin=plugin,
@@ -978,6 +996,11 @@ def run_campaign_from_artifacts(
         require_empirical=True,
         refusals=refusals,
     )
+    if source_binding is not None:
+        for name in {declaration.qname for declaration in dense} | set(pinned):
+            for row in payload["costs"][name].values():
+                row["source_binding"] = source_binding
+    return payload
 
 
 RECIPE_REKEY_SCHEMA = "prismaquant.glm53_stock_campaign.recipe_rekey.v1"

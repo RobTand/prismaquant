@@ -89,7 +89,7 @@ def _legality(shapes, fmt_names, *, source_manifest=None):
     """Per-row legal-format sets, through ``build_candidates``."""
     stats, costs = _stats_and_costs(shapes, fmt_names)
     cands = build_candidates(
-        stats, costs, _specs(fmt_names), source_manifest=source_manifest)
+        stats, costs, _specs(fmt_names), source_manifest=source_manifest).candidates
     return stats, costs, cands, legal_formats_from_candidates(cands)
 
 

@@ -379,24 +379,28 @@ def allocation_shape_price_scope(serving_target, *, tensor_parallel):
     """What a PACT shape-time table must equal, and what admits its launches.
 
     Returns ``(ShapeTableScope, eligibility table, published formats)``. The
-    scope is the TRACKED serving pin, after the live gate has checked the
-    installed contract's bytes against it (``require_pinned_tessera_runtime``),
+    scope is the TRACKED serving pin, after the exact pin has checked one
+    captured installed contract (``RuntimeContractSnapshot.require_exact_pin``),
     plus the serving target the flags name and the world size the caller
-    declares; the eligibility table and the format rows are the installed
-    contract's own (``tessera_render._pinned_serving_table``). The table's
-    ``tessera_commit`` is the commit the serve installs, so it is compared with
-    the pin's ``serving_commit``.
+    declares; the eligibility table and the format rows are read from those
+    same captured bytes, so the facts priced are the facts the pin verified.
+    The table's ``tessera_commit`` is the commit the serve installs, so it is
+    compared with the pin's ``serving_commit``.
     """
-    from . import tessera_render, tessera_serving_runtime_pin as pins
     from .shape_runtime_prices import ShapeTableScope
+    from .tessera_runtime_contract import installed_runtime_snapshot
 
     if serving_target is None:
         raise LookupError("a shape-time table is admitted only under an explicit serving "
                           "target: pass --tessera-platform, --tessera-runtime-image, "
                           "--tessera-execution-mode and --tessera-residency")
-    pin = pins.load_tessera_serving_runtime_pin()
-    pins.require_pinned_tessera_runtime(pin)
-    eligibility, published = tessera_render._pinned_serving_table()
+    try:
+        snapshot = installed_runtime_snapshot()
+    except (ImportError, OSError) as exc:
+        raise LookupError("no installed Tessera runtime contract can admit a shape-time "
+                          f"table: {exc}") from exc
+    pin = snapshot.require_exact_pin()
+    eligibility, published = snapshot.eligibility, snapshot.published_formats
     scope = ShapeTableScope(
         contract_sha256=pin.contract_sha256, tessera_commit=pin.serving_commit,
         runtime_image_digest=serving_target.runtime_image,
@@ -784,7 +788,7 @@ def format_subfamily(canonical: str) -> str | None:
 
 def glm_fused_sibling_group(linear_qname: str, *, config=None):
     """Resolve the GLM fused owner through the runtime's authoritative rule."""
-    from tessera.serving.dense_ownership import fused_module
+    from tessera.metadata import fused_module
 
     source = linear_qname.replace(".self_attn.forget_gate.f_a_proj", ".self_attn.f_a_proj")
     tensor = source if source.endswith(".weight") else source + ".weight"
@@ -794,11 +798,11 @@ def glm_fused_sibling_group(linear_qname: str, *, config=None):
 
 def glm_fused_sibling_leaf_mapping():
     """Read GLM fused members from the same runtime owner."""
-    from tessera.serving.dense_ownership import GLM_FUSED, fused_module
+    from tessera.metadata import fused_module, glm_fused_groups
 
     owner, mlp_members = fused_module("model.layers.0.mlp.gate_proj.weight")
     return {owner.rsplit(".", 1)[-1]: tuple(member.rsplit(".", 2)[1] for member in mlp_members),
-            **{target: members for _pattern, target, members in GLM_FUSED}}
+            **dict(glm_fused_groups())}
 
 
 # -- the pinned serving runtime (serving_profiles) ---------------------------

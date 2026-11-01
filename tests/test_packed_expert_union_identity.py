@@ -32,9 +32,9 @@ import torch
 from prismaquant import union_production_cache as union
 from prismaquant.production_weight_cache import (
     ProductionWeightCache,
-    _cache_weight_filename,
     fill_packed_expert_cache_entries,
 )
+from prismaquant.render_cache_paths import cache_weight_filename
 
 from test_packed_expert_cross_domain_gate import ASSIGNMENT, TinyLM
 from test_union_production_cache import CODE_IDENTITY, _source_identity
@@ -107,7 +107,7 @@ def _dense_cache(cache_dir: Path) -> ProductionWeightCache:
     it: score record, gate record with a real mechanism trace, and the three
     counters agreeing with a single cache key."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    fname = _cache_weight_filename(DENSE_QNAME, DENSE_FMT)
+    fname = cache_weight_filename(DENSE_QNAME, DENSE_FMT)
     torch.save(torch.arange(8, dtype=torch.bfloat16), cache_dir / fname)
     metadata = {
         "render_scope": "assignment",

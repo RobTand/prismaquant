@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space,
     checkpoint_directory,

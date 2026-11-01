@@ -73,7 +73,8 @@ def main():
     monitor.start()
     command = ["docker", "run", "--rm", "--pull=never", "--gpus", "all", "--name", name,
                "--cidfile", str(cidfile), "--label", f"prismaquant.mixed-native={owner}",
-               "--memory=16g", "--memory-swap=16g", "--cpus=4", "--ipc=host",
+               "--memory=16g", "--memory-swap=16g", "--cpus=4",
+               f"--cpuset-cpus={','.join(map(str, record['cpu_affinity']))}", "--ipc=host",
                "-v", f"{repo}:/pq:ro", "-v", "/mnt/shared:/mnt/shared:ro",
                "-v", f"{local_out}:/out", "-w", "/pq",
                "-e", f"PYTHONPATH={args.source}/src:/pq", "-e", "PYTHONDONTWRITEBYTECODE=1",

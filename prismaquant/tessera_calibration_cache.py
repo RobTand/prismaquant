@@ -25,6 +25,7 @@ from .digests import (
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
+    file_digest_sha256hex,
     git_blob_sha1hex,
     hex_chain_sha256hex,
     indent2_json_file_bytes,
@@ -91,7 +92,7 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
                         advised = end
                 if resource_check is not None:
                     resource_check(f'after_capture_hash:{Path(path).name}')
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+        return file_digest_sha256hex(handle)
 
 
 @contextmanager
@@ -319,9 +320,12 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     in between. Without ``source_files`` the shards are checked against the
     checkpoint index alone. Returns ``({shard name: sha256}, proof sha256)``.
     """
-    from .cost_streaming import (_local_checkpoint_shards,
-                                 _read_streamed_model_identity_cache,
-                                 stat_fingerprint, stat_fingerprint_reusable)
+    from .streamed_model_identity import (
+        _local_checkpoint_shards,
+        _read_streamed_model_identity_cache,
+        stat_fingerprint,
+        stat_fingerprint_reusable,
+    )
 
     root = Path(os.path.abspath(root))
     path = Path(cache_path)
@@ -869,7 +873,7 @@ class CaptureSourceAuthentication:
         """Hold a recording owner's held object to the object its prep stat."""
         if self._fingerprints is None or name not in self._fingerprints:
             return
-        from .cost_streaming import stat_fingerprint, stat_fingerprint_reusable
+        from .streamed_model_identity import stat_fingerprint, stat_fingerprint_reusable
         live = stat_fingerprint(str((self.root/name).resolve()), observed)
         seal_check('capture prep source stat', self._fingerprints[name], live, where=name,
             same=stat_fingerprint_reusable(live, self._fingerprints[name]),
@@ -947,9 +951,9 @@ class CaptureSourceAuthentication:
         each full-file SHA against the hash-bound canonical capture, then
         open and hold those exact objects through all future reads. The live
         runner's ``build_streamed_model_identity`` still checks its semantic
-        config and executable weight map before qualification. A changed file
-        (including a same-size edit with restored mtime) refuses; it is never
-        silently rehashed under a manifest that omitted the source read.
+        config and executable weight map before qualification. In certified
+        mode, changed source/proof metadata refuses. Development mode follows
+        the existing seal policy: warn and retain recorded source metadata.
 
         ``expected_sha256`` binds the proof file itself: the bytes read here
         must hash to it, checked before any held state changes. A caller that
@@ -966,8 +970,8 @@ class CaptureSourceAuthentication:
             _, held[name] = self._file(self.root / name)
             return held[name]['before']
 
-        # ``_expected`` agrees with ``_source_files`` on every roster name (the
-        # constructor refuses otherwise), so the roster is the capture's own.
+        # The roster is the capture's own; producer digest disagreements go
+        # through seal_check's certified refusal/development warning policy.
         digests, proof_sha256 = streamed_identity_proof_digests(
             self.root, cache_path, self._source_files, live_stat=live_stat,
             expected_sha256=expected_sha256)
@@ -980,7 +984,7 @@ class CaptureSourceAuthentication:
         return len(digests)
 
     def adopt_identity_proof_or_hash(self, cache_path, expected_sha256):
-        """Adopt a planned identity proof, or leave every read to hash fresh.
+        """Adopt a planned identity proof, or use ordinary source authentication.
 
         A Stage A row reads a few shards of a complete source. Hashing each
         one on first read idled the GPU reservation for 41% of a row
@@ -989,11 +993,11 @@ class CaptureSourceAuthentication:
         :meth:`adopt_streamed_identity_cache`, with that method's own checks
         and nothing weaker. A proof that refuses -- a changed stat
         fingerprint, a proof file that differs from its declared digest, a
-        missing file -- changes no held state: each payload read then hashes
-        its shard through the held descriptor, as it did before this method
-        existed, and the receipt records why. Integrity is the same either
-        way; only where the digest came from differs. Returns the count of
-        shards adopted, 0 on refusal.
+        missing file -- leaves payload reads to the existing source policy.
+        Certified mode hashes each shard through its held descriptor;
+        development mode may retain its recorded digest without hashing.
+        The receipt records the adoption refusal and digest source. Returns
+        the count of shards adopted, 0 on refusal.
         """
         try:
             adopted = self.adopt_streamed_identity_cache(
@@ -1005,7 +1009,7 @@ class CaptureSourceAuthentication:
                 path=str(cache_path), declared_sha256=expected_sha256,
                 reason=f'{type(exc).__name__}: {exc}')
             print(f'[source] identity proof {cache_path} refused ({exc}); '
-                  'every payload read hashes its shard fresh', flush=True)
+                  'payload reads use the current source-authentication policy', flush=True)
             return 0
         print(f'[source] adopted {adopted} full-file SHA proofs from {cache_path}',
               flush=True)
@@ -1015,7 +1019,8 @@ class CaptureSourceAuthentication:
         """Let a census derived from this capture's source bind its roster.
 
         A derived capture covers units the canonical capture never ran (an
-        MTP layer outside the streamed text forward) over the same source
+        MTP layer outside the streamed text forward, or the scoped attention
+        roster the body campaign pins) over the same source
         checkpoint. It inherits this owner's hash-bound source roster instead
         of re-hashing every shard, and its payload reads are still
         authenticated one shard at a time. The derived census must name the
@@ -1617,7 +1622,7 @@ def fold_load_receipt(execution, receipt):
 
 def capture_entry_fingerprint(path):
     """The stat fingerprint of one regular, nonsymlink capture entry file."""
-    from .cost_streaming import stat_fingerprint
+    from .streamed_model_identity import stat_fingerprint
     observed = Path(path).lstat()
     if not stat.S_ISREG(observed.st_mode):
         raise RuntimeError(f'{path}: capture entry must be a regular nonsymlink file')
@@ -1667,7 +1672,7 @@ def _write_capture_entry(root, name, *, inputs, hessian, count, max_abs):
 
 def _require_verified_entry(path, name, record, verified):
     """An entry this capture wrote or verified, still the object it was then."""
-    from .cost_streaming import stat_fingerprint_reusable
+    from .streamed_model_identity import stat_fingerprint_reusable
     if (not isinstance(verified, dict) or verified.get('sha256') != record['sha256']
             or verified.get('path') != record['path']):
         raise RuntimeError(f'{name}: verified capture record differs from the journal')
@@ -1749,8 +1754,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             payload = dict(inputs=acts[name],hessian=hessians[name],count=counts[name],
                            max_abs=maxima[name],name=name,source=SOURCE)
             _validate_tensors(name,payload,census,identity['max_act_rows'])
-            path, record, _fingerprint = _write_capture_entry(root, name, inputs=acts[name],
+            path, record, fingerprint = _write_capture_entry(root, name, inputs=acts[name],
                 hessian=hessians[name], count=counts[name], max_abs=maxima[name])
+            _require_verified_entry(path, name, record, {**record, 'fingerprint': fingerprint})
             file_stat = path.stat() if release_file_pages else None
         else:
             if record.get('path') != str(expected_path):

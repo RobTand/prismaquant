@@ -89,8 +89,8 @@ class RoutedInputFixture:
 
     @contextmanager
     def capture(self):
-        from prismaquant import measure_quant_cost
-        original = measure_quant_cost.derive_per_expert_activations
+        from prismaquant import routed_experts
+        original = routed_experts.derive_per_expert_activations
 
         def derive(module, *args, **kwargs):
             result = original(module, *args, **kwargs)
@@ -123,7 +123,7 @@ class RoutedInputFixture:
             self.records.append(record)
             return result
 
-        with patch.object(measure_quant_cost, 'derive_per_expert_activations', derive):
+        with patch.object(routed_experts, 'derive_per_expert_activations', derive):
             yield
 
     def manifest(self, max_rows):
@@ -156,8 +156,8 @@ class RoutedInputFixture:
 
     def replay(self, model, targets, tokens, max_rows, device, *, shared, profile,
                after_batch, resource_check):
-        from prismaquant import measure_quant_cost, production_weight_cache
-        from prismaquant.tessera_campaign import _collect_activations
+        from prismaquant import routed_experts, production_weight_cache
+        from prismaquant.tessera_calibration_forward import capture_activation_statistics
         original_collector = production_weight_cache._PackedExpertActivationCollector
         installed = []
         next_batch = 0
@@ -186,8 +186,8 @@ class RoutedInputFixture:
             after_batch(next_batch)
 
         with patch.object(production_weight_cache, '_PackedExpertActivationCollector', InputDelivery), \
-                patch.object(measure_quant_cost, 'derive_per_expert_activations', derive):
-            result = _collect_activations(model, targets, tokens, max_rows, device,
+                patch.object(routed_experts, 'derive_per_expert_activations', derive):
+            result = capture_activation_statistics(model, targets, tokens, max_rows, device,
                 want_hessian=True, profile=profile, forward_batch=forward,
                 resource_check=resource_check, shared_packed_inputs=shared)
         if next_batch != len(self.records):
@@ -207,7 +207,7 @@ def qualify_collector(model, members, tokens, max_rows, device, *, profile,
                       actual_forward, out, check_guard, mark, max_fixture_bytes):
     """Capture once; interleave legacy/shared/shared/legacy in one admitted action."""
     import json
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     targets = [member.qname for member in members]
     fixture = RoutedInputFixture(members, max_batches=len(tokens), max_bytes=max_fixture_bytes,
@@ -218,7 +218,7 @@ def qualify_collector(model, members, tokens, max_rows, device, *, profile,
                   arm_order=['legacy', 'shared', 'shared', 'legacy'], arms=[])
     try:
         with fixture.capture():
-            capture = _collect_activations(model, targets, tokens, 0, device,
+            capture = capture_activation_statistics(model, targets, tokens, 0, device,
                 want_hessian=False, profile=profile, forward_batch=actual_forward,
                 resource_check=check_guard)
         if any(value is not None for value in capture[0].values()) or capture[1]:

@@ -4,7 +4,7 @@ import copy
 import pytest
 
 from experiments import measure_glm_tr3_vllm as served
-from prismaquant import shipcard
+from prismaquant import shipcard_slots
 from test_glm_tr3_gold_bridge import _completed_result
 
 
@@ -19,7 +19,7 @@ def _arms():
 
 
 def _problems(candidate, control):
-    return shipcard._replay_control_arms(
+    return shipcard_slots._replay_control_arms(
         "uniform_control", {"metrics": {"gold_metric_key": "kl_mean"}, "control_arm": control},
         {"candidate": 0.125, "control": 0.25},
         card={"model_sha": "d" * 64, "slots": {"gold.kl": candidate}})

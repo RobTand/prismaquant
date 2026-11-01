@@ -1,17 +1,15 @@
 """The seam under a wire recipe whose size is a function of the shape.
 
-Tessera's E4M3 grid is scheduled to move from the TCQ body over a block scale
-plane to the **window body over the CHANNEL plane**
-(``tessera.export.wire_recipe``'s own docstring names the flip and its gates;
-measured 0.985x of EXL3 K4 at 4.0 bpp).  That recipe charges two things no
+Tessera's E4M3 recipe uses the window body over the CHANNEL plane.
+That recipe charges two things no
 bits-per-parameter rate can state: one fp16 per output row, and one
 ``2**L``-byte window table per unit.  The same rung is 4.0078 bpp on a
 2048x4096 tensor and 4.4653 bpp on a 96x768 one.
 
-These tests run the seam in that world by substituting ``wire_recipe`` for the
+These tests exercise the seam by substituting ``wire_recipe`` for the
 E4M3 grids only, and they assert the substitution took effect before asserting
 anything else -- the recipe lookup is memoised, so a test that forgot to clear
-the cache would otherwise pass while measuring today's wire.
+the cache would otherwise pass while measuring the unpatched wire.
 
 The authority for every number here is ``tessera.calculator.terminal_rate``,
 called directly with the plane flags the recipe implies, never through the code

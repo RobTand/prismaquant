@@ -18,7 +18,7 @@ the MTP objective as the seed:
   (packed routed experts and the shared expert) and projects each render's
   ``dW`` through ``joint_statistics_replay.observe_and_project_windows``, the
   same statistics and projection arithmetic as a body layer.
-* **Rows.** ``joint_aura.make_joint_aura_entry`` on a probe identity carrying
+* **Rows.** ``joint_aura_rows.make_joint_aura_entry`` on a probe identity carrying
   ``glm_mtp.mtp_objective_identity``, so a body join refuses them.
 
 The output is a ``prismaquant.glm_mtp_cost.v1`` payload, the input of the
@@ -37,7 +37,6 @@ from typing import Callable, Mapping
 import torch
 
 from . import glm_mtp
-from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 SCOPE = "mtp"
@@ -91,28 +90,23 @@ def mtp_probe_identity(*, source_model, calibration_ids, n_probes, seed_base, ar
     sequence contributes ``T - 1`` rows, the probe is normalized by
     ``n * (T - 1)``, and ``glm_mtp.mtp_objective_identity`` names the seed.
     """
-    from .aura_cost import _aura_source_sha256
+    from .aura_provenance import producer_package_sha256
     from .kl_fisher import ROW_PROBE_LAYOUT
+    from .joint_aura import make_joint_probe_identity
 
     n, length = (int(size) for size in calibration_ids.shape)
-    probe = {
-        "schema": "prismaquant.joint_aura.probes.v2",
-        "source_model": source_model,
-        "calibration_sha256": bytes_sha256hex(calibration_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": [n, length],
-        "calibration_dtype": str(calibration_ids.dtype),
-        "n_probes": int(n_probes), "seed_base": int(seed_base),
-        "token_scope": "all", "temperature": 1.0,
-        "distribution": "rademacher", "normalization": "global_kl_fisher",
-        "producer_source_sha256": _aura_source_sha256(),
-        "source_execution": source_execution,
-        "arithmetic": arithmetic,
-        "noise_layout": {
-            "schema": ROW_PROBE_LAYOUT, "global_rows": n, "sequence_length": length,
-            "selected_tokens_per_row": length - 1, "vocab_size": int(vocab_size),
-            "token_scope": "all",
-            "global_token_count": glm_mtp.mtp_global_token_count(n, length),
-        },
+    probe = make_joint_probe_identity(
+        calibration_ids=calibration_ids, source_model=source_model,
+        n_probes=int(n_probes), seed_base=int(seed_base),
+        token_scope="all", temperature=1.0,
+        producer_source_sha256=producer_package_sha256(),
+        source_execution=source_execution, arithmetic=arithmetic,
+    )
+    probe["noise_layout"] = {
+        "schema": ROW_PROBE_LAYOUT, "global_rows": n, "sequence_length": length,
+        "selected_tokens_per_row": length - 1, "vocab_size": int(vocab_size),
+        "token_scope": "all",
+        "global_token_count": glm_mtp.mtp_global_token_count(n, length),
     }
     return glm_mtp.with_mtp_objective(probe, glm_mtp.mtp_objective_identity(
         mtp_layer=int(mtp_layer), sequence_length=length, n_sequences=n))
@@ -192,9 +186,8 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
     """
     from . import format_registry as fr
     from .glm_mtp_capture import sequence_progress
-    from .joint_aura import (activation_identity, identity_sha256, make_joint_aura_entry,
-                             source_execution_identity,
-                             validated_probe_identity)
+    from .joint_aura import activation_identity, source_execution_identity
+    from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry, validated_probe_identity
     from .joint_served_activation import joint_activation_maxima
     from .joint_statistics_replay import (observe_and_project_windows,
                                           statistics_arithmetic_identity)
@@ -234,7 +227,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
         source_execution=source_execution_identity(model),
         mtp_layer=model.layer.layer_idx, vocab_size=int(lm_head.weight.shape[0]))
     validated = validated_probe_identity(probe_identity)
-    probe_sha256 = identity_sha256(validated)
+    probe_sha256 = joint_identity_sha256(validated)
 
     # The installed sources and the activation contracts depend on nothing a
     # probe computes, so they are checked against the preparation before the
@@ -331,7 +324,7 @@ def compute_mtp_cost(model, embed_tokens, lm_head, calibration_ids, hidden_state
                                         signed_components=components[(name, fmt)])
             row["probe_identity"] = probe_identity
             costs[name][fmt] = row
-    if identity_sha256(probe_identity) != probe_sha256:
+    if joint_identity_sha256(probe_identity) != probe_sha256:
         raise RuntimeError("MTP probe identity changed during measurement")
     return {
         "schema": SCHEMA,
@@ -388,6 +381,8 @@ def run_mtp_scope(runner, *, config, data, production_cache, calibration_ids, ca
         raise RuntimeError("the final hidden states were computed on another calibration draw")
     if tuple(calibration_ids.shape)[0] != len(final["records"]):
         raise RuntimeError("the final-hidden entries do not cover the calibration draw")
+    cap.require_final_hidden_source(
+        final, config["canonical_capture"], where="MTP pricing final hidden")
 
     runner.context.schedule_prefetch(layer)
     runner.context.install(layer, require_prefetched=runner.require_prefetched_residency,

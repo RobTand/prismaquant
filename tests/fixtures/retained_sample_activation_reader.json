@@ -1,0 +1,76 @@
+{
+  "qname": "model.layers.0.q_proj",
+  "filename": "model__layers__0__q_proj.pt",
+  "tensors": {
+    "inputs": [
+      [
+        0.0,
+        1.0,
+        2.0
+      ],
+      [
+        3.0,
+        4.0,
+        5.0
+      ],
+      [
+        18.0,
+        19.0,
+        20.0
+      ]
+    ],
+    "row_indices": [
+      0,
+      1,
+      6
+    ],
+    "row_priorities": [
+      484211665,
+      827814195,
+      948996335
+    ]
+  },
+  "stamp": {
+    "schema": "prismaquant.probe.sample_activation_cache_merge.v1",
+    "cover_identity_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "priority_schema": "blake2b64-keyed-fmix32x2-prp-global-row-fused-group-v2",
+    "identity_sha256": "ae215d2222daea3ba638dafbe02b9d656879c66ac440fba7c769f2237dbc77e5",
+    "priority_group": "model.layers.qkv"
+  },
+  "verification_contract": {
+    "schema": "prismaquant.probe.sample_activation_cache_merge.v1",
+    "cover_identity_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "priority_schema": "blake2b64-keyed-fmix32x2-prp-global-row-fused-group-v2",
+    "records": {
+      "model.layers.0.q_proj": {
+        "inputs": {
+          "dtype": "torch.float32",
+          "shape": [
+            3,
+            3
+          ],
+          "sha256": "594444b8210f8cf02b78d788112cb84f9f7a9af6cbca59f89a65148b8726a950"
+        },
+        "row_indices": {
+          "dtype": "torch.int64",
+          "shape": [
+            3
+          ],
+          "sha256": "11bb3f5c7019118bac58dfc6e5d7635f56de7812358859e619df458f35e11369"
+        },
+        "row_priorities": {
+          "dtype": "torch.int64",
+          "shape": [
+            3
+          ],
+          "sha256": "9d0c9f131a0b0d2a5aaa5c666c2d62358b2baeb8a34041e41d0977a5c6f9ed91"
+        },
+        "source_shards": [
+          0
+        ],
+        "priority_group": "model.layers.qkv",
+        "identity_sha256": "ae215d2222daea3ba638dafbe02b9d656879c66ac440fba7c769f2237dbc77e5"
+      }
+    }
+  }
+}

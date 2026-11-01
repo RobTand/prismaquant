@@ -112,7 +112,7 @@ def test_a_corrupt_checkpoint_is_discarded_fail_closed_and_rewalked(tmp_path):
 def test_a_banked_unit_whose_inputs_drifted_is_rewalked_not_trusted(tmp_path):
     """The cursor re-verifies each banked unit against the bytes it names."""
     from prismaquant import tessera_joint_aura as bridge
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     config, names, fmt, _payload, _states = fixture(tmp_path)
     # Roster positions, not fixture list positions: the walk visits
@@ -120,7 +120,7 @@ def test_a_banked_unit_whose_inputs_drifted_is_rewalked_not_trusted(tmp_path):
     first, second = sorted(names)
     journal = tmp_path / "head-walk"
     bridge.load_measured_anchor_input(config, verify_payloads=False, head_checkpoint=journal)
-    render = tmp_path / "campaign/rows/row-0000/cache" / _cache_weight_filename(second, fmt)
+    render = tmp_path / "campaign/rows/row-0000/cache" / cache_weight_filename(second, fmt)
     render.write_bytes(render.read_bytes() + b"drifted")
 
     data = bridge.load_measured_anchor_input(config, verify_payloads=False,

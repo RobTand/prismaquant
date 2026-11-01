@@ -38,15 +38,15 @@ import pytest
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import (
+from prismaquant.source_format_contracts import (
     PASSTHROUGH_WIRE_FORMAT_IDS,
     REQUANT_WIRE_FORMAT_IDS,
     SOURCE_BPP_EXCEEDED_REASON,
     SOURCE_BPP_UNKNOWN_REASON,
     SOURCE_PASSTHROUGH_CONTRACTS,
     WIRE_FORMAT_IDS,
-    check_format_applicability,
 )
+from prismaquant.allocator_candidates import check_format_applicability
 from prismaquant.layer_config import canonicalize_format
 from prismaquant.mx_formats import (
     E4M3_MAX,
@@ -169,7 +169,7 @@ def test_the_shared_exponent_is_the_smallest_that_does_not_clip(amax, expected):
     assert amax / 2.0 ** (got - 1) > E4M3_MAX
 
 
-def test_the_ceil_rule_never_lets_an_element_reach_the_e4m3_rail():
+def test_the_ceil_rule_never_lets_an_element_exceed_the_e4m3_rail():
     g = torch.Generator().manual_seed(3)
     for power in (-140, -60, -8, 0, 8, 60, 118):
         x = torch.randn(16, GROUP, generator=g) * (2.0 ** power)
@@ -298,7 +298,7 @@ def test_a_block128_fp8_source_re_encodes_with_zero_weight_error():
     Any tensor whose stored form is E4M3 codes times a shared power of two —
     the DeepSeek ``fp8_e4m3_ue8m0_block128`` body convention — is exactly
     representable here, because the ceil rule can never pick a group exponent
-    above the block's own, so every element is an E4M3 code scaled DOWN by a
+    above the block's own, so every element is an E4M3 code scaled UP by a
     power of two. 128 = 4*32, so a chunk never straddles a block boundary.
 
     Stated on the WEIGHT plane deliberately. The served lane is W8A8, so a
@@ -323,7 +323,7 @@ def test_zero_weight_error_does_not_make_the_layer_output_exact():
     This is the honesty the allocator gates depend on: a block-FP8 source on
     this rung must NOT look free.
     """
-    from prismaquant.allocator_candidates import cost_entry_is_bit_exact
+    from prismaquant.priced_cell import cost_entry_is_bit_exact
 
     spec = fr.get_format(FMT)
     w, _ = _block128_source(n=128, k=128, block=64)
@@ -448,8 +448,8 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
     from prismaquant.allocator_candidates import (
         ACTIVATION_COST_UNMEASURED_REASON,
         build_candidates,
-        cost_entry_prices_unmeasured_activation_at_zero,
     )
+    from prismaquant.priced_cell import cost_entry_prices_unmeasured_activation_at_zero
 
     # The bare predicate: weight-lossless, no measured output side, priced 0.
     assert cost_entry_prices_unmeasured_activation_at_zero(
@@ -461,7 +461,7 @@ def test_an_unmeasured_activation_side_is_masked_not_admitted():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research", mask_records=masks)
+        target_profile="research", mask_records=masks).candidates
     assert FMT not in {c.fmt for c in cands[name]}
     assert any(m["format"] == FMT
                and m["reason"] == ACTIVATION_COST_UNMEASURED_REASON
@@ -478,7 +478,7 @@ def test_a_measured_activation_side_passes_menu_admission():
     cands = build_candidates(
         stats, costs,
         [fr.get_format(FMT), fr.get_format("BF16")],
-        target_profile="research")
+        target_profile="research").candidates
     chosen = {c.fmt: c for c in cands[name]}
     assert FMT in chosen
     assert chosen[FMT].predicted_dloss > 0.0
@@ -647,8 +647,8 @@ def test_the_batched_render_is_the_same_codec_as_the_unbatched_one():
 
     ``weight_element_dtype`` is "fp8_e4m3" here and on MXFP8_E4M3, so a
     fall-through would render this rung with MXFP8's E8M0 snap instead of its
-    own saturating-ceil rule — pricing the batched path with a different codec
-    than the exporter writes.
+    own saturating-ceil rule, pricing the batched path with a different codec
+    from the surviving unbatched research path. This rung has no live writer.
     """
     from prismaquant import measure_quant_cost as mqc
 

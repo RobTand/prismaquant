@@ -188,6 +188,22 @@ def _activation_qdq(
     return act_spec.activation_quantize_dequantize(x)
 
 
+
+def _packed_activation_qdq_is_row_local(spec) -> bool:
+    """Only proven row-local QDQ may combine expert batches.
+
+    Static served contracts use a fixed unit scale and independent row groups.
+    The listed dynamic quantizers reduce columns within each row. Unknown
+    quantizers may reduce over the batch and must use the eager reference.
+    """
+    contract = getattr(spec, "static_activation_contract", None)
+    if contract is not None and contract.measured_as_served:
+        return True
+    quantize = spec.activation_quantize_dequantize
+    return any(quantize is fr.get_format(name).activation_quantize_dequantize
+               for name in ("NVFP4", "MXFP4", "MXFP8_E4M3", "MXFP8_E5M2",
+                            "MXFP8_UE8M0_G32", "FP8_E4M3", "FP8_E5M2"))
+
 def activation_cache_filename(name: str) -> str:
     return _FNAME_SUB.sub("__", name) + ".pt"
 
@@ -691,10 +707,11 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
                          deadline=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
-    Returns the entered ``(window, key, staged)``: the RAM leg refuses
-    fast (RAM-mover covers unresolved), the SSD copy acquires honestly
-    with the map's leads. Raises ``LeaseRefused`` before any pool payload
-    byte when unmapped, unfenced, or unpermitted. The caller opens keys,
+    Returns the unentered ``(window, key, staged, resolver)``. The shared
+    lease owner selects RAM when allowed and covered, or acquires the SSD
+    copy with its own covers after a RAM availability refusal. Raises
+    ``LeaseRefused`` before any pool payload byte when unmapped, unfenced,
+    or unpermitted. The caller enters the window and opens keys,
     reads through held descriptors, verifies content against
     ``expected_sha256``, re-checks the declared file's binding, and exits
     the window (close-then-release) on every path.
@@ -1831,20 +1848,6 @@ class _ExactActivationPrefetch:
         return self._tensors[reference]
 
 
-#: How the strict exact-entry reader leased its windows, this process
-#: (PQ #997). ``windows_batched`` counts multi-entry lease windows and
-#: ``entries_batched`` the entries they served; ``entries_single`` counts
-#: entries leased one at a time, and ``batch_fallbacks`` the groups whose
-#: batched lease was refused and re-read one entry at a time.
-EXACT_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
-                        "entries_single": 0, "batch_fallbacks": 0}
-
-
-def exact_lease_counters() -> dict:
-    """A copy of :data:`EXACT_LEASE_COUNTERS` for a report."""
-    return dict(EXACT_LEASE_COUNTERS)
-
-
 _EXACT_READ_POOL = None
 _EXACT_READ_POOL_THREADS = 0
 _EXACT_READ_POOL_LOCK = threading.Lock()
@@ -2006,81 +2009,6 @@ def _strict_lease_groups(references, resolver, *, deadline=None):
     return list(groups.values())
 
 
-def _enter_group_lease(entry_resolver, members, live_windows, counters=None):
-    """Pin one group in at most two windows (RAM, then SSD), or ``None``.
-
-    The group-granular form of ``acquire_entry_window``'s RAM-first rule.
-    Entries offering a RAM copy share one RAM window when RAM is allowed,
-    and the rest share one SSD window. When the RAM cover lookup refuses as
-    availability for the whole set (the epoch moved, nothing is published
-    at it, the tier is not announced), each of those entries records the
-    RAM fallback and joins the SSD window, which is what the single-entry
-    leg does for each of them.
-
-    Every other refusal returns ``None`` after releasing whatever this call
-    pinned, and the caller re-reads the group one entry at a time, keeping
-    the single-entry refusal kinds exactly. This covers a partial RAM cover,
-    any refusal of the SSD lookup, and any refusal to enter. A batched
-    lookup that misses one key refuses the whole set as
-    ``source-coverage-gap`` (integrity), where that entry alone would
-    refuse ``unpublished`` (availability). A read is never served on a
-    batched proof alone: the SDK re-verifies every key under the ownership
-    lock at acquire, and every key is still opened through the SDK under
-    the pin.
-
-    ``members`` is ``[(ref, staged entry), ...]`` where ``ref.path`` is the
-    declared file. ``counters`` is the report this call adds to
-    (:data:`EXACT_LEASE_COUNTERS` unless the caller keeps its own, as the
-    PWC retained window does).
-    """
-    from .staged_lease import LeaseRefused, acquire_entries_window
-    if counters is None:
-        counters = EXACT_LEASE_COUNTERS
-    from .staged_tier_policy import tier_is_allowed
-    ram = ([member for member in members if member[1].get("ram_path") is not None]
-           if tier_is_allowed("ram") else [])
-    ssd = [member for member in members if member not in ram]
-    assignments, entered = {}, []
-
-    def items(subset):
-        return [(Path(ref.path), staged) for ref, staged in subset]
-
-    try:
-        plans = []
-        if ram:
-            try:
-                plans.append(acquire_entries_window(entry_resolver, items(ram), tier="ram")
-                             + (ram,))
-            except LeaseRefused as refusal:
-                # ``source-coverage-gap`` (a partial RAM cover) is classed
-                # integrity, so it takes the per-entry path below.
-                if refusal.kind != "availability":
-                    raise
-                for ref, _staged in ram:
-                    entry_resolver.record_ram_fallback(Path(ref.path), str(refusal))
-                ssd = list(members)
-        if ssd:
-            plans.append(acquire_entries_window(entry_resolver, items(ssd), tier="ssd")
-                         + (ssd,))
-        for lease_window, keys, subset in plans:
-            lease_window.__enter__()
-            # Owned by the caller's cleanup from the moment it is entered,
-            # so a failed release below can never strand the pin.
-            live_windows.append(lease_window)
-            entered.append(lease_window)
-            for (ref, _staged), key in zip(subset, keys):
-                assignments[ref] = (lease_window, key)
-    except LeaseRefused:
-        for lease_window in entered:
-            lease_window.__exit__(None, None, None)
-            live_windows.remove(lease_window)
-        counters["batch_fallbacks"] += 1
-        return None
-    counters["windows_batched"] += len(entered)
-    counters["entries_batched"] += len(members)
-    return assignments
-
-
 def _exact_entry_prechecks(ref, *, expected_session, session_for_reference, path=None):
     """The declared-file fences every read runs first: ``(path, stat, signature)``.
 
@@ -2213,6 +2141,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     it has returned. A refusal is the one the serial read raises: the
     first failing entry in window order, with its kind unchanged.
     """
+    from .staged_lease import EXACT_LEASE_COUNTERS, enter_group_lease
+
     references = tuple(references)
     if any(not isinstance(ref, ExactActivationReference) for ref in references):
         raise TypeError("exact activation prefetch requires immutable references")
@@ -2321,7 +2251,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         """
         checked = _run_in_order(pool, [partial(_exact_entry_prechecks, ref, **prechecks)
                                        for ref, _ in members])
-        assignments = (_enter_group_lease(entry_resolver, members, live_windows)
+        assignments = (enter_group_lease(entry_resolver, members, live_windows)
                        if len(members) > 1 else None)
         if assignments is None:
             for ref, _staged in members:
@@ -2661,7 +2591,7 @@ class PerturbedActivationCache:
         # the export's act-clip behavior.  See production_weight_cache.py
         # for the convention note (we store max_abs directly; the export's
         # vLLM-facing metadata is derived via
-        # export_native_compressed._nvfp4_input_global_scale_from_max_abs).
+        # native_render_codec.nvfp4_input_global_scale_from_max_abs).
         if production_weight_cache is not None and (
             production_weight_cache.activation_max_abs
             or production_weight_cache.activation_scales
@@ -2816,6 +2746,14 @@ class PerturbedActivationCache:
                         f"({param_plan.name!r}, {fmt!r}); set "
                         f"PRISMAQUANT_STRICT_PRODUCTION_CACHE=0 to fall back "
                         f"to RTN, or rebuild the cache to cover this Linear."
+                    )
+                if fr.requires_production_render(fmt):
+                    raise RuntimeError(
+                        f"production_weight_cache is required for "
+                        f"{fr.format_owner_label(fmt)} "
+                        f"({param_plan.name!r}, {fmt!r}); the registry "
+                        "render is a weights-only reconstruction, not the "
+                        "decoded wire and not the H-aware encode that ships"
                     )
                 original = param.data.detach().clone()
                 q = spec.quantize_dequantize(original).to(
@@ -3300,6 +3238,7 @@ class PerturbedActivationCache:
         packed = self._fused_nvfp4_weight_cache.get(cache_key)
         if packed is None:
             from prismaquant.kernels.nvfp4_fused import nvfp4_pack_weight
+            from prismaquant.native_render_levers import NativeRenderLevers
 
             enforce_gpu_memory_budget(
                 [self],
@@ -3332,7 +3271,10 @@ class PerturbedActivationCache:
                         f"PRISMAQUANT_STRICT_PRODUCTION_CACHE=0 to allow "
                         f"raw-weight fallback or rebuild the cache."
                     )
-            packed = nvfp4_pack_weight(source)
+            # The opt-in fused fast path packs under the process's native
+            # numerical controls, as it always has; it is not an export.
+            packed = nvfp4_pack_weight(
+                source, levers=NativeRenderLevers.resolve())
             self._fused_nvfp4_weight_cache[cache_key] = packed
             self._fused_nvfp4_weight_cache.move_to_end(cache_key)
             enforce_gpu_memory_budget(
@@ -3436,8 +3378,10 @@ class PerturbedActivationCache:
             param.data.copy_(original.to(device=param.device, dtype=param.dtype))
         plan.active_originals.clear()
 
-    def _packed_act_plan(self, plan: _ModulePlan) -> list[_ParamPlan] | None:
-        """The per-projection params of a packed-experts plan, or None.
+    def _packed_act_plan(
+        self, plan: _ModulePlan, *, active_only: bool = True,
+    ) -> list[_ParamPlan] | None:
+        """The packed projection params, restricted to active QDQ by default.
 
         A packed-experts module owns several 3-D projection parameters and is
         not an ``nn.Linear``, so the module-level pre-hook can only ever see
@@ -3458,35 +3402,34 @@ class PerturbedActivationCache:
             return None
         members = [
             p for p in plan.params
-            if getattr(p.spec, "act_quant_changes_input", False)
+            if (not active_only or getattr(p.spec, "act_quant_changes_input", False))
             and getattr(getattr(plan.module, p.attr, None), "ndim", 0) == 3
         ]
         return members or None
 
     def _install_packed_expert_activation_quant(self, plan: _ModulePlan) -> None:
-        """Quantize each expert-slice ``F.linear`` input with ITS OWN spec.
+        """Quantize both packed projection inputs with their own scales.
 
-        Same interception the probe uses to capture packed-expert Fisher
-        (``sensitivity_probe.install_packed_expert_hooks``): swap ``F.linear``
-        for the duration of the experts-module forward and dispatch on whether
-        the weight is a dim-0 slice of one of this plan's packed parameters.
-        Eval-time only -- no autograd Function, no gradient path.
-
-        Each projection uses its own calibrated activation scale, keyed by its
-        own param name. The module-level pre-hook's act-qdq is suppressed for
-        these plans (see ``_make_pre_hook``) so gate_up's input is quantized
-        exactly once, here, rather than once there and once again inside.
+        Row-local QDQ runs once on each sorted grouped-matmul input. A
+        batch-dependent or unknown quantizer uses the per-expert eager
+        reference. The module pre-hook skips these plans to avoid double QDQ.
+        A hooked batched_mm call uses grouped_mm. Its unhooked reference
+        keeps batched_mm.
+        Grouped dispatch refuses unless QDQ runs exactly once per active projection.
         """
-        members = self._packed_act_plan(plan)
-        if members is None:
+        if self._packed_act_plan(plan, active_only=False) is None:
             return
         from prismaquant.sensitivity_probe import _packed_expert_slice_index
 
         module = plan.module
         original_forward = module.forward
         owner = self
-
         def _forward(*args, **kwargs):
+            members = owner._packed_act_plan(plan)
+            if members is None:
+                return original_forward(*args, **kwargs)
+            row_local = all(_packed_activation_qdq_is_row_local(member.spec)
+                            for member in members)
             targets: dict[int, _ParamPlan] = {}
             params: dict[int, torch.Tensor] = {}
             for member in members:
@@ -3511,11 +3454,54 @@ class PerturbedActivationCache:
                             owner._priced_input_global_scales)
                 return orig_linear(input, weight, bias)
 
-            F.linear = _intercepting_linear
+            original_grouped = getattr(F, "grouped_mm", None)
+            config = getattr(module, "config", None)
+            implementation = getattr(config, "_experts_implementation", None)
+            use_grouped = (row_local and original_grouped is not None
+                           and implementation in ("batched_mm", "grouped_mm"))
+            grouped_calls = dict.fromkeys(targets, 0)
+
+            def _intercepting_grouped(input, weight, *, offs=None, **kwargs):
+                base = weight._base if weight._is_view() else weight
+                member = targets.get(id(base))
+                if member is not None:
+                    if not row_local:
+                        raise RuntimeError("batch-dependent packed QDQ requires the eager reference")
+                    parameter = params[id(base)]
+                    expected = parameter.transpose(-2, -1)
+                    if (weight.shape != expected.shape or weight.stride() != expected.stride()
+                            or weight.storage_offset() != expected.storage_offset()
+                            or input.ndim != 2 or input.shape[1] != parameter.shape[2]
+                            or not isinstance(offs, torch.Tensor) or offs.ndim != 1
+                            or len(offs) != parameter.shape[0]
+                            or offs.dtype not in (torch.int32, torch.int64)):
+                        raise RuntimeError("packed activation QDQ grouped geometry differs")
+                    input = _activation_qdq(
+                        input, member.spec, owner._activation_scales,
+                        member.name, owner._priced_input_global_scales)
+                    grouped_calls[id(base)] += 1
+                return original_grouped(input, weight, offs=offs, **kwargs)
+
             try:
-                return original_forward(*args, **kwargs)
+                F.linear = _intercepting_linear
+                if original_grouped is not None:
+                    F.grouped_mm = _intercepting_grouped
+                if implementation is not None:
+                    config._experts_implementation = "grouped_mm" if use_grouped else "eager"
+                result = original_forward(*args, **kwargs)
+                if use_grouped:
+                    for parameter_id, count in grouped_calls.items():
+                        if count != 1:
+                            raise RuntimeError(
+                                "packed activation QDQ grouped dispatch must quantize "
+                                f"{targets[parameter_id].name} exactly once; saw {count} calls")
+                return result
             finally:
                 F.linear = orig_linear
+                if original_grouped is not None:
+                    F.grouped_mm = original_grouped
+                if implementation is not None:
+                    config._experts_implementation = implementation
 
         module.forward = _forward
         self._fused_forward_originals.append((module, original_forward))
@@ -3679,9 +3665,31 @@ def load_text_model_under_work_root(
     work_root: str | Path,
     device_map: str | None = None,
 ) -> nn.Module:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM
+    from prismaquant.streamed_model_identity import (
+        resolve_source_checkpoint_path, source_model_decode_contract,
+    )
 
-    staged = stage_text_only_under_work_root(model_path, work_root)
+    source_root = resolve_source_checkpoint_path(model_path)
+    if source_model_decode_contract(source_root) is not None:
+        from prismaquant.memory_management import CaptureMemoryGuard
+        from prismaquant.streaming_model import load_resident_source_model
+
+        if device_map not in (None, "cuda", device):
+            raise ValueError(
+                f"native FP8 source loading requires a resident device, not "
+                f"device_map={device_map!r}"
+            )
+        target = torch.device(device)
+        return load_resident_source_model(
+            str(source_root), device=target, dtype=dtype,
+            offload_folder=str(Path(work_root) / "resident-source-offload"),
+            resource_check=CaptureMemoryGuard(target).check,
+        ).eval()
+
+    staged = stage_text_only_under_work_root(str(source_root), work_root)
     load_device_map = device_map if device_map is not None else device
     load_kwargs = {
         "torch_dtype": dtype,

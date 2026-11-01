@@ -5,7 +5,7 @@ import copy
 import pytest
 
 from prismaquant.digests import DIRECT_ASCII_STRICT
-from prismaquant.streaming_model import validate_streaming_selected_initialization_witness
+from prismaquant.streaming_initialization import validate_streaming_selected_initialization_witness
 
 
 def selected_fixture(*, derived=False):

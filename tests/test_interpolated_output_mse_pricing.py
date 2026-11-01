@@ -54,13 +54,15 @@ from prismaquant.allocator_candidates import (
     build_candidates,
     calibrate_activation_fair_pricing,
     collect_activation_calibration_rows,
+    drop_interpolated_candidates_dominated_by_measured,
+)
+from prismaquant.priced_cell import (
     cost_entry_activation_pricing_branch,
     TESSERA_INTERPOLATED_COST_SOURCE,
     cost_entry_is_band_interpolated,
     cost_entry_predicted_dloss,
     cost_entry_source,
     cost_entry_uses_measured_output_mse,
-    drop_interpolated_candidates_dominated_by_measured,
 )
 from prismaquant.allocator_solver import Candidate
 
@@ -201,7 +203,7 @@ def test_interpolated_rungs_are_priced_between_their_measured_neighbours():
     K13 and K14 are interpolated; K12 and K15 are measured. A CB ladder spends
     bits to buy error, so price must fall monotonically in K — and each
     interpolated rung must sit strictly between the rungs on either side of
-    it, on a projection whose ratio is 25x below the family constant and on
+    it, on a projection whose ratio is 5x below the family constant and on
     one 5x above it.
     """
     stats, costs = _tables()
@@ -277,7 +279,7 @@ def test_build_candidates_prices_and_labels_the_interpolated_rung():
            for qname in (_DOWN_PROJ, _GATE_PROJ)}
     cands = build_candidates(
         stats, costs, _specs(), target_profile="research",
-        activation_pricing=pricing, census_loo=loo)
+        activation_pricing=pricing, census_loo=loo).candidates
 
     for qname, ratio in ((_DOWN_PROJ, _RATIO_DOWN_PROJ),
                          (_GATE_PROJ, _RATIO_GATE_PROJ)):
@@ -708,7 +710,7 @@ def test_census_loo_band_prints_its_own_report_line(capsys, monkeypatch):
     menu_report = {}
     ac.build_candidates(stats, stock, [fr.REGISTRY["NVFP4"], fr.REGISTRY["BF16"]],
                         tessera_menu_report=menu_report, census_loo=loo,
-                        census_loo_groups=_CENSUS_GROUP)
+                        census_loo_groups=_CENSUS_GROUP).candidates
     assert seen["loo"] is loo
     assert seen["fused_groups"] is _CENSUS_GROUP
     assert seen["report"] is menu_report

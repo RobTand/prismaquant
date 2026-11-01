@@ -75,6 +75,9 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
             path.write_bytes(wire)
             extra += [word, str(path), hashlib.sha256(wire).hexdigest()]
     resealed = []
+    for index, word in enumerate(args):
+        if word == "--pilot-quantum-record":
+            extra += args[index:index + 3]
     for candidate in canned.results.values():
         request = candidate["request"]
         command = copy.deepcopy(request["params"]["command"])
@@ -224,3 +227,29 @@ def test_production_gateway_consumes_selected_results_from_the_installed_sdk5_he
         assert {item["action_key"] for item in evidence} == set(resealed)
         assert all(item["attempt"] == 1 for item in evidence)
         assert all(len(item["receipt_sha256"]) == 64 for item in evidence)
+
+
+def test_production_gateway_reads_a_consumer_copy_not_the_producer_path(
+        tmp_path, campaign, records_dir, monkeypatch, capsys, installed_helper_sdk):
+    from prismabuild import pool
+
+    receipt = _ready(tmp_path, campaign, records_dir)
+    canned = dispatch.FakeGateway()
+    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=canned)
+    for result in canned.results.values():
+        completion = json.loads(result["payload"])
+        completion["quantum_record"]["path"] = "/workspace/producer-only/quantum.json"
+        assert not Path(completion["quantum_record"]["path"]).exists()
+        result["payload"] = json.dumps(completion).encode() + b"\n"
+    args, _, selected = _selected_fixture(
+        tmp_path, monkeypatch, installed_helper_sdk, args, canned, None)
+    monkeypatch.setattr(pool, "DEFAULT_POOL_ROOT", tmp_path / "private-pb" / "queue")
+    capsys.readouterr()
+    output = tmp_path / "consumer-dry-run"
+    assert dispatch.main(
+        _argv(records_dir, output, receipt, extra=[*args, "--dry-run"]),
+        _gateway=dispatch.Gateway()) == 0
+    captured = capsys.readouterr()
+    assert not output.exists()
+    rows = json.loads(captured.out)["rows"]
+    assert {row["pilot_admission"]["result"]["action_key"] for row in rows} == set(selected)

@@ -37,9 +37,17 @@ def load(path: str):
             blob = pickle.load(fh)
     except Exception as e:  # noqa: BLE001
         return None, f"unreadable ({type(e).__name__}: {e})"
+    if not isinstance(blob, dict):
+        return None, "cost envelope must be a mapping"
     costs = blob.get("costs")
     if not isinstance(costs, dict) or not costs:
         return None, "no 'costs' table"
+    for name, row in costs.items():
+        if not isinstance(name, str) or not isinstance(row, dict) or not row:
+            return None, f"invalid cost row {name!r}: expected a nonempty format mapping"
+        for fmt, entry in row.items():
+            if not isinstance(fmt, str) or not isinstance(entry, dict) or not entry:
+                return None, f"invalid cost entry {name!r}/{fmt!r}: expected a nonempty mapping"
     return costs, None
 
 
@@ -54,15 +62,11 @@ def compare(ref: dict, got: dict, ref_tag: str, got_tag: str):
                       (only_ref[:3], only_got[:3]), None))
     for name in sorted(set(ref) & set(got)):
         rrow, growth = ref[name], got[name]
-        if not isinstance(rrow, dict) or not isinstance(growth, dict):
-            continue
         for fmt in sorted(set(rrow) | set(growth)):
             re_, ge = rrow.get(fmt), growth.get(fmt)
             if re_ is None or ge is None:
                 diffs.append((name, fmt, "format present in only one arm",
                               None))
-                continue
-            if not isinstance(re_, dict) or not isinstance(ge, dict):
                 continue
             for k, v in re_.items():
                 if k not in ge:
@@ -74,22 +78,21 @@ def compare(ref: dict, got: dict, ref_tag: str, got_tag: str):
 
 
 def check_additive(got: dict, ref: dict):
-    """Every field the new arm added must be one we expect, with the expected
-    value on every row. Anything else is a refusal, not a silent pass."""
+    """Require the expected values on every entry and refuse unknown additions."""
     problems = []
     for name, row in got.items():
         rrow = ref.get(name, {})
         for fmt, entry in row.items():
-            if not isinstance(entry, dict):
-                continue
-            base_keys = set(rrow.get(fmt, {}) or {})
+            for k, expected in EXPECTED_ADDITIVE.items():
+                if k not in entry:
+                    problems.append((name, fmt, f"{k}: MISSING", None))
+                elif entry[k] != expected:
+                    problems.append((name, fmt, f"{k} != {expected}", entry[k]))
+            base_keys = set(rrow.get(fmt, {}))
             for k in set(entry) - base_keys:
                 if k not in EXPECTED_ADDITIVE:
                     problems.append((name, fmt, f"unexpected new field {k!r}",
                                      entry[k]))
-                elif entry[k] != EXPECTED_ADDITIVE[k]:
-                    problems.append((name, fmt, f"{k} != "
-                                     f"{EXPECTED_ADDITIVE[k]}", entry[k]))
     return problems
 
 
@@ -143,8 +146,7 @@ def main():
             print("  ADDITIVE:", p)
         return verdict("UNEXPECTED_FIELDS",
                        f"{len(extra)} additive-field problems")
-    n_add = sum(1 for row in new.values() for e in row.values()
-                if isinstance(e, dict) and "n_activation_rows" in e)
+    n_add = sum(len(row) for row in new.values())
     print(f"n_activation_rows present and == 64 on {n_add} entries")
 
     if diffs:

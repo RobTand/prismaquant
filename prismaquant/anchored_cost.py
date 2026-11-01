@@ -23,7 +23,7 @@ from pathlib import Path
 import subprocess
 from typing import Literal, Protocol, runtime_checkable
 
-from prismaquant.allocator_candidates import (
+from prismaquant.priced_cell import (
     ANCHORED_AURA_COST_CURRENCY,
     ANCHORED_AURA_COST_SOURCE,
     SOURCE_PASSTHROUGH_COST_SOURCE,

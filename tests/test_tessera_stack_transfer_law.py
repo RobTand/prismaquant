@@ -105,7 +105,7 @@ def _base(rng, experts):
 
 @pytest.fixture
 def population():
-    """Twelve stacks of 48 experts, 9 of them sampled -- the study's 3%-ish.
+    """Twelve synthetic stacks of 48 experts, with 9 sampled per stack.
 
     The held-out stack keeps its full frame at both target rungs so the test
     can compare against a truth the law never saw; a production stack would

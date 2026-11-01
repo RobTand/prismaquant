@@ -359,7 +359,7 @@ def test_a_runtime_without_decomposition_is_reported_by_name(tmp_path: Path) -> 
     """Acceptance criterion 6.
 
     The refusal has to name what is missing and what would fix it, because the
-    fix is a merge and a runtime publication that no agent performs.
+    fix requires a compatible published runtime, not an adapter fallback.
     """
 
     root = _runtime_tree(tmp_path / "old", tags=_WITHOUT)

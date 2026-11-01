@@ -1,6 +1,5 @@
 """Overlap the producer's exact cold source seal, never replace it (PQ #1742)."""
-import ast
-import inspect
+
 from concurrent.futures import Future
 from contextlib import ExitStack
 from functools import lru_cache
@@ -10,6 +9,7 @@ import pytest
 
 from prismaquant import io_engine
 from prismaquant import tessera_campaign as campaign
+from prismaquant import tessera_campaign_wire as campaign_wire
 
 
 class ControlledSubmit:
@@ -48,7 +48,7 @@ def test_start_submits_without_waiting_and_uses_the_same_producer_seal(monkeypat
         calls.append("producer")
         return digest
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=source_seal))
     ahead, submit, scope = _start(monkeypatch)
     assert ahead is not None
@@ -58,7 +58,7 @@ def test_start_submits_without_waiting_and_uses_the_same_producer_seal(monkeypat
     submit.run()
     assert ahead.wait() == digest
     # The unchanged run-identity call and producer bind now see their own cache.
-    assert campaign._checkpoint_identity_api().encoder_source_sha256() == digest
+    assert campaign_wire.require_checkpoint_identity_api().encoder_source_sha256() == digest
     assert calls == ["producer"]
     scope.close()
 
@@ -77,7 +77,7 @@ def test_source_seal_failure_reaches_identity_and_cleanup_does_not_mask_it(monke
     def fail():
         raise failure
 
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=fail))
     ahead, submit, scope = _start(monkeypatch)
     assert ahead is not None
@@ -89,7 +89,7 @@ def test_source_seal_failure_reaches_identity_and_cleanup_does_not_mask_it(monke
 
 
 def test_pricing_scopes_have_no_shared_future(monkeypatch):
-    monkeypatch.setattr(campaign, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(encoder_source_sha256=lambda: "a" * 64))
     first, a, scope_a = _start(monkeypatch)
     assert first is not None
@@ -103,24 +103,81 @@ def test_pricing_scopes_have_no_shared_future(monkeypatch):
     scope_b.close()
 
 
-def test_main_starts_before_model_and_joins_before_identity_uses():
-    tree = ast.parse(inspect.getsource(campaign._main))
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+@pytest.mark.parametrize('row_head,identity_bytes', [
+    ('load-all', 0), ('load-all', 1 << 20), ('stream', 0)])
+def test_main_joins_the_encoder_seal_before_identity_consumers(
+        monkeypatch, tmp_path, row_head, identity_bytes):
+    from prismaquant import autoscale, cost_streaming
+    from test_tessera_row_stream import stream_fixture
 
-    def named(name):
-        return [node.lineno for node in calls
-                if isinstance(node.func, ast.Name) and node.func.id == name]
+    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    events = []
+    ahead_started = False
+    joined = False
+    start = campaign._start_encoder_source_seal_ahead
+    wait = campaign._EncoderSourceSealAhead.wait
+    build = cost_streaming.build_streamed_causal_lm
+    identity = campaign.campaign_checkpoint_identity
+    metadata_plan = campaign._campaign_identity_metadata_plan
+    bind_identities = campaign._campaign_bound_identities
+    resources = autoscale.selected_anchor_resources
 
-    start, = named("_start_encoder_source_seal_ahead")
-    join, = [node.lineno for node in calls if isinstance(node.func, ast.Attribute)
-             and node.func.attr == "wait" and isinstance(node.func.value, ast.Name)
-             and node.func.value.id == "encoder_seal_ahead"]
-    assert start < min(named("build_streamed_causal_lm")) < join
-    assert join < min(named("_campaign_identity_metadata_plan"))
-    assert join < min(named("_campaign_bound_identities"))
-    assert join < min(named("_campaign_checkpoint_identity"))
-    # Still ask the producer in the existing identity, not a new digest/field.
-    identity = ast.parse(inspect.getsource(campaign._campaign_checkpoint_identity))
-    assert sum(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "encoder_source_sha256"
-               for node in ast.walk(identity)) == 1
+    def resources_with_identity_hold(*args, **kwargs):
+        result = resources(*args, **kwargs)
+        result['phases']['resident_anchors']['campaign_identity_hold_scratch_bytes'] = 0
+        return result
+
+    def observed_start(*args, **kwargs):
+        nonlocal ahead_started
+        ahead = start(*args, **kwargs)
+        assert ahead is not None
+        ahead_started = True
+        events.append('submitted')
+        return ahead
+
+    def observed_build(*args, **kwargs):
+        assert ahead_started
+        assert not joined
+        events.append('model')
+        return build(*args, **kwargs)
+
+    def observed_wait(self):
+        nonlocal joined
+        result = wait(self)
+        joined = True
+        events.append('joined')
+        return result
+
+    def observed_identity(*args, **kwargs):
+        assert joined
+        result = identity(*args, **kwargs)
+        events.append(('identity', result['encoder_source_sha256']))
+        return result
+
+    def observed_metadata_plan(*args, **kwargs):
+        assert joined
+        events.append('metadata_plan')
+        return metadata_plan(*args, **kwargs)
+
+    def observed_bind_identities(*args, **kwargs):
+        assert joined
+        events.append('bound_identities')
+        return bind_identities(*args, **kwargs)
+
+    monkeypatch.setattr(campaign, '_start_encoder_source_seal_ahead', observed_start)
+    monkeypatch.setattr(cost_streaming, 'build_streamed_causal_lm', observed_build)
+    monkeypatch.setattr(campaign._EncoderSourceSealAhead, 'wait', observed_wait)
+    monkeypatch.setattr(campaign, 'campaign_checkpoint_identity', observed_identity)
+    monkeypatch.setattr(campaign, '_campaign_identity_metadata_plan', observed_metadata_plan)
+    monkeypatch.setattr(campaign, '_campaign_bound_identities', observed_bind_identities)
+    monkeypatch.setattr(autoscale, 'selected_anchor_resources', resources_with_identity_hold)
+    assert campaign.main([
+        *argv, '--row-head', row_head,
+        '--campaign-identity-bytes', str(identity_bytes)]) == 0
+    assert events[:3] == ['submitted', 'model', 'joined']
+    assert events.count('metadata_plan') == int(row_head == 'stream' or identity_bytes > 0)
+    assert events.count('bound_identities') == int(row_head == 'load-all' and identity_bytes > 0)
+    identities = [item[1] for item in events if isinstance(item, tuple)]
+    assert identities
+    assert set(identities) == {
+        campaign_wire.require_checkpoint_identity_api().encoder_source_sha256()}

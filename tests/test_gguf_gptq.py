@@ -10,6 +10,9 @@ from prismaquant.gguf_formats import (
     reconstruct_fields,
 )
 from prismaquant.gguf_gptq import gptq_fields
+from prismaquant.native_render_levers import NativeRenderLevers
+
+RECIPE = NativeRenderLevers()
 
 gguf = pytest.importorskip("gguf")
 
@@ -29,7 +32,7 @@ def _problem(seed=0, out_f=64, in_f=512, rows=256):
 def test_gptq_reduces_hessian_weighted_error_under_frozen_scales(fmt):
     W, X, qw = _problem()
     f_rtn = compute_fields(W, fmt, col_weights=qw)
-    f_gptq = gptq_fields(W, fmt, X, col_weights=qw)
+    f_gptq = gptq_fields(W, fmt, X, col_weights=qw, levers=RECIPE)
 
     # Scales are FROZEN: only q may differ.
     for key in f_rtn:
@@ -50,7 +53,7 @@ def test_gptq_fields_pack_bit_exact(fmt):
     """GPTQ output lives on the frozen grid: gguf-py's dequantize of the
     packed bytes equals our reconstruction exactly."""
     W, X, qw = _problem(seed=1)
-    fields = gptq_fields(W, fmt, X, col_weights=qw)
+    fields = gptq_fields(W, fmt, X, col_weights=qw, levers=RECIPE)
     packed = gguf_pack_fields(fields, fmt, tuple(W.shape))
     decoded = gguf.quants.dequantize(
         packed, getattr(gguf.GGMLQuantizationType, fmt))
@@ -65,6 +68,6 @@ def test_gptq_dead_activation_channels_do_not_destroy_weights():
     W, X, qw = _problem(seed=2)
     X[:, :64] = 0.0
     qw = X.float().pow(2).mean(dim=0)
-    fields = gptq_fields(W, "Q3_K", X, col_weights=qw)
+    fields = gptq_fields(W, "Q3_K", X, col_weights=qw, levers=RECIPE)
     out = reconstruct_fields(fields, "Q3_K").reshape(W.shape)
     assert out[:, :64].abs().sum() > 0

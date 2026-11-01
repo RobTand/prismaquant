@@ -1,4 +1,5 @@
 """An explicit recovery authority, never reuse of an unfinished generation."""
+from prismaquant import aura_provenance
 import pytest
 import copy
 import json
@@ -133,7 +134,7 @@ def test_export_action_must_seal_the_exact_manifest_input():
 def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, monkeypatch):
     from prismaquant import joint_cost_stage_a as stage_a
     from prismaquant import joint_forward_resume as recovery_mod
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_adjoint_checkpoints import exact_entry_record, load_adjoint_checkpoint, adjoint_space
     from test_joint_cost_quantum_runtime import _execution, _stage_a
     from test_streamed_cost_checkpoints import _model_identity
@@ -321,7 +322,7 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
     """R9 -> R10 -> R11: the second resume imports the first resume's prefix."""
     from prismaquant import joint_cost_stage_a as stage_a
     from prismaquant import joint_forward_resume as recovery_mod
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_adjoint_checkpoints import (
         adjoint_space, load_adjoint_checkpoint, reference_from_record)
     from test_joint_cost_quantum_runtime import _execution, _stage_a
@@ -454,7 +455,7 @@ def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):
 
     # The freezer derives the same chained capsule from the spool and PB records.
     import prismaquant.aura_cost as aura_cost
-    monkeypatch.setattr(aura_cost, '_aura_source_sha256', lambda: '3' * 64)
+    monkeypatch.setattr(aura_provenance, 'producer_package_sha256', lambda: '3' * 64)
     request = tmp_path / 'r10-request.json'
     request.write_text(json.dumps(owner_action))
     derived = tmp_path / 'r10-to-r11-derived.json'

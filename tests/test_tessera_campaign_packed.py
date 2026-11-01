@@ -1,4 +1,5 @@
 """A campaign must account for the live packed expert population."""
+
 from types import ModuleType, SimpleNamespace
 import json
 import os
@@ -7,6 +8,11 @@ import pickle
 import sys
 
 import pytest
+
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_table as campaign_table
 
 torch = pytest.importorskip("torch")
 
@@ -81,14 +87,14 @@ def _routed_tokens():
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_capture_packed_projections_uses_every_actual_routed_row(dtype):
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     model = _RoutedModel().to(dtype=dtype)
     targets = [f"{EXPERT_PREFIX}.{expert}.{projection}"
                for expert in range(2) for projection in ("w1", "w3", "w2")]
     dense = "model.layers.0.attention"
     tokens = [batch.to(dtype=dtype) for batch in _routed_tokens()]
-    rows, hessians, counts, max_abs = _collect_activations(
+    rows, hessians, counts, max_abs = capture_activation_statistics(
         model, [dense, *targets], tokens, 1, "cpu", want_hessian=True)
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
 
@@ -123,14 +129,14 @@ def test_capture_packed_projections_uses_every_actual_routed_row(dtype):
 
 
 def test_packed_capture_subset_keeps_the_same_routed_rows_and_hessian():
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     all_targets = [f"{EXPERT_PREFIX}.{expert}.{projection}"
                    for expert in range(2) for projection in ("w1", "w3", "w2")]
     selected = f"{EXPERT_PREFIX}.1.w2"
-    whole = _collect_activations(
+    whole = capture_activation_statistics(
         _RoutedModel(), all_targets, _routed_tokens(), 2, "cpu", want_hessian=True)
-    subset = _collect_activations(
+    subset = capture_activation_statistics(
         _RoutedModel(), [selected], _routed_tokens(), 2, "cpu", want_hessian=True)
     for index in (0, 1):
         torch.testing.assert_close(subset[index][selected], whole[index][selected])
@@ -140,12 +146,12 @@ def test_packed_capture_subset_keeps_the_same_routed_rows_and_hessian():
 
 @pytest.mark.parametrize("want_hessian", [False, True])
 def test_packed_capture_refuses_an_unobserved_expert(want_hessian):
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     model = _RoutedModel()
     missing = f"{EXPERT_PREFIX}.1.w1"
     with pytest.raises(RuntimeError, match="no routed calibration rows") as error:
-        _collect_activations(model, [missing], [torch.ones(1, 3, 4)], 1,
+        capture_activation_statistics(model, [missing], [torch.ones(1, 3, 4)], 1,
                              "cpu", want_hessian=want_hessian)
     assert missing in str(error.value)
     assert not model.model.layers[2].feed_forward.experts._forward_pre_hooks
@@ -367,12 +373,10 @@ def _write_source_checkpoint(model, root, *, perturb=None):
     }, indent=1))
 
 
-
-
 def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     """main() with a real capture, projection, encode and receipt; no route scoring.
 
-    ``_measure_anchor`` is replaced by the producer's real encode without its
+    ``measure_cell`` is replaced by the producer's real encode without its
     served-route admission: this fixture exercises the bridge on the campaign's
     selected device, while
     runtime-scoped GPU pricing requires its own measurement. Everything the
@@ -425,14 +429,14 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     def measure_without_route_admission(*, qname, weight, format_name, wire_dir, **_kwargs):
         # The producer's real encode and real bytes (so the cached-unit receipt
         # is a receipt for a Tessera artifact); only the served-route scoring
-        # of ``_measure_anchor`` is left out, for the reason in the docstring.
-        render, blob = tessera_campaign._encode_and_render(
+        # of ``measure_cell`` is left out, for the reason in the docstring.
+        render, blob = tessera_render.encode_tessera_unit(
             weight, format_name, hessian_required=False)
-        path = tessera_campaign._wire_path(wire_dir, qname, format_name)
+        path = campaign_wire.wire_path(wire_dir, qname, format_name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(blob)
         encoded.append((qname, format_name, tuple(weight.shape)))
-        return tessera_campaign.CampaignAnchor(
+        return campaign_table.CampaignAnchor(
             qname=qname, family="TESSERA_E4M3_K1", format_name=format_name,
             body_rate_q256=1024,
             dloss=float(((render.float() - weight.float()) ** 2).mean()), dloss_stderr=0.0,
@@ -441,7 +445,7 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
             activation_quantized=True,
             wire_bytes=len(blob), seconds=0.01, hessian_applied=False)
 
-    monkeypatch.setattr(tessera_campaign, "_measure_anchor", measure_without_route_admission)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure_without_route_admission)
     argv = ["--model", str(source), "--out", str(tmp_path / "cost.pkl"),
             "--cache-dir", str(tmp_path / "cache"), "--hessian", "off",
             "--menu-mode", "research", "--max-rounds", "1",
@@ -514,8 +518,6 @@ def test_main_prices_the_producer_projected_expert_population(monkeypatch, tmp_p
         wire = tmp_path / "cache" / "wire" / record["file"]
         assert wire.is_file() and wire.stat().st_size == record["blob_bytes"]
     assert dense not in wires
-    # The checkpoint identity binds the projection the rows were priced under.
-    assert campaign._campaign_checkpoint_identity.__doc__  # (bound in the journal; see resume tests)
 
 
 def test_main_refuses_a_live_view_that_disagrees_with_the_producer_source(monkeypatch, tmp_path):
@@ -545,14 +547,14 @@ def test_main_reports_unpriced_targets_without_claiming_coverage(monkeypatch, tm
 
         monkeypatch.setattr(campaign, "expand_menus_for_targets", menus)
     else:
-        measure = campaign._measure_anchor
+        measure = cell_measurement.measure_cell
 
         def failing_measure(**kwargs):
             if kwargs["qname"] == target:
                 raise RuntimeError("synthetic encode failure")
             return measure(**kwargs)
 
-        monkeypatch.setattr(campaign, "_measure_anchor", failing_measure)
+        monkeypatch.setattr(cell_measurement, "measure_cell", failing_measure)
         # A rung that fails to price fails the row, and no table claims the
         # rest (RobTand/prismaquant#1481). Before #1481 this row exited 0 and
         # reported the unit as ``no_successful_anchor``; the consumer then
@@ -582,7 +584,7 @@ def test_wire_backed_units_keep_only_measured_rows():
     expert unit's row is exported from its priced blob (``--cached-expert-units``),
     so an interpolated rung would be a price with no bytes behind it.
     """
-    from prismaquant.tessera_campaign import CampaignAnchor, campaign_cost_payload
+    from prismaquant.tessera_campaign_table import (CampaignAnchor, campaign_cost_payload)
 
     fam = "TESSERA_E2M1_K2"
 

@@ -97,8 +97,10 @@ candidate. It prevents the corresponding downstream operation and records a
 specific gap. In v22 the relevant measured cells cover E4 R1024 dense/routed
 and BF R1792 dense; they are not the research domain. Re-read the exact pin at
 execution. Do not restore the retired release-tag gate or infer admission
-from package importability. No PrismaQuant code imports/vendors Tessera's
-serving runtime; native measurement crosses the existing file/receipt boundary.
+from package importability. Native measurements may import Tessera APIs in
+their declared runtime and retain the existing file/receipt evidence boundary.
+Prefer published interfaces; ordinary metadata checks use producer metadata
+APIs without loading the serving stack. Keep Tessera as an external dependency.
 
 E2M1/A4 may be retained as an existing, separately licensed control. It is not
 a prerequisite to delivering the requested E4/BF research menu. Add no new A4

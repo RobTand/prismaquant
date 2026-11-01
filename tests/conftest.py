@@ -877,6 +877,35 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
     lines = reports.read_text().splitlines() if reports.exists() else []
     outcomes, collection = _fold_own_process_reports(
         [json.loads(line) for line in lines], log=log)
+    reported_failure = any(item["outcome"] == "failed" for item in outcomes.values())
+    collection_failure = any(item["outcome"] == "failed" for item in collection)
+    collection_skip = (not outcomes and collection
+                       and all(item["outcome"] == "skipped" for item in collection))
+    expected_exit = (state["returncode"] == pytest.ExitCode.OK
+                     or (state["returncode"] == pytest.ExitCode.TESTS_FAILED
+                         and (reported_failure or collection_failure))
+                     or (state["returncode"] == pytest.ExitCode.NO_TESTS_COLLECTED
+                         and collection_skip))
+    if state.get("error") or not expected_exit:
+        # Keep ordinary failed/skip/xfail mappings. A failure after the last
+        # report still needs one proxy to carry the child's terminal failure.
+        target = next((nodeid for nodeid in nodeids
+                       if outcomes.get(nodeid, {}).get("outcome") == "failed"), None)
+        if target is None:
+            target = next((nodeid for nodeid in nodeids
+                           if outcomes.get(nodeid, {}).get("outcome") == "passed"),
+                          nodeids[0])
+        folded = outcomes.setdefault(target, {"outcome": "passed", "phases": []})
+        message = (f"the module's own pytest process exited unexpectedly "
+                   f"(exit {state['returncode']}"
+                   + (f", {state['error']}" if state.get("error") else "")
+                   + f"); see {log}")
+        if folded["outcome"] == "failed":
+            message = folded["message"] + "\n" + message
+        elif collection_failure:
+            message += "\n" + "\n".join(item["longrepr"] for item in collection
+                                           if item["outcome"] == "failed")
+        folded.update(outcome="failed", message=message)
     return {"state": state, "outcomes": outcomes, "collection": collection,
             "log": log}
 
@@ -1028,6 +1057,58 @@ def pytest_collectreport(report):
     """In a child session, hand a failed or skipped collection to the parent."""
     if not report.passed:
         _append_own_process_record(report)
+
+
+# -- golden tables: every frozen row is used (tests/golden_table.py) ---------
+
+_GOLDEN_OUTCOME = pytest.StashKey[str]()
+_GOLDEN_DESELECTED = pytest.StashKey[set]()
+
+
+def pytest_deselected(items):
+    """Record each module ``-k``, ``-m`` or ``--deselect`` did not select whole."""
+    for item in items:
+        item.config.stash.setdefault(_GOLDEN_DESELECTED, set()).add(item.path)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Keep the outcome each test reached, for the golden-row check below."""
+    report = yield
+    if report.when == "call" or not report.passed:
+        item.stash[_GOLDEN_OUTCOME] = report.outcome
+    return report
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _golden_rows_all_used(request):
+    """Fail a module whose opted-in golden table kept rows no passing call used.
+
+    Active only when this process ran the whole module; see
+    ``golden_table.unfinished_tests_if_whole_module_ran``.
+    """
+    yield
+    from tests.golden_table import GoldenTable, unfinished_tests_if_whole_module_ran
+
+    tables = [table for table in vars(request.module).values()
+              if isinstance(table, GoldenTable) and table.every_row_used]
+    if not tables:
+        return
+    module = request.node.path
+    unfinished = unfinished_tests_if_whole_module_ran(
+        module, args=request.config.args,
+        deselected=request.config.stash.get(_GOLDEN_DESELECTED, set()),
+        outcomes={item.nodeid: item.stash.get(_GOLDEN_OUTCOME, None)
+                  for item in request.session.items if item.path == module})
+    if unfinished is None:
+        return
+    for table in tables:
+        unused = table.unused_rows(unfinished=unfinished)
+        if unused:
+            pytest.fail(
+                f"fixtures/{table.name}.json has {len(unused)} frozen row(s) that no "
+                f"passing call used: {unused[:10]}. Restore the call, or archive the "
+                "rows of a retired test with its archive wall.", pytrace=False)
 
 
 @pytest.fixture

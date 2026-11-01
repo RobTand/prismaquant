@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 from prismaquant import tessera_campaign as campaign
 from prismaquant import tessera_render as render
 
@@ -20,7 +21,7 @@ def test_pending_batches_keep_each_anchor_once_and_split_incompatible_units():
     pending = [("a", "family", 100), ("a", "family", 200),
                ("b", "family", 100), ("c", "family", 100),
                ("dense", "family", 100), ("d", "family", 100)]
-    batches = campaign._anchor_batches(pending, weights=weights, batch_size=2)
+    batches = cell_measurement.compatible_batches(pending, weights=weights, batch_size=2)
     assert sorted(item for batch in batches for item in batch) == sorted(pending)
     assert [("a", "family", 100), ("b", "family", 100)] in batches
     assert [("dense", "family", 100), ("d", "family", 100)] in batches
@@ -29,7 +30,7 @@ def test_pending_batches_keep_each_anchor_once_and_split_incompatible_units():
     for batch in batches:
         assert len({(family, rung, tuple(weights[name].shape))
                     for name, family, rung in batch}) == 1
-    assert campaign._anchor_batches(pending, weights=weights,
+    assert cell_measurement.compatible_batches(pending, weights=weights,
         batch_size=1) == [[item] for item in pending]
 
 
@@ -48,7 +49,7 @@ def test_same_shape_dense_units_of_different_groups_share_a_batch():
     weights.update({name: torch.empty((4096, 2048)) for name in down})
     pending = [(name, fam, rung) for name in gate_up + down
                for fam in ("TESSERA_BF16_K1", "TESSERA_E4M3_K1") for rung in (1408, 1536)]
-    batches = campaign._anchor_batches(pending, weights=weights, batch_size=8)
+    batches = cell_measurement.compatible_batches(pending, weights=weights, batch_size=8)
     assert sorted(item for batch in batches for item in batch) == sorted(pending)
     for batch in batches:
         assert len(batch) <= 8
@@ -63,16 +64,16 @@ def test_same_shape_dense_units_of_different_groups_share_a_batch():
 
 
 def test_batch_refuses_units_that_prepare_different_recipes(monkeypatch):
+    from priced_model_screen import bind_priced_model_screen
+    bind_priced_model_screen()
     calls = []
-    monkeypatch.setattr(campaign, "_prepare_anchor", lambda **kw: {
-        "wire": "recipe-" + kw["qname"], "hessian_required": False,
-        "activation_kwargs": None})
     monkeypatch.setattr(render, "encode_tessera_units",
                         lambda *a, **k: calls.append(a) or [])
     with pytest.raises(ValueError, match="different wire recipe"):
-        campaign._measure_anchor_batch(
+        cell_measurement.measure_cells(
             qnames=["a", "b"], weights=[torch.zeros(16, 256)] * 2,
-            activations=[torch.zeros(4, 256)] * 2, format_name=FMT,
+            activations=[torch.zeros(4, 256)] * 2, format_name="TESSERA_E2M1_K2_R640",
+            structures={"b": "routed_moe"}, static_input_scales={"a": 1.0, "b": 1.0},
             cache=None, wire_dir=Path("."), hessian_required=False)
     assert calls == []
 
@@ -116,10 +117,10 @@ def test_real_cli_batch_wire_prices_and_resume_equal_scalar(monkeypatch, tmp_pat
     monkeypatch.setattr(fixture, "INTER", 256)
     _bridge_main_fixture = fixture._bridge_main_fixture
 
-    scalar_measure = campaign._measure_anchor
+    scalar_measure = cell_measurement.measure_cell
     instance, argv, model, _ = _bridge_main_fixture(monkeypatch, tmp_path)
     model.to("cuda")
-    monkeypatch.setattr(instance, "_measure_anchor", scalar_measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", scalar_measure)
     argv[argv.index("--hessian") + 1] = "require"
     real_batch = render._tessera_export.encode_linears
     seen = []
@@ -179,15 +180,15 @@ def test_batch_scoring_keeps_each_units_static_activation_scale(monkeypatch, tmp
     monkeypatch.setattr(fr, "get_format", lambda fmt: spec if fmt == FMT else get_format(fmt))
     monkeypatch.setattr(render, "encode_tessera_units",
         lambda values, *_args, **_kwargs: [(w * 0.75, b"wire") for w in values])
-    monkeypatch.setattr(campaign, "_encode_and_render",
+    monkeypatch.setattr(render, "encode_tessera_unit",
         lambda w, *_args, **_kwargs: (w * 0.75, b"wire"))
     cache = SimpleNamespace(weights={}, cache_dir=None)
     wire_dir = tmp_path / "wire"
     wire_dir.mkdir()
-    batch = campaign._measure_anchor_batch(qnames=["a", "b"], weights=weights,
+    batch = cell_measurement.measure_cells(qnames=["a", "b"], weights=weights,
         activations=acts, format_name=FMT, cache=cache, wire_dir=wire_dir,
         hessian_required=False, static_input_scales=scales)
-    scalar = [campaign._measure_anchor(qname=name, weight=w, activations=x,
+    scalar = [cell_measurement.measure_cell(qname=name, weight=w, activations=x,
         format_name=FMT, cache=cache, wire_dir=wire_dir, hessian_required=False,
         static_input_scale=scales[name]) for name, w, x in zip(scales, weights, acts)]
     assert [row.input_global_scale for row in batch] == [0.5, 2.0]
@@ -224,7 +225,7 @@ def test_batches_are_unit_major_so_a_batch_wide_memo_reuses_each_factorization()
     pending = [(name, "TESSERA_E4M3_K1", rung) for name in units for rung in rungs]
     pending += [("dense", "TESSERA_E4M3_K1", 832), ("dense", "TESSERA_E4M3_K1", 1088)]
     batch_size = 8
-    batches = campaign._anchor_batches(
+    batches = cell_measurement.compatible_batches(
         pending, weights=weights, batch_size=batch_size)
     assert sorted(item for batch in batches for item in batch) == sorted(pending)
     for batch in batches:

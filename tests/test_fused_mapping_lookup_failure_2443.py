@@ -2,7 +2,7 @@
 
 THE DEFECT THESE TESTS PIN. ``profile.fused_sibling_leaf_mapping()`` can raise: the
 GLM profile reads its mapping from the Tessera runtime lane, and an interpreter
-without ``tessera.serving.dense_ownership`` fails the lookup. Two callers used to
+without ``tessera.metadata`` fails the lookup. Two callers used to
 swallow every exception from it:
 
 * ``export_native_compressed._fused_modules_mapping_for_profile`` fell through to
@@ -99,7 +99,7 @@ def test_glm_export_mapping_stops_when_the_lane_lookup_fails(monkeypatch):
     """The real case: the GLM lane lookup fails and the export must not return {}."""
 
     def lookup_failed():
-        raise ModuleNotFoundError("No module named 'tessera.serving.dense_ownership'")
+        raise ModuleNotFoundError("No module named 'tessera.metadata'")
 
     monkeypatch.setattr(lane, "glm_fused_sibling_leaf_mapping", lookup_failed)
     with pytest.raises(ModuleNotFoundError):

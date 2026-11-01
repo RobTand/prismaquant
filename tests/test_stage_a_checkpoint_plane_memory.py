@@ -70,7 +70,7 @@ def test_reverse_roll_releases_each_cpu_result_after_write(tmp_path, monkeypatch
 
 def test_descriptor_checkpoint_matches_tensor_bytes_with_bounded_windows(
         tmp_path, monkeypatch):
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_adjoint_checkpoints import write_adjoint_checkpoint
     from test_checkpoint_artifact_budget import _owner, _session
 

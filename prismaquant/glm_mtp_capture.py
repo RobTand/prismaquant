@@ -9,7 +9,7 @@ runs in two phases:
    sealed streamed runner, then the model's own mHC collapse and final norm.
    These are the steps of ``StreamedCausalLM._finish`` before its head.
 2. :class:`MtpCaptureFeed` runs the MTP layer on ``h`` for each calibration
-   sequence. The body campaign's collector (``tessera_campaign._collect_activations``)
+   sequence. The body campaign's collector (``tessera_calibration_forward.capture_activation_statistics``)
    hooks the layer through :class:`~prismaquant.glm_mtp.MtpCheckpointModel`,
    unchanged, so the rows, Hessians, counts and maxima mean what the body's do.
 
@@ -44,6 +44,11 @@ from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, indent2_json_file_byt
 
 FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"
+#: The scoped attention census (PQ #2579, part of #1842): the body census's
+#: schema over the lifted KDA, MLA and kv_b_proj Linears, bound to the base
+#: draw it names. It lives beside the MTP schema because it reuses the same
+#: derived pattern, not because attention runs on the MTP layer.
+ATTENTION_CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_attention.census_extension.v1"
 
 
 def sequence_progress(label, total):
@@ -74,7 +79,7 @@ def final_hidden(runner, input_ids, boundary, *, layer: int):
     from the runner's own ``_prepare`` on the same ids, as the quanta rebuild
     it. Refuses any layer but the last, since only the last feeds the norm.
     """
-    from .cost_streaming import StreamedForwardBoundaries
+    from .streamed_boundary_artifacts import StreamedForwardBoundaries
     from .layer_streaming import _get_final_norm
 
     if int(layer) != int(runner.num_layers) - 1:
@@ -154,6 +159,36 @@ def read_bound_json(path, expected_sha256):
     if digest != expected_sha256:
         raise RuntimeError(f"{path}: sha256 {digest} is not the bound {expected_sha256}")
     return json.loads(raw), digest
+
+
+def require_final_hidden_source(manifest, canonical_capture, *, where):
+    """Admit CLI hidden states under the canonical capture's source seal.
+
+    Independent captures of the same checkpoint may have different draws,
+    units or generations. Compare their bound source rosters, leaving the
+    caller's calibration equality and each artifact's own integrity strict.
+    """
+    from . import tessera_calibration_cache as cc
+    from .dev_mode import seal_check
+
+    if manifest.get("schema") != FINAL_HIDDEN_SCHEMA:
+        raise RuntimeError(f"{where}: not a GLM MTP final-hidden manifest")
+
+    def source_files(binding):
+        if not isinstance(binding, dict) or not {"path", "sha256"} <= binding.keys():
+            raise RuntimeError(f"{where}: final-hidden source needs a bound canonical capture")
+        capture, _ = read_bound_json(binding["path"], binding["sha256"])
+        source = cc.validate_capture_contract(capture)["identity"]["source_files"]
+        if not isinstance(source, dict):
+            raise RuntimeError(f"{where}: canonical capture source roster is invalid")
+        cc._require_sha256_roster(source, what="final-hidden canonical source")
+        return source
+
+    recorded = source_files((manifest.get("inputs") or {}).get("canonical_capture"))
+    current = source_files(canonical_capture)
+    return seal_check("MTP final-hidden source", recorded, current, where=where,
+        refusal=lambda: RuntimeError(
+            f"{where}: final hidden states were computed from another source model"))
 
 
 def ordered_boundary_records(manifest, n_sequences, *, layer):
@@ -310,11 +345,11 @@ def capture_mtp_layer(model, embed_tokens, calibration_ids, read_final_hidden, *
 
     Returns the collector's ``(rows, hessians, counts, max_abs)`` for ``units``.
     """
-    from .tessera_campaign import _collect_activations
+    from .tessera_calibration_forward import capture_activation_statistics
 
     feed = MtpCaptureFeed(model, embed_tokens, calibration_ids,
                           read_final_hidden=read_final_hidden)
-    result = _collect_activations(
+    result = capture_activation_statistics(
         model, sorted(units), feed.batches(), int(max_act_rows), device,
         want_hessian=True, profile=profile, forward_batch=feed,
         resource_check=resource_check)
@@ -467,10 +502,85 @@ def publish_mtp_capture(root, *, census, census_path, source_authentication, cal
     return identity, census_sha256, receipt
 
 
+def attention_census(*, base_census, base_census_ref, units, counts, max_abs, groups,
+                     model_load_contract, attention_implementation, capture_runtime,
+                     expert_projection=None, pinned_roster=None):
+    """The scoped attention census: the body census's schema over the lifted units.
+
+    Model and draw are the body census's. The body campaign pins every KDA,
+    MLA and kv_b_proj Linear, so it never observes them; this census covers
+    exactly ``units`` over the body's draw instead, and takes the draw's
+    (max, min) rows from the hash-bound base census it names
+    (``attention_extension``). ``expert_projection`` carries the body's
+    producer answer unchanged when given, so the capture inherits the sealed
+    source roster (``admit_derived_census``). ``pinned_roster`` carries the
+    scoped run's lift record when given; a census without one carries no such
+    key, so a body census stays byte-identical.
+    """
+    from types import SimpleNamespace
+
+    from .tessera_campaign import calibration_census
+
+    if set(counts) != set(units) or set(max_abs) != set(units):
+        raise RuntimeError("Attention census counts and maxima must cover exactly its units")
+    args = SimpleNamespace(**{key: base_census[key] for key in (
+        "model", "nsamples", "seqlen", "seed", "layer_stride")})
+    census = calibration_census(
+        counts, max_abs, args=args, groups=groups, dense_targets=sorted(units),
+        expert_targets=[], shapes=units,
+        identity={
+            **{key: base_census[key] for key in ("text_sha256", "fit_ids_sha256")},
+            **({"calibration_input": base_census["calibration_input"]}
+               if "calibration_input" in base_census else {}),
+        },
+        expert_projection=expert_projection,
+        model_load_contract=model_load_contract,
+        attention_implementation=attention_implementation, capture_runtime=capture_runtime,
+        pinned_roster=pinned_roster)
+    census["attention_extension"] = {
+        "schema": ATTENTION_CENSUS_EXTENSION_SCHEMA,
+        "base_census": dict(base_census_ref),
+    }
+    return census
+
+
+def publish_attention_capture(root, *, census, census_path, source_authentication, calibration,
+                              max_act_rows, rows, hessians, counts, max_abs,
+                              completed_contract):
+    """Write the census, then the capture through the canonical writer.
+
+    ``completed_contract`` is the checkpoint load's initialization contract
+    taken after the forward that measured ``rows`` and ``hessians``. The
+    writer refuses it unless it equals the census's, the contract the capture
+    identity names.
+    Returns ``(identity, census_sha256, capture receipt)``.
+    """
+    from . import tessera_calibration_cache as cc
+    from .cost_stage_checkpoint import atomic_write_bytes
+
+    raw = indent2_json_file_bytes(census)
+    atomic_write_bytes(Path(census_path), raw)
+    census_sha256 = bytes_sha256hex(raw)
+    admitted = source_authentication.admit_derived_census(census_path)
+    if admitted != census_sha256:
+        raise RuntimeError("Attention census changed between its write and its admission")
+    identity = cc.capture_identity(
+        census_path, calibration=calibration, max_act_rows=int(max_act_rows),
+        model_load_contract=census["model_load_contract"],
+        attention_implementation=census["attention_implementation"],
+        source_authentication=source_authentication)
+    writer = cc.CaptureWriter(root, census_path=census_path, identity=identity)
+    writer.write(acts=rows, hessians=hessians, counts=counts, maxima=max_abs)
+    receipt = writer.finish(model_load_contract=completed_contract)
+    return identity, census_sha256, receipt
+
+
 __all__ = [
+    "ATTENTION_CENSUS_EXTENSION_SCHEMA",
     "CENSUS_EXTENSION_SCHEMA",
     "FINAL_HIDDEN_SCHEMA",
     "MtpCaptureFeed",
+    "attention_census",
     "capture_mtp_layer",
     "check_mtp_expert_projection",
     "final_hidden",
@@ -481,8 +591,10 @@ __all__ = [
     "mtp_expert_projection",
     "mtp_projection_request",
     "ordered_boundary_records",
+    "publish_attention_capture",
     "publish_final_hidden",
     "publish_mtp_capture",
     "read_bound_json",
+    "require_final_hidden_source",
     "write_final_hidden",
 ]

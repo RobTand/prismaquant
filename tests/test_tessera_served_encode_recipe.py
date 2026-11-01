@@ -7,6 +7,7 @@ E2M1_K2 rung from 128 to 896, and the routed cells attest those rungs. A
 routed unit priced on the research wire is priced on bytes the routed decoder
 cannot read; G2 spent w02r row-0045 on exactly that.
 """
+from prismaquant import tessera_cell_measurement as cell_measurement
 import pytest
 
 pytest.importorskip("tessera")
@@ -119,13 +120,13 @@ def test_batches_never_join_units_served_on_different_structures():
     weights = {name: torch.empty((64, 64)) for name in ("dense", "routed", "routed2")}
     pending = [(name, "TESSERA_E2M1_K2", 896) for name in weights]
     structures = {"dense": "dense", "routed": "routed_moe", "routed2": "routed_moe"}
-    batches = campaign._anchor_batches(pending, weights=weights, batch_size=4,
+    batches = cell_measurement.compatible_batches(pending, weights=weights, batch_size=4,
                                        structures=structures)
     assert sorted(map(sorted, batches)) == sorted([
         [("dense", "TESSERA_E2M1_K2", 896)],
         [("routed", "TESSERA_E2M1_K2", 896), ("routed2", "TESSERA_E2M1_K2", 896)]])
     # Without declared structures the historical key is unchanged: one batch.
-    assert len(campaign._anchor_batches(pending, weights=weights, batch_size=4)) == 1
+    assert len(cell_measurement.compatible_batches(pending, weights=weights, batch_size=4)) == 1
 
 
 def test_the_campaign_plans_route_refusals_as_contract_facts():
@@ -167,7 +168,7 @@ def test_a_routed_checkpoint_identity_stamps_the_served_wire(monkeypatch):
     kwargs = dict(weights={"u": weight}, menus={"u": [SimpleNamespace(format_name=fmt)]},
                   calibration_source=None, static_scales={})
     # The A-side gate is not under test here.
-    monkeypatch.setattr(campaign, "_require_resumable_anchor", lambda *_a, **_k: None)
+    monkeypatch.setattr(cell_measurement, "require_resumable_cell", lambda *_a, **_k: None)
     research = campaign._checkpoint_anchor_identity(anchor, **kwargs)
     assert research == cached_unit.encoding_input_identity(
         weight, "u", family.payload_grid(), int(rung))
@@ -202,11 +203,11 @@ def test_a_resumed_row_stamped_on_the_research_wire_is_diverted_not_adopted():
 
     research = record(tessera_wire_recipe(family, rung))
     served = record(_served(fmt, "routed_moe"))
-    reason = campaign._stale_served_wire(anchor, research, structure="routed_moe")
+    reason = cell_measurement.stale_wire_reason(anchor, research, structure="routed_moe")
     assert reason is not None and "#1502" in reason
-    assert campaign._stale_served_wire(anchor, served, structure="routed_moe") is None
+    assert cell_measurement.stale_wire_reason(anchor, served, structure="routed_moe") is None
     # No declared structure, or a dense unit on its own wire: adopted as before.
-    assert campaign._stale_served_wire(anchor, research, structure=None) is None
-    assert campaign._stale_served_wire(anchor, research, structure="dense") is None
+    assert cell_measurement.stale_wire_reason(anchor, research, structure=None) is None
+    assert cell_measurement.stale_wire_reason(anchor, research, structure="dense") is None
     # An unreadable receipt is left to the full identity check, which refuses it.
-    assert campaign._stale_served_wire(anchor, {}, structure="routed_moe") is None
+    assert cell_measurement.stale_wire_reason(anchor, {}, structure="routed_moe") is None

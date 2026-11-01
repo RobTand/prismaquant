@@ -1,10 +1,4 @@
-"""Dispatch hashlib wrappers route through the digests owners (issue #1670).
-
-RED: each test patches the digests owner with a recorder and calls the tool
-wrapper. Before delegation the wrapper hashes inline, so the recorder is
-never consulted and the test fails with the mutation (unrouted bytes)
-observed. After delegation the recorder sees every call.
-"""
+"""Dispatchers use the shared byte and file digest functions (issue #1670)."""
 
 from __future__ import annotations
 
@@ -41,14 +35,11 @@ def test_sha_bytes_routes_through_owner(monkeypatch):
     assert seen == [b"abc"]
 
 
-def test_sha256_of_routes_through_owner(monkeypatch, tmp_path):
+def test_campaign_file_digest_is_bound_to_owner(tmp_path):
     target = tmp_path / "f.bin"
     target.write_bytes(b"abc")
-    seen = []
-    monkeypatch.setattr(owners, "file_sha256hex",
-                        lambda path, **k: seen.append(Path(path).name) or "routed")
-    assert CAMPAIGN._sha256_of(target) == "routed"
-    assert seen == ["f.bin"]
+    assert CAMPAIGN.file_sha256hex is owners.file_sha256hex
+    assert CAMPAIGN.file_sha256hex(target) == hashlib.sha256(b"abc").hexdigest()
 
 
 def test_argv_file_hash_routes_through_owner(monkeypatch):

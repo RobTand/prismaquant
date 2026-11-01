@@ -75,13 +75,6 @@ def test_group_option_names_come_from_the_family():
         fr.whole_group_option_name("NVFP4", 0)
 
 
-def test_the_dp_reductions_live_in_the_solver():
-    from prismaquant import tessera_menu
-
-    assert tessera_menu.prune_dominated is solver.prune_dominated
-    assert tessera_menu.collapse_to_dp_bins is solver.collapse_to_dp_bins
-
-
 def test_the_licence_vocabulary_is_the_lanes():
     from prismaquant import tessera_formats as tf
 

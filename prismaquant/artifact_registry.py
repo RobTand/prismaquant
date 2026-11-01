@@ -1,8 +1,10 @@
 """JSON-backed registry for shipped and candidate PrismaQuant artifacts."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import stat
 import uuid
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
@@ -10,11 +12,27 @@ from pathlib import Path
 from typing import Mapping
 
 from .pipeline import MetricGateSpec
-from .digests import DIRECT_ASCII_LAX
+from .digests import DIRECT_ASCII_LAX, is_sha256hex
 
 
 DEFAULT_REGISTRY_PATH = Path("/home/rob/dq-runs/prismaquant-artifact-registry.json")
 COMPARE_EPSILON = 0.005
+_EVALUATION_SETTING_TYPES = {
+    "model_sha": str,
+    "model_identity_scope": str,
+    "eval_split": str,
+    "metric_era": str,
+    "wikitext_split": str,
+    "n_wikitext_tokens": int,
+    "n_mmlu_questions": int,
+    "calib_seqlen": int,
+    "calib_n_samples": int,
+    "calib_split": str,
+    "calib_seed": int,
+    "wikitext_max_window_tokens": int,
+    "device": str,
+    "dtype": str,
+}
 
 
 @dataclass
@@ -98,16 +116,61 @@ def resolve_layer_config_sha(layer_config: Mapping | str | Path) -> str:
     return layer_config_sha256(payload)
 
 
+def _evaluation_settings_reasons(candidate: ArtifactRecord, baseline: ArtifactRecord) -> list[str]:
+    metadata = {}
+    reasons = []
+    for role, record in (("candidate", candidate), ("baseline", baseline)):
+        metadata[role] = record.eval_meta if isinstance(record.eval_meta, Mapping) else {}
+    for name, expected_type in _EVALUATION_SETTING_TYPES.items():
+        values = {}
+        for role, settings in metadata.items():
+            if name not in settings:
+                reasons.append(f"{role} evaluation settings missing {name}")
+                continue
+            value = settings[name]
+            invalid = type(value) is not expected_type or (
+                expected_type is str and not value.strip())
+            if name == "model_sha":
+                invalid = invalid or not is_sha256hex(value)
+            elif name == "model_identity_scope":
+                invalid = invalid or value not in ("local_content", "remote_identifier")
+            if invalid:
+                reasons.append(f"{role} evaluation settings invalid {name}")
+            else:
+                values[role] = value
+        if len(values) == 2 and values["candidate"] != values["baseline"]:
+            reasons.append(f"evaluation settings differ for {name}")
+    for role, settings in metadata.items():
+        if ("eval_split" in settings and "wikitext_split" in settings
+                and settings["eval_split"] != settings["wikitext_split"]):
+            reasons.append(f"{role} evaluation settings eval_split differs from wikitext_split")
+    return reasons
+
+
 class ArtifactRegistry:
     def __init__(self, path: str | Path = DEFAULT_REGISTRY_PATH):
         self.path = Path(path)
         self._records = self._load()
 
     def add(self, record: ArtifactRecord) -> None:
-        if any(existing.record_id == record.record_id for existing in self._records):
-            raise ValueError(f"duplicate artifact record_id: {record.record_id}")
-        self._records.append(record)
-        self._write()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(lock_path, flags, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError(f"artifact registry lock is not a regular file: {lock_path}")
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            records = self._load()
+            if any(existing.record_id == record.record_id for existing in records):
+                raise ValueError(f"duplicate artifact record_id: {record.record_id}")
+            records.append(record)
+            self._write(records)
+            self._records = records
+        finally:
+            os.close(descriptor)
 
     def find_by_layer_config(self, layer_config: dict | str) -> ArtifactRecord | None:
         layer_sha = resolve_layer_config_sha(layer_config)
@@ -125,6 +188,7 @@ class ArtifactRegistry:
     def compare(self, candidate_id: str, baseline_id: str) -> dict:
         candidate = self._record_by_id(candidate_id)
         baseline = self._record_by_id(baseline_id)
+        settings_reasons = _evaluation_settings_reasons(candidate, baseline)
 
         metrics = {
             "end_kl": _compare_metric(
@@ -165,7 +229,7 @@ class ArtifactRegistry:
                 ),
             ),
         }
-        reasons = [
+        reasons = settings_reasons + [
             f"{name} failed"
             for name, result in metrics.items()
             if not result["passed"]
@@ -174,6 +238,9 @@ class ArtifactRegistry:
             "candidate_id": candidate_id,
             "baseline_id": baseline_id,
             "epsilon": COMPARE_EPSILON,
+            "comparison_scope": "recorded_evaluation_settings",
+            "content_equivalence": "not_established",
+            "evaluation_settings_compatible": not settings_reasons,
             "metrics": metrics,
             "pass": not reasons,
             "reasons": reasons,
@@ -198,9 +265,8 @@ class ArtifactRegistry:
             raise ValueError(f"{self.path}: registry JSON must be a list or object")
         return [ArtifactRecord.from_dict(record) for record in raw_records]
 
-    def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"records": [record.to_dict() for record in self._records]}
+    def _write(self, records: list[ArtifactRecord]) -> None:
+        payload = {"records": [record.to_dict() for record in records]}
         tmp = self.path.with_name(
             f".{self.path.name}.{uuid.uuid4().hex}.tmp"
         )

@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
-from .joint_aura import _joint_projection_requirements, identity_sha256
+from .joint_aura import _joint_projection_requirements
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from .digests import DIRECT_ASCII_STRICT
 
 SCHEMA = 'prismaquant.joint_statistics_target_windows.v1'
@@ -58,7 +59,7 @@ class JointStatisticsTargetPlan:
 
     @property
     def identity_sha256(self):
-        return identity_sha256(self.as_dict())
+        return joint_identity_sha256(self.as_dict())
 
 
 def plan_joint_statistics_target_windows(modules, specs_by_qname, *, max_statistics_bytes,

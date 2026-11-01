@@ -71,12 +71,6 @@ if set(iq) != required_iq:
     sys.exit(f"installed IQ tables differ from canonical keys: {sorted(iq)}")
 print(f"  IQ tables OK: {len(iq)}")
 
-# The Gridbook codebook lane's packaged runtime helper and immutable pin were
-# checked here until 2026-09-02, when that lane was retired
-# (archive/gridbook_lane_2026-09-02/). Nothing replaces the check: the Tessera
-# lane's pin is not packaged data, it is read from the installed `tessera`
-# distribution's own runtime_contract.json.
-
 # The pipeline's final refusal display is packaged rather than pointing at the
 # repository-only tools/ tree.
 shipcard = subprocess.run(

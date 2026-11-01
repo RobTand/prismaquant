@@ -18,8 +18,9 @@ each off by their own power of two. Nothing raises. On DSv4-Flash that was 43
 So this module asks the question the exporter's own asserts could not: **for
 every scale-bearing weight tensor actually present in the artifact, which
 mechanism decodes it, and is that mechanism complete?** It reads only the
-artifact — safetensors headers and ``quant_config.json``, never the source
-checkpoint — because that is exactly what a consumer has.
+artifact, its safetensors headers and ``config.json.quantization_config``,
+never the source checkpoint. Historical ``quant_config.json`` remains readable;
+contradictory current and historical decoder contracts are refused.
 
 Cheap by construction: safetensors headers only, no tensor data, so it runs on
 a 92 GB artifact in about the time it takes to open the shards.
@@ -34,15 +35,13 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from prismaquant.source_read_plan import read_safetensors_header
+from prismaquant.source_read_plan import read_artifact_header, read_tensor_header
 
 
 __all__ = [
     "ArtifactIncomplete",
     "CompletenessReport",
     "check_artifact_completeness",
-    "read_artifact_header",
-    "read_artifact_shard_headers",
 ]
 
 #: Element dtypes that CANNOT be read without a scale plane. A tensor stored in
@@ -101,7 +100,7 @@ class CompletenessReport:
     undeclared: list[str] = field(default_factory=list)
     #: scale-bearing weights declared `ignore`, i.e. claimed to be unquantized
     fp8_in_ignore: list[str] = field(default_factory=list)
-    #: declared passthrough units whose scale plane is MISSING from the artifact
+    #: units whose declared decoder requires an absent scale plane
     missing_scale: list[str] = field(default_factory=list)
     #: scale planes present whose weight is not declared passthrough
     orphan_scale: list[str] = field(default_factory=list)
@@ -139,7 +138,7 @@ class CompletenessReport:
                 f"raise nothing: {sorted(self.fp8_in_ignore)[:5]}")
         if self.missing_scale:
             parts.append(
-                f"{len(self.missing_scale)} declared passthrough unit(s) are "
+                f"{len(self.missing_scale)} declared unit(s) are "
                 f"missing their scale plane, so the declaration promises a "
                 f"decode the artifact cannot perform: "
                 f"{sorted(self.missing_scale)[:5]}")
@@ -174,44 +173,6 @@ class CompletenessReport:
                 f"sub-group sums: {self.group_byte_mismatches[:5]}"
             )
         return "; ".join(parts)
-
-
-def _read_safetensors_header(path: Path) -> dict[str, dict]:
-    """Read one safetensors-compatible container header, never its data."""
-
-    header, _base, _size = read_safetensors_header(str(path))
-    return {
-        name: meta for name, meta in header.items() if name != "__metadata__"
-    }
-
-
-def read_artifact_shard_headers(artifact_dir: str | Path) -> dict[str, dict[str, dict]]:
-    """``{shard file name: {tensor name: safetensors metadata}}``. Headers only.
-
-    The shards are the index's ``weight_map`` values, or the one
-    ``model.safetensors`` of an unindexed checkpoint, in sorted order. Each
-    tensor is attributed to the file whose header names it, so a caller that
-    needs to know which file a read opens (source authentication hashes whole
-    files, RobTand/prismaquant#1491) reads it here instead of re-deriving the
-    index rule.
-    """
-
-    root = Path(artifact_dir)
-    index = root / "model.safetensors.index.json"
-    if index.exists():
-        shards = sorted(set(json.loads(index.read_text())["weight_map"].values()))
-    else:
-        shards = ["model.safetensors"]
-    return {shard: _read_safetensors_header(root / shard) for shard in shards}
-
-
-def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
-    """``{tensor name: safetensors metadata}`` across every shard. Headers only."""
-
-    header: dict[str, dict] = {}
-    for shard_header in read_artifact_shard_headers(artifact_dir).values():
-        header.update(shard_header)
-    return header
 
 
 def _checkpoint_spellings(unit: str, profile) -> set[str]:
@@ -267,27 +228,45 @@ def _detect_profile_quietly(artifact_dir: Path):
         return None
 
 
-def _group_claimed_units(quant_config: dict) -> set[str]:
-    """Units ANY config group claims, un-anchored from regex spellings.
+def _group_requires_weight_scale(quant_config: dict, group: dict) -> bool:
+    if quant_config.get("quant_method") != "compressed-tensors":
+        return False
+    weights = group.get("weights")
+    if (not isinstance(weights, dict) or weights.get("dynamic", False) is not False
+            or weights.get("type") != "float"):
+        return False
+    encoding = group.get("format", quant_config.get("format"))
+    if encoding == "float-quantized":
+        return (weights.get("num_bits") == 8
+                and weights.get("strategy") in ("tensor", "channel", "block"))
+    if encoding == "nvfp4-pack-quantized":
+        return (weights.get("num_bits") == 4
+                and weights.get("strategy") == "tensor_group"
+                and weights.get("group_size") == 16)
+    if encoding in ("mxfp4-pack-quantized", "mxfp8-quantized"):
+        return (weights.get("num_bits") == (4 if encoding.startswith("mxfp4") else 8)
+                and weights.get("strategy") == "group"
+                and weights.get("group_size") == 32)
+    return False
 
-    Deliberately not limited to CB groups. A config group is a decoding
-    mechanism whatever its flavour — a CB ``scheme``, a ``source-passthrough``
-    layout record, a lane-native re-quant group, or a stock
-    compressed-tensors scheme — and this gate's question is only "is there
-    one", not "which". Narrowing it to CB would report every stock-delegated
-    and re-quantized fp8 unit as undeclared, which is noise that would get the
-    gate switched off.
+
+def _group_claimed_units(quant_config: dict) -> dict[str, bool]:
+    """Config-group targets and their known persisted weight-scale requirement.
+
+    All existing groups remain decoding claims. Only the supported static
+    compressed-tensors schemes impose a persisted ``weight_scale`` here.
     """
 
-    claimed: set[str] = set()
+    claimed: dict[str, bool] = {}
     for group in (quant_config.get("config_groups") or {}).values():
         if not isinstance(group, dict):
             continue
+        requires_scale = _group_requires_weight_scale(quant_config, group)
         for target in group.get("targets") or ():
             name = str(target)
             if name.startswith("re:^") and name.endswith("$"):
                 name = name[len("re:^"):-1].replace("[.]", ".")
-            claimed.add(name)
+            claimed[name] = claimed.get(name, False) or requires_scale
     return claimed
 
 
@@ -501,7 +480,7 @@ def _validate_per_expert_format_groups(
     if codebook_file is not None:
         codebook_path = root / str(codebook_file)
         if codebook_path.exists():
-            codebook_header = _read_safetensors_header(codebook_path)
+            codebook_header = read_tensor_header(codebook_path)
     tensor_sum = 0
     codebook_sum = 0
     tensor_owners: dict[str, str] = {}
@@ -596,6 +575,31 @@ def _validate_per_expert_format_groups(
         )
 
 
+def _read_quantization_config(root: Path) -> dict:
+    """Read the emitted decoder contract, refusing contradictory sidecars."""
+    config_path = root / "config.json"
+    current = None
+    if config_path.exists():
+        config = json.loads(config_path.read_text())
+        if not isinstance(config, dict):
+            raise ValueError("artifact config.json must contain an object")
+        if "quantization_config" in config:
+            current = config["quantization_config"]
+            if current is None:
+                current = {}
+            if not isinstance(current, dict):
+                raise ValueError("artifact quantization_config must be an object")
+    legacy_path = root / "quant_config.json"
+    legacy = None
+    if legacy_path.exists():
+        legacy = json.loads(legacy_path.read_text())
+        if not isinstance(legacy, dict):
+            raise ValueError("artifact quant_config.json must contain an object")
+    if current is not None and legacy is not None and current != legacy:
+        raise ValueError("conflicting quantization configurations in artifact")
+    return current if current is not None else (legacy if legacy is not None else {})
+
+
 def check_artifact_completeness(
     artifact_dir: str | Path,
     *,
@@ -611,7 +615,7 @@ def check_artifact_completeness(
     """
 
     root = Path(artifact_dir)
-    quant_config = json.loads((root / "quant_config.json").read_text())
+    quant_config = _read_quantization_config(root)
     header = read_artifact_header(root)
 
     profile = _detect_profile_quietly(root)
@@ -628,11 +632,12 @@ def check_artifact_completeness(
         for entry in (quant_config.get("ignore") or ())
         for spelling in _checkpoint_spellings(str(entry), profile)
     }
-    group_claimed = {
-        spelling
-        for entry in _group_claimed_units(quant_config)
-        for spelling in _checkpoint_spellings(entry, profile)
-    }
+    group_claimed = {}
+    for entry, requires_scale in _group_claimed_units(quant_config).items():
+        for spelling in _checkpoint_spellings(entry, profile):
+            group_claimed[spelling] = group_claimed.get(spelling, False) or requires_scale
+    scaled_group_claimed = {name for name, requires_scale in group_claimed.items()
+                            if requires_scale}
     embedding_claimed = {
         spelling
         for entry in (
@@ -756,6 +761,9 @@ def check_artifact_completeness(
         if _claimed_by_self_or_ancestor(unit, group_claimed, profile):
             report.cb_units.append(unit)
             claimed_scales |= unit_scales
+            if (_claimed_by_self_or_ancestor(unit, scaled_group_claimed, profile)
+                    and unit + ".weight_scale" not in header):
+                report.missing_scale.append(unit)
             continue
         if unit in group_split_claimed:
             # Exact name, no variant walk: `tensor_prefix` is written in the
@@ -779,6 +787,9 @@ def check_artifact_completeness(
             # must stay a failure rather than pass on one sibling's claim.
             report.cb_units.append(unit)
             claimed_scales |= unit_scales
+            if (any(_claimed_by_self_or_ancestor(member, scaled_group_claimed, profile)
+                    for member in members) and unit + ".weight_scale" not in header):
+                report.missing_scale.append(unit)
             continue
         report.undeclared.append(unit)
 

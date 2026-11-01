@@ -538,7 +538,7 @@ def run_report(args: argparse.Namespace) -> Path:
     lines = [
         "# COLD-EXPERT ATLAS",
         "",
-        "CPU-only screening of never-routed experts by projecting each learned router row "
+        "CPU-only screening of experts with zero recorded Fisher trace by projecting each learned router row "
         "back onto the checkpoint token-embedding vocabulary.",
         "",
         f"Cold definition: `{inventory['definition']}`. Total: **{inventory['cold_expert_count']:,}**.",
@@ -590,8 +590,8 @@ def run_report(args: argparse.Namespace) -> Path:
             "- A coherent top-token list is a hypothesis about specialization, not evidence "
             "that those tokens would route to the expert in a real forward pass.",
             "",
-            "- Zero calibration routing proves only that the calibration sample missed the "
-            "expert. This atlas is a screening tool for the future truncated-forward miner, "
+            "- A zero Fisher trace does not prove that no token reached the expert. "
+            "This atlas is a screening tool for the future truncated-forward miner, "
             "not proof that an expert is dead or semantically specialized.",
             "",
         ]

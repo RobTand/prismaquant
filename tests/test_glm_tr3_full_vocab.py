@@ -4,6 +4,9 @@ import enum
 import hashlib
 import io
 import json
+import inspect
+import runpy
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -152,6 +155,151 @@ def test_nonfinite_refuses_before_number(bad, side):
 def test_actual_scoring_has_no_cpu_fallback():
     with pytest.raises(ValueError, match="CUDA"):
         exp.token_kl(torch.zeros(2, 3), torch.zeros(2, 3))
+
+
+# #2778 is a checked-scorer-only slice of #1303. The frozen body is deliberately
+# independent of both live entry points and of the NumPy upstream oracle above.
+OLD_TOKEN_KL_2778 = runpy.run_path(str(
+    Path(__file__).parent / "fixtures" / "token_kl_old_2778.py"))["token_kl"]
+
+
+def _same_bits_2778(actual, expected):
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    assert actual.device == expected.device
+    assert torch.equal(actual.contiguous().view(torch.uint8),
+                       expected.contiguous().view(torch.uint8))
+
+
+def _entry_points_2778():
+    from prismaquant import g3_numerics
+    return (g3_numerics.token_kl, exp.token_kl)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("tile_rows", [1, 3, 32])
+@pytest.mark.parametrize("case", ["seeded", "strided", "extreme", "identical"])
+def test_checked_token_kl_old_body_bits_2778(dtype, tile_rows, case):
+    generator = torch.Generator().manual_seed(2778)
+    backing = [torch.randn(14, 38, generator=generator, dtype=dtype) for _ in range(2)]
+    if case == "extreme":
+        # Finite but wide enough to underflow softmax tails, without overflowing
+        # FP64 subtraction. Covers both input dtypes rather than an FP32 oracle.
+        for value in backing:
+            value.mul_(1e30 if dtype == torch.float32 else 1e300)
+    if case == "identical":
+        backing[1].copy_(backing[0])
+    teacher, candidate = ([value[::2, ::2] for value in backing] if case == "strided"
+                          else [value[:7, :19].contiguous() for value in backing])
+    if case == "strided":
+        assert not teacher.is_contiguous() and not candidate.is_contiguous()
+    originals = [value.clone() for value in (teacher, candidate, *backing)]
+    expected = OLD_TOKEN_KL_2778(teacher, candidate, tile_rows=tile_rows, require_cuda=False)
+    for scorer in _entry_points_2778():
+        actual = scorer(teacher, candidate, tile_rows=tile_rows, require_cuda=False)
+        assert actual.dtype == torch.float64 and actual.device == teacher.device
+        assert actual.shape == (7,)
+        _same_bits_2778(actual, expected)
+        for value, original in zip((teacher, candidate, *backing), originals):
+            _same_bits_2778(value, original)
+
+
+@pytest.mark.parametrize("case", [
+    "teacher-rank", "candidate-rank", "shape", "empty-rows", "one-column", "empty-columns",
+    "tile-zero", "tile-negative", "tile-bool", "tile-float", "tile-numpy-int", "device",
+    "default-cuda", "explicit-cuda", "result-nonfinite",
+])
+def test_checked_token_kl_old_body_refusals_2778(case):
+    teacher, candidate = torch.zeros(4, 5), torch.ones(4, 5)
+    kwargs = {"tile_rows": 2, "require_cuda": False}
+    if case == "teacher-rank":
+        teacher = teacher.unsqueeze(0)
+    elif case == "candidate-rank":
+        candidate = candidate.unsqueeze(0)
+    elif case == "shape":
+        candidate = candidate[:, :-1]
+    elif case in ("empty-rows", "one-column", "empty-columns"):
+        shape = {"empty-rows": (0, 5), "one-column": (4, 1), "empty-columns": (4, 0)}[case]
+        teacher, candidate = torch.zeros(shape), torch.ones(shape)
+    elif case.startswith("tile-"):
+        kwargs["tile_rows"] = {"tile-zero": 0, "tile-negative": -1, "tile-bool": True,
+                               "tile-float": 2.0, "tile-numpy-int": np.int64(2)}[case]
+    elif case == "device":
+        candidate = torch.empty(4, 5, device="meta")
+    elif case == "default-cuda":
+        kwargs.pop("require_cuda")
+    elif case == "explicit-cuda":
+        kwargs["require_cuda"] = True
+    elif case == "result-nonfinite":
+        maximum = torch.finfo(torch.float64).max
+        teacher = torch.tensor([[maximum, -maximum]], dtype=torch.float64)
+        candidate = teacher.flip(1)
+    originals = [value.clone() for value in (teacher, candidate)]
+    with pytest.raises(ValueError) as old:
+        OLD_TOKEN_KL_2778(teacher, candidate, **kwargs)
+    for scorer in _entry_points_2778():
+        with pytest.raises(type(old.value)) as current:
+            scorer(teacher, candidate, **kwargs)
+        assert str(current.value) == str(old.value)
+        for value, original in zip((teacher, candidate), originals):
+            if value.device.type != "meta":
+                _same_bits_2778(value, original)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("side", [0, 1])
+@pytest.mark.parametrize("row", [0, 3])
+def test_checked_token_kl_nonfinite_old_body_2778(dtype, bad, side, row):
+    tensors = [torch.zeros(4, 5, dtype=dtype), torch.ones(4, 5, dtype=dtype)]
+    tensors[side][row, 1] = bad  # First and later tiles must both refuse.
+    originals = [value.clone() for value in tensors]
+    with pytest.raises(ValueError) as old:
+        OLD_TOKEN_KL_2778(*tensors, tile_rows=2, require_cuda=False)
+    for scorer in _entry_points_2778():
+        with pytest.raises(type(old.value)) as current:
+            scorer(*tensors, tile_rows=2, require_cuda=False)
+        assert str(current.value) == str(old.value)
+        for value, original in zip(tensors, originals):
+            _same_bits_2778(value, original)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"tile_rows": 3, "require_cuda": False}])
+@pytest.mark.parametrize("refuse", [False, True])
+def test_checked_token_kl_delegates_to_g3_owner_2778(monkeypatch, kwargs, refuse):
+    from prismaquant import g3_numerics
+    teacher, candidate = torch.zeros(4, 5), torch.ones(4, 5)
+    marker = torch.full((4,), 2778., dtype=torch.float64)
+    calls = []
+    refusal = ValueError("checked owner refusal #2778")
+
+    def checked_owner(t, c, *, tile_rows=32, require_cuda=True):
+        calls.append((t, c, tile_rows, require_cuda))
+        if refuse:
+            raise refusal
+        return marker
+
+    monkeypatch.setattr(g3_numerics, "token_kl", checked_owner)
+    # Load the whole consumer normally, not an AST-extracted FunctionDef. Patch
+    # before load to admit either an imported alias or a module-attribute call.
+    entry = runpy.run_path(exp.__file__)["token_kl"]
+    assert inspect.signature(entry) == inspect.signature(OLD_TOKEN_KL_2778)
+    if refuse:
+        with pytest.raises(ValueError) as caught:
+            entry(teacher, candidate, **kwargs)
+        assert caught.value is refusal
+    else:
+        assert entry(teacher, candidate, **kwargs) is marker
+    assert len(calls) == 1
+    assert calls[0][0] is teacher and calls[0][1] is candidate
+    assert calls[0][2:] == (kwargs.get("tile_rows", 32), kwargs.get("require_cuda", True))
+
+
+def test_checked_token_kl_standalone_import_2778(tmp_path):
+    # This file was executable as a standalone script without a model or CUDA.
+    result = subprocess.run([sys.executable, str(Path(exp.__file__).resolve())],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
 
 
 def capture(rank=0, world=1):
@@ -673,10 +821,10 @@ def test_candidate_authentication_matches_real_manifest_bytes(tmp_path):
 
 def test_missing_digest_cache_cannot_trigger_implicit_full_rehash(tmp_path, monkeypatch):
     from safetensors.torch import save_file
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
     # Reach the cache refusal after authenticating a real checkpoint header.
     save_file({"unit.weight": torch.zeros(1)}, str(tmp_path / "model.safetensors"))
-    monkeypatch.setattr(cost_streaming, "build_source_checkpoint_identity",
+    monkeypatch.setattr(cost_streaming_identity, "build_source_checkpoint_identity",
                         lambda *a, **k: pytest.fail("must not hash missing/stale cache"))
     with pytest.raises(ValueError, match="incomplete/stale"):
         exp.cached_checkpoint_identity(tmp_path, tmp_path / "missing.json")
@@ -890,12 +1038,19 @@ def test_teacher_window_single_read_holds_one_window_on_the_host(tmp_path):
     size = descriptor["bytes"]
 
     def peak(load):
-        tracemalloc.start()
+        started_tracing = not tracemalloc.is_tracing()
+        if started_tracing:
+            tracemalloc.start()
         try:
+            # Exclude both historical peaks and live allocations (including
+            # arrays retained from the previous measurement) from this load.
+            tracemalloc.reset_peak()
+            baseline = tracemalloc.get_traced_memory()[0]
             value = load()
-            return tracemalloc.get_traced_memory()[1], value
+            return tracemalloc.get_traced_memory()[1] - baseline, value
         finally:
-            tracemalloc.stop()
+            if started_tracing:
+                tracemalloc.stop()
 
     single, _ = peak(lambda: served.load_teacher_window(path, descriptor))
     double, _ = peak(lambda: np.load(io.BytesIO(path.read_bytes()), allow_pickle=False))

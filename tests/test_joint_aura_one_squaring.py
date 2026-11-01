@@ -4,16 +4,14 @@ they differ by one ulp for some inputs, and the exact checkpoint-reload
 comparison of the two sample lists refused ("legacy/joint sample alignment
 mismatch"). Both sites now call ``squared_signed``.
 """
-import ast
-from pathlib import Path
 
 import torch
 
 from prismaquant import format_registry as fr
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA
-from prismaquant.joint_aura import (activation_identity, arithmetic_identity, identity_sha256,
-                                    make_joint_aura_entry, squared_signed)
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
+from prismaquant.joint_aura import activation_identity, arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry, squared_signed
 
 # Two signed totals recorded in joint-streamed-run-02 whose pow/mul squares
 # differ by one ulp on this platform.
@@ -40,7 +38,7 @@ def test_row_squares_with_squared_signed():
              "temperature": 1.0, "arithmetic": arithmetic}
     name, fmt = "model.layers.0.mlp.down_proj", "NVFP4"
     operator = {"schema": "prismaquant.joint_aura.operator.v2", "qname": name, "format": fmt,
-                "probe_identity_sha256": identity_sha256(probe),
+                "probe_identity_sha256": joint_identity_sha256(probe),
                 "source_weight": {"content_sha256": "a" * 64, "shape": [64, 64],
                                   "dtype": "torch.float32", "logical_bytes": 16384},
                 "rendered_weight": {"content_sha256": "b" * 64, "shape": [64, 64],
@@ -53,13 +51,8 @@ def test_row_squares_with_squared_signed():
     assert row["x2_per_probe"] == [t * t for t in RECORDED]
 
 
-def test_streamed_accumulator_uses_the_shared_squaring():
-    source = (Path(__file__).resolve().parents[1] / "prismaquant" / "aura_cost.py").read_text()
-    tree = ast.parse(source)
-    pow_squares = [node.lineno for node in ast.walk(tree)
-                   if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)
-                   and isinstance(node.right, ast.Constant) and node.right.value == 2
-                   and isinstance(node.left, ast.Subscript)
-                   and isinstance(node.left.slice, ast.Constant) and node.left.slice.value == "total"]
-    assert pow_squares == [], f"joint total squared with ** at lines {pow_squares}"
-    assert "squared_signed(terms[\"total\"])" in source
+def test_actual_price_step_accumulates_the_recorded_squares():
+    from test_joint_price_step import _completed, FORMAT, UNIT_A
+    step, state = _completed()
+    assert step.measurements.x2_probe[UNIT_A, FORMAT] == [value * value for value in RECORDED]
+    assert state["joint_aura_rows"][FORMAT]["x2_per_probe"] == [value * value for value in RECORDED]

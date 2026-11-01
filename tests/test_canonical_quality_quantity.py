@@ -1,13 +1,13 @@
 """Synthetic regressions for complete scientific coordinates and one quantity."""
 from __future__ import annotations
-
 import copy
 import math
 
 import pytest
 
+from prismaquant import joint_aura_rows
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as candidates, format_registry as registry
-from prismaquant import joint_aura as joint
 from prismaquant.activation_fair_pricing import ActivationFairPricing, FamilyCalibration, _family_of
 from prismaquant.rung_allowability import RungAllowabilityError, qualified_cost_scope
 from test_canonical_consumer_join import FAMILY, _cost_owner, _mutated
@@ -15,8 +15,7 @@ from test_glm_mtp_selection import _row
 from canonical_quality_fixtures import complete_probe, scope_for
 
 
-
-def anchor_rows(*, currency=joint.JOINT_CURRENCY, producer="d", upper_seed=7000):
+def anchor_rows(*, currency=joint_aura_rows.JOINT_CURRENCY, producer="d", upper_seed=7000):
     rows = {}
     for rate, value, source, seed in ((768, 2.0, "d", 7000), (1024, 1.0, producer, upper_seed)):
         name = f"{FAMILY}_R{rate}"
@@ -50,7 +49,7 @@ def nontrivial_calibration(fmt):
                                  {family: 8}, {family: 8}, ())
 
 
-@pytest.mark.parametrize("currency,expected", [(joint.JOINT_CURRENCY, 1.25), ("served_kl", 0.75)])
+@pytest.mark.parametrize("currency,expected", [(joint_aura_rows.JOINT_CURRENCY, 1.25), ("served_kl", 0.75)])
 def test_body_chord_keeps_its_quantity_without_another_transfer(monkeypatch, currency, expected):
     owner = owner_for_rows(monkeypatch)
     fmt = f"{FAMILY}_R896"
@@ -58,7 +57,7 @@ def test_body_chord_keeps_its_quantity_without_another_transfer(monkeypatch, cur
                    "h_trace": 9.0, "unit_structure": "dense"}}
     built = candidates.build_candidates(stats, {"u": anchor_rows(currency=currency)},
         [registry.get_format(fmt)], target_profile="research", rung_allowability={FAMILY: owner},
-        allowability_m=8, calibrated_gains={fmt: 9.0}, activation_pricing=nontrivial_calibration(fmt))
+        allowability_m=8, calibrated_gains={fmt: 9.0}, activation_pricing=nontrivial_calibration(fmt)).candidates
     assert built["u"][0].predicted_dloss == expected
     assert built["u"][0].activation_pricing == "canonical_qualified_chord"
 
@@ -142,7 +141,7 @@ def test_fused_quantity_is_not_scaled_after_member_prices(monkeypatch):
     option = next(c for options in grouped.values() for c in options if c.fmt == fmt)
     assert option.predicted_dloss == 1.5
     group = next(name for name in grouped if name not in units)
-    assert candidates.cost_entry_predicted_dloss(grouped_stats[group], grouped_costs[group][fmt],
+    assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], grouped_costs[group][fmt],
         gain=9.0, format_name=fmt, activation_pricing=nontrivial_calibration(fmt)) == 1.5
 
 
@@ -205,7 +204,7 @@ def test_missing_actual_probe_objective_cannot_be_hidden_by_scope(monkeypatch):
     with pytest.raises(ValueError, match="objective"):
         owner.chord_cost(f"{FAMILY}_R896", unit="u", costs=rows)
 
-@pytest.mark.parametrize("currency,expected", [(joint.JOINT_CURRENCY, 1.75), ("served_kl", 1.25)])
+@pytest.mark.parametrize("currency,expected", [(joint_aura_rows.JOINT_CURRENCY, 1.75), ("served_kl", 1.25)])
 def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch, currency, expected):
     from types import SimpleNamespace
     from prismaquant import allocator_solver
@@ -229,8 +228,10 @@ def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch
                 scope["currency"] = scope["objective"]["currency"] = currency
                 row = {"predicted_dloss": 1.0 if rate == 768 else 0.5, "quality_scope": scope}
             costs[unit][name] = row
-    supplied = candidates.build_candidates(stats, costs, specs, target_profile="research",
+    build = candidates.build_candidates(stats, costs, specs, target_profile="research",
         rung_allowability={FAMILY: owner}, allowability_m=8)
+    supplied = build.candidates
+    costs = build.cost_rows
     supplied = {unit: [option for option in supplied[unit] if option.fmt == fmt]
                 for unit, fmt in zip(units, formats)}
     profile = SimpleNamespace(fused_sibling_group=lambda name: "pair",
@@ -241,7 +242,7 @@ def test_fused_mixed_measured_and_chord_members_keep_complete_prices(monkeypatch
     mixed = next(option for option in options if option.member_formats == dict(zip(units, formats)))
     assert mixed.predicted_dloss == expected
     complete = grouped_costs[group][mixed.fmt]
-    assert candidates.cost_entry_predicted_dloss(grouped_stats[group], complete,
+    assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], complete,
         gain=9.0, format_name=mixed.fmt, activation_pricing=nontrivial_calibration(formats[0])) == expected
     assert {member["unit"]: member["format"] for member in complete["canonical_members"]} == dict(zip(units, formats))
 
@@ -305,7 +306,7 @@ def test_canonical_densify_does_not_publish_anchor_stderr_as_fractional_uncertai
         tessera_pareto_frontier(built, uncertainty_z=1.96)
 
 
-@pytest.fixture(params=[joint.JOINT_CURRENCY, "served_kl"])
+@pytest.fixture(params=[joint_aura_rows.JOINT_CURRENCY, "served_kl"])
 def canonical_chord_candidate(monkeypatch, request):
     from prismaquant.tessera_rate_surface import TesseraRateSurface, densify_rate_surface
     base_owner = owner_for_rows(monkeypatch)
@@ -327,7 +328,7 @@ def canonical_chord_candidate(monkeypatch, request):
             operator["source_weight"]["logical_bytes"] = 2 * 64 * 256
             operator["rendered_weight"]["shape"] = [64, 256]
             operator["rendered_weight"]["logical_bytes"] = 4 * 64 * 256
-            row["joint_operator_identity_sha256"] = joint.identity_sha256(operator)
+            row["joint_operator_identity_sha256"] = joint_aura_rows.joint_identity_sha256(operator)
             from canonical_quality_fixtures import scope_for as rebuild_scope
             row["quality_scope"] = rebuild_scope(row)
         else:

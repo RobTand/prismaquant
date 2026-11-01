@@ -68,3 +68,15 @@ Retained limitations: three units on one model, one rung per family, no
 sparse-anchor interpolation validation, no prefill/decode benchmark, no
 served operator timings, no uniform whole-model control, and no downstream
 task suite. Numerical screen success leaves these routes research-only.
+
+Current execution policy, 2026-10-17: submit new runs through PrismaBuild,
+using the known container with admitted resources and preserved CPU affinity.
+The September 5 exception above describes that historical run only. The
+current harness records this requirement; the action receipt supplies the
+execution evidence.
+
+The streamed protocol hashes the entire historical screen source, including
+its receipt prose. This correction therefore changes that source identity.
+Replay a retained protocol from its original frozen source snapshot through
+PrismaBuild, or generate a new protocol for the current source. Do not rewrite
+an old protocol's hash or its historical execution record.

@@ -61,6 +61,8 @@ run; the bytes handed over are the stage's, admitted on the map.
 """
 from __future__ import annotations
 
+from .mount_facts import MountFacts, find_mount
+
 from concurrent.futures import CancelledError, ThreadPoolExecutor
 import errno
 import json
@@ -599,52 +601,13 @@ STREAMS_ENV = "PRISMAQUANT_STAGED_READ_STREAMS"
 #: from. Named so a test can point it at a table of its own.
 MOUNTS_PATH = "/proc/self/mounts"
 
-#: ``/proc/self/mounts`` escapes space, tab, newline and backslash in a mount
-#: point as a backslash and three octal digits. Decoded in one pass, so a mount
-#: point holding a literal backslash cannot be decoded twice.
-_OCTAL = re.compile(r"\\([0-7]{3})")
-
 _READ_SHAPE_LOCK = threading.Lock()
 _READ_SHAPE_CACHE: dict[str, tuple[int, int] | None] = {}
 _CHUNK_POOL_LOCK = threading.Lock()
 _CHUNK_POOL: ThreadPoolExecutor | None = None
 _CHUNK_POOL_SIZE = 0
 
-
-def _mount_options(path: str) -> tuple[str, str, str] | None:
-    """``(mount point, fstype, options)`` of the mount ``path`` is on.
-
-    The longest mount point that prefixes the path wins, and on a tie the one
-    later in the table does, because that is how the kernel resolves it: mounts
-    stack, and the last one on a point is the one a read reaches. The tie is
-    not hypothetical -- ``/stage/prewarm`` is an autofs trigger with the NFS
-    mount on top of it, and reading the autofs row's options instead of the
-    NFS row's is a mount with no ``nconnect``, which is a reader that quietly
-    stays serial. ``/proc/self/mounts`` escapes space, tab, newline and
-    backslash in the mount point as octal, so they are decoded before the
-    comparison rather than compared raw.
-    """
-    target = os.path.abspath(path)
-    best: tuple[int, str, str, str] | None = None
-    try:
-        with open(MOUNTS_PATH) as handle:
-            rows = handle.read().splitlines()
-    except OSError:
-        return None
-    for row in rows:
-        fields = row.split(" ")
-        if len(fields) < 4:
-            continue
-        point = _OCTAL.sub(lambda m: chr(int(m.group(1), 8)), fields[1])
-        if target == point or target.startswith(point.rstrip("/") + "/"):
-            if best is None or len(point) >= best[0]:
-                best = (len(point), point, fields[2], fields[3])
-    if best is None:
-        return None
-    return best[1], best[2], best[3]
-
-
-def _read_shape_for(mount: tuple[str, str, str]) -> tuple[int, int] | None:
+def _read_shape_for(mount: MountFacts) -> tuple[int, int] | None:
     """``(streams, chunk_bytes)`` for reads on ``mount``, or None to stay serial.
 
     Both numbers are the mount's, not ours (principle 2). ``nconnect`` is how
@@ -658,12 +621,10 @@ def _read_shape_for(mount: tuple[str, str, str]) -> tuple[int, int] | None:
     way it read before. ``STREAMS_ENV`` overrides the stream count for an A/B;
     ``1`` is the single-stream read and is what the before arm sets.
     """
-    _, fstype, raw = mount
-    if not fstype.startswith("nfs"):
+    if not mount.filesystem.startswith("nfs"):
         return None
     streams = chunk = 0
-    for option in raw.split(","):
-        name, _, value = option.partition("=")
+    for name, value in mount.options.items():
         if name == "nconnect" and value.isdigit():
             streams = int(value)
         elif name == "rsize" and value.isdigit():
@@ -686,15 +647,15 @@ def _read_shape(path: str) -> tuple[int, int] | None:
     is on -- and the cache saves the option parse and the environment read, not
     the table read.
     """
-    mount = _mount_options(path)
+    mount = find_mount(path, table=MOUNTS_PATH)
     if mount is None:
         return None
     with _READ_SHAPE_LOCK:
-        if mount[0] in _READ_SHAPE_CACHE:
-            return _READ_SHAPE_CACHE[mount[0]]
+        if mount.point in _READ_SHAPE_CACHE:
+            return _READ_SHAPE_CACHE[mount.point]
     shape = _read_shape_for(mount)
     with _READ_SHAPE_LOCK:
-        _READ_SHAPE_CACHE[mount[0]] = shape
+        _READ_SHAPE_CACHE[mount.point] = shape
     return shape
 
 
@@ -870,7 +831,8 @@ class StagedShardReader:
     shapes and dtypes come from the existing bounded header reader
     (``_read_shard_header``); payload comes from staged ranges or refuses.
 
-    Concurrency is threads, never fork: payload and lifecycle operations
+    Under active allowed-tier policy, concurrency is threads, never fork:
+    payload and lifecycle operations
     (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) reject
     inherited handle operations in a forked child, so a child cannot
     drive reads through state the parent's release retires. ``keys``/
@@ -1291,8 +1253,8 @@ def staged_shard_opener(declared, pool_open):
 
     Under the active allowed-tier policy there is no unwrapped path: a file
     the map never names (or no map at all) still opens through a reader
-    whose header/keys/metadata come from the pool handle — bounded header
-    bytes, allowed — but whose payload reads refuse with
+    whose header/keys/metadata come from the bounded header reader,
+    but whose payload reads refuse with
     ``readset-not-staged`` instead of serving pool bytes.
     """
     resolver = residency_resolver()

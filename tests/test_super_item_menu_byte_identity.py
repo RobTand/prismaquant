@@ -67,7 +67,6 @@ stamps it into the fixture beside the digest::
         PYTHONPATH=. python tests/test_super_item_menu_byte_identity.py --regen
 """
 from __future__ import annotations
-
 import hashlib
 import json
 import os
@@ -77,6 +76,7 @@ from unittest import mock
 
 import pytest
 
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as alloc_cand
 from prismaquant import format_registry as fr
 from prismaquant.activation_fair_pricing import (
@@ -293,7 +293,7 @@ def _run_fused(ucb_z: str, *, gains, pricing):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": ucb_z}):
         cands = build_candidates(
             stats, costs, specs, calibrated_gains=gains,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
         return alloc_cand.aggregate_fused_siblings(
             stats, costs, specs, cands, _DenseProfile(),
             calibrated_gains=gains, activation_pricing=pricing)
@@ -308,7 +308,7 @@ def _run_packed(ucb_z: str, *, gains, pricing, role_split: bool):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": ucb_z}):
         cands = build_candidates(
             stats, costs, specs, calibrated_gains=gains,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
         return alloc_cand.aggregate_packed_serving_groups(
             stats, costs, specs, cands, profile,
             calibrated_gains=gains, activation_pricing=pricing)
@@ -522,7 +522,7 @@ def test_group_prices_preserve_scaled_member_hedges(kind, z):
     with mock.patch.dict(os.environ, {"PRISMAQUANT_COST_UCB_Z": z}):
         members = build_candidates(
             stats, costs, _specs(), calibrated_gains=GAINS,
-            activation_pricing=pricing)
+            activation_pricing=pricing).candidates
     if kind == "fused":
         grouped_stats, _, grouped = _run_fused(z, gains=GAINS, pricing=pricing)
         member_key = "_fused_siblings"
@@ -662,13 +662,13 @@ def test_the_golden_is_load_bearing():
             "-- the golden does not pin what it claims to pin"
         )
 
-    original_dloss = alloc_cand.cost_entry_predicted_dloss
+    original_dloss = priced_cell.cost_entry_predicted_dloss
 
     def perturbed(*args, **kwargs):
         return original_dloss(*args, **kwargs) * (1.0 + 1e-12)
 
     with mock.patch.object(
-        alloc_cand, "cost_entry_predicted_dloss", perturbed
+        priced_cell, "cost_entry_predicted_dloss", perturbed
     ):
         problems = compare_to_golden(_build_payload(), golden)
     assert problems, (

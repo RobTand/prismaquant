@@ -46,7 +46,7 @@ IDENTITY = {"source_model": "fixture"}
 
 
 def _storage_config(prefix):
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
     return {"schema": BOUNDARY_STORAGE_SCHEMA, "directory": str(prefix / "exact"),
             "max_resident_bytes": 1 << 24, "max_auxiliary_bytes": 1 << 24,
             "max_artifact_bytes": 1 << 24, "prefetch_batches": GROUP_SIZE}
@@ -60,7 +60,7 @@ def _interrupted_run(prefix):
     generation stays ``running``, as a killed run's does.
     """
 
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     storage = StreamedBoundaryArtifacts(_storage_config(prefix))
     storage.bind(IDENTITY, n_probes=N_PROBES, published=True)
@@ -78,7 +78,7 @@ def _interrupted_run(prefix):
 def _rebound_owner(tmp_path, session, *, read_order):
     """``chain._bound_owner``, rebinding ``session`` instead of binding anew."""
 
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.produced_output_spool import ProducedOutputSpool
     from prismaquant.stage_a_produced_output import BoundaryProducedPublication
     from prismaquant.staged_lease import set_lease_helper_root
@@ -125,7 +125,7 @@ def _rebound_owner(tmp_path, session, *, read_order):
 def _roll_probe_major(storage, batches, grad_outs):
     """``test_stage_a_same_box_readback._run_chain``'s roll, from ``TOP``."""
 
-    from prismaquant.cost_streaming import prefetched_boundary_batches
+    from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches
 
     final = {probe: [None] * N_BATCHES for probe in range(N_PROBES)}
     for layer in range(TOP - 1, -1, -1):
@@ -149,7 +149,7 @@ def _roll_probe_major(storage, batches, grad_outs):
 def _roll_sample_major(storage, batches, grad_outs):
     """The fused roll R13 runs: one window serves every probe (PQ #997)."""
 
-    from prismaquant.cost_streaming import prefetched_fused_boundary_windows
+    from prismaquant.streamed_boundary_artifacts import prefetched_fused_boundary_windows
 
     final = {probe: [None] * N_BATCHES for probe in range(N_PROBES)}
     for layer in range(TOP - 1, -1, -1):

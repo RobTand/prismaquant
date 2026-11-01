@@ -1,7 +1,7 @@
 """Real metadata-only adoption/readback, with any weight hash trapped."""
 import json
 from pathlib import Path
-from prismaquant import cost_streaming
+from prismaquant import streamed_model_identity as cost_streaming_identity
 from prismaquant.tessera_source_digest_adoption import adopt_source_digests
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from tessera import serving_parts
@@ -15,7 +15,7 @@ def no_body(path):
  if str(path).endswith('.safetensors'):raise AssertionError('unexpected source payload hash')
  checks.append(str(path));return original(path)
 def no_pq_hash(*a,**kw):raise AssertionError('unexpected PQ source hash')
-cost_streaming._file_sha256=no_pq_hash;serving_parts.sha256_file=no_body
+cost_streaming_identity._file_sha256=no_pq_hash;serving_parts.sha256_file=no_body
 result=adopt_source_digests(source,binding,out,expected_content_sha256='3a4ff1472f4a3fd08f55da96add839d25dbbefef0797c576707aca985e48828c')
 cache=SourceDigestCache(out,source=source);whole=serving_parts.source_identity(source,digest_cache=cache)
 original_identity=json.loads(Path(binding['path']).read_text())['identity']

@@ -21,6 +21,7 @@ import torch.nn as nn
 
 from prismaquant import format_registry as fr
 from prismaquant import nvfp4_activation_contract as owner
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.perturbed_x_cache import _activation_qdq
 from prismaquant.production_weight_cache import (
     _local_forward_render_score,
@@ -147,7 +148,7 @@ def test_cache_score_for_a_tessera_row_prices_the_served_contract(underflow_case
     record = _render_score_record(
         qname=Q, fmt=W4A4, render_format=W4A4,
         reference_weight=w, rendered_weight=w,
-        activations=x, activation_max_abs=amax)
+        activations=x, activation_max_abs=amax, levers=NativeRenderLevers.resolve(gptq_default=True))
     served_score = _local_forward_render_score(
         reference_weight=w, rendered_weight=w, activations=x,
         activation_quantize=lambda t: fr.nvfp4_activation_qdq_served(t, g),
@@ -170,7 +171,7 @@ def test_cache_score_for_a_tessera_row_refuses_without_its_scale(underflow_case)
         _render_score_record(
             qname=Q, fmt=W4A4, render_format=W4A4,
             reference_weight=w, rendered_weight=w,
-            activations=x, activation_max_abs=None)
+            activations=x, activation_max_abs=None, levers=NativeRenderLevers.resolve(gptq_default=True))
 
 
 def test_stock_nvfp4_cache_score_is_unchanged(underflow_case):
@@ -181,7 +182,7 @@ def test_stock_nvfp4_cache_score_is_unchanged(underflow_case):
     record = _render_score_record(
         qname=Q, fmt="NVFP4", render_format="NVFP4",
         reference_weight=w, rendered_weight=w,
-        activations=x, activation_max_abs=amax)
+        activations=x, activation_max_abs=amax, levers=NativeRenderLevers.resolve(gptq_default=True))
     dynamic = _local_forward_render_score(
         reference_weight=w, rendered_weight=w, activations=x,
         activation_quantize=fr.get_format("NVFP4").activation_quantize_dequantize,
@@ -334,6 +335,7 @@ def policy_case():
 
 
 def _score_record(amax, x, w, fmt=W4A4, **kwargs):
+    kwargs.setdefault("levers", NativeRenderLevers.resolve(gptq_default=True))
     return _render_score_record(
         qname=Q, fmt=fmt, render_format=fmt,
         reference_weight=w, rendered_weight=w,
@@ -493,7 +495,7 @@ def test_the_cache_the_scorer_and_the_hook_use_one_effective_g(
             _render_score_record_key(name, W4A4): _render_score_record(
                 qname=name, fmt=W4A4, render_format=W4A4,
                 reference_weight=w, rendered_weight=w,
-                activations=x, activation_max_abs=amax)
+                activations=x, activation_max_abs=amax, levers=NativeRenderLevers.resolve(gptq_default=True))
             for name in siblings
         }
         assert {r["input_global_scale"] for r in records.values()} == {g}

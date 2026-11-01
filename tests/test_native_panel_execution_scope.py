@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import tessera_runtime_contract as trc
-from prismaquant.joint_aura import identity_sha256
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from prismaquant.native_operator_panel import consume_native_receipt
 
 
@@ -95,9 +95,9 @@ def _cell(tmp_path, *, stamp, executing_image):
         if "repo_digests" in declaration:
             declaration["repo_digests"] = [executing_image]
     receipt["panel"] = copy.deepcopy(panel)
-    receipt["panel_sha256"] = identity_sha256(panel)
+    receipt["panel_sha256"] = joint_identity_sha256(panel)
     receipt["runtime"] = copy.deepcopy(panel["runtime"])
-    receipt["runtime_sha256"] = identity_sha256(panel["runtime"])
+    receipt["runtime_sha256"] = joint_identity_sha256(panel["runtime"])
     raw = (json.dumps(receipt, indent=2, sort_keys=True, allow_nan=False)
            + "\n").encode()
     path = tmp_path / "receipt.json"

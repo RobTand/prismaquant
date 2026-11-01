@@ -19,6 +19,7 @@ coverage recording an unexecuted module.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -368,9 +369,16 @@ def test_qwen3_walk_is_stable_across_two_runs(qwen3_walk):
 # 2026-08-21 on torch 2.11). The contract's fallback applies: root B runs a
 # real tiny-tensor CPU forward instead. The fake block is pinned as a
 # ratchet so a torch/vendored change that lifts it turns the test red with
-# an instruction to promote the fake path.
+# an instruction to promote the fake path. The ratchet walks the checked-in
+# repeating-cell config below, never a host checkpoint path, so it runs on
+# workers without the source tree (PQ #2594).
 
-DSV4_CONFIG = "/home/rob/dq-runs/dsv4-flash-0731/source/config.json"
+#: Repository copy of the DSv4 repeating-cell config the fake-trace ratchet
+#: walks: the same tiny topology `_shrunken_dsv4` builds, checked in so the
+#: ratchet exercises the vendored `from_pretrained` resolution path on every
+#: worker instead of skipping without the source checkpoint.
+DSV4_FAKE_TRACE_CELL = (
+    Path(__file__).resolve().parent / "fixtures" / "dsv4_fake_trace_cell")
 
 
 def test_dsv4_profile_rules_decide_the_grouped_linear_weight():
@@ -401,7 +409,7 @@ def test_dsv4_profile_rules_decide_the_grouped_linear_weight():
 def _shrunken_dsv4():
     """The real vendored DSv4 modeling code at toy dimensions: same classes,
     same forward, ~1.3M parameters, real CPU init. No checkpoint needed."""
-    import prismaquant  # noqa: F401
+    from prismaquant import genuine_weight_initialization
     from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
     from transformers import AutoConfig, AutoModelForCausalLM
 
@@ -421,10 +429,50 @@ def _shrunken_dsv4():
         tie_word_embeddings=False,
     )
     torch.manual_seed(0)
-    return profile, AutoModelForCausalLM.from_config(cfg).eval()
+    with genuine_weight_initialization():
+        model = AutoModelForCausalLM.from_config(cfg)
+    return profile, model.eval()
 
 
 @pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
+def test_dsv4_genuine_init_covers_per_expert_linear_and_packed_weights(monkeypatch):
+    """HF initialization must overwrite constructor poison for both layouts."""
+    poisoned = []
+
+    @torch.no_grad()
+    def poisoned_reset(module):
+        module.weight.fill_(float("nan"))
+        if module.bias is not None:
+            module.bias.fill_(float("nan"))
+        poisoned.append(module)
+
+    monkeypatch.setattr(torch.nn.Linear, "reset_parameters", poisoned_reset)
+    _, model = _shrunken_dsv4()
+    linears = {name: module for name, module in model.named_modules()
+               if isinstance(module, torch.nn.Linear)}
+    assert poisoned and linears
+    assert any(".experts.0.gate_proj" in name for name in linears)
+    for name, module in linears.items():
+        assert torch.isfinite(module.weight).all(), name
+        if module.bias is not None:
+            assert torch.isfinite(module.bias).all(), name
+
+    # Selecting the per-expert constructor must preserve the packed class's
+    # own initialization dispatch, even after registration selects the adapter.
+    from transformers.models.deepseek_v4 import modeling_deepseek_v4 as modeling
+
+    packed = modeling.DeepseekV4Experts(model.config)
+    assert set(dict(packed.named_parameters())) == {"gate_up_proj", "down_proj"}
+    with torch.no_grad():
+        for value in packed.parameters():
+            value.fill_(float("nan"))
+    model._init_weights(packed)
+    assert all(torch.isfinite(value).all() for value in packed.parameters())
+
+
+@pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 @pytest.mark.slow
 def test_dsv4_real_cpu_walk_discovers_and_decides_wo_a():
     """Acceptance c on the contract's root-B fallback: the real DSv4
@@ -453,6 +501,7 @@ def test_dsv4_real_cpu_walk_discovers_and_decides_wo_a():
 
 
 @pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 @pytest.mark.slow
 def test_dsv4_walk_fails_without_the_profile_rules():
     """The wo_a defect, reproduced: with only the generic Linear rule, the
@@ -486,27 +535,24 @@ def test_dsv4_walk_fails_without_the_profile_rules():
     assert "bmm" in message
 
 
+@pytest.mark.own_process
+@pytest.mark.usefixtures("pinned_pb_source")
 @pytest.mark.slow
 def test_dsv4_fake_trace_block_is_still_real():
-    """Ratchet on the documented block: the fake trace of the real source
-    config stops at `int(position_ids[0, 0])` (DataDependentOutputException
+    """Ratchet on the documented block: the fake trace of the DSv4 cell
+    stops at `int(position_ids[0, 0])` (DataDependentOutputException
     on `aten._local_scalar_dense`). If torch or the vendored code ever
     lifts it, this turns red: switch acceptance c to the fake path and
     delete the real-CPU fallback note from the module docstring."""
-    import pathlib
-
     from torch._subclasses.fake_tensor import DataDependentOutputException
 
-    if not pathlib.Path(DSV4_CONFIG).is_file():
-        pytest.skip(f"DSv4 source config not on this host: {DSV4_CONFIG}")
     import prismaquant  # noqa: F401
     from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
     from transformers import AutoConfig, AutoModelForCausalLM
 
     profile = DeepseekV4Profile()
     profile.register_vendored_modeling()
-    cfg = AutoConfig.from_pretrained(str(pathlib.Path(DSV4_CONFIG).parent))
-    cfg.num_hidden_layers = 4  # walk the repeating cell, not 43 copies
+    cfg = AutoConfig.from_pretrained(str(DSV4_FAKE_TRACE_CELL))
     with torch.device("meta"):
         model = AutoModelForCausalLM.from_config(cfg)
     model.eval()

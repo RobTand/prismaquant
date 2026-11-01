@@ -51,7 +51,7 @@ from .tessera_expert_projection import (
     carried_units, check_expert_wire_receipt, expand_stack_decision_assignment,
     locate_expert_wire, require_unit_assignment, verify_expert_wire_record,
 )
-from .tessera_joint_aura import STAGE
+from .tessera_campaign_table import STAGE
 
 ROSTER_SCHEMA = "prismaquant.tessera_census_seal_roster.v1"
 LAYER_CONFIG_META_SCHEMA = "prismaquant.layer_config_meta.v1"

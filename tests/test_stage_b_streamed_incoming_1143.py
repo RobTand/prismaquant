@@ -27,6 +27,8 @@ from pathlib import Path
 import pytest
 import torch
 
+from prismaquant import joint_quantum_row as quantum_row
+
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
     if str(_entry) not in sys.path:
@@ -34,13 +36,13 @@ for _entry in (ROOT, ROOT / "tools"):
 
 import test_band_serial_dispatch as dispatch_tests  # noqa: E402
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
-from prismaquant.joint_quantum_handoff import (  # noqa: E402
-    HANDOFF_LOAD_PHASE,
+from prismaquant.joint_quantum_handoff import (
     band_serial_manifest,
     band_serial_manifest_bytes,
     handoff_read_entries,
     load_quantum_handoff,
 )
+from prismaquant.joint_quantum_row import HANDOFF_LOAD_PHASE
 from test_quantum_executable_readset import N_BATCHES, N_PROBES  # noqa: E402
 
 _offline_tier_policy = dispatch_tests._offline_tier_policy
@@ -78,7 +80,7 @@ def _plane_row(handoff, probe, batch):
 
 
 def _spill_phase(probe):
-    return jl.executable_spill_phase_name(probe)
+    return quantum_row.executable_spill_phase_name(probe)
 
 
 # -- the derived read plan ----------------------------------------------------
@@ -198,14 +200,14 @@ def test_the_dispatcher_counts_a_spill_capture_by_its_boundary_entries(tmp_path)
         assert derived_facts[name]["entries"] == 2 * N_BATCHES
         assert derived_facts[name]["bytes"] > sealed_facts[name]["bytes"]
         for capture_batch in (1, 2):
-            sealed_work = dispatch.compute_phase_work(
+            sealed_work = quantum_row.compute_phase_work(
                 name, replay_mode="spill",
-                entries=dispatch.phase_work_entries(
+                entries=quantum_row.phase_work_entries(
                     name, sealed_facts[name], sealed_annotations),
                 n_probes=N_PROBES, capture_batch=capture_batch)
-            derived_work = dispatch.compute_phase_work(
+            derived_work = quantum_row.compute_phase_work(
                 name, replay_mode="spill",
-                entries=dispatch.phase_work_entries(
+                entries=quantum_row.phase_work_entries(
                     name, derived_facts[name], derived_annotations),
                 n_probes=N_PROBES, capture_batch=capture_batch)
             assert derived_work == sealed_work

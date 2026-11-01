@@ -170,7 +170,7 @@ def main():
     out = Path(args.out)
     assert not out.exists(), out
     base, prep = Path(args.census_base), Path(args.prepared)
-    from prismaquant.tessera_joint_aura import STAGE
+    from prismaquant.tessera_campaign_table import STAGE
 
     legacy = not args.workspace and not args.carry
     if bool(args.proof) != bool(args.proof_sha256) or (args.proof and args.no_proof):

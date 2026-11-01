@@ -327,6 +327,42 @@ class SensitivityUnit:
             if label != "act_absmax" and np.any(arr < 0.0):
                 raise ValueError(f"{self.topology.name}: {label} has negative entries")
 
+        expert_vectors = (
+            ("expert_g_sq_sum", self.expert_g_sq_sum, self.out_features),
+            ("expert_act_sq_sum", self.expert_act_sq_sum, self.in_features),
+            ("expert_act_absmax", self.expert_act_absmax, self.in_features),
+            ("expert_tokens", self.expert_tokens, None),
+        )
+        if any(vec is not None for _, vec, _ in expert_vectors):
+            missing = [label for label, vec, _ in expert_vectors
+                       if label != "expert_act_absmax" and vec is None]
+            if missing:
+                raise ValueError(
+                    f"{self.topology.name}: incomplete expert arrays; "
+                    f"missing {', '.join(missing)}")
+            params_per_expert = self.out_features * self.in_features
+            if self.n_params <= 0 or self.n_params % params_per_expert != 0:
+                raise ValueError(
+                    f"{self.topology.name}: expert arrays require n_params "
+                    f"to be a positive multiple of {params_per_expert}")
+            n_experts = self.n_params // params_per_expert
+            for label, vec, channels in expert_vectors:
+                if vec is None:
+                    continue
+                expected = ((n_experts,) if channels is None
+                            else (n_experts, channels))
+                arr = np.asarray(vec)
+                if arr.shape != expected:
+                    raise ValueError(
+                        f"{self.topology.name}: {label} has shape {arr.shape}, "
+                        f"expected {expected}")
+                if not np.all(np.isfinite(arr)):
+                    raise ValueError(
+                        f"{self.topology.name}: {label} has non-finite entries")
+                if np.any(arr < 0.0):
+                    raise ValueError(
+                        f"{self.topology.name}: {label} has negative entries")
+
         if self.h_trace_raw > 0.0:
             for label, vec in (("fisher_row", self.fisher_row),
                                ("fisher_col", self.fisher_col)):

@@ -14,7 +14,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from prismaquant.joint_aura import arithmetic_identity, identity_sha256
+from prismaquant.joint_aura import arithmetic_identity
+from prismaquant.joint_aura_rows import joint_identity_sha256
 from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
 from prismaquant.joint_replay_regime import stamp_replay_regime
 from prismaquant.joint_statistics_replay import statistics_arithmetic_identity
@@ -116,7 +117,7 @@ def test_the_stamp_differs_when_the_flag_differs(flags):
     assert bf16_reduction_stamp() == {BF16_REDUCTION_FIELD: False}
     off = statistics_arithmetic_identity(torch.bfloat16, None)
     assert off == {**PINNED_DEFAULT, BF16_REDUCTION_FIELD: False}
-    assert identity_sha256(off) != identity_sha256(default)
+    assert joint_identity_sha256(off) != joint_identity_sha256(default)
     assert bf16_reduction_of(off) is False
     assert arithmetic_identity(torch.bfloat16)[BF16_REDUCTION_FIELD] is False
 
@@ -127,7 +128,7 @@ def test_the_flag_and_the_replay_regime_are_independent_axes(flags):
     for allow in (True, False):
         MATMUL.allow_bf16_reduced_precision_reduction = allow
         for text in (None, regime):
-            digests.add(identity_sha256(statistics_arithmetic_identity(
+            digests.add(joint_identity_sha256(statistics_arithmetic_identity(
                 torch.bfloat16, None, replay_regime=text)))
     assert len(digests) == 4
 

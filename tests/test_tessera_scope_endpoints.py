@@ -8,6 +8,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from prismaquant import tessera_calibration_forward as calibration_forward
 from conftest import (
     down_convert_lane_table, lane_cells_on_one_image,
     project_lane_cells_onto_structures)
@@ -137,7 +138,7 @@ def test_campaign_main_passes_live_model_topology_to_real_menu_boundary(tmp_path
     monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", lambda *a, **k: model)
     monkeypatch.setattr(render, "tessera_encoder_hessian_status", lambda: {"accepted": True})
     monkeypatch.setattr(campaign, "_calibration_tokens", lambda *a: ([torch.ones(1, 1, dtype=torch.int64)], "fixture"))
-    monkeypatch.setattr(campaign, "_collect_activations", lambda *a, **k: ({}, {}, {}, {}))
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *a, **k: ({}, {}, {}, {}))
     monkeypatch.setattr(sensitivity_probe, "discover_moe_structure", lambda *a, **k: {
         EXPERT: ("model.layers.0.mlp.gate", "0")})
     seen = {}
@@ -159,7 +160,7 @@ def test_campaign_main_passes_live_model_topology_to_real_menu_boundary(tmp_path
 
 def _allocator_inputs(tmp_path, fmt="BF16"):
     from prismaquant.cost_currency import RENDER_SCORE_COST_MODE
-    from prismaquant.tessera_campaign import CURRENCY
+    from prismaquant.tessera_campaign_table import CURRENCY
     from prismaquant.tessera_formats import SUPERBLOCK_WEIGHTS
     model_dir = tmp_path / "model"
     model_dir.mkdir()

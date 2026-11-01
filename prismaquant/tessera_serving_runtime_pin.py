@@ -375,8 +375,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: no code-digest/v3 activation, compiled-cell or release-card waiver.
 #: Re-pinned 2026-10-07 to fca4c6ce0 (Tessera #1033, PQ #2426).
 #: Contract v60 retains the v56 cells and extension rows.
+#: API-only exact-v60 backport reviewed 2026-10-16: public producer metadata
+#: owns smoke grammar, lane decisions, fused ownership and image replay.
+#: Contract bytes, native qualification and both admission policies are unchanged.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+    "aaa417003f0ee690e8ace138acd18df7f9531369"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
@@ -390,13 +393,13 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "fca4c6ce0e16c41d94a1a3c4cfc21c4548dec6bb"
+    "aaa417003f0ee690e8ace138acd18df7f9531369"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the
 #: value every packaged eligibility cell publishes in ``requires_plugin``, and
-#: ``tessera_render.tessera_lane_attested`` refuses a cell that claims a route
+#: ``tessera_render.tessera_lane_admission`` refuses a cell that claims a route
 #: without naming it.
 TESSERA_SERVING_PLUGIN_NAME = "tessera"
 
@@ -909,28 +912,26 @@ def load_tessera_serving_runtime_pin(
     immutable within a process.
     """
     if path is None:
-        return _load_tracked_pin()
+        from copy import deepcopy
+
+        return deepcopy(_load_tracked_pin())
     return _read_pin(Path(path))
 
 
 def installed_tessera_contract_sha256() -> str:
     """SHA-256 of the ``runtime_contract.json`` the INSTALLED Tessera packages.
 
-    Resolved through ``tessera_runtime_contract.contract_path()`` -- the one
-    resolver both producer readers share -- so the bytes hashed here are the
-    bytes every other gate on this side reads.  Hashing a different copy would
-    make the pin attest a file nothing consumes.
+    Capture through ``tessera_runtime_contract.installed_runtime_snapshot``.
+    The snapshot hashes the same immutable bytes its metadata readers consume;
+    each public call captures the installed resource anew.
 
     Raises :class:`TesseraServingRuntimePinError` when there is no importable
     Tessera at all, because "no runtime" and "the wrong runtime" must both
     refuse; neither may read as "fine".
     """
-    from importlib.resources import as_file
-
     try:
-        from .tessera_runtime_contract import contract_path
-        with as_file(contract_path()) as path:
-            return bytes_sha256hex(path.read_bytes())
+        from .tessera_runtime_contract import installed_runtime_snapshot
+        return installed_runtime_snapshot().sha256
     except TesseraServingRuntimePinError:
         raise
     except Exception as exc:  # ImportError, OSError, ModuleNotFoundError...
@@ -974,8 +975,8 @@ def require_exact_tessera_runtime_pin(
     A pure predicate over two inputs -- the tracked pin and the digest of the
     contract actually installed -- so the rule can be tested without an
     importable Tessera and cannot be satisfied by reading whatever happens to
-    be on ``PYTHONPATH``.  :func:`require_pinned_tessera_runtime` is the thin
-    resolver every live caller uses.
+    be on ``PYTHONPATH``. :func:`require_pinned_tessera_runtime` resolves these
+    inputs; captured contract snapshots also call this predicate directly.
 
     Three conjuncts, in the order a reader needs them:
 
@@ -986,11 +987,11 @@ def require_exact_tessera_runtime_pin(
        nothing.  Since v3 the producer commit and the serving code digest are
        compared too; under v2 they are the one commit and ``None``, so the
        comparison is the one it always was.
-    3. The INSTALLED contract hashes to the pinned digest.  This is the
-       enforced binding, and the reason a stray Tessera checkout on
-       ``PYTHONPATH`` is refused: the commit is a claim about another
-       repository that this process cannot check, but the bytes it is about to
-       read are right here.
+    3. The INSTALLED contract hashes to the pinned digest. A checkout on
+       ``PYTHONPATH`` with different contract bytes is refused. Under v2,
+       matching contract bytes do not verify the installed code's commit.
+       Exact installed Git provenance and package bytes need separate
+       qualification.
 
     ``version_is_release`` is deliberately absent from all three.  Rob retired
     the tag requirement; a gate that still demanded the flag would re-impose

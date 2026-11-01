@@ -31,7 +31,7 @@ import pytest
 import torch
 
 from prismaquant import perturbed_x_cache as cache_module
-from prismaquant.cost_streaming import prefetched_boundary_batches, prefetched_fused_boundary_windows
+from prismaquant.streamed_boundary_artifacts import prefetched_boundary_batches, prefetched_fused_boundary_windows
 from prismaquant.joint_adjoint_checkpoints import render_free_layer_roll
 from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
 from prismaquant.sensitivity_probe import SharedStateCotangents

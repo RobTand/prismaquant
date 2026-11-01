@@ -5,9 +5,9 @@ import torch
 from experiments.glm_shared_input_replay import (
     RoutedInputFixture, audit_cpu_storage, compare_captures,
 )
-from prismaquant import measure_quant_cost, production_weight_cache
+from prismaquant import routed_experts, production_weight_cache
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from test_tessera_campaign_packed import _RoutedModel, _routed_tokens
 
 
@@ -19,13 +19,13 @@ def capture_fixture(*, max_bytes=1024*1024):
     fixture = RoutedInputFixture(members, max_batches=len(tokens), max_bytes=max_bytes,
                                  resource_check=lambda _: None)
     with fixture.capture():
-        observed = _collect_activations(model, targets, tokens, 0, 'cpu', want_hessian=False)
+        observed = capture_activation_statistics(model, targets, tokens, 0, 'cpu', want_hessian=False)
     return model, targets, tokens, fixture, observed
 
 
 def test_real_routed_fixture_preserves_source_rows_and_both_arms():
     model, targets, tokens, fixture, observed = capture_fixture()
-    source_derive = measure_quant_cost.derive_per_expert_activations
+    source_derive = routed_experts.derive_per_expert_activations
     source_delivery = production_weight_cache._PackedExpertActivationCollector
     manifest = fixture.manifest(3)
     assert manifest['batches'] == 8
@@ -40,17 +40,17 @@ def test_real_routed_fixture_preserves_source_rows_and_both_arms():
     assert before[2] == after[2] == observed[2]
     assert visited == list(range(1, 9))*2
     assert audit_cpu_storage(before) == audit_cpu_storage(after)
-    assert measure_quant_cost.derive_per_expert_activations is source_derive
+    assert routed_experts.derive_per_expert_activations is source_derive
     assert production_weight_cache._PackedExpertActivationCollector is source_delivery
     fixture.clear()
     assert not fixture.records and fixture.bytes == 0
 
 
 def test_fixture_cannot_silently_exceed_byte_budget():
-    source_derive = measure_quant_cost.derive_per_expert_activations
+    source_derive = routed_experts.derive_per_expert_activations
     with pytest.raises(RuntimeError, match='byte bound'):
         capture_fixture(max_bytes=1)
-    assert measure_quant_cost.derive_per_expert_activations is source_derive
+    assert routed_experts.derive_per_expert_activations is source_derive
 
 
 def test_missing_row_filled_window_cannot_claim_a_profile():
@@ -62,7 +62,7 @@ def test_missing_row_filled_window_cannot_claim_a_profile():
 
 def test_replay_failure_restores_original_delivery_and_derivation():
     model, targets, tokens, fixture, _observed = capture_fixture()
-    original_derive = measure_quant_cost.derive_per_expert_activations
+    original_derive = routed_experts.derive_per_expert_activations
     original_delivery = production_weight_cache._PackedExpertActivationCollector
 
     def fail(_label):
@@ -71,7 +71,7 @@ def test_replay_failure_restores_original_delivery_and_derivation():
     with pytest.raises(RuntimeError, match='guard refused replay'):
         fixture.replay(model, targets, tokens, 3, 'cpu', shared=True, profile=None,
                        after_batch=lambda _: None, resource_check=fail)
-    assert measure_quant_cost.derive_per_expert_activations is original_derive
+    assert routed_experts.derive_per_expert_activations is original_derive
     assert production_weight_cache._PackedExpertActivationCollector is original_delivery
     fixture.clear()
 
@@ -113,7 +113,7 @@ def test_partial_fixture_guard_failure_releases_clones_with_retained_traceback(m
                                  resource_check=guard)
     with pytest.raises(RuntimeError, match='partial fixture guard') as error:
         with fixture.capture():
-            _collect_activations(model, targets, _routed_tokens(), 0, 'cpu', want_hessian=False)
+            capture_activation_statistics(model, targets, _routed_tokens(), 0, 'cpu', want_hessian=False)
     fixture.clear()
     assert error.value.__traceback__ is not None
     assert refs and all(ref() is None for ref in refs)

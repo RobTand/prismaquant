@@ -3,7 +3,8 @@
 Only the admitted helper tree owns map validation, pinning and release. A map
 miss reads the declared origin. A named range never uses an origin fallback.
 Each phase holds batched tier leases until all its descriptors close.
-An unavailable RAM cover can select published stage covers. Integrity failures refuse.
+Unavailable RAM covers or acquisition can select published stage covers.
+Integrity and unknown refusals never select another copy.
 """
 import json
 import os
@@ -13,7 +14,7 @@ import threading
 import time
 import uuid
 from g3_pq_policy.digests import bytes_sha256hex
-from g3_pq_policy.staged_lease import _classify
+from g3_pq_policy.staged_lease import classify_refusal
 
 _LOCK = threading.Lock()
 _READER = None
@@ -96,7 +97,7 @@ class StagedReader:
                     and ("ram_path" in mapping["entries"][k]) == ("ram_path" in entry)}
         covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
                                           manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
-        if not covers["ok"] and "ram_path" in entry and _classify(covers["refusal"]) == "availability":
+        if not covers["ok"] and "ram_path" in entry and classify_refusal(covers["refusal"]) == "availability":
             # PB permits unavailable RAM covers to select the same bytes on stage.
             # Integrity and unknown refusals never select another copy.
             tier, epoch = mapping["tier_id"], ""
@@ -109,6 +110,23 @@ class StagedReader:
             expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
             span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
             acquire_token=uuid.uuid4().hex, residency_root=self.root)
+        if not acq["ok"] and "ram_path" in entry and tier != mapping["tier_id"] \
+                and classify_refusal(acq["refusal"]) == "availability":
+            # PB acquire proves availability after covers did: the RAM epoch
+            # moved or the fragment dropped between the two calls (pinned SDK
+            # reader_lease.acquire: unpublished, stale-epoch, retiring). The
+            # failed acquire files no pin, so re-cover the same bytes on stage.
+            # Integrity and unknown refusals never select another copy.
+            tier, epoch = mapping["tier_id"], ""
+            covers = self.lease.covers_for_keys(self.root, self.ctx["action_key"], list(selected), tier_id=tier,
+                                              manifest_sha256=mapping["manifest_sha256"], epoch=epoch)
+            if not covers["ok"]:
+                raise RuntimeError(f'{phase}: PB covering material: {covers["refusal"]}')
+            acq = self.lease.acquire_for(
+                self.ctx, tier_id=tier, epoch=epoch, covers=covers["covers"],
+                expected={k: {"bytes": e["bytes"], "sha256": e["sha256"]} for k, e in selected.items()},
+                span={"start_bytes": 0, "end_bytes": sum(e["bytes"] for e in selected.values())},
+                acquire_token=uuid.uuid4().hex, residency_root=self.root)
         if not acq["ok"]:
             raise RuntimeError(f'{phase}: PB reader lease: {acq["refusal"]}')
         window = {"acq": acq, "entries": selected, "active": 0}
@@ -137,13 +155,16 @@ class StagedReader:
     def read(self, path, offset, size):
         key = self.maps.residency_map_key(resolve_g3_origin(path), offset)
         with self.lock:
-            phase = self.key_phases.get(key, "setup" if self.phase_keys else "smoke")
-            if phase in self.closed_phases:
-                raise RuntimeError(f"{key}: read from completed phase {phase}")
+            # A map miss reads the declared origin, so it never raises:
+            # the default phase below only labels mapped keys with no
+            # tracked phase, and unmapped keys return before this check.
             mapping = self._map()
             entry = mapping["entries"].get(key)
             if entry is None:
                 return None
+            phase = self.key_phases.get(key, "setup" if self.phase_keys else "smoke")
+            if phase in self.closed_phases:
+                raise RuntimeError(f"{key}: read from completed phase {phase}")
             if entry["bytes"] != size:
                 raise RuntimeError(f"{key}: staged range length differs from requested {size}")
             window = self._window(mapping, key, phase)

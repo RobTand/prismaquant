@@ -32,15 +32,11 @@ def test_kl_is_zero_when_the_two_arms_agree():
     assert divergence == pytest.approx(0.0, abs=1e-12)
 
 
-def test_the_untabulated_tail_is_max_entropy_and_never_optimistic():
-    """`min(row)` -- what the ad-hoc script used -- understates divergence.
+def test_the_untabulated_tail_uses_a_clamped_max_entropy_estimate():
+    """Spread residual mass uniformly, capped at the observed K-th value.
 
-    The K-th logprob is an upper bound on every value the endpoint did not
-    tabulate, so substituting it can only make the student look CLOSER to the
-    teacher than it is. Spreading the residual mass uniformly over the
-    untabulated vocabulary is the max-entropy estimate given what was
-    observed, and it is clamped at the K-th value so truncation can never
-    manufacture a larger KL term than it licenses.
+    This max-entropy estimate can be above or below an unknown token's true
+    probability. It does not bound the true full-vocabulary KL.
     """
     row = {"1": math.log(0.5), "2": math.log(0.3)}      # 0.2 mass unaccounted
     tail = gold._tail_logprob(row, vocab_size=1002)
@@ -62,13 +58,20 @@ def test_coverage_is_recomputed_from_the_teacher_not_declared():
 # ---------------------------------------------------------------------------
 # Refusals
 # ---------------------------------------------------------------------------
-def _dump(tmp_path, name, **overrides):
+def _dump(tmp_path, name, *, corpus_text="one two one two", **overrides):
+    corpus = tmp_path / "fixture-corpus.txt"
+    corpus.write_text(corpus_text)
+    tokenizer = tmp_path / "fixture-tokenizer"
+    tokenizer.mkdir(exist_ok=True)
+    (tokenizer / "tokenizer.json").write_text('{"synthetic_test_tokenizer":true}')
+    contract = gold._calibration_contract(
+        corpus, tokenizer, [1, 2, 1, 2], seqlen=2, n_tokens_requested=4)
     payload = {
         "schema": gold.SERVED_DUMP_SCHEMA,
         "model": "qwen",
         "artifact_dir": str(tmp_path / "exported"),
         "prompt_top_k": 1024,
-        "seqlen": 512,
+        "seqlen": 2,
         "n_samples": 2,
         "n_positions": 2,
         "vocab_size": 1000,
@@ -78,8 +81,8 @@ def _dump(tmp_path, name, **overrides):
         "serve_manifest": {"schema": gold.SERVE_MANIFEST_SCHEMA},
         "git_commit": "c" * 40,
         "gold_producer_identity": {"git_commit": "c" * 40},
-        "calibration_contract": {"schema": gold.CALIBRATION_SCHEMA},
-        "calibration_contract_sha256": "d" * 64,
+        "calibration_contract": contract,
+        "calibration_contract_sha256": gold._canonical_sha256(contract),
         "positions": [
             {"1": math.log(0.9), "2": math.log(0.1)},
             {"1": math.log(0.6), "2": math.log(0.4)},
@@ -111,7 +114,7 @@ def test_two_arms_dumped_at_different_top_k_are_refused(tmp_path, monkeypatch):
 def test_two_arms_that_scored_different_text_are_refused(tmp_path, monkeypatch):
     """KL is only the quantization when both models saw identical inputs."""
     teacher = _dump(tmp_path, "t.json")
-    student = _dump(tmp_path, "s.json", calibration_contract_sha256="f" * 64)
+    student = _dump(tmp_path, "s.json", corpus_text="different input text")
     with pytest.raises(SystemExit, match="different text/geometry"):
         _run_kl(tmp_path, teacher, student, monkeypatch)
 

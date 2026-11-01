@@ -55,7 +55,7 @@ def _write_planes(storage):
 
 
 def _fused_read(storage, batches, incoming, *, window_batches):
-    from prismaquant.cost_streaming import prefetched_fused_boundary_windows
+    from prismaquant.streamed_boundary_artifacts import prefetched_fused_boundary_windows
 
     seen = []
     with prefetched_fused_boundary_windows(

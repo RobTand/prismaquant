@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 
 from prismaquant import format_registry as fr
+from prismaquant.model_profiles.base import load_complete_mtp_state_dict
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.measure_quant_cost import (
     ActivationIndex,
@@ -28,6 +29,7 @@ from prismaquant.measure_quant_cost import (
 )
 from prismaquant.production_weight_cache import (
     MTP_APPEND_SIDECAR_KEY,
+    NVFP4_JOINT_GLOBAL_WITNESS_KEY,
     ProductionWeightCache,
     _FisherRowWeightCache,
     _check_and_record_append_identity,
@@ -35,8 +37,10 @@ from prismaquant.production_weight_cache import (
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
-    require_injective_cache_filenames,
+    nvfp4_joint_global_witness_section,
+    nvfp4_joint_global_witnesses,
 )
+from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_production_cache import _render_dense_layer
 
 
@@ -127,6 +131,8 @@ def _load_exact_mtp_wrapper(
     device: torch.device,
     dtype: torch.dtype,
 ) -> tuple[nn.Module, dict[str, nn.Linear], int]:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoConfig
 
     local_only = Path(model_path).exists()
@@ -153,13 +159,7 @@ def _load_exact_mtp_wrapper(
             f"profile '{profile.name}' declares MTP but the checkpoint has "
             f"no source tensors under {profile.mtp_source_prefix()!r}"
         )
-    unmatched_source, module_unset = profile.load_mtp_state_dict(inner, raw)
-    if unmatched_source or module_unset:
-        raise RuntimeError(
-            "MTP source/module coverage failure: "
-            f"unmatched_source={unmatched_source[:8]} "
-            f"module_params_unset={module_unset[:8]}"
-        )
+    load_complete_mtp_state_dict(profile, inner, raw, where="production MTP cache")
 
     wrapper.to(device=device)
     wrapper.eval()
@@ -445,9 +445,9 @@ def fill_profile_mtp_production_cache(
             # Compare-or-write this append's own sidecar section BEFORE any
             # render, so a hand-mixed append configuration refuses instead
             # of landing in one directory under a still-matching sidecar.
-            # The render narrowing (which mtp.* subset this call appends)
-            # is deliberately NOT bound: the append replaces its scope, so
-            # consecutive stripes stay legal.
+            # The activation hash and row counts bind this selected MTP
+            # population. A disk-backed repeat requires the same inputs;
+            # changing the population requires a fresh cache directory.
             _check_and_record_append_identity(
                 cache_dir_path,
                 MTP_APPEND_SIDECAR_KEY,
@@ -497,6 +497,20 @@ def fill_profile_mtp_production_cache(
         for qname in list(cache.activation_max_abs):
             if qname.startswith("mtp.") and qname not in selected_linears:
                 cache.activation_max_abs.pop(qname)
+        # The fused joint-global witnesses are part of that scope: every pair
+        # rendered below records its own, and no earlier one survives.
+        witnesses = {
+            key: value
+            for key, value in nvfp4_joint_global_witnesses(
+                cache.metadata, where="MTP production cache append",
+            ).items()
+            if not key[0].startswith("mtp.")
+        }
+        cache.metadata.pop(NVFP4_JOINT_GLOBAL_WITNESS_KEY, None)
+        if witnesses:
+            cache.metadata[NVFP4_JOINT_GLOBAL_WITNESS_KEY] = (
+                nvfp4_joint_global_witness_section(witnesses)
+            )
         score_meta, render_score_records = _existing_render_score_records(cache)
 
         fused_mapping = _fused_sibling_leaf_mapping_from_profile(profile)

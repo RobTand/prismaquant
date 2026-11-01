@@ -1,5 +1,7 @@
 """Actual producer identities remain exact across a bounded immutable unit."""
 from __future__ import annotations
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_campaign_table as campaign_table
 
 from dataclasses import replace
 from types import SimpleNamespace
@@ -23,7 +25,7 @@ def fixture(*, projected=False):
     for fmt in formats:
         family, rung = parse_tessera_format_name(fmt)
         spec = get_format(fmt)
-        anchors.append(tc.CampaignAnchor(qname=name, format_name=fmt, family=family.name,
+        anchors.append(campaign_table.CampaignAnchor(qname=name, format_name=fmt, family=family.name,
             body_rate_q256=rung, dloss=0.1, dloss_stderr=0.0, memory_bytes=8192,
             bits_per_param=4.0, activation_contract=str(spec.act_dtype_name or "a16"),
             activation_quantized=spec.act_quant_changes_input,
@@ -93,7 +95,7 @@ def test_bound_unit_keeps_per_anchor_static_scale_and_hessian_gates():
             calibration_source=source, projected_unit=projection, static_scales=kwargs["static_scales"]) as bound:
         with pytest.raises(RuntimeError, match="Hessian applicability"):
             tc._checkpoint_anchor_identity(replace(anchors[0], hessian_applied=False), **kwargs, bound_unit=bound)
-        with pytest.raises(tc.ActivationScaleContractError):
+        with pytest.raises(ActivationScaleContractError):
             tc._checkpoint_anchor_identity(replace(anchors[-1], input_global_scale=0.25), **kwargs, bound_unit=bound)
 
 
@@ -113,7 +115,7 @@ def test_bound_unit_still_refuses_invalid_measured_activation_metadata(changes):
     with tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
             calibration_source=source, projected_unit=projection,
             static_scales=kwargs["static_scales"]) as bound:
-        with pytest.raises(tc.ActivationScaleContractError, match="activation (contract|observation)"):
+        with pytest.raises(ActivationScaleContractError, match="activation (contract|observation)"):
             tc._checkpoint_anchor_identity(replace(anchors[0], **changes), **kwargs, bound_unit=bound)
 
 
@@ -123,11 +125,11 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     tc, name, weight, hessian, source, anchors, projection, kwargs = fixture(projected=True)
     args = SimpleNamespace(family_restriction=None)
     common = dict(weights=kwargs["weights"], acts={name: torch.ones(2, 2)},
-        hessians={name: hessian}, menus=kwargs["menus"], args=args,
+        hessians={name: hessian}, menus=kwargs["menus"], settings=vars(args),
         calibration_identity=source.provenance, serving_scope=None,
         static_scales=kwargs["static_scales"], static_scale_policy="fixture",
         expert_projection=None)
-    expected = tc._campaign_checkpoint_identity(**common)
+    expected = tc.campaign_checkpoint_identity(**common)
     actual_hash = cached_unit.tensor_identity
     calls = []
     def observed(value):
@@ -141,7 +143,7 @@ def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_h
     bound = tc._campaign_bound_identities(weights=kwargs["weights"], menus=kwargs["menus"],
         calibration_source=source, projected_units={name: projection},
         static_scales=kwargs["static_scales"], metadata_bounds=metadata_bounds)
-    actual = tc._campaign_checkpoint_identity(**common, bound_units=bound)
+    actual = tc.campaign_checkpoint_identity(**common, bound_units=bound)
     assert actual == expected
     # Exact identity parity is the same-campaign resume/merge compatibility
     # predicate; source identity is intentionally still a normal identity field.

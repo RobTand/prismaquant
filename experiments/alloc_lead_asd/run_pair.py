@@ -73,6 +73,8 @@ def load_source_model(config, state_dict, *, dtype, device):
     # Ordinary construction under the library's no-init context creates those
     # buffers while avoiding random weight fills. Copy into the requested
     # parameter dtype, then move devices without casting FP32 rotary buffers.
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     with no_init_weights():
         model = AutoModelForCausalLM.from_config(
             config, torch_dtype=dtype, attn_implementation="sdpa")

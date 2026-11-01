@@ -6,7 +6,7 @@ import weakref
 import pytest
 import torch
 
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from test_tessera_campaign_packed import _RoutedModel, _routed_tokens, EXPERT_PREFIX
 
 
@@ -25,7 +25,7 @@ def test_legacy_duplicates_gate_up_gram_work(monkeypatch):
         return original(left, right)
 
     monkeypatch.setattr(torch.Tensor, '__matmul__', matmul)
-    _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(), 3,
+    capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(), 3,
                          'cpu', want_hessian=True)
     assert len(calls) == 12  # Six qnames each batch; four unique routed inputs.
 
@@ -60,9 +60,9 @@ def test_shared_exact_full_rows_cap_order_and_dense(dtype, max_rows, want_hessia
     targets = ['model.layers.0.attention', *packed_targets()]
     tokens = [x.to(dtype) for x in _routed_tokens()]
     model = _RoutedModel().to(dtype)
-    before = _collect_activations(model, targets, tokens, max_rows, 'cpu',
+    before = capture_activation_statistics(model, targets, tokens, max_rows, 'cpu',
                                   want_hessian=want_hessian)
-    after = _collect_activations(model, targets, tokens, max_rows, 'cpu',
+    after = capture_activation_statistics(model, targets, tokens, max_rows, 'cpu',
                                  want_hessian=want_hessian, shared_packed_inputs=True)
     assert_capture_exact(before, after)
     for row_dict in after[:2]:
@@ -74,8 +74,8 @@ def test_shared_exact_full_rows_cap_order_and_dense(dtype, max_rows, want_hessia
 def test_partial_siblings_share_only_selected_inputs(projections):
     targets = [f'{EXPERT_PREFIX}.1.{p}' for p in projections]
     model, tokens = _RoutedModel(), _routed_tokens()
-    before = _collect_activations(model, targets, tokens, 3, 'cpu', want_hessian=True)
-    after = _collect_activations(model, targets, tokens, 3, 'cpu', want_hessian=True,
+    before = capture_activation_statistics(model, targets, tokens, 3, 'cpu', want_hessian=True)
+    after = capture_activation_statistics(model, targets, tokens, 3, 'cpu', want_hessian=True,
                                  shared_packed_inputs=True)
     assert_capture_exact(before, after)
 
@@ -89,13 +89,13 @@ def test_shared_computes_one_gram_per_actual_input(monkeypatch):
         return original(left, right)
 
     monkeypatch.setattr(torch.Tensor, '__matmul__', matmul)
-    _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(), 3,
+    capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(), 3,
                          'cpu', want_hessian=True, shared_packed_inputs=True)
     assert len(calls) == 8
 
 
 def test_returned_sibling_mutation_cannot_change_other_outputs():
-    result = _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(),
+    result = capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(),
                                   3, 'cpu', want_hessian=True, shared_packed_inputs=True)
     left, right = f'{EXPERT_PREFIX}.0.w1', f'{EXPERT_PREFIX}.0.w3'
     for output in result[:2]:
@@ -108,8 +108,8 @@ def test_returned_sibling_mutation_cannot_change_other_outputs():
 def test_zero_row_batches_do_not_cap_later_observations():
     tokens = [torch.ones(1, 2, 4), -torch.ones(1, 2, 4)]
     model = _RoutedModel()
-    before = _collect_activations(model, packed_targets(), tokens, 1, 'cpu', want_hessian=True)
-    after = _collect_activations(model, packed_targets(), tokens, 1, 'cpu', want_hessian=True,
+    before = capture_activation_statistics(model, packed_targets(), tokens, 1, 'cpu', want_hessian=True)
+    after = capture_activation_statistics(model, packed_targets(), tokens, 1, 'cpu', want_hessian=True,
                                  shared_packed_inputs=True)
     assert_capture_exact(before, after)
     assert all(count == 2 for count in after[2].values())
@@ -119,7 +119,7 @@ def test_zero_row_batches_do_not_cap_later_observations():
 def test_unobserved_group_still_refuses_and_removes_hooks(want_hessian):
     model = _RoutedModel()
     with pytest.raises(RuntimeError, match='no routed calibration rows'):
-        _collect_activations(model, packed_targets(), [torch.ones(1, 2, 4)], 1,
+        capture_activation_statistics(model, packed_targets(), [torch.ones(1, 2, 4)], 1,
                              'cpu', want_hessian=want_hessian, shared_packed_inputs=True)
     assert not model.model.layers[2].feed_forward.experts._forward_pre_hooks
 
@@ -128,8 +128,8 @@ def test_nan_maximum_preserves_legacy_fmax_policy():
     tokens = _routed_tokens()
     tokens[1][0, :, 2] = float('nan')
     model = _RoutedModel()
-    before = _collect_activations(model, packed_targets(), tokens, 3, 'cpu', want_hessian=True)
-    after = _collect_activations(model, packed_targets(), tokens, 3, 'cpu', want_hessian=True,
+    before = capture_activation_statistics(model, packed_targets(), tokens, 3, 'cpu', want_hessian=True)
+    after = capture_activation_statistics(model, packed_targets(), tokens, 3, 'cpu', want_hessian=True,
                                  shared_packed_inputs=True)
     assert_capture_exact(before, after)
 
@@ -143,7 +143,7 @@ def test_private_scoring_prefix_survives_reused_mutable_source_buffer():
         model(batch)
         batch.fill_(-999)
 
-    result = _collect_activations(model, ['0'], [source], 3, 'cpu', forward_batch=forward,
+    result = capture_activation_statistics(model, ['0'], [source], 3, 'cpu', forward_batch=forward,
                                   want_hessian=True, shared_packed_inputs=True)
     assert torch.equal(result[0]['0'], expected)
     assert torch.equal(result[1]['0'], expected.T @ expected)
@@ -190,18 +190,18 @@ def test_shared_guard_failure_releases_owned_tensors_despite_traceback(monkeypat
     monkeypatch.setattr(torch.Tensor, 'clone', clone)
     model = _RoutedModel()
     with pytest.raises(RuntimeError, match='guard latched') as error:
-        _collect_activations(model, packed_targets(), _routed_tokens(), 3, 'cpu',
+        capture_activation_statistics(model, packed_targets(), _routed_tokens(), 3, 'cpu',
                              want_hessian=True, shared_packed_inputs=True, resource_check=check)
     gc.collect()
     assert refs and all(ref() is None for ref in refs)
     assert not model.model.layers[2].feed_forward.experts._forward_pre_hooks
-    observed = failed_collector_row_counts(error.value, _collect_activations, packed_targets())
+    observed = failed_collector_row_counts(error.value, capture_activation_statistics, packed_targets())
     assert observed['rows'] == dict.fromkeys(packed_targets(), 4)
 
 
 def test_shared_group_drains_before_sibling_clone_and_next_transfer():
     labels = []
-    _collect_activations(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
+    capture_activation_statistics(_RoutedModel(), packed_targets(), _routed_tokens(), 3, 'cpu',
                          want_hessian=True, shared_packed_inputs=True, resource_check=labels.append)
     owner, sibling, next_owner = (f'{EXPERT_PREFIX}.0.{p}' for p in ('w1', 'w3', 'w2'))
     assert labels.index(f'after_hessian_cpu_transfer:{owner}') < labels.index(f'before_output_clone:{sibling}')
@@ -226,7 +226,7 @@ def test_shared_forward_failure_drops_accumulator_owners(monkeypatch):
 
     monkeypatch.setattr(torch.Tensor, '__matmul__', mm)
     with pytest.raises(RuntimeError, match='source forward failed'):
-        _collect_activations(model, packed_targets(), _routed_tokens(), 3, 'cpu',
+        capture_activation_statistics(model, packed_targets(), _routed_tokens(), 3, 'cpu',
                              want_hessian=True, shared_packed_inputs=True, forward_batch=forward)
     assert refs and all(ref() is None for ref in refs)
     assert not model.model.layers[2].feed_forward.experts._forward_pre_hooks
@@ -235,8 +235,8 @@ def test_shared_forward_failure_drops_accumulator_owners(monkeypatch):
 def test_signed_zero_rows_match_by_bytes_and_serialized_storage():
     model = torch.nn.Sequential(torch.nn.Identity())
     tokens = [torch.tensor([[-0.0, 0.0, -0.0, 1.0]])]
-    before = _collect_activations(model, ['0'], tokens, 5, 'cpu', want_hessian=True)
-    after = _collect_activations(model, ['0'], tokens, 5, 'cpu', want_hessian=True,
+    before = capture_activation_statistics(model, ['0'], tokens, 5, 'cpu', want_hessian=True)
+    after = capture_activation_statistics(model, ['0'], tokens, 5, 'cpu', want_hessian=True,
                                  shared_packed_inputs=True)
     assert_capture_exact(before, after)
     assert after[0]['0'].untyped_storage().nbytes() == 16

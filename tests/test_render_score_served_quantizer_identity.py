@@ -24,6 +24,7 @@ import torch
 
 from prismaquant import nvfp4_activation_contract as owner
 from prismaquant import production_weight_cache as pwc
+from prismaquant.native_render_levers import NativeRenderLevers
 from prismaquant.production_weight_cache import (
     _render_score_record,
     _check_resumed_render_score_policies,
@@ -164,7 +165,7 @@ def test_the_writer_stamps_the_arithmetic_the_contract_actually_priced_with(monk
         reference_weight=torch.zeros(2, 16, dtype=torch.bfloat16),
         rendered_weight=torch.zeros(2, 16, dtype=torch.bfloat16),
         activations=torch.zeros(1, 16, dtype=torch.bfloat16),
-        activation_max_abs=1.0)
+        activation_max_abs=1.0, levers=NativeRenderLevers.resolve(gptq_default=True))
 
     assert record["served_quantizer"]["backend"] == owner.SERVED_QUANTIZER_BACKEND_MODEL
     assert record["served_quantizer"] == explicit.as_record()

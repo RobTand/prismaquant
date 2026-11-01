@@ -3,7 +3,7 @@ import pytest
 import torch
 from torch import nn
 
-from prismaquant.measure_quant_cost import derive_per_expert_activations, _packed_router_topk
+from prismaquant.routed_experts import derive_per_expert_activations, packed_router_topk
 
 
 def _real_block(use_bias=True):
@@ -60,7 +60,7 @@ def test_external_bias_router_without_parent_bias_fails_clearly():
         def forward(self, hidden_states, expert_bias=None):
             raise AssertionError('must reject missing parent bias before router execution')
     with pytest.raises(ValueError, match='expert_bias.*parent'):
-        _packed_router_topk(ExternalBiasRouter(), torch.ones(3, 8))
+        packed_router_topk(ExternalBiasRouter(), torch.ones(3, 8))
 
 
 def test_existing_correction_bias_router_remains_supported():
@@ -71,6 +71,6 @@ def test_existing_correction_bias_router_remains_supported():
             return logits, weights, indices
     x = torch.tensor([[2., 0.], [3., 1.]])
     bias = torch.tensor([-10., 10.])
-    indices, weights = _packed_router_topk(CorrectionRouter(), x, bias)
+    indices, weights = packed_router_topk(CorrectionRouter(), x, bias)
     assert torch.equal(indices, torch.ones(2, 1, dtype=torch.long))
     torch.testing.assert_close(weights, (x + bias).softmax(-1)[:, 1:])

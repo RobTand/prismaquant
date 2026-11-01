@@ -249,10 +249,8 @@ def test_profile_has_structure_spec(profile):
 def test_profile_has_a_fused_sibling_source(profile):
     """De-vacuums check 3 for lanes requiring uniform fused siblings.
 
-    Gridbook role-composite architectures are explicit exceptions: each role
-    may have a different storage scheme because it is decoded independently
-    into the common execution type. The ratchet below keeps that exception
-    named instead of silently weakening this check for every profile.
+    The retained historical role-composite exemption is named below;
+    its Gridbook consumer is retired.
     """
     name = type(profile).__name__
     has_vllm_cls = profile.vllm_architecture_class() is not None

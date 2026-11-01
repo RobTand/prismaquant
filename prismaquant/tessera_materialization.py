@@ -7,6 +7,11 @@ packed allocation, after the ordinary receipt and priced-input gates pass.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_cell_measurement as cell_measurement
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+
 import argparse
 import copy
 import json
@@ -81,10 +86,16 @@ def _request(path):
 
 def _check_census(path, cost, source, units):
     from . import tessera_campaign as tc
-    provenance = {**cost['provenance']['hessian']['calibration_identity'], **cost['provenance']}
-    args = SimpleNamespace(**{field:provenance[field]
-        for field in ('model', 'nsamples', 'seqlen', 'seed', 'layer_stride')})
-    census = tc.load_calibration_census(path, args=args)
+    identity = cost['provenance']['hessian']['calibration_identity']
+    provenance = {**identity, **cost['provenance']}
+    # The priced payload records the draw but no lifted-pin roster, so the
+    # census is held to the body roster: a lifted-pin census refuses here.
+    request = SimpleNamespace(
+        **{field: provenance[field]
+           for field in ('model', 'nsamples', 'seqlen', 'seed', 'layer_stride')},
+        calibration_input_receipt=identity.get('calibration_input'),
+        allow_pinned=None, pinned_roster_only=False)
+    census = tc.load_calibration_census(path, request=request)
     tc.require_census_draw(census, provenance['hessian']['calibration_identity'],
                            where='selected-wire planning')
     census_source, census_units, _stacks = tep.carried_units(census.get('expert_projection'))
@@ -112,7 +123,7 @@ def _planned_groups(census, selected, cost):
 
 
 def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1):
-    from tools import dispatch_tessera_campaign as dispatcher
+    from . import tessera_campaign_rows as campaign_rows
     if anchor_batch_size < 1:
         raise ValueError('anchor batch size must be positive')
     request, cost, source, units, expanded = _request(request_path)
@@ -120,7 +131,7 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
     census = _check_census(census_path, cost, source, units)
     workspace = Path(workspace).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    spec = dispatcher.load_spec(Path(spec_path))
+    spec = campaign_rows.load_spec(Path(spec_path))
     if spec['model'] != provenance['model']:
         raise RuntimeError('materialization spec model differs from priced model')
     selected = {n: expanded[n] for n in units if expanded[n].startswith('TESSERA_')}
@@ -130,11 +141,13 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
                   census_sha256=_sha(census_path), workspace=str(workspace), groups=groups)
     plan_path = workspace / 'plan.json'
     _json(plan_path, result)
+    memory_spec = {**spec, 'max_act_rows': provenance['max_act_rows'],
+                   'campaign_argv': ['--max-act-rows', str(provenance['max_act_rows'])]}
     rows = []
     for index, group in enumerate(groups):
-        row = dispatcher._row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
+        row = campaign_rows.prismabuild_row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
                                      '--anchor-batch-size', str(anchor_batch_size)],
-            mem_gb=dispatcher._row_memory_gb({**spec, 'max_act_rows':provenance['max_act_rows']},
+            mem_gb=campaign_rows.row_memory_gb(memory_spec,
                                             list(group['assignment']), census),
             timeout_s=int(spec.get('timeout_s', 86400)), module='prismaquant.tessera_materialization')
         rows.append(row)
@@ -155,7 +168,7 @@ def _inputs(plan_path, group_index=None):
     census = _check_census(plan_data['census_path'], cost, source, units)
     if plan_data['groups'] != _planned_groups(census, expected, cost):
         raise RuntimeError('materialization plan differs from selected census groups')
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     source_sha = api.encoder_source_sha256()
     # Every measured receipt must describe the same producer source.
     priced_receipts = 0
@@ -197,22 +210,12 @@ def _journal(plan_data, identity, index, names):
         identity={**identity, 'group': index}, qnames=names)
 
 
-def _expert_input_identity(api, weight, unit, fmt, activation):
-    """The same served expert identity at completion, resume and finalization."""
-    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
-    from .tessera_render import rung_accepts_hessian
-
-    family, rung = parse_tessera_format_name(fmt)
-    wire = tessera_served_wire_recipe(family, rung, structure='routed_moe')
-    active = (activation if activation is not None and rung_accepts_hessian(fmt, wire)
-              else None)
-    return api.unit_input_identity(weight, unit, family.payload_grid(), rung,
-                                   activation=active, structure='routed_moe')
 
 
 def run(plan_path, group_index, *, anchor_batch_size=1):
     """Execute inside one admitted action; never submit recursively."""
-    import functools
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from dataclasses import asdict
     import torch
     from transformers import AutoModelForCausalLM
@@ -264,7 +267,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             cache_record['path'],expected_sha256=cache_record['sha256'],
             expected_identity=cache_identity,census=census,names=names,device=device)
     else:
-        acts, hessians, counts, maxima = tc._collect_activations(
+        acts, hessians, counts, maxima = calibration_forward.capture_activation_statistics(
             model, names, tokens, provenance['max_act_rows'], device,
             want_hessian=want_h, profile=profile)
     hi, lo = tc.census_token_counts(census, counts)
@@ -288,9 +291,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     if device == 'cuda':
         torch.cuda.empty_cache()
     activation = th.activation_source(hessians, calibration) if want_h else None
-    @functools.lru_cache(maxsize=None)
-    def kwargs(name, plane):
-        return th.encoder_kwargs(activation, name, weights[name].shape[1], device, scale_plane=plane)
+    kwargs = cell_measurement.encoder_kwargs_memo(activation, weights, device)
     wire_dir = root / 'wire'
     wire_dir.mkdir(exist_ok=True)
     cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
@@ -298,20 +299,20 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     # Missing selections and adopted/resumed wires share this directory.
     # Reserve the whole group before iteration: a later seeded alias must
     # not appear after an earlier coordinate has been scheduled to encode.
-    tc._register_campaign_wire_coordinates(cache, wire_dir, group['assignment'].items())
-    api = tc._checkpoint_identity_api()
+    campaign_wire.register_wire_coordinates(cache, wire_dir, group['assignment'].items())
+    api = campaign_wire.require_checkpoint_identity_api()
     missing, expected_by_name = [], {}
     for name in names:
         fmt = group['assignment'][name]
         family, rung = parse_tessera_format_name(fmt)
-        expected = _expert_input_identity(api, weights[name], units[name], fmt, activation)
-        wire_path = tc._wire_path(wire_dir, name, fmt)
+        expected = campaign_wire.expert_input_identity(api, weights[name], units[name], fmt, activation)
+        wire_path = campaign_wire.wire_path(wire_dir, name, fmt)
         state = completed.get(name)
         record = None if state is None else state['record']
         if record is None:
             record = cost.get(tep.EXPERT_WIRES_KEY, {}).get(name, {}).get(fmt)
             if record is not None:
-                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
+                campaign_wire.link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
                                    qname=name, format_name=fmt)
         if record is not None:
             if record['file'] != wire_path.name:
@@ -332,26 +333,20 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             continue
         write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
             state=dict(format=fmt, record=record, anchor=anchor))
-    for batch in tc._anchor_batches(missing, weights=weights,
+    for batch in cell_measurement.compatible_batches(missing, weights=weights,
                                     batch_size=anchor_batch_size, structures=structures):
         batch_names = [item[0] for item in batch]
         fmt = group['assignment'][batch_names[0]]
         common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
                       activation_kwargs_for=kwargs, hessian_required=want_h, profile=profile)
-        if len(batch) == 1:
-            name = batch_names[0]
-            anchors = [tc._measure_anchor(qname=name, weight=weights[name].to(device),
-                activations=acts[name].to(device), static_input_scale=scales.get(name),
-                structure=structures[name], **common)]
-        else:
-            anchors = tc._measure_anchor_batch(qnames=batch_names,
-                weights=[weights[name].to(device) for name in batch_names],
-                activations=[acts[name].to(device) for name in batch_names],
-                static_input_scales=scales,
-                structures={name: structures[name] for name in batch_names}, **common)
+        anchors = cell_measurement.measure_cells(qnames=batch_names,
+            weights=[weights[name].to(device) for name in batch_names],
+            activations=[acts[name].to(device) for name in batch_names],
+            static_input_scales=scales,
+            structures={name: structures[name] for name in batch_names}, **common)
         for anchor in anchors:
             name = anchor.qname
-            record = tc._checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])
+            record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])
             write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
                 state=dict(format=anchor.format_name, record=record, anchor=asdict(anchor)))
     capture, scale_file, digest = tc.write_export_inputs(root, hessians=hessians if want_h else None,
@@ -417,7 +412,7 @@ def finalize(plan_path):
         if set(counts) != set(hessians):
             raise RuntimeError('original priced capture counts do not cover its Hessians')
     receipts = copy.deepcopy(cost.get(tep.EXPERT_WIRES_KEY, {}))
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     completed_names = set()
     for index, group in enumerate(data['groups']):
         names = sorted(group['assignment'])
@@ -472,18 +467,18 @@ def finalize(plan_path):
                 break
         family, rung = parse_tessera_format_name(fmt)
         weight = tep.source_unit_weight(provenance['model'], source, units[name])
-        expected = _expert_input_identity(api, weight, units[name], fmt, activation)
+        expected = campaign_wire.expert_input_identity(api, weight, units[name], fmt, activation)
         checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
             grid=family.payload_grid().name)
         # The name is checked before the source wire is located or read: a
         # misnamed receipt is refused without touching its bytes (#2310).
-        tc._require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
+        campaign_wire.require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
         source_path = source_dir / checked['file']
         tep.locate_expert_wire(checked, name=name, wire_dir=source_dir)
         # One content check per blob: the verified bytes are the ones the hard
         # link below carries into the published wire directory (#643).
         api.verify_cached_unit(source_path.read_bytes(), checked, expected)
-        tc._link_seed_wire(source_dir, wire_dir, checked['file'],
+        campaign_wire.link_seed_wire(source_dir, wire_dir, checked['file'],
                            qname=name, format_name=fmt)
         linked_path = wire_dir / checked['file']
         if not os.path.samefile(source_path, linked_path):

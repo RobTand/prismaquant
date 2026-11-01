@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Polish every candidate in a kneedle directory sequentially in one
-# Docker container (model loaded once, polish runs in series).
+# Historical launcher for the archived cross-layer polish experiment.
+# Its live module entry points were removed; retain these commands as research
+# context, not as a supported quantization workflow.
 set -euo pipefail
 
 MODEL_PATH="${MODEL_PATH:-/home/rob/.cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca}"

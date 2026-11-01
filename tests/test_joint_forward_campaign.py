@@ -7,9 +7,8 @@ import pytest
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_forward_campaign import resolve_forward_campaign
-from prismaquant.joint_layer_quanta import (
-    LAYER_QUANTUM_SCHEMA, canonical_sha256, check_adjoint_run_header, roster_digest,
-)
+from prismaquant.joint_campaign_ledger import (LAYER_QUANTUM_SCHEMA, roster_digest)
+from prismaquant.joint_layer_quanta import (canonical_sha256, check_adjoint_run_header)
 
 
 def fixture(tmp_path):

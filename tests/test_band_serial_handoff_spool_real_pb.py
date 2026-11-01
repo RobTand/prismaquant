@@ -98,7 +98,7 @@ def test_the_writer_books_its_own_waits_and_counts_landed_repins(
     import torch
     from fleet_sdk import require_prismabuild_sdk
     require_prismabuild_sdk()
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.joint_quantum_handoff import HandoffEmitter
     from prismaquant.produced_output_spool import MAX_ENV, ROOT_ENV
     from prismaquant.staged_lease import sdk_submodule

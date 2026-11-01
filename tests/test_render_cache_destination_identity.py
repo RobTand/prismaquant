@@ -7,6 +7,7 @@ import pytest
 import torch
 from torch import nn
 
+from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import production_weight_cache as pwc
 
 
@@ -66,7 +67,7 @@ def test_disk_fill_refuses_alias_before_sidecar_or_shard_work(tmp_path, monkeypa
     model.layer = nn.Module()
     model.layer.a = nn.Linear(2, 2, bias=False)
     model.layer_a = nn.Linear(2, 2, bias=False)
-    leaf = tmp_path / pwc._cache_weight_filename("layer.a", "FP8_E4M3")
+    leaf = tmp_path / cache_weight_filename("layer.a", "FP8_E4M3")
     leaf.write_bytes(b"preexisting shard must not be consumed or changed")
     before = leaf.read_bytes()
     calls = []

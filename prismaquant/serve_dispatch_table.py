@@ -46,11 +46,12 @@ worse one.
 Statuses, and what a table may claim
 ------------------------------------
 
-``docs/lanes/nvfp4-cb/format-speed-policy.md`` §1 is binding: "Per-layer or
-per-operator timing tables may generate candidate assignments. They are not
-final evidence." Every table therefore declares a ``status``; the only value
-this module ships an example for is ``proposal_data``. Nothing here promotes
-anything — the served NATIVE-PARITY protocol does.
+The historical policy in
+``archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/format-speed-policy.md``
+§1 distinguishes candidate-generating timing tables from final evidence.
+Every table declares a ``status``. No example table ships in the active tree;
+the former ``proposal_data`` example was archived with Gridbook. Admission
+still requires the served NATIVE-PARITY protocol.
 
 Arenas whose metric is not a whole-phase metric (``operator_ms``: an isolated
 GEMM or operator microbenchmark) are loaded, kept, and marked

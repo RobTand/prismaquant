@@ -1,11 +1,10 @@
 """Execute the shell gates in ``prismaquant/run-pipeline.sh``.
 
-A gate that is only asserted as a *string* would still pass with its
-predicate inverted, its variable misspelled, or the whole block sitting
-after an early ``exit 0``.  Every test here therefore extracts the gate's
-own shell block out of the shipped script and RUNS it in a subshell under
-``set -euo pipefail`` with a controlled environment, asserting the exact
-exit status (2 = the gate fired, 0 = it did not).
+Every test here extracts a gate's shell block from the shipped script and
+runs it in a subshell under ``set -euo pipefail`` with a controlled
+environment, asserting the exact exit status (2 = the gate fired, 0 = it
+did not). These checks exercise each block's predicate and status behavior.
+They do not establish that the complete pipeline reaches that block.
 
 The pattern generalizes ``test_run_pipeline_defaults.py::
 test_cb_unlicensed_guard_actually_fires`` from a one-line predicate to a

@@ -344,8 +344,8 @@ def cmd_child(args) -> int:
 
     import prismaquant
     from prismaquant.calibration_data import load_calibration_input
-    from prismaquant.cost_streaming import (
-        StreamedBoundaryArtifacts, build_streamed_causal_lm, normalize_boundary_storage)
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, normalize_boundary_storage
+    from prismaquant.cost_streaming import build_streamed_causal_lm
     from prismaquant.joint_adjoint_checkpoints import reference_from_record, render_free_layer_roll
     from prismaquant.joint_cost_quantum import _install_with_settlement, _rebuild_batches
     from prismaquant.model_profiles import detect_profile
@@ -580,18 +580,48 @@ def _netdata(base: str, power_chart: str, envelope_w: float, after: float,
     return row
 
 
+def _declared_results(out: Path, drive: dict) -> list[dict]:
+    arms, runs = drive.get("arms"), drive.get("runs")
+    if not isinstance(arms, dict) or not arms or not isinstance(runs, list) or not runs:
+        raise SystemExit("incomplete chain-roll census: declared arms and runs must be nonempty")
+    labels, coordinates, represented = set(), set(), set()
+    records = []
+    for run in runs:
+        label, arm, repeat = run["label"], run["arm"], run["repeat"]
+        if not isinstance(label, str) or not label or arm not in arms:
+            raise SystemExit(f"incomplete chain-roll census: invalid run {run!r}")
+        if type(repeat) is not int or repeat < 0:
+            raise SystemExit(f"incomplete chain-roll census: invalid repeat for {label}")
+        coordinate = (arm, repeat)
+        if label in labels or coordinate in coordinates:
+            raise SystemExit(f"incomplete chain-roll census: duplicate run {label}")
+        if type(run.get("returncode")) is not int or run["returncode"] != 0:
+            raise SystemExit(f"incomplete chain-roll census: unsuccessful run {label}")
+        labels.add(label)
+        coordinates.add(coordinate)
+        represented.add(arm)
+        path = out / f"{label}.json"
+        if not path.exists():
+            raise SystemExit(f"incomplete chain-roll census: missing result {label}")
+        record = json.loads(path.read_text())
+        if record.get("label") != label or record.get("arm") != arm:
+            raise SystemExit(f"incomplete chain-roll census: result identity differs for {label}")
+        records.append(record)
+    missing = set(arms) - represented
+    if missing:
+        raise SystemExit(f"incomplete chain-roll census: missing declared arms {sorted(missing)}")
+    return records
+
+
 def cmd_analyze(args) -> int:
     out = Path(args.out)
     drive = json.loads((out / "drive.json").read_text())
+    records = _declared_results(out, drive)
     by_arm = defaultdict(list)
-    for run in drive["runs"]:
-        path = out / f"{run['label']}.json"
-        if not path.exists():
-            continue
-        record = json.loads(path.read_text())
-        raw = out / f"{run['label']}.raw"
+    for record in records:
+        raw = out / f"{record['label']}.raw"
         record["profile"] = _profile_shares(raw) if raw.exists() else None
-        by_arm[run["arm"]].append(record)
+        by_arm[record["arm"]].append(record)
     report = {"arms": {}, "planes": {}}
     for arm, records in by_arm.items():
         rolls = sorted(r["roll_s"] for r in records)

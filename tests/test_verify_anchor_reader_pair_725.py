@@ -3,6 +3,8 @@
 The receipt checksum still refuses; only the redundant pass is gone."""
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 from types import SimpleNamespace
 
 import pytest
@@ -33,7 +35,7 @@ def _patched_verify(monkeypatch, rendered):
 
     monkeypatch.setattr(tc, "_checkpoint_anchor_identity",
                         lambda *_a, **_k: {"expected": "derived"})
-    monkeypatch.setattr(tc, "_checkpoint_identity_api",
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api',
                         lambda: SimpleNamespace(verify_cached_unit=lambda *_a: None))
     monkeypatch.setattr(unit_artifact, "read_unit_artifact",
                         lambda blob, device="cpu": rendered.clone())

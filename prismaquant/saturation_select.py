@@ -79,14 +79,14 @@ def bootstrap_mean_ci(
     mean = sum(samples) / n
     if n == 1:
         return mean, float("inf")
-    # Deterministic LCG bootstrap (no numpy dependency required at call site).
-    state = (seed * 2654435761 + 12345) & 0xFFFFFFFF
+    from random import Random
+
+    rng = Random(seed)
     boot_means = []
     for _ in range(n_boot):
         s = 0.0
         for _ in range(n):
-            state = (1103515245 * state + 12345) & 0x7FFFFFFF
-            s += samples[state % n]
+            s += rng.choice(samples)
         boot_means.append(s / n)
     bm = sum(boot_means) / n_boot
     var = sum((m - bm) ** 2 for m in boot_means) / max(1, n_boot - 1)

@@ -26,7 +26,7 @@ from typing import Any
 import torch
 
 from .cost_stage_checkpoint import canonical_json_sha256
-from .cost_streaming import (
+from .streamed_model_identity import (
     canonical_streamed_model_semantic_config,
     portable_streamed_model_content_identity,
     validate_streamed_model_identity,
@@ -383,6 +383,9 @@ def _validated_null_floor_arms(
         raise RuntimeError(f"{where} needs at least two independent null arms")
     validated: list[Mapping[str, object]] = []
     kls: list[float] = []
+    distinct: dict[str, set[str]] = {
+        key: set() for key in ("arm", "student_result_sha256", "splice_receipt_sha256")
+    }
     for index, raw in enumerate(arms):
         arm = _require_exact_mapping(
             raw, _NULL_FLOOR_ARM_KEYS, where=f"{where}.arms[{index}]"
@@ -403,6 +406,14 @@ def _validated_null_floor_arms(
             raise RuntimeError(f"{where}.arms[{index}] is malformed")
         for key in ("student_result_sha256", "serve_fingerprint", "splice_receipt_sha256"):
             _require_sha256(arm.get(key), where=f"{where}.arms[{index}].{key}")
+        for key, seen in distinct.items():
+            value = str(arm[key])
+            if value in seen:
+                raise RuntimeError(
+                    f"{where}.arms[{index}] repeats {key}; independent null arms "
+                    "require distinct identities and measurement evidence"
+                )
+            seen.add(value)
         validated.append(arm)
         kls.append(float(kl))
     if max(kls) / min(kls) > _NULL_FLOOR_ARM_AGREEMENT_MAX_RATIO:
@@ -1042,6 +1053,8 @@ def _validated_source_identity_binding(
     source_root: Path, identity_path: Path
 ) -> tuple[dict[str, object], dict[str, object], str]:
     """Validate the original source bytes without trusting a path-only stamp."""
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     identity_bytes = _read_regular_bytes(
         identity_path, where="PrismaSnap original-source identity"
     )

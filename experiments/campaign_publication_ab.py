@@ -6,6 +6,7 @@ cache, calibration traversal, or fleet placement is implemented here.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
 import argparse
 from contextlib import contextmanager
 import functools
@@ -139,7 +140,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
     ``profiler_allowance_gib`` is the bounded CUDA trace plus its decoded
     objects, charged on top of the workload; the trace cap is a quarter of it.
     """
-    from tools.dispatch_tessera_campaign import load_spec, _streamed_resource_plan
+    from prismaquant.tessera_campaign_rows import load_spec, streamed_resource_plan
     spec = load_spec(spec_path)
     workspace, out = Path(workspace), Path(out)
     plan = json.loads((workspace/'plan.json').read_text())
@@ -166,7 +167,7 @@ def prepare(spec_path, workspace, row_id, out, *, identity_bytes=0, order=None, 
         argv = list(selected['campaign_argv'])
         argv[argv.index('--anchor-batch-size')+1] = str(batch)
         selected['campaign_argv'] = argv+arm_flags(budget, identity)
-        resources['%d:%d:%d' % (budget, identity, batch)] = _streamed_resource_plan(
+        resources['%d:%d:%d' % (budget, identity, batch)] = streamed_resource_plan(
             selected, census, row['members'], selected_source=True)
     # Existing measured process baseline plus a bounded CUDA trace and its
     # decoded profiler objects. This allowance is separate from staged bytes.
@@ -232,6 +233,7 @@ class PhaseRecorder:
     def wrap(self, function, name):
         @functools.wraps(function)
         def measured(*args, **kwargs):
+            units = list(kwargs['qnames']) if 'qnames' in kwargs else None
             start = time.time()
             wall = time.perf_counter()
             cpu = time.thread_time()
@@ -242,6 +244,8 @@ class PhaseRecorder:
                     seconds=time.perf_counter()-wall, thread_cpu_seconds=time.thread_time()-cpu,
                     thread=threading.current_thread().name, qname=kwargs.get('qname'),
                     format_name=kwargs.get('format_name'))
+                if units is not None:
+                    record.update(qnames=units, batch_size=len(units))
                 if len(self.records) >= self.limit:
                     raise RuntimeError('phase profile exceeded its bounded record budget')
                 self.records.append(record)
@@ -252,10 +256,22 @@ class PhaseRecorder:
 def instrument(campaign, recorder, projection):
     from prismaquant import production_weight_cache, perturbed_x_cache, cost_stage_checkpoint
     from prismaquant.tessera_publication import BoundedPublisher
+    from prismaquant import tessera_campaign_wire as campaign_wire
+    wire_operations = {'_checkpoint_wire_record': 'checkpoint_wire_record'}
     targets = [
-        (campaign, name) for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record', '_finish_anchor',
+        (campaign_wire, wire_operations[name]) if name in wire_operations else (campaign, name)
+        for name in ('_checkpoint_anchor_identity', '_checkpoint_wire_record',
                                       '_campaign_bound_identities', '_adopt_seed_checkpoint')
     ] + [
+        # Two spans under their own names. ``measure_cells`` is one compatible
+        # batch end to end: recipe admission, the encode and every unit's
+        # scoring and publication. ``_score_and_publish`` is one unit's scoring
+        # and publication of decoded bytes, the span the pre-2026-10-16
+        # profiles name ``tessera_campaign._finish_anchor``, except that the
+        # direct-consumer contract lookup now runs in ``CellRecipe.prepare``.
+        # Neither is relabelled as the historical span.
+        (cell_measurement, 'measure_cells'),
+        (cell_measurement, '_score_and_publish'),
         # The per-anchor derivation off a sealed template.  Its thread name
         # in the record is the evidence of where the post-work ran.
         (campaign._BoundCheckpointUnitIdentity, 'derive'),
@@ -268,9 +284,9 @@ def instrument(campaign, recorder, projection):
     from prismaquant import tessera_hessian
     targets.append((tessera_hessian, 'encoder_kwargs'))
     originals = [(owner, name, getattr(owner, name)) for owner, name in targets]
-    batches = campaign._anchor_batches
+    batches = cell_measurement.compatible_batches
     close = BoundedPublisher.close
-    memo = campaign._activation_kwargs_memo
+    memo = cell_measurement.encoder_kwargs_memo
     memos = []
 
     def memo_with_record(*a, **kw):
@@ -298,19 +314,23 @@ def instrument(campaign, recorder, projection):
 
     try:
         for owner, name, original in originals:
-            setattr(owner, name, recorder.wrap(original, owner.__name__+'.'+name))
-        campaign._anchor_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
-        campaign._activation_kwargs_memo = memo_with_record
+            setattr(owner, name, recorder.wrap(original, (campaign.__name__+'.'+next(
+                old for old, current in wire_operations.items() if current == name))
+                if owner is campaign_wire else owner.__name__+'.'+name))
+        cell_measurement.compatible_batches = lambda *a, **kw: preferred_batches(batches(*a, **kw), projection)
+        cell_measurement.encoder_kwargs_memo = memo_with_record
         BoundedPublisher.close = close_with_stats
         yield
     finally:
         BoundedPublisher.close = close
-        campaign._anchor_batches = batches
-        campaign._activation_kwargs_memo = memo
+        cell_measurement.compatible_batches = batches
+        cell_measurement.encoder_kwargs_memo = memo
         for owner, name, original in originals:
             setattr(owner, name, original)
         for built in memos:
             info = built.cache_info()
+            # The same memo, moved to ``tessera_cell_measurement.encoder_kwargs_memo``;
+            # its counters keep their historical key.
             recorder.records.append(dict(phase='tessera_campaign._activation_kwargs_memo.cache_info',
                 started_unix=time.time(), seconds=0.0, thread_cpu_seconds=0.0,
                 thread=threading.current_thread().name, qname=None, format_name=None,

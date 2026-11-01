@@ -85,7 +85,7 @@ def _adjoint_slice(record):
 
 def band_campaign(tmp_path):
     """Layers 3 (producer) and 2 (consumer) of band 4, bound to Stage A."""
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
 
     records, _parent = _tiny_records(tmp_path)
     receipt = _tiny_receipt(tmp_path, records[0]["campaign"])
@@ -357,8 +357,7 @@ def test_a_write_only_owner_names_its_lifetime_and_never_reads_back(
     could never commit. Each refusal comes before any byte is written.
     """
     _src, pb_repo = pb_source(monkeypatch)
-    from prismaquant.cost_streaming import (
-        StreamedBoundaryArtifacts, normalize_boundary_storage)
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, normalize_boundary_storage
     from prismaquant.joint_quantum_handoff import handoff_root
 
     producer, _consumer, storage = band_campaign(tmp_path)

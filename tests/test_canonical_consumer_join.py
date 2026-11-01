@@ -322,11 +322,11 @@ def test_body_builder_scopes_per_unit_shape(monkeypatch):
     contexts = {name: _serving_context("dense") for name in stats}
     built = candidates.build_candidates({"good": stats["good"]}, costs, [spec], target_profile="research",
                                         context_by_unit=contexts,
-                                        rung_allowability={FAMILY: whole})
+                                        rung_allowability={FAMILY: whole}).candidates
     assert set(built) == {"good"}
     with pytest.raises(ValueError, match="no serving-eligible"):
         candidates.build_candidates(stats, costs, [spec], target_profile="research",
-            context_by_unit=contexts, rung_allowability={FAMILY: whole})
+            context_by_unit=contexts, rung_allowability={FAMILY: whole}).candidates
 
 
 def test_t4_family_waits_without_invented_admission(monkeypatch):
@@ -402,22 +402,29 @@ def test_body_prices_the_qualified_chord_and_exact_fractional_bytes(monkeypatch)
                         lambda *a, **k: candidates.FormatApplicability(True))
     stats = {"u": {"in_features": 8, "out_features": 4, "n_params": 32, "unit_structure": "dense"}}
     specs = [registry.get_format(f"{FAMILY}_R{rung}") for rung in (896, 1024)]
-    built = candidates.build_candidates(stats, _body_costs(), specs, target_profile="research",
+    costs = _body_costs()
+    build = candidates.build_candidates(stats, costs, specs, target_profile="research",
         rung_allowability={FAMILY: owner}, allowability_m=8)
+    built = build.candidates
     by_format = {item.fmt: item for item in built["u"]}
     half = by_format[f"{FAMILY}_R896"]
     whole = by_format[f"{FAMILY}_R1024"]
     assert half.predicted_dloss == 0.75
+    assert costs["u"][half.fmt]["predicted_dloss"] == 999.0
+    from prismaquant.priced_cell import cost_entry_predicted_dloss, resolve_cost_row
+    row, row_format = resolve_cost_row(build.cost_rows["u"], half.fmt)
+    assert row_format == half.fmt
+    assert cost_entry_predicted_dloss(stats["u"], row, format_name=half.fmt) == 0.75
     assert type(half.memory_bytes) is int and half.memory_bytes < whole.memory_bytes
     assert half.memory_bytes == candidates.serialized_candidate_payload(specs[0], (4, 8), qname="u")[0]
     scope = stats["u"]["_rung_allowability_scope_by_format"][half.fmt]
     assert (scope["rows"], scope["columns"], scope["m"]) == (4, 8, 8)
     assert scope["activation_contract"] == owner.kernel_build["activation_contract"]
     assert scope["recipe"] == _first_row(owner._table, 896)["measurements"][0]["geometry"]["recipe"]
-    assert stats["u"]["_canonical_quality_by_format"][half.fmt]["numerical_qualification_inherited"] is False
+    assert build.cost_rows["u"][half.fmt]["canonical_quality"]["numerical_qualification_inherited"] is False
     with pytest.raises(ValueError, match="no serving-eligible"):
         candidates.build_candidates(stats, _body_costs(), specs, target_profile="research",
-            rung_allowability={FAMILY: owner}, allowability_m=9)
+            rung_allowability={FAMILY: owner}, allowability_m=9).candidates
 
 
 def test_final_scope_retains_rank_local_shape_m_activation_and_recipe(monkeypatch):
@@ -465,7 +472,7 @@ def test_actual_pact_resources_use_reconciled_class_costs_and_exact_budget(monke
     stats = {"u": {"in_features": 8, "out_features": 4, "n_params": 32, "unit_structure": "dense"}}
     specs = [registry.get_format(f"{FAMILY}_R{rung}") for rung in (896, 1024)]
     built = candidates.build_candidates(stats, _body_costs(), specs, target_profile="research",
-        rung_allowability={FAMILY: owner}, allowability_m=8)
+        rung_allowability={FAMILY: owner}, allowability_m=8).candidates
     table, formats = _shape_price_fixture()
     members = {("u", option.fmt): {"u": option.fmt} for option in built["u"]}
     pricing = prices.build_shape_runtime_resources(table, built, option_members=members,
@@ -570,7 +577,7 @@ def test_missing_qualified_chord_never_drops_the_actual_unit(monkeypatch):
     fmt = f"{FAMILY}_R896"
     with pytest.raises(ValueError, match="canonical quality waits"):
         candidates.build_candidates(stats, {"u": {fmt: {"predicted_dloss": 5.0}}},
-            [registry.get_format(fmt)], target_profile="research", rung_allowability={FAMILY: owner})
+            [registry.get_format(fmt)], target_profile="research", rung_allowability={FAMILY: owner}).candidates
 
 
 def test_explicit_candidate_index_uses_actual_schema_without_active_index_changes(tmp_path, monkeypatch):

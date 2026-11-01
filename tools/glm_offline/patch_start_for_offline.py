@@ -6,7 +6,7 @@ once or this exits non-zero, so a recipe update that moves one of these
 anchors stops the launch instead of silently launching the served
 configuration under an offline name.
 
-What the five patches do, and why each one is needed rather than an export:
+What the patches do, and why each one is needed rather than an export:
 
   KV       `KV_CACHE_DTYPE` is not in start.sh's caller-wins list
            (start.sh:60-82), so `.env`'s `fp8` would win over any export.  We

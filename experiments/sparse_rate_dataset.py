@@ -14,7 +14,7 @@ import json
 import math
 import os
 import pickle
-import re
+import sys
 import tempfile
 import zipfile
 from collections.abc import Mapping
@@ -22,13 +22,19 @@ from pathlib import Path
 
 import numpy as np
 
+# Support direct-script execution from an uninstalled checkout as well as -m.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from prismaquant.qnames import DOTTED_LAYER_QNAME
+
 
 SCHEMA = "prismaquant.sparse_rate_dataset.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 CAMPAIGN_SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 DATASET_NAME = "sparse_rate_dataset.npz"
 MANIFEST_NAME = "manifest.json"
-LAYER_RE = re.compile(r"\.layers\.(\d+)\.")
+LAYER_RE = DOTTED_LAYER_QNAME
 
 
 class SparseRateDatasetError(ValueError):

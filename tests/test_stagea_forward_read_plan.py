@@ -129,10 +129,10 @@ def _published_pb():
         pytest.skip(f"published PrismaBuild not visible at {PUBLISHED_PB_SRC}")
     if str(PUBLISHED_PB_SRC) not in sys.path:
         sys.path.insert(0, str(PUBLISHED_PB_SRC))
-    import prismabuild.core as core
-    import prismabuild.storage_tiers as tiers
+    import prismabuild.data_manifest as data_manifest
+    import prismabuild.manifest_layout as manifest_layout
     import prismabuild.residency_plan as plans
-    for module in (core, tiers, plans):
+    for module in (data_manifest, manifest_layout, plans):
         if not Path(module.__file__).resolve().is_relative_to(
                 PUBLISHED_PB_SRC.resolve()):
             # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
@@ -141,7 +141,7 @@ def _published_pb():
                 f"a different prismabuild is already imported: {module} -- it shadows the "
                 "published generation under test; the interpreter carries a stale "
                 "prismabuild (PQ #1109)")
-    return core, tiers, plans
+    return data_manifest, manifest_layout, plans
 
 
 # -- the v2 table (fails on base: v1 shape, ascending order) --------------
@@ -149,7 +149,7 @@ def _published_pb():
 def test_single_ordered_helper_owns_all_phase_names():
     """One spelling of the consumption order, shared by builder, capture
     and (through the manifest) the dispatch lane."""
-    from prismaquant.joint_layer_quanta import (
+    from prismaquant.joint_quantum_row import (
         ADJOINT_TAIL_PHASE,
         adjoint_chain_phase_name,
         adjoint_forward_phase_name,
@@ -228,10 +228,10 @@ def test_generated_plan_is_interoperable_with_published_pb():
     the sealed residency ranges (a dropped phase is a phase the window
     never stages), and driving the phases in order keeps `accepted` true
     with `remaining` shrinking from the reported phase -- never a reset."""
-    core, tiers, plans = _published_pb()
+    data_manifest, manifest_layout, plans = _published_pb()
     manifest = _manifest()
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
+    normalized = data_manifest.validate_data_manifest(manifest)
+    ranges = manifest_layout.manifest_phase_ranges(normalized)
     plan_names = [entry["name"] for entry in ranges]
     read_names = [phase["name"] for phase in normalized["read_plan"]["phases"]]
     assert plan_names == read_names
@@ -257,7 +257,7 @@ def test_capture_timeline_advances_monotonically_with_exact_units():
     commit carries exactly the entries landed so far -- phases never
     fabricate units, entries never move the phase."""
     from prismaquant.joint_cost_stage_a import stage_a_forward_observer
-    from prismaquant.joint_layer_quanta import adjoint_chain_phase_name
+    from prismaquant.joint_quantum_row import (adjoint_chain_phase_name)
     order = _expected_order()
     recorder, progress = _reporter(order)
     observe = stage_a_forward_observer(progress)

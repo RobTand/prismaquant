@@ -1,0 +1,293 @@
+{
+ "schema": "prismaquant.compressed_route_sweep/1",
+ "load": {
+  "model_dir": "/model",
+  "quantization": "compressed-tensors",
+  "enforce_eager": true,
+  "speculative_config": false,
+  "gpu_memory_utilization": 0.1,
+  "max_model_len": 256,
+  "prompt": "The capital of France is",
+  "max_new_tokens": 4,
+  "hooks_attached": [
+   31
+  ]
+ },
+ "forward_observed": true,
+ "ranks": [
+  {
+   "schema": "prismaquant.compressed_route_sweep/1",
+   "rank": 0,
+   "world_size": 1,
+   "rank_source": "torch.distributed",
+   "model_class": "MixtralForCausalLM",
+   "packed_modules_mapping": {
+    "qkv_proj": [
+     "q_proj",
+     "k_proj",
+     "v_proj"
+    ]
+   },
+   "modules_walked": 31,
+   "modules": [
+    {
+     "name": "model.embed_tokens",
+     "module_class": "VocabParallelEmbedding",
+     "quant_method": "UnquantizedEmbeddingMethod",
+     "quant_method_module": "vllm.model_executor.layers.vocab_parallel_embedding",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {},
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 0
+    },
+    {
+     "name": "model.layers.0.self_attn.qkv_proj",
+     "module_class": "QKVParallelLinear",
+     "quant_method": "CompressedTensorsLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": "CompressedTensorsW8A8Fp8",
+     "scheme_module": "vllm.model_executor.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8",
+     "scheme_attrs": {
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "strategy": "'channel'",
+      "out_dtype": "torch.float16",
+      "input_dtype": "torch.float16",
+      "is_static_input_scheme": "False",
+      "weight_block_size": "None",
+      "activation_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "weight_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "fp8_linear": "<vllm.model_executor.kernels.linear.scaled_mm.cutlass.CutlassFP8ScaledMMLinearKe"
+     },
+     "method_attrs": {
+      "quantization_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.0.self_attn.o_proj",
+     "module_class": "RowParallelLinear",
+     "quant_method": "CompressedTensorsLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": "CompressedTensorsW8A8Fp8",
+     "scheme_module": "vllm.model_executor.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8",
+     "scheme_attrs": {
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "strategy": "'channel'",
+      "out_dtype": "torch.float16",
+      "input_dtype": "torch.float16",
+      "is_static_input_scheme": "False",
+      "weight_block_size": "None",
+      "activation_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "weight_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "fp8_linear": "<vllm.model_executor.kernels.linear.scaled_mm.cutlass.CutlassFP8ScaledMMLinearKe"
+     },
+     "method_attrs": {
+      "quantization_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.0.self_attn.attn",
+     "module_class": "Attention",
+     "quant_method": "CompressedTensorsKVCacheMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {
+      "quant_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.0.block_sparse_moe.gate",
+     "module_class": "ReplicatedLinear",
+     "quant_method": "UnquantizedLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.linear",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {},
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.0.block_sparse_moe.experts.routed_experts",
+     "module_class": "RoutedExperts",
+     "quant_method": "CompressedTensorsW8A8Fp8MoEMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {
+      "moe": "FusedMoEConfig(num_experts=8, experts_per_token=2, hidden_dim=1024, intermediate",
+      "moe_quant_config": "FusedMoEQuantConfig(_a1=FusedMoEQuantDesc(dtype=torch.float8_e4m3fn, shape=Group",
+      "moe_kernel": "<vllm.model_executor.layers.fused_moe.modular_kernel.FusedMoEKernel object at 0x",
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "input_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "weight_block_size": "None",
+      "block_quant": "False",
+      "static_input_scales": "False",
+      "fp8_backend": "<Fp8MoeBackend.TRITON: 'TRITON'>",
+      "experts_cls": "<class 'vllm.model_executor.layers.fused_moe.experts.triton_moe.TritonExperts'>"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 0,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.1.self_attn.qkv_proj",
+     "module_class": "QKVParallelLinear",
+     "quant_method": "CompressedTensorsLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": "CompressedTensorsW8A8Fp8",
+     "scheme_module": "vllm.model_executor.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8",
+     "scheme_attrs": {
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "strategy": "'channel'",
+      "out_dtype": "torch.float16",
+      "input_dtype": "torch.float16",
+      "is_static_input_scheme": "False",
+      "weight_block_size": "None",
+      "activation_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "weight_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "fp8_linear": "<vllm.model_executor.kernels.linear.scaled_mm.cutlass.CutlassFP8ScaledMMLinearKe"
+     },
+     "method_attrs": {
+      "quantization_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.1.self_attn.o_proj",
+     "module_class": "RowParallelLinear",
+     "quant_method": "CompressedTensorsLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": "CompressedTensorsW8A8Fp8",
+     "scheme_module": "vllm.model_executor.layers.quantization.compressed_tensors.schemes.compressed_tensors_w8a8_fp8",
+     "scheme_attrs": {
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "strategy": "'channel'",
+      "out_dtype": "torch.float16",
+      "input_dtype": "torch.float16",
+      "is_static_input_scheme": "False",
+      "weight_block_size": "None",
+      "activation_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "weight_quant_key": "QuantKey(dtype=torch.float8_e4m3fn, scale=ScaleDesc(dtype=torch.float32, static=",
+      "fp8_linear": "<vllm.model_executor.kernels.linear.scaled_mm.cutlass.CutlassFP8ScaledMMLinearKe"
+     },
+     "method_attrs": {
+      "quantization_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.1.self_attn.attn",
+     "module_class": "Attention",
+     "quant_method": "CompressedTensorsKVCacheMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {
+      "quant_config": "<vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors.C"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.1.block_sparse_moe.gate",
+     "module_class": "ReplicatedLinear",
+     "quant_method": "UnquantizedLinearMethod",
+     "quant_method_module": "vllm.model_executor.layers.linear",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {},
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 4,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "model.layers.1.block_sparse_moe.experts.routed_experts",
+     "module_class": "RoutedExperts",
+     "quant_method": "CompressedTensorsW8A8Fp8MoEMethod",
+     "quant_method_module": "vllm.model_executor.layers.quantization.compressed_tensors.compressed_tensors_moe.compressed_tensors_moe_w8a8_fp8",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {
+      "moe": "FusedMoEConfig(num_experts=8, experts_per_token=2, hidden_dim=1024, intermediate",
+      "moe_quant_config": "FusedMoEQuantConfig(_a1=FusedMoEQuantDesc(dtype=torch.float8_e4m3fn, shape=Group",
+      "moe_kernel": "<vllm.model_executor.layers.fused_moe.modular_kernel.FusedMoEKernel object at 0x",
+      "weight_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "input_quant": "QuantizationArgs(num_bits=8, type='float', symmetric=True, group_size=None, stra",
+      "weight_block_size": "None",
+      "block_quant": "False",
+      "static_input_scales": "False",
+      "fp8_backend": "<Fp8MoeBackend.TRITON: 'TRITON'>",
+      "experts_cls": "<class 'vllm.model_executor.layers.fused_moe.experts.triton_moe.TritonExperts'>"
+     },
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 0,
+     "parent_dispatches": 4
+    },
+    {
+     "name": "lm_head",
+     "module_class": "ParallelLMHead",
+     "quant_method": "UnquantizedEmbeddingMethod",
+     "quant_method_module": "vllm.model_executor.layers.vocab_parallel_embedding",
+     "quantize_method_base": true,
+     "scheme": null,
+     "scheme_module": null,
+     "scheme_attrs": {},
+     "method_attrs": {},
+     "kernel": null,
+     "kernel_module": null,
+     "dispatches": 0,
+     "parent_dispatches": 4
+    }
+   ],
+   "torch_version": "2.13.0+cu130",
+   "vllm_version": "0.28.0",
+   "device": "NVIDIA GB10 sm_121"
+  }
+ ]
+}

@@ -1,7 +1,7 @@
 """Declared immutable pins for the fleet acceptance harness (PQ #859).
 
-The PB candidate is resolved from a declared pinned checkout's git
-objects -- no branch fetch, no remotes, no mutable paths:
+The PB candidate is resolved from a declared pinned checkout's Git objects,
+with an exact-commit network fetch when that object store is unavailable:
 
 - ``PB_PINNED_CHECKOUT``: the checkout whose object store carries the
   pinned commit (retired detached, read-only; never edited here).
@@ -12,12 +12,12 @@ Resolution verifies the WHOLE extracted tree against the revision
 (archive digest recorded, file list equal to ``ls-tree``, every reused
 byte under ``src/prismabuild`` + ``tools/fleet`` hash-checked), and the
 run records the exact executed PB snapshot (rev + tree digest) and PQ
-snapshot (worktree HEAD, required clean). A missing checkout, a missing
-commit, or a verification mismatch is :class:`NonQualified` machine
+snapshot (worktree HEAD, required clean). An unavailable pinned commit or
+a verification mismatch is :class:`NonQualified` machine
 output -- never a green row, never a silent substitution.
 
-``git`` is invoked with ``--git-dir`` against the pinned checkout only;
-no fetch, no checkout mutation, no remote required.
+The fallback fetches the declared SHA into a separate bare mirror. It does
+not change the pinned checkout or substitute a mutable branch tip.
 """
 
 from __future__ import annotations

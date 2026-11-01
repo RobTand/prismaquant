@@ -19,7 +19,7 @@ loader's own enumeration:
   read no phase stages; it is reported as its own gap.
 
 The install order and the prefetch schedule are the runtime's own:
-``joint_layer_quanta.quantum_source_layer_order`` and
+``joint_quantum_row.quantum_source_layer_order`` and
 ``source_read_plan.chain_prefetch_window`` for a Stage B quantum. The
 Stage A chain in ``joint_cost_stage_a`` schedules with the same two
 windows (PQ #1100); :func:`stage_a_prefetch_targets` states that schedule
@@ -54,7 +54,7 @@ import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 
-from .joint_layer_quanta import (
+from prismaquant.joint_quantum_row import (
     executable_own_source_phase_name,
     executable_source_phase_name,
     quantum_source_layer_order,

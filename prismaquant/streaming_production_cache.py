@@ -22,6 +22,7 @@ offline from that snapshot + the resident gate weight, exactly as the resident
 packed render does.
 """
 from __future__ import annotations
+from .native_render_levers import NativeRenderLevers
 
 import os
 from collections import defaultdict
@@ -52,15 +53,17 @@ from prismaquant.production_weight_cache import (
     _render_base_format,
     _render_score_record,
     _render_score_record_key,
+    _qualify_stored_candidate_render_score,
     _resolve_production_render_levers,
     _resolve_render_mechanism_plan,
     _store_rendered_weight_entry,
     _production_cache_git_commit,
     _production_cache_source_sha256,
+    claim_streamed_cache_directory,
     fill_packed_expert_cache_entries,
     render_production_weight,
-    require_injective_cache_filenames,
 )
+from prismaquant.render_cache_paths import require_injective_cache_filenames
 from prismaquant.streaming_model import _build_streaming_context
 
 
@@ -138,7 +141,8 @@ def _render_dense_layer(
     joint fused-sibling NVFP4 globals (siblings are resident in the same layer),
     fused-group-unified calibrated max_abs, then
     ``render_production_weight`` per (qname, fmt) stored via the shared
-    ``_store_rendered_weight_entry``.
+    ``_store_rendered_weight_entry``, each stored fused NVFP4 entry witnessing
+    its joint global, and the shard it was published as, on ``cache``.
     """
     from prismaquant.decision_units import fused_group_key
     from prismaquant.export_native_compressed import _compute_nvfp4_joint_global
@@ -146,10 +150,11 @@ def _render_dense_layer(
         _render_levers_input_global_scale_policy,
     )
 
-    # The A-side scale policy this stream was resolved under, from the same
-    # levers the resident fill stamps it in (#227): the streamed and resident
-    # renders must price identically, so neither may re-read the environment
-    # per layer.
+    # The recorded recipe and the A-side scale policy this stream was resolved
+    # under, from the same levers the resident fill stamps (#227): the streamed
+    # and resident renders must price identically, so neither may re-read the
+    # environment per layer.
+    render_options = NativeRenderLevers.from_record(levers)
     stream_score_policy = _render_levers_input_global_scale_policy(levers)
     if not retain_rendered and consume_render is None:
         raise ValueError(
@@ -181,13 +186,16 @@ def _render_dense_layer(
 
     # Joint fused-sibling NVFP4 global (max across q/k/v or gate/up). Restricted
     # to this layer's non-BF16 dense qnames; siblings are co-resident. The
-    # synthetic all-NVFP4 assignment matches the resident derivation.
+    # synthetic all-NVFP4 assignment and the recorded recipe match the resident
+    # derivation and the export pre-pass, which re-derives the shipped codes
+    # under this same global.
     joint_globals: dict[str, torch.Tensor] = {}
     if needs_nvfp4:
         joint_globals = _compute_nvfp4_joint_global(
             model,
             {q: "NVFP4" for q in joint_scope},
             profile=profile,
+            levers=render_options,
         )
 
     # Per-Linear calibrated max_abs, unified (max) across fused sibling groups
@@ -258,11 +266,11 @@ def _render_dense_layer(
         # the exporter (the igs convention is a ±14-37% served-KL knob).
         export_scale = None
         if max_abs is not None and max_abs > 0:
-            from prismaquant.export_native_compressed import (
-                _nvfp4_input_global_scale_from_max_abs,
+            from prismaquant.native_render_codec import (
+                nvfp4_input_global_scale_from_max_abs,
             )
-            export_scale = _nvfp4_input_global_scale_from_max_abs(
-                float(max_abs), policy=stream_score_policy)
+            export_scale = nvfp4_input_global_scale_from_max_abs(
+                float(max_abs), policy=stream_score_policy, levers=render_options)
         row_weights = (
             fisher_rows.get(qname)
             if (fisher_rows is not None
@@ -285,6 +293,8 @@ def _render_dense_layer(
                 ),
                 gate_trace=gate_trace,
             )
+            w_dq = _canonical_rendered_weight_tensor(
+                w_dq, weight_dtype=weight.dtype, device=device)
             score_key = _render_score_record_key(qname, fmt)
             render_score = _render_score_record(
                 qname=qname,
@@ -295,7 +305,10 @@ def _render_dense_layer(
                 activations=X,
                 activation_max_abs=max_abs,
                 input_global_scale_policy=stream_score_policy,
+                levers=render_options,
             )
+            render_score = _qualify_stored_candidate_render_score(
+                render_score, scored_dtype=w_dq.dtype)
             render_score_records[score_key] = render_score
             if not retain_rendered:
                 canonical_render = _canonical_rendered_weight_tensor(
@@ -316,7 +329,7 @@ def _render_dense_layer(
                         f"{qname}@{fmt}, got {type(result).__name__}"
                     )
             else:
-                _store_rendered_weight_entry(
+                shard = _store_rendered_weight_entry(
                     weights=cache.weights,
                     cache_dir_path=cache_dir_path,
                     qname=qname,
@@ -324,6 +337,8 @@ def _render_dense_layer(
                     tensor=w_dq,
                     weight_dtype=weight.dtype,
                 )
+                if joint is not None and render_fmt == "NVFP4":
+                    cache.witness_nvfp4_joint_global(qname, fmt, joint, shard)
             rendered += 1
             del w_dq
         del X
@@ -337,6 +352,50 @@ def _render_dense_layer(
 PRODUCTION_ANCHOR_RENDERER_IDENTITY_SCHEMA = (
     "prismaquant.streaming_production_anchor_renderer.identity.v1"
 )
+
+
+def validate_completed_production_anchor_identity(value, *, where):
+    """Parse the renderer's complete sparse source contract without a model."""
+    from .cost_stage_checkpoint import canonical_json
+    from .digests import is_sha256hex
+    from .streamed_model_identity import validate_streamed_model_identity
+
+    if (not isinstance(value, Mapping)
+            or value.get("schema") != PRODUCTION_ANCHOR_RENDERER_IDENTITY_SCHEMA
+            or value.get("source_weight_binding") != "complete_streamed_model_content_identity"):
+        raise ValueError(f"{where}: missing production-anchor source identity")
+    validate_streamed_model_identity(value.get("source_model"), where=where)
+    plan = value.get("formats_by_qname")
+    if (not isinstance(plan, Mapping) or not plan
+            or any(not isinstance(name, str) or not name
+                   or not isinstance(formats, list) or not formats
+                   or any(not isinstance(fmt, str) or not fmt for fmt in formats)
+                   or len(set(formats)) != len(formats)
+                   for name, formats in plan.items())
+            or type(value.get("requested_entries")) is not int
+            or value["requested_entries"] != sum(len(formats) for formats in plan.values())):
+        raise ValueError(f"{where}: invalid production-anchor plan")
+    if any(_canon_fmt(fmt) != fmt or fmt in _ANCHOR_PASSTHROUGH_FORMATS
+           for formats in plan.values() for fmt in formats):
+        raise ValueError(f"{where}: invalid production-anchor format")
+    source = value.get("source_weights")
+    records = source.get("records") if isinstance(source, Mapping) else None
+    if (not isinstance(source, Mapping) or source.get("complete") is not True
+            or source.get("scope") != "sparse_anchor_plan"
+            or not isinstance(records, Mapping) or set(records) != set(plan)):
+        raise ValueError(f"{where}: incomplete production-anchor source roster")
+    for name, row in records.items():
+        if (not isinstance(row, Mapping) or set(row) != {"shape", "sha256"}
+                or not isinstance(row["shape"], list) or len(row["shape"]) != 2
+                or any(type(dim) is not int or dim <= 0 for dim in row["shape"])
+                or not is_sha256hex(row["sha256"])):
+            raise ValueError(f"{where}: invalid production-anchor source weight {name}")
+    if source.get("identity_sha256") != _canonical_json_sha256(
+            records, where="production anchor source-weight identity"):
+        raise ValueError(f"{where}: production-anchor source digest differs")
+    return canonical_json(value, where=where)
+
+
 _ANCHOR_PASSTHROUGH_FORMATS = frozenset({
     "BF16",
     "FP8_SOURCE",
@@ -386,7 +445,7 @@ class StreamedProductionAnchorRenderer:
         transient_consumer_identity: Mapping[str, object] | None = None,
     ) -> None:
         from prismaquant.cost_stage_checkpoint import canonical_json
-        from prismaquant.cost_streaming import validate_streamed_model_identity
+        from prismaquant.streamed_model_identity import validate_streamed_model_identity
         from prismaquant.routed_experts import (
             profile_declared_routed_expert_targets,
             resolve_routed_expert_profile,
@@ -852,8 +911,6 @@ class StreamedProductionAnchorRenderer:
         source-complete *sparse anchor* identity; it never claims that
         unrendered cells were materialized.
         """
-        from prismaquant.cost_stage_checkpoint import canonical_json
-
         if set(records) != set(self.formats_by_qname):
             raise RuntimeError(
                 "production anchor completed source identity scope differs "
@@ -889,7 +946,7 @@ class StreamedProductionAnchorRenderer:
                 where="production anchor source-weight identity",
             ),
         }
-        self.identity = canonical_json(
+        self.identity = validate_completed_production_anchor_identity(
             completed,
             where="completed production anchor renderer identity",
         )
@@ -911,6 +968,7 @@ def _render_packed_layer(
     render_mode: str,
     col_weights: Mapping[str, torch.Tensor] | None,
     progress: bool,
+    include_qnames: Sequence[str] | None = None,
 ) -> dict:
     """Render this layer's packed experts via the shared packed-expert path,
     feeding each experts-module's input snapshot from the probe act cache."""
@@ -924,6 +982,7 @@ def _render_packed_layer(
     return fill_packed_expert_cache_entries(
         cache, model, None,
         render_assignment=render_assignment,
+        include_qnames=include_qnames,
         levers=levers,
         profile=profile,
         module_token_budget=module_token_budget,
@@ -941,7 +1000,9 @@ def _experts_qnames_by_layer(
 ) -> dict[int | None, list[str]]:
     """Group packed-experts module names by decoder-layer index (structure
     only — safe while layers are on meta)."""
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     out: dict[int | None, list[str]] = defaultdict(list)
     for name, mod in model.named_modules():
@@ -1055,6 +1116,18 @@ def run_streaming_render(
         ),
         where="streaming production cache",
     )
+    if cache_dir_path is not None:
+        # #146: this fill never resumes and overwrites every shard in its
+        # scope, so it renders only into a directory no rendering claimed.
+        claim_streamed_cache_directory(
+            cache_dir_path,
+            render_scope=render_scope,
+            requested_formats=requested_formats,
+            levers=levers,
+            calib_hash=calibration_hash,
+            render_formats_by_qname=render_formats_by_qname,
+            max_act_rows=max_act_rows,
+        )
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)
     for qname, mod in dense_modules.items():
         per_layer_dense[_layer_index_of(qname, layers_prefix)][qname] = mod
@@ -1108,6 +1181,7 @@ def run_streaming_render(
                     render_mode=expert_render_mode,
                     col_weights=col_weights,
                     progress=progress,
+                    include_qnames=include_qnames,
                 )
                 coverage.update(cov)
         finally:
@@ -1223,6 +1297,15 @@ def fill_production_weight_cache_streaming(
     device = torch.device(device)
     cache_dir_path = Path(cache_dir)
     cache_dir_path.mkdir(parents=True, exist_ok=True)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+    )
+
+    model_path = str(resolve_source_checkpoint_path(model_path))
+    source_binding = build_source_model_binding(
+        model_path, dtype=dtype,
+        digest_cache_path=cache_dir_path / "source_identity_cache.json",
+    )
     if offload_folder is None:
         offload_folder = cache_dir_path / "streaming_offload"
 
@@ -1286,4 +1369,5 @@ def fill_production_weight_cache_streaming(
         )
     finally:
         ctx.shutdown()
+    cache.metadata["source_binding"] = source_binding
     return cache

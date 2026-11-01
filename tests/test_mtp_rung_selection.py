@@ -80,6 +80,72 @@ def test_fit_missing_E_is_hard_error():
         fit_acceptance([AcceptancePoint(0.8, rung_name="ghost")], {"real": 0.01})
 
 
+@pytest.mark.parametrize("include_name", [False, True])
+def test_selector_resolves_bits_acceptance_like_named_acceptance(include_name):
+    menu = _ideal_menu([2, 3, 4, 5])
+    constants = ServeConstants(t_ms=1.0, d0_ms=0.0, c_ms_per_bit=0.1)
+    named = [AcceptancePoint(0.6, rung_name="b2"),
+             AcceptancePoint(0.9, rung_name="b5")]
+    numeric = [
+        AcceptancePoint(0.6, bits=2.0, rung_name="b2" if include_name else None),
+        AcceptancePoint(0.9, bits=5.0, rung_name="b5" if include_name else None),
+    ]
+    expected = select_rung(menu, constants, named, _BIG)
+    actual = select_rung(menu, constants, numeric, _BIG)
+
+    assert actual.rung == expected.rung
+    assert actual.regime == expected.regime
+    assert actual.per_rung_T == expected.per_rung_T
+    for field in ("a_inf", "beta", "fit_mode"):
+        assert actual.provenance["fit"][field] == expected.provenance["fit"][field]
+    assert [point["E"] for point in actual.provenance["fit"]["points"]] == [
+        menu[0].E, menu[-1].E,
+    ]
+    assert [point["rung"] for point in actual.provenance["fit"]["points"]] == [
+        "b2", "b5",
+    ]
+    assert [point["bits"] for point in actual.provenance["fit"]["points"]] == [
+        2.0, 5.0,
+    ]
+
+
+@pytest.mark.parametrize("include_name", [False, True])
+def test_selector_refuses_ambiguous_bits_acceptance(include_name):
+    menu = [RungPoint("first", 4.0, 1_000_000, 0.04),
+            RungPoint("second", 4.0, 1_000_000, 0.01)]
+    constants = ServeConstants(t_ms=1.0, d0_ms=0.0, c_ms_per_bit=0.1)
+    point = AcceptancePoint(
+        0.8, bits=4.0, rung_name="second" if include_name else None)
+
+    with pytest.raises(ValueError, match="ambiguous acceptance bits"):
+        select_rung(menu, constants, [point], _BIG)
+
+    named = select_rung(
+        menu, constants, [AcceptancePoint(0.8, rung_name="second")], _BIG)
+    assert named.provenance["fit"]["points"][0]["E"] == 0.01
+    assert named.rung.name == "second"
+
+
+def test_selector_refuses_bits_absent_from_menu():
+    constants = ServeConstants(t_ms=1.0, d0_ms=0.0, c_ms_per_bit=0.1)
+    with pytest.raises(KeyError, match="no rung has bits"):
+        select_rung(_ideal_menu([2, 3]), constants,
+                    [AcceptancePoint(0.8, bits=4.0)], _BIG)
+
+
+def test_selector_uses_numeric_calibration_from_memory_excluded_rung():
+    menu = _ideal_menu([2, 5], bytes_by_bits={2: 100, 5: 200})
+    constants = ServeConstants(t_ms=1.0, d0_ms=0.0, c_ms_per_bit=0.1)
+    named = select_rung(
+        menu, constants, [AcceptancePoint(0.9, rung_name="b5")], 100)
+    numeric = select_rung(
+        menu, constants, [AcceptancePoint(0.9, bits=5.0)], 100)
+
+    assert numeric.rung == named.rung == menu[0]
+    assert numeric.per_rung_T == named.per_rung_T
+    assert numeric.provenance["fit"]["points"][0]["E"] == menu[1].E
+
+
 # --------------------------------------------------------------------------- #
 # Interior argmax matches an independent brute force
 # --------------------------------------------------------------------------- #

@@ -3,7 +3,8 @@
 Each pair below computed one quantity with two copies of one recipe. Each site
 now binds its owner. The outcomes of the pre-move code on every input here are
 frozen in ``fixtures/numerics_pairs_1394.json`` (``tests/golden_table.py``),
-and every call goes through the old site's name.
+and every call goes through its active consumer. Historical case ids retain
+the old site's name.
 
 A tensor outcome is its dtype, shape, device type and the SHA-256 of its raw
 bytes, so "the same" means bit-identical, not close. Sites that run on the GPU
@@ -113,7 +114,8 @@ def test_log_error_values_keep_their_floats(site):
 # 2. The MX E8M0 scale's power-of-two rounding.
 # ---------------------------------------------------------------------------
 MX_SITES = [
-    "prismaquant.export_native_compressed._mx_rounded_amax_power2",
+    pytest.param("prismaquant.native_render_codec._mx_rounded_amax_power2",
+                 id="prismaquant.export_native_compressed._mx_rounded_amax_power2"),
     "prismaquant.format_registry._mx_rounded_amax_power2",
 ]
 

@@ -13,7 +13,7 @@ import torch
 from experiments.indomain_split_stats import (
     FIT, HELDOUT, DisjointRowMoments,
 )
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 from test_tessera_campaign_packed import (
     EXPERT_PREFIX, _RoutedModel, _routed_tokens,
 )
@@ -50,7 +50,7 @@ def _one_sample_capture(moments, tokens_batches, *, max_rows=0,
         model(batch)
 
     try:
-        result = _collect_activations(
+        result = capture_activation_statistics(
             model, [DENSE, *packed_targets()], tokens_batches, max_rows, "cpu",
             want_hessian=want_hessian, shared_packed_inputs=shared,
             forward_batch=forward_batch, row_consumer=moments)
@@ -318,9 +318,9 @@ def test_resource_check_gates_allocations_and_transfers():
 def test_off_mode_is_bit_identical():
     tokens = _routed_tokens()
     targets = [DENSE, *packed_targets()]
-    baseline = _collect_activations(_RoutedModel(), targets, tokens, 3, "cpu",
+    baseline = capture_activation_statistics(_RoutedModel(), targets, tokens, 3, "cpu",
                                     want_hessian=True)
-    with_callback = _collect_activations(
+    with_callback = capture_activation_statistics(
         _RoutedModel(), targets, tokens, 3, "cpu", want_hessian=True,
         row_consumer=lambda names, rows: None)
     assert baseline[2:] == with_callback[2:]
@@ -347,7 +347,7 @@ def test_consumer_owns_its_bytes_despite_reused_mutable_source_buffer():
         batch.fill_(-999)  # the caller reuses/mutates the source buffer
 
     try:
-        _collect_activations(model, [DENSE, *packed_targets()], source, 0, "cpu",
+        capture_activation_statistics(model, [DENSE, *packed_targets()], source, 0, "cpu",
                              forward_batch=forward_batch, row_consumer=moments)
     except BaseException:
         moments.close()

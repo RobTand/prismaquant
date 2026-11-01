@@ -248,26 +248,25 @@ class RoutingFactor:
 # Routing factor
 # ---------------------------------------------------------------------------
 
-def _config_scopes(config: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
-    """The config dicts a routing declaration may legitimately live in."""
-    scopes: list[Mapping[str, Any]] = [config]
+def _config_scopes(config: Mapping[str, Any]) -> tuple[tuple[str, Mapping[str, Any]], ...]:
+    """The ordered config paths and mappings that may carry declarations."""
+    scopes: list[tuple[str, Mapping[str, Any]]] = [("config", config)]
     for key in ("text_config", "language_model_config"):
         inner = config.get(key)
         if isinstance(inner, Mapping):
-            scopes.append(inner)
+            scopes.append((f"config.{key}", inner))
     return tuple(scopes)
 
 
 def _first_positive_int(
-    scopes: Iterable[Mapping[str, Any]], keys: Iterable[str],
+    scopes: Iterable[tuple[str, Mapping[str, Any]]], keys: Iterable[str],
 ) -> tuple[int, str] | None:
-    for scope_idx, scope in enumerate(scopes):
+    for label, scope in scopes:
         for key in keys:
             value = scope.get(key)
             if isinstance(value, bool) or not isinstance(value, int):
                 continue
             if value > 0:
-                label = "config" if scope_idx == 0 else "config.text_config"
                 return int(value), f"{label}.{key}"
     return None
 
@@ -575,7 +574,7 @@ def _matches_declared(base: str, declared: str) -> bool:
 
 
 def _declared_tie(config: Mapping[str, Any]) -> bool | None:
-    for scope in _config_scopes(config or {}):
+    for _label, scope in _config_scopes(config or {}):
         for key in _TIE_KEYS:
             value = scope.get(key)
             if isinstance(value, bool):
@@ -1165,7 +1164,7 @@ def _apply_probabilities(
 
 
 def _source_passthrough_formats() -> frozenset[str]:
-    from prismaquant.allocator_candidates import SOURCE_PASSTHROUGH_FORMATS
+    from prismaquant.source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
     return frozenset(SOURCE_PASSTHROUGH_FORMATS)
 
 

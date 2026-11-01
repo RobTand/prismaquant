@@ -228,7 +228,7 @@ def joint_acquisition_from_cost_data(cost_data, unit_shapes, families, *,
     """
     from .cost_currency import require_run_currency, CostCurrencyError
     from .cost_stage_checkpoint import canonical_json_sha256
-    from .joint_aura import JOINT_CURRENCY, identity_sha256
+    from prismaquant.joint_aura_rows import JOINT_CURRENCY, joint_identity_sha256
     from .tessera_allocator import build_tessera_allocator_candidate
     from .tessera_formats import parse_tessera_format_name, get_tessera_family
 
@@ -243,14 +243,14 @@ def joint_acquisition_from_cost_data(cost_data, unit_shapes, families, *,
     provenance = cost_data["provenance"]
     run = provenance.get("joint_aura_identity")
     if (not isinstance(run, dict) or run.get("schema") != "prismaquant.joint_aura.run.v2"
-            or identity_sha256(run) != provenance.get("joint_aura_identity_sha256")):
+            or joint_identity_sha256(run) != provenance.get("joint_aura_identity_sha256")):
         raise ValueError("joint acquisition requires the bound v2 joint run identity")
     if run.get("probe_identity") != provenance.get("probe_identity"):
         raise ValueError("joint acquisition run/provenance probe identity differs")
     for field in ("cached_rendered_weights", "activation_contracts"):
         if not isinstance(run.get(field), dict):
             raise ValueError(f"joint acquisition requires bound run {field}")
-    probe_digest = identity_sha256(run["probe_identity"])
+    probe_digest = joint_identity_sha256(run["probe_identity"])
     reports = []
     for unit, shape in sorted(unit_shapes.items()):
         shape = tuple(shape)
@@ -337,7 +337,7 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
     from .cost_stage_checkpoint import canonical_json_sha256
     from .tessera_acquisition_inputs import (
         read_joint_campaign_acquisition_document, joint_campaign_acquisition_control_sha256)
-    from .joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from .stage_inputs import read_bound, require
     from .tessera_formats import get_tessera_family
     from .tessera_legal_domain import live_pins as current_domain_pins, tessera_source_state
@@ -409,7 +409,7 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
         same(document.get(field), actual[field], field)
     expected_reports = {(r["unit_name"], r["family"]): r for r in actual["reports"]}
     provenance = cost_data["provenance"]
-    probe_digest = identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
+    probe_digest = joint_identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
     same(provenance.get("probe_identity_sha256"), probe_digest, "run probe digest")
     # Currency permits a development seal override; this intake does not.
     for rows in cost_data["costs"].values():

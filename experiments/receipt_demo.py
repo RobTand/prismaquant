@@ -29,8 +29,6 @@ def main() -> int:
     from prismabuild import pool
 
     root = Path(args.root)
-    if root.exists():
-        subprocess.run(["rm", "-rf", str(root)], check=True)
     root.mkdir(parents=True)
     queue = pool.PoolQueue(root / "pb-queue")
     queue.ensure_layout()

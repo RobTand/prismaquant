@@ -28,6 +28,8 @@ def dump(path,value):
 
 
 def prepare(spec,out,local_root,device_bytes):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     from prismaquant.memory_management import enforce_device_envelope
     envelope=enforce_device_envelope("cuda",device_bytes,where="native GLM reference preparation")

@@ -14,7 +14,7 @@ def resolve_forward_campaign(document, *, plan_sha256, prepared_sha256,
                              calibration_shape):
     from .cost_stage_checkpoint import canonical_json_sha256
     from .digests import bytes_sha256hex, text_sha256hex
-    from .joint_layer_quanta import check_quantum_for_campaign, roster_digest
+    from .joint_campaign_ledger import (require_quantum_campaign, roster_digest)
     from .stage_inputs import bound as _bound
 
     bound = document['source_campaign_record']
@@ -26,7 +26,7 @@ def resolve_forward_campaign(document, *, plan_sha256, prepared_sha256,
     campaign = record['campaign']
     # Existing consumer validates the record's own canonical identity, schema,
     # exact campaign digests, scope and checkpoint binding.
-    check_quantum_for_campaign(record, campaign)
+    require_quantum_campaign(record, campaign)
     for field, expected in (('plan_sha256', plan_sha256),
                             ('prepared_sha256', prepared_sha256),
                             ('read_manifest_sha256', read_manifest_sha256)):

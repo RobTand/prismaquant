@@ -11,7 +11,7 @@ from pathlib import Path
 
 from experiments import measure_glm_tr3_vllm as served
 from test_glm_tr3_dual_teacher import BASE_ARGS
-from prismaquant import release_receipts, shipcard, shipcard_cli
+from prismaquant import release_receipts, shipcard, shipcard_cli, shipcard_slots
 from tools.gold_measurement_fidelity import tr3_kl_fidelity
 from test_release_receipts import _inputs
 from test_glm_tr3_full_vocab import fake_measure, _FakeLLM
@@ -111,7 +111,7 @@ def test_uniform_control_cli_preserves_the_producer_gold_record(tmp_path, monkey
 
     def construct(**kwargs):
         captured.update(copy.deepcopy(kwargs))
-        return shipcard.make_record(slot="uniform_control", tool="fixture", passed=False,
+        return shipcard_slots.make_record(slot="uniform_control", tool="fixture", passed=False,
                                     model_sha=shipcard.compute_model_sha(model))
 
     monkeypatch.setattr(shipcard_cli, "make_uniform_control_record", construct)

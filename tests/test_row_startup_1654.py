@@ -25,6 +25,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant import tessera_cell_measurement as cell_measurement
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 
 from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, OUTPUT_FEATURES,
@@ -431,16 +433,14 @@ def test_the_reader_reserves_a_placeholders_source_bytes(monkeypatch, tmp_path):
 
 
 def test_placeholders_batch_as_the_host_weights_they_stand_for():
-    from prismaquant import tessera_campaign as campaign
-
     pending = [(name, "TESSERA_E4M3_K1", rung) for name in UNITS for rung in (1024, 2048)]
     host = {name: REAL[name] for name in UNITS}
     meta = _placeholders(set(UNITS))
     mixed = _placeholders({UNITS[1]})
     for batch_size in (1, 2, 4):
-        expected = campaign._anchor_batches(pending, weights=host, batch_size=batch_size)
-        assert campaign._anchor_batches(pending, weights=meta, batch_size=batch_size) == expected
-        assert campaign._anchor_batches(pending, weights=mixed, batch_size=batch_size) == expected
+        expected = cell_measurement.compatible_batches(pending, weights=host, batch_size=batch_size)
+        assert cell_measurement.compatible_batches(pending, weights=meta, batch_size=batch_size) == expected
+        assert cell_measurement.compatible_batches(pending, weights=mixed, batch_size=batch_size) == expected
 
 
 def test_the_preflight_lstats_on_the_io_engine_and_fails_in_name_order(monkeypatch, tmp_path):

@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
-from prismaquant.tessera_joint_aura import STAGE
+from prismaquant.tessera_campaign_table import STAGE
 from tessera.cached_unit import verify_cached_unit
 
 

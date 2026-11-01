@@ -1,5 +1,6 @@
 """A campaign merge must preserve the journal's existing trust boundary."""
 from __future__ import annotations
+from prismaquant import tessera_campaign_table as campaign_table
 
 import json
 import pickle
@@ -60,7 +61,7 @@ def test_merge_checkpoint_unions_a_dense_row_and_a_routed_row(tmp_path):
 
     rows = {"row-0000": str(_restricted_row(tmp_path, "row-0000", "a", "dense")),
             "row-0001": str(_restricted_row(tmp_path, "row-0001", "b", "routed_moe"))}
-    merged = dispatch.merge_checkpoint(rows, tmp_path / "merged" / "cost.anchors.json")
+    merged = campaign_table.merge_checkpoint(rows, tmp_path / "merged" / "cost.anchors.json")
     assert merged["identity"]["family_restriction"] == {
         "policy": POLICY, "structure_by_unit": {"a": "dense", "b": "routed_moe"}}
     assert sorted(merged["identity"]["units"]) == ["a", "b"]
@@ -78,7 +79,7 @@ def test_merge_checkpoint_refuses_a_conflicting_restricted_structure(tmp_path):
     value["identity"]["family_restriction"]["structure_by_unit"]["a"] = "routed_moe"
     manifest.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="a"):
-        dispatch.merge_checkpoint({"row-0000": str(first), "row-0001": str(second)},
+        campaign_table.merge_checkpoint({"row-0000": str(first), "row-0001": str(second)},
                                   tmp_path / "merged.json")
 
 
@@ -90,7 +91,7 @@ def test_merge_checkpoint_refuses_a_restricted_row_beside_an_unrestricted_one(tm
             "row-0001": str(_restricted_row(tmp_path, "row-0001", "b", None,
                                             policy=None))}
     with pytest.raises(RuntimeError, match="restrict"):
-        dispatch.merge_checkpoint(rows, tmp_path / "merged.json")
+        campaign_table.merge_checkpoint(rows, tmp_path / "merged.json")
 
 
 def test_merge_checkpoint_refuses_two_policies(tmp_path):
@@ -102,7 +103,7 @@ def test_merge_checkpoint_refuses_two_policies(tmp_path):
             "row-0001": str(_restricted_row(tmp_path, "row-0001", "b", "routed_moe",
                                             policy=other))}
     with pytest.raises(RuntimeError, match="policy"):
-        dispatch.merge_checkpoint(rows, tmp_path / "merged.json")
+        campaign_table.merge_checkpoint(rows, tmp_path / "merged.json")
 
 
 @pytest.mark.parametrize("field,value", [
@@ -121,7 +122,7 @@ def test_merge_refuses_a_shard_the_journal_itself_refuses(tmp_path, field, value
     shard.write_bytes(pickle.dumps(envelope))
     out = tmp_path / "merged" / "cost.anchors.json"
     with pytest.raises(RuntimeError, match=field):
-        dispatch.merge_checkpoint({"row-0000": str(row)}, out)
+        campaign_table.merge_checkpoint({"row-0000": str(row)}, out)
     assert not out.exists()
 
 
@@ -133,7 +134,7 @@ def test_merge_refuses_a_manifest_with_a_wrong_identity_digest(tmp_path):
     value["identity_sha256"] = "0" * 64
     manifest.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="identity_sha256"):
-        dispatch.merge_checkpoint({"row-0000": str(row)}, tmp_path / "merged.json")
+        campaign_table.merge_checkpoint({"row-0000": str(row)}, tmp_path / "merged.json")
 
 
 def test_merge_refuses_a_manifest_that_drops_an_identity_unit(tmp_path):
@@ -144,7 +145,7 @@ def test_merge_refuses_a_manifest_that_drops_an_identity_unit(tmp_path):
     value["units"] = []
     manifest.write_text(json.dumps(value))
     with pytest.raises(RuntimeError, match="units"):
-        dispatch.merge_checkpoint({"row-0000": str(row)}, tmp_path / "merged.json")
+        campaign_table.merge_checkpoint({"row-0000": str(row)}, tmp_path / "merged.json")
 
 
 def test_valid_merged_journal_resumes_through_the_owned_reader(tmp_path):
@@ -153,7 +154,7 @@ def test_valid_merged_journal_resumes_through_the_owned_reader(tmp_path):
 
     row, _, _ = _journal(tmp_path)
     out = tmp_path / "merged" / "cost.anchors.json"
-    merged = dispatch.merge_checkpoint({"row-0000": str(row)}, out)
+    merged = campaign_table.merge_checkpoint({"row-0000": str(row)}, out)
     _, _, states = prepare_journal(
         out.with_name(out.name + ".parts"), stage="Tessera campaign", resume=True,
         identity=merged["identity"], qnames=["a"], manifest_path=out)
@@ -165,9 +166,9 @@ def test_refusal_order_does_not_depend_on_anchor_insertion_order():
     from prismaquant import tessera_campaign as campaign
 
     def payload(names):
-        return campaign.campaign_cost_payload(
+        return campaign_table.campaign_cost_payload(
             {name: {"TESSERA_BF16_K1": [
-                _anchor(campaign, name, "TESSERA_BF16_K1", "TESSERA_BF16_K1_R1792",
+                _anchor(name, "TESSERA_BF16_K1", "TESSERA_BF16_K1_R1792",
                         1792, 1.0)]} for name in names}, {}, loo={}, provenance={})
 
     assert payload(["b", "a"])["non_interpolable"] == payload(["a", "b"])["non_interpolable"]
@@ -181,7 +182,7 @@ def test_merge_accepts_stack_incomplete_rung_refusal_without_family():
     refusal = {"qname": "a", "format_name": "TESSERA_BF16_K1_R1792",
                "reason": "stack_rung_incomplete_over_sample", "missing_experts": [2]}
     payloads["row-0000"]["non_interpolable"] = [refusal]
-    merged = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
+    merged = campaign_table.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
     assert merged["non_interpolable"] == [refusal]
 
 
@@ -197,7 +198,7 @@ def test_merge_carries_the_union_of_identity_migration_records(tmp_path):
     data["identity_migration"] = [record]
     manifest.write_text(json.dumps(data))
     out = tmp_path / "merged" / "cost.anchors.json"
-    merged = dispatch.merge_checkpoint({"row-0000": str(row)}, out)
+    merged = campaign_table.merge_checkpoint({"row-0000": str(row)}, out)
     carried = json.loads(out.read_text())["identity_migration"]
     assert merged["identity_migration"] == carried
     assert carried[0]["proof_bundle_sha256"] == "p" * 64 and "old_identity_sha256" not in carried[0]
@@ -205,8 +206,8 @@ def test_merge_carries_the_union_of_identity_migration_records(tmp_path):
     payloads = _payloads()
     for row_id, payload in payloads.items():
         payload["provenance"]["identity_migration"] = [dict(record, old_identity_sha256=row_id)]
-    merged_payload = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
+    merged_payload = campaign_table.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
     assert merged_payload["provenance"]["identity_migration"] == carried
     del payloads[sorted(payloads)[0]]["provenance"]["identity_migration"]
-    merged_payload = dispatch.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
+    merged_payload = campaign_table.merge_payloads(payloads, census={"counts": {}}, capture_sha256="merged")
     assert merged_payload["provenance"]["identity_migration"] == carried

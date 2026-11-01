@@ -381,7 +381,7 @@ def test_real_plan_slice_manifests_are_standalone_v1():
 
 @real_plan
 def test_real_plan_adjoint_manifest():
-    from prismaquant.joint_layer_quanta import adjoint_read_plan_phase_names
+    from prismaquant.joint_quantum_row import adjoint_read_plan_phase_names
     built = _build_real()
     manifest = built["adjoint_manifest"]
     assert manifest["schema"] == "prismaquant.prismabuild.data_manifest.v2"
@@ -472,37 +472,6 @@ def test_schema_every_record_real_plan():
             int(value, 16)
         headless = {k: v for k, v in record.items() if k != "identity_sha256"}
         assert jl.canonical_sha256(headless) == record["identity_sha256"]
-
-
-@real_plan
-def test_check_quantum_for_campaign_real_plan():
-    built = _build_real()
-    campaign = _campaign_of(built["records"])
-    jl.check_quantum_for_campaign(built["records"][13], campaign)
-    for field in ("plan_sha256", "prepared_sha256", "read_manifest_sha256",
-                  "unit_roster_sha256"):
-        bad = dict(campaign)
-        bad[field] = "0" * 64
-        with pytest.raises(ValueError):
-            jl.check_quantum_for_campaign(built["records"][13], bad)
-    bad = dict(campaign)
-    bad["campaign_scope"] = {"schema": "s", "kind": "foreign"}
-    with pytest.raises(ValueError):
-        jl.check_quantum_for_campaign(built["records"][13], bad)
-    # An unbound (pre-A) record refuses a bound campaign: stage A must be
-    # sealed and the record rebound before any quantum publishes.
-    bound = dict(campaign, adjoint_slice_sha256="a" * 64)
-    with pytest.raises(ValueError, match="unbound"):
-        jl.check_quantum_for_campaign(built["records"][13], bound)
-    # A campaign still naming a whole receipt is refused, never ignored
-    # (PQ #993: records bind their slice).
-    legacy = dict(campaign, adjoint_receipt_sha256="a" * 64)
-    with pytest.raises(ValueError, match="whole stage-A receipt"):
-        jl.check_quantum_for_campaign(built["records"][13], legacy)
-    edited = copy.deepcopy(built["records"][13])
-    edited["chunks"] = edited["chunks"][:1]
-    with pytest.raises(ValueError):
-        jl.check_quantum_for_campaign(edited, campaign)
 
 
 def test_chunk_target_derivation_pinned():
@@ -613,15 +582,3 @@ def test_qname_layer_reads_the_layer_grammar():
     assert jl.qname_layer("model.layers.notanumber.q_proj") is None
     assert jl.qname_layer("no.layers.here") is None
     assert jl.qname_layer(None) is None
-
-
-def test_the_joiner_is_not_colocated():
-    """#787 survival decision (D5): one joiner -- joint_quanta_join. The
-    producer module is the data plane only; the parallel joiner that refused
-    the merged joiner's bytes is gone, not adapted."""
-    import prismaquant.joint_quanta_join
-
-    assert not hasattr(jl, "join_layer_quanta")
-    assert not hasattr(jl, "refuse_gapped_for_allocation")
-    assert hasattr(prismaquant.joint_quanta_join, "join_joint_quanta")
-    assert hasattr(prismaquant.joint_quanta_join, "load_joint_cost_for_allocation")

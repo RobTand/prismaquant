@@ -16,6 +16,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch
 
@@ -37,7 +39,7 @@ def spec():
 # -- the seal --------------------------------------------------------------
 
 def test_a_row_seals_no_deadline_of_its_own(tmp_path):
-    row = dispatch._row(spec(), ["--units", "/mnt/shared/units.json"],
+    row = campaign_rows.prismabuild_row(spec(), ["--units", "/mnt/shared/units.json"],
                         mem_gb=48, timeout_s=None)
     assert "timeout_s" not in row
     assert row["progress_phases"] == ["startup=3600", "pricing=900",
@@ -45,7 +47,7 @@ def test_a_row_seals_no_deadline_of_its_own(tmp_path):
 
 
 def test_an_explicitly_asked_for_deadline_is_still_sealed():
-    row = dispatch._row(spec(), [], mem_gb=48, timeout_s=86400)
+    row = campaign_rows.prismabuild_row(spec(), [], mem_gb=48, timeout_s=86400)
     assert row["timeout_s"] == 86400
     # Both, and they compose: the hard deadline caps the cost, the phases end
     # a row that stops early.
@@ -55,7 +57,7 @@ def test_an_explicitly_asked_for_deadline_is_still_sealed():
 def test_nonpricing_rows_do_not_promise_anchor_progress():
     """Census/capture exit before the pricing journal reporter is available."""
 
-    row = dispatch._row(spec(), [], mem_gb=48, timeout_s=7200,
+    row = campaign_rows.prismabuild_row(spec(), [], mem_gb=48, timeout_s=7200,
                         progress_phases=())
     assert row["timeout_s"] == 7200
     assert "progress_phases" not in row
@@ -88,7 +90,7 @@ def test_census_and_capture_keep_their_deadlines_without_anchor_progress(tmp_pat
 def test_the_declared_quiet_is_shorter_than_the_limit_that_killed_the_rows():
     """The bound got *tighter*; what changed is what it is a bound on."""
 
-    total = sum(grace for _, grace in dispatch.CAMPAIGN_PROGRESS_PHASES)
+    total = sum(grace for _, grace in campaign_rows.CAMPAIGN_PROGRESS_PHASES)
     assert total == 6300
     assert total < 14400
 
@@ -96,14 +98,14 @@ def test_the_declared_quiet_is_shorter_than_the_limit_that_killed_the_rows():
 def test_the_pricing_allowance_covers_the_measured_commit_cadence():
     """The retained-record fit measured 18.672808 s per committed batch."""
 
-    pricing = dict(dispatch.CAMPAIGN_PROGRESS_PHASES)["pricing"]
+    pricing = dict(campaign_rows.CAMPAIGN_PROGRESS_PHASES)["pricing"]
     assert pricing / 18.672808072814316 > 48
 
 
 def test_nonpricing_allowances_cover_the_fit_and_its_largest_residual():
     """Both cover 836.10 s outside pricing plus a 160.46 s residual."""
 
-    phases = dict(dispatch.CAMPAIGN_PROGRESS_PHASES)
+    phases = dict(campaign_rows.CAMPAIGN_PROGRESS_PHASES)
     required = 836.1036216758985 + 160.45635778753422
     assert phases["startup"] > required
     assert phases["finalize"] > required

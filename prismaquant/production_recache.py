@@ -497,21 +497,33 @@ def main(argv: list[str] | None = None) -> int:
     from prismaquant.calibration_data import _dtype_from_name
     from prismaquant.model_profiles import detect_profile_with_warning
     from prismaquant.perturbed_x_cache import load_text_model_under_work_root
-    from prismaquant.sensitivity_probe import load_calibration
+    from prismaquant.calibration_data import load_calibration
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with open(args.production_weight_cache, "rb") as fh:
         cache = pickle.load(fh)
-    if args.cache_dir_override:
-        cache.relocate(args.cache_dir_override)
-    if args.production_cache_lru_gb > 0 and hasattr(cache, "enable_lru"):
-        cache.enable_lru(int(float(args.production_cache_lru_gb) * 1024**3))
 
     work_root = Path(args.work_root) if args.work_root else output.parent / "recache_work"
     work_root.mkdir(parents=True, exist_ok=True)
     dtype = _dtype_from_name(args.dtype)
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+    )
+
+    args.model = str(resolve_source_checkpoint_path(args.model))
+    cache.require_source_binding(
+        build_source_model_binding(
+            args.model, dtype=dtype,
+            digest_cache_path=work_root / "source_identity_cache.json",
+        ),
+        where="production_recache attachment",
+    )
+    if args.cache_dir_override:
+        cache.relocate(args.cache_dir_override)
+    if args.production_cache_lru_gb > 0 and hasattr(cache, "enable_lru"):
+        cache.enable_lru(int(float(args.production_cache_lru_gb) * 1024**3))
     from prismaquant.gpu_guard import require_cuda_hot_path
 
     require_cuda_hot_path("production_recache", args.device)

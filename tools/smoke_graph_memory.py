@@ -92,6 +92,8 @@ def _pin_rng(seed: int) -> None:
 
 
 def _load_local_model():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     requested = os.environ.get("PRISMAQUANT_SMOKE_MODEL")

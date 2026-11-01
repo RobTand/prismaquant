@@ -12,8 +12,8 @@ import pickle
 import pytest
 import torch
 
-from prismaquant.joint_aura import identity_sha256
-from prismaquant.joint_projection_backend import REFERENCE_IDENTITY
+from prismaquant.joint_aura_rows import joint_identity_sha256
+from prismaquant.joint_projection_contract import REFERENCE_IDENTITY
 from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
 from prismaquant.joint_replay_regime import (
     DEFAULT_REPLAY_REGIME,
@@ -87,7 +87,7 @@ def test_non_default_regime_is_stamped(pinned_torch, text, regime):
     assert rest == {key: value for key, value in PINNED_DEFAULT.items()
                     if key != "operator_accumulation"}
     assert replay_regime_of(stamped) == regime
-    assert identity_sha256(stamped) != identity_sha256(PINNED_DEFAULT)
+    assert joint_identity_sha256(stamped) != joint_identity_sha256(PINNED_DEFAULT)
 
 
 def test_each_regime_field_moves_the_identity(pinned_torch):
@@ -95,7 +95,7 @@ def test_each_regime_field_moves_the_identity(pinned_torch):
              "accumulation=operator_gemm,chunk_rows=1024",
              "accumulation=operator_gemm,chunk_rows=2048",
              "capture_batch=2,accumulation=operator_gemm,chunk_rows=1024"]
-    digests = {identity_sha256(statistics_arithmetic_identity(
+    digests = {joint_identity_sha256(statistics_arithmetic_identity(
         torch.bfloat16, None, replay_regime=text)) for text in texts}
     assert len(digests) == len(texts)
 
@@ -173,9 +173,9 @@ def _restamp(root, quantum, restamp):
             operator = entry["joint_operator_identity"]
             probe_identity["arithmetic"] = restamp(probe_identity["arithmetic"])
             operator["arithmetic"] = copy.deepcopy(probe_identity["arithmetic"])
-            digest = identity_sha256(probe_identity)
+            digest = joint_identity_sha256(probe_identity)
             entry["probe_identity_sha256"] = operator["probe_identity_sha256"] = digest
-            entry["joint_operator_identity_sha256"] = identity_sha256(operator)
+            entry["joint_operator_identity_sha256"] = joint_identity_sha256(operator)
             rows[fmt] = entry
     path.write_bytes(pickle.dumps(payload))
     return payload

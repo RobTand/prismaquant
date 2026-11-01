@@ -1,12 +1,12 @@
-"""A retirement's PrismaBuild accounting: the durable charge drops by the pins (PQ #1073).
+"""A retirement reclaims owned committed batches through PrismaBuild (PQ #1073).
 
 A fixture Stage A run seals its referenced checkpoints; its entries are then
 committed to a real PrismaBuild owner on a private queue as two batches, one
 holding exactly the entries a checkpoint references and one holding a forward
 boundary entry, and the run's chain state names that owner as its producer.
-The retirement finds both batches from PrismaBuild's own records, retires the
-first, leaves the second, and ``reclaim_origin`` drops the durable charge by
-exactly the first batch's bytes.
+The retirement finds and reclaims both committed batches from PrismaBuild's
+records. Their durable charge drops to zero; other forward boundary files
+remain.
 
 The batches are committed with ``commit_origin_batch`` under a write-only
 template: that is the one way a test can commit files it did not write

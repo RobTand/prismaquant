@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import pytest
 import torch
 
+from prismaquant import aura_checkpoint_journal
 import prismaquant.joint_adjoint_checkpoints as checkpoints
 import prismaquant.joint_cost_quantum as quantum
 import test_stageb_one_pass_spill as spill_fixture
@@ -174,9 +175,8 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     spill_fixture._clear_output(campaign, layer)
     # A real partial durable journal still consumes the whole original incoming
     # plane on its final pass, rather than treating already-priced units as finality.
-    import prismaquant.aura_cost as aura
     from pathlib import Path
-    atomic = aura.atomic_write_bytes
+    atomic = aura_checkpoint_journal.atomic_write_bytes
     published = []
 
     def fail_second(path, body):
@@ -187,7 +187,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
         return atomic(path, body)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(aura, "atomic_write_bytes", fail_second)
+        patch.setattr(aura_checkpoint_journal, "atomic_write_bytes", fail_second)
         failed, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
     assert failed is None and isinstance(state.error, OSError)
     assert len(published) == 1 and Path(published[0]).is_file()

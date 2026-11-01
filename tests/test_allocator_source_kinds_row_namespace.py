@@ -12,9 +12,9 @@ import torch
 
 from prismaquant.allocator_candidates import (
     _scan_source_dtype_manifest,
-    source_footprint_owner_for_kind,
     source_kinds_in_row_namespace,
 )
+from prismaquant.source_format_contracts import source_footprint_owner_for_kind
 from prismaquant.model_profiles import DefaultProfile
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 

@@ -8,6 +8,7 @@ binding through the existing owners; dispatcher selection with derived
 progress declarations; runtime read-phase reporting through the existing
 semantic reporter. Full GPU execution belongs to a later lane, not here.
 """
+from prismaquant import aura_provenance
 
 import copy
 import gzip
@@ -30,22 +31,24 @@ for _entry in (ROOT, ROOT / "tools"):
 from prismaquant.joint_adjoint_checkpoints import exact_entry_record  # noqa: E402
 from prismaquant.joint_adjoint_checkpoints import (  # noqa: E402
     write_adjoint_checkpoint, write_adjoint_receipt)
-from prismaquant.joint_layer_quanta import (  # noqa: E402
+from prismaquant.joint_layer_quanta import (
     ADJOINT_CAPTURE_SCHEMA,
-    CHECKPOINT_LOAD_PHASE,
     MANIFEST_SCHEMA_V2,
     adjoint_binding_fields,
     bind_adjoint_slice,
     bind_quantum_executable,
     build_quantum_executable_manifest,
     emit_quantum_executable_readsets,
+    layer_quanta,
+    seal_manifest_bytes,
+)
+from prismaquant.joint_quantum_row import (
+    CHECKPOINT_LOAD_PHASE,
     executable_bound_phase_name,
     executable_own_source_phase_name,
     executable_replay_phase_name,
     executable_source_phase_name,
-    layer_quanta,
     quantum_executable_phase_names,
-    seal_manifest_bytes,
 )
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
@@ -368,9 +371,8 @@ def _bound_inputs(tmp_path, root="/mnt/shared/run"):
 
 
 def test_binder_recomputes_identity_and_anchors_rebuild(tmp_path):
-    from prismaquant.joint_layer_quanta import (
-        bind_quantum_executable, check_quantum_for_campaign,
-        canonical_sha256)
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+    from prismaquant.joint_layer_quanta import (bind_quantum_executable, canonical_sha256)
     record, receipt, parent, kwargs = _bound_inputs(tmp_path)
     new = bind_quantum_executable(
         record, receipt, parent, **kwargs)
@@ -380,7 +382,7 @@ def test_binder_recomputes_identity_and_anchors_rebuild(tmp_path):
     campaign = dict(record["campaign"],
                     adjoint_slice_sha256=new["executable_readset"][
                         "slice_sha256"])
-    check_quantum_for_campaign(new, campaign)
+    require_quantum_campaign(new, campaign)
     body = {k: v for k, v in new.items() if k != "identity_sha256"}
     assert canonical_sha256(body, where="quantum record") == new[
         "identity_sha256"]
@@ -542,9 +544,9 @@ def _acceptance_setup(tmp_path, monkeypatch):
     import test_joint_cost_quantum_runtime as rt
     import test_layer_major_boundary_capture as lm
     import prismaquant.aura_cost as aura
-    from prismaquant.joint_layer_quanta import roster_digest
+    from prismaquant.joint_campaign_ledger import (roster_digest)
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     torch.manual_seed(85)
     model, context, runner, cache = lm.fixture()
@@ -618,8 +620,8 @@ def _acceptance_setup(tmp_path, monkeypatch):
     preflight = rt._preflight_windows(runner, cache, None)
     partition = {"windows_by_layer": {
         str(layer): len(preflight[layer]) for layer in (0, 1)}}
-    from prismaquant.joint_layer_quanta import (
-        layer_quanta as _produce, roster_digest)
+    from prismaquant.joint_campaign_ledger import (roster_digest)
+    from prismaquant.joint_layer_quanta import (layer_quanta as _produce)
     torch.manual_seed(85)
     _model_b, _context_b, runner_b, _cache_b = lm.fixture()
     _context_b.settle_prefetch_layers = lambda layers: None
@@ -681,7 +683,7 @@ def run_adjoint_capture_core_alias(runner, calib, tmp_path, plan_sha,
         source_model_identity=tsc._model_identity("joint-source"),
         unit_roster_sha256=roster_sha, plan_sha256=plan_sha,
         prepared_sha256=prepared_sha, read_manifest_sha256=parent_sha,
-        implementation_sha256=aura._aura_source_sha256(),
+        implementation_sha256=aura_provenance.producer_package_sha256(),
         campaign_scope=campaign_scope)
 
 
@@ -1095,12 +1097,12 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
     import test_joint_cost_quantum_runtime as rt
     import test_layer_major_boundary_capture as lm
     import prismaquant.aura_cost as aura
-    from prismaquant.joint_layer_quanta import roster_digest
+    from prismaquant.joint_campaign_ledger import (roster_digest)
     from prismaquant.joint_statistics_replay import (
         preflight_joint_operator_admission)
     from prismaquant.production_weight_cache import ProductionWeightCache
 
-    monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: "1" * 40)
+    monkeypatch.setattr(aura_provenance, "checkpoint_git_commit", lambda: "1" * 40)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     model, context, runner = _expert_fixture()
     context.settle_prefetched_layers = lambda layers, *, retry_availability=False: None
@@ -1192,8 +1194,8 @@ def _acceptance_setup_expert(tmp_path, monkeypatch):
     assert all(count >= 2 for count in counts.values()), counts
     partition = {"windows_by_layer": {
         str(layer): counts[layer] for layer in (0, 1)}}
-    from prismaquant.joint_layer_quanta import (
-        layer_quanta as _produce, roster_digest)
+    from prismaquant.joint_campaign_ledger import (roster_digest)
+    from prismaquant.joint_layer_quanta import (layer_quanta as _produce)
     torch.manual_seed(109)
     _model_b, _context_b, runner_b = _expert_fixture_secondary()
     _context_b.settle_prefetch_layers = lambda layers: None
@@ -1326,7 +1328,7 @@ def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     coverage are asserted on every leg. Source-file opens stay explicitly
     unqualified (fake context); calibration stays torch.save fixture bytes.
     """
-    from prismaquant.aura_cost import _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import (unit_path as _aura_unit_checkpoint_path)
     setup = _acceptance_setup_expert(tmp_path, monkeypatch)
     record0 = setup["records"]["layer-000"]
     n_windows = len(record0["windows"])
@@ -1611,7 +1613,7 @@ def _exec_receipt(tmp_path, campaign):
 def test_cli_executable_readsets_end_to_end(tmp_path):
     import regenerate_joint_quanta as regen
     from prismaquant import joint_cost_quantum as quantum
-    from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
     campaign = _exec_campaign(tmp_path)
     receipt, space = _exec_receipt(tmp_path, campaign)
     receipt_path = space / "adjoint-capture.json"
@@ -1657,7 +1659,7 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
             "campaign_scope": {"fixture": "exec-cli"},
             "adjoint_slice_sha256": canonical,
         }
-        check_quantum_for_campaign(record, campaign_binding)
+        require_quantum_campaign(record, campaign_binding)
         quantum_path = out / f"{record['quantum_id']}.json"
         quantum.verify_quantum_identity(
             quantum_path=quantum_path,

@@ -109,7 +109,7 @@ def check_packet(packet):
             raise ValueError("PB905 groups have unequal byte counts")
     if packet["total_bytes"] != GROUPS * expected_bytes:
         raise ValueError("PB905 total byte bound differs")
-    from prismaquant.cost_streaming import check_boundary_storage
+    from prismaquant.streamed_boundary_artifacts import check_boundary_storage
     storage = check_boundary_storage(packet["storage"])
     if storage["max_artifact_bytes"] != packet["total_bytes"]:
         raise ValueError("PB905 artifact bound differs")
@@ -176,7 +176,7 @@ def prepare(proposal_path, proposal_sha256, directory, *, output_prefix, tier, h
     checkpoint = proposal["checkpoint"]
     record = load_pinned_checkpoint({"path": checkpoint["path"], "sha256": checkpoint["sha256"]})
     entries = proposal["entries"]
-    from prismaquant.cost_streaming import BOUNDARY_STORAGE_SCHEMA
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA
     largest = max(row["file_bytes"] for row in entries)
     tensor = max(row["tensor_bytes"] for row in entries)
     group_bytes = proposal["group_bytes"]
@@ -337,7 +337,7 @@ def load_runtime_packet(path, packet_sha256, packet_bytes, readset_sha256, *, gr
 
 def run_component(packet, *, mode, evidence_directory, group_index=None):
     import torch
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.memory_management import CaptureMemoryGuard
     from prismaquant.perturbed_x_cache import EntryReadScratch
     from prismaquant.prismabuild_progress import report

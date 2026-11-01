@@ -1,4 +1,5 @@
 """Actual CPU configs must not enter HF dense fallback for unreadable bytes."""
+import builtins
 import json
 from pathlib import Path
 
@@ -48,6 +49,14 @@ def make_reader_configuration(root, *, scope, quant_method="tessera"):
 def test_declared_tessera_config_refuses_before_hf_dense_fallback(tmp_path, monkeypatch, dev, scope):
     config = make_reader_configuration(tmp_path, scope=scope)
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
+    original_import = builtins.__import__
+
+    def refuse_lm_eval(name, *args, **kwargs):
+        if name == "lm_eval" or name.startswith("lm_eval."):
+            raise AssertionError("unreadable artifact reached optional lm_eval imports")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", refuse_lm_eval)
     with pytest.raises(ValueError, match="quant_method.*tessera"):
         preflight_tasks(config)
     with pytest.raises(ValueError, match="quant_method.*tessera"):

@@ -12,7 +12,7 @@ import pytest
 import torch
 
 from prismaquant.cost_currency import CostCurrencyError
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.tessera_full_domain_acquisition import joint_acquisition_from_cost_data
 from test_joint_aura_streamed import _fixture
 from test_streamed_cost_checkpoints import _model_identity
@@ -122,7 +122,7 @@ def test_valid_row_does_not_rebind_to_a_different_run(joint_payload, part):
     name, _ = selection(payload)
     run = payload["provenance"]["joint_aura_identity"]
     run[part][name][FORMATS[0]] = {}
-    payload["provenance"]["joint_aura_identity_sha256"] = identity_sha256(run)
+    payload["provenance"]["joint_aura_identity_sha256"] = joint_identity_sha256(run)
     with pytest.raises(ValueError, match="bound run"):
         acquire(payload)
 
@@ -203,7 +203,7 @@ def test_rehashed_calibration_change_cannot_leave_the_bound_run(joint_payload):
         probe = copy.deepcopy(old["probe_identity"])
         probe["calibration_sha256"] = "e" * 64
         operator = copy.deepcopy(old["joint_operator_identity"])
-        operator["probe_identity_sha256"] = identity_sha256(probe)
+        operator["probe_identity_sha256"] = joint_identity_sha256(probe)
         payload["costs"][name][fmt] = make_joint_aura_entry(
             operator_identity=operator, probe_identity=probe,
             signed_components=old["signed_components_per_probe"])

@@ -15,7 +15,12 @@ The second half keeps it a derivation and not a grant: a contract that drops
 the routed E2M1 cells flips the verdict back to ``unattested``, on both the
 dev-pin and the packaged-table paths.
 """
+import json
 from dataclasses import replace
+
+from tests.tessera_metadata_fixture import install_metadata
+
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
 
 import pytest
 
@@ -32,7 +37,8 @@ ROUTED = "routed_moe"
 
 def _packaged_reference():
     """The dense and the routed E2M1 cells the pinned contract carries."""
-    table, formats = render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, formats = snapshot.eligibility, snapshot.published_formats
     dense = [cell for cell in table.cells if cell.family == FAMILY and cell.structure == "dense"]
     routed = [cell for cell in table.cells if cell.family == FAMILY and cell.structure == ROUTED]
     assert dense, "the pinned contract attests no dense E2M1_K2 cell; this test's premise moved"
@@ -102,7 +108,11 @@ def test_a_contract_without_routed_e2m1_refuses_it_with_no_producer_change(monke
         kept = tuple(cell for cell in table.cells if not is_routed_e2m1(cell))
         assert len(kept) < len(table.cells)
         altered = replace(table, cells=kept)
-        monkeypatch.setattr(render, "_pinned_serving_table", lambda: (altered, formats))
+        payload = json.loads(installed_runtime_snapshot().raw)
+        payload["lane_eligibility"]["cells"] = [
+            cell for cell in payload["lane_eligibility"]["cells"]
+            if not (cell["family"] == FAMILY and cell["structure"] == ROUTED)]
+        install_metadata(monkeypatch, payload)
 
     admission = menu.route_admission(RUNG, serving_context=routed_context)
     assert not admission.attested

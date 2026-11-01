@@ -217,7 +217,7 @@ def test_a_failed_owner_stays_bounded_when_retry_is_not_available(monkeypatch, c
 def test_stage_a_core_opts_in_at_both_forward_and_reverse_loader_barriers(tmp_path):
     """Full CPU core wiring; strict source byte/owner proof is the test above."""
     from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
-    from prismaquant.joint_layer_quanta import adjoint_read_plan_phase_names
+    from prismaquant.joint_quantum_row import (adjoint_read_plan_phase_names)
     from prismaquant.joint_run_progress import JointRunProgress
     from test_joint_cost_quantum_runtime import _execution
     from test_layer_major_boundary_capture import fixture

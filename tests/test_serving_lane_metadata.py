@@ -20,16 +20,16 @@ re-pointed at a profile that would answer them vacuously.
 
 What still has a subject, and is what this file now pins:
 
-1. ``serving_lane_route`` returns ``None`` for a profile that declares no
-   lane — which is today every profile.
+1. Legacy lane metadata and synthetic parser behavior. A missing lane
+   declaration does not imply a ``None`` route for Tessera: its separate
+   admission path can return an unattested verdict.
 2. The end-to-end ``selection.json`` / ``format_applicability.json`` blocks:
-   the P5a activation-fair-pricing verdict, the republished cross-family
-   ladder verdict, and a serving-lane provenance report in which every
-   selected unit is honestly laneless.
+   the P5a activation-fair-pricing verdict and a serving-lane provenance
+   report in which this fixture's selected units are honestly laneless.
+   Obsolete CB ladder verdicts remain readable input but are not republished.
 
-The CB format/cost/render plumbing (``cb_layout``, ``nvfp4_cb_formats``,
-``format_registry``'s ``*_CB_*`` FormatSpecs) was deliberately kept, so CB
-rungs are still registered and still priceable; nothing offers or ships them.
+The retired CB rungs are not registered in the active format menu. Their old
+cost payloads remain compatibility fixtures here.
 """
 from __future__ import annotations
 

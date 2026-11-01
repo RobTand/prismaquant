@@ -7,6 +7,8 @@ therefore the replay uses explicitly reported balanced host partitions.
 """
 from __future__ import annotations
 
+from prismaquant import aura_checkpoint_journal, cost_stage_checkpoint
+
 import argparse
 from contextlib import ExitStack
 import hashlib
@@ -78,8 +80,8 @@ def _load_source(path: Path, *, name: str, identity: str, allowance: int) -> dic
         if type(payload) is not bytes:
             raise ValueError("replay source has no builtin byte payload")
         _check_builtin_pickle(payload)
-        return aura_cost._decode_aura_unit_checkpoint(
-            envelope, path=path, qname=name, identity_sha256=identity)
+        return aura_checkpoint_journal.load_unit(
+            path, qname=name, identity_sha256=identity, envelope=envelope)
 
 
 def replay(source: Path, destination: Path, *, expected_units: int,
@@ -102,7 +104,7 @@ def replay(source: Path, destination: Path, *, expected_units: int,
     paths = {}
     for row in rows:
         path = (source / row["file"]).resolve(strict=True)
-        if source not in path.parents or path != aura_cost._aura_unit_checkpoint_path(source, row["qname"]).resolve():
+        if source not in path.parents or path != cost_stage_checkpoint.unit_path(source, row["qname"]).resolve():
             raise ValueError("unit path is not the existing canonical destination")
         paths[row["qname"]] = path
     windows = [{"names": names[start:stop]} for start, stop in
@@ -114,11 +116,11 @@ def replay(source: Path, destination: Path, *, expected_units: int,
     consumer = threading.get_ident()
     calls = {"synchronous": [], "shared-engine": []}
     arm = "synchronous"
-    encoder = aura_cost._encode_aura_unit_checkpoint
+    encoder = aura_checkpoint_journal.UnitCheckpointWriter.publish
 
-    def observed_encode(**kwargs):
+    def observed_encode(writer, **kwargs):
         calls[arm].append((threading.get_ident(), threading.current_thread().name))
-        return encoder(**kwargs)
+        return encoder(writer, **kwargs)
 
     def load(name, allowance=source_allowance):
         # These are trusted existing campaign pickles, never arbitrary CLI URLs.
@@ -127,15 +129,14 @@ def replay(source: Path, destination: Path, *, expected_units: int,
 
     source_digests, expected, input_bytes = {}, {}, 0
     historical_matches = 0
-    aura_cost._encode_aura_unit_checkpoint = observed_encode
+    aura_checkpoint_journal.UnitCheckpointWriter.publish = observed_encode
     try:
         for name in names:
             source_digests[name] = digest(paths[name])
             input_bytes += paths[name].stat().st_size
             with owned_builtin_graph(load(name)) as state:
-                aura_cost._write_aura_unit_checkpoint(
-                    sync, qname=name, identity_sha256=identity, state=state)
-            target = aura_cost._aura_unit_checkpoint_path(sync, name)
+                aura_checkpoint_journal.UnitCheckpointWriter(sync, identity).publish(qname=name, state=state)
+            target = cost_stage_checkpoint.unit_path(sync, name)
             expected[name] = digest(target)
             historical_matches += expected[name] == source_digests[name]
         arm = "shared-engine"
@@ -143,13 +144,13 @@ def replay(source: Path, destination: Path, *, expected_units: int,
 
         def acknowledge():
             for name in durable - checked:
-                target = aura_cost._aura_unit_checkpoint_path(asynchronous, name)
+                target = cost_stage_checkpoint.unit_path(asynchronous, name)
                 if digest(target) != expected[name]:
                     raise AssertionError("durable acknowledgement precedes matching bytes")
                 checked.add(name)
 
         ledger = CheckpointPublicationLedger(
-            checkpoint_root=asynchronous, identity_sha256=identity,
+            checkpoint_writer=aura_checkpoint_journal.UnitCheckpointWriter(asynchronous, identity),
             windows=windows, completed=durable, acknowledge=acknowledge,
             window_done=done.append, budget_bytes=budget_bytes, max_jobs=max_jobs)
         try:
@@ -215,7 +216,7 @@ def replay(source: Path, destination: Path, *, expected_units: int,
         print(json.dumps(result, sort_keys=True))
         return result
     finally:
-        aura_cost._encode_aura_unit_checkpoint = encoder
+        aura_checkpoint_journal.UnitCheckpointWriter.publish = encoder
 
 
 def main() -> None:

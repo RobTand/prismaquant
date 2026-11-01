@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import select_validated_frontier as svf
+from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY,
     canonicalize_assignment,
@@ -32,6 +33,7 @@ GB = 1_000_000_000.0
 def _rows(tmp_path, spec):
     """spec: [(label, bpp, kl, gb)] -> results rows + priced assignment JSONs."""
     out = []
+    assignment = {"model.layers.0.self_attn.q_proj": "NVFP4"}
     for label, bpp, kl, gb in spec:
         path = tmp_path / f"{label}.json"
         path.write_text(json.dumps({
@@ -42,9 +44,10 @@ def _rows(tmp_path, spec):
                 "selection_upper_bound_tensor_payload_plus_"
                 "operator_non_tensor_reserve"
             ),
-            "assignment": {"model.layers.0.self_attn.q_proj": "NVFP4"},
+            "assignment": assignment,
         }))
-        out.append({"label": label, "path": str(path), "bpp": bpp, "kl": kl})
+        out.append({"label": label, "path": str(path), "bpp": bpp, "kl": kl,
+                    "assignment_sha256": assignment_serialization_sha256(assignment)})
     return out
 
 
@@ -89,17 +92,31 @@ def test_bytes_are_read_from_the_allocator_payload(tmp_path):
 
 
 def test_kneedle_is_untouched_by_the_bytes_column(tmp_path):
-    """R1 must be byte-identical when no card is given."""
-    rows = _rows(tmp_path, [
+    """Kneedle selects the same label with or without byte prices."""
+    spec = [
         ("a", 4.5, 0.100, 18.0), ("b", 5.0, 0.030, 20.0),
         ("c", 5.5, 0.025, 24.0), ("d", 6.0, 0.024, 28.0),
-    ])
-    unpriced = [{k: v for k, v in row.items()} for row in rows]
+    ]
+    priced_root, unpriced_root = tmp_path / "priced", tmp_path / "unpriced"
+    priced_root.mkdir()
+    unpriced_root.mkdir()
+    rows = _rows(priced_root, spec)
+    unpriced = _rows(unpriced_root, spec)
+    before = {row["path"]: Path(row["path"]).read_bytes() for row in rows}
+    assert set(before).isdisjoint(row["path"] for row in unpriced)
     for row in unpriced:
-        Path(row["path"]).write_text(json.dumps({"assignment": {}}))
-    a, _ = svf.select_frontier_point(rows, mode="kneedle")
-    b, _ = svf.select_frontier_point(unpriced, mode="kneedle")
+        Path(row["path"]).write_text(json.dumps({
+            "assignment": {"model.layers.0.self_attn.q_proj": "NVFP4"},
+        }))
+    assert [row["artifact_bytes"] for row in svf.measured_rows(rows)] == [
+        int(item[3] * GB) for item in spec]
+    assert all(row["artifact_bytes"] is None for row in svf.measured_rows(unpriced))
+    assert {path: Path(path).read_bytes() for path in before} == before
+    a, priced_frontier = svf.select_frontier_point(rows, mode="kneedle")
+    b, unpriced_frontier = svf.select_frontier_point(unpriced, mode="kneedle")
     assert a["label"] == b["label"]
+    assert [row["label"] for row in priced_frontier] == [
+        row["label"] for row in unpriced_frontier]
 
 
 def test_run_pipeline_wires_the_card_into_both_stages():

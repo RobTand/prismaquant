@@ -84,7 +84,7 @@ def test_production_candidate_builder_requires_table_even_in_research_menu(monke
     stats = {"unit": {"in_features": 256, "out_features": 256, "n_params": 65536}}
     costs = {"unit": {spec.name: {"predicted_dloss": 0.1}}}
     with pytest.raises(tessera_menu.TesseraMenuError, match="allowability.*required"):
-        candidates.build_candidates(stats, costs, [spec], target_profile="vllm_packed_moe")
+        candidates.build_candidates(stats, costs, [spec], target_profile="vllm_packed_moe").candidates
 
 
 def test_index_selects_current_version_not_directory_order(publication):

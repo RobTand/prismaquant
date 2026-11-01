@@ -1,12 +1,13 @@
 """A pilot zero is observable only inside a complete atomic serving stack."""
 import copy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from prismaquant import tessera_expert_projection as tep
-from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
+from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from prismaquant.tessera_joint_eval_panel import make_panel
 from prismaquant.tessera_sampled_stack_proposal import propose_bound_payload
@@ -77,14 +78,15 @@ def pilot_fixture():
     return joint, data, prepared, metadata, kwargs, names
 
 
-def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
-    # The full domain test checks the producer range separately; keep the
-    # allocation fixture small while exercising real rows and real candidate
-    # construction/aggregation/solver/serialization.
+def _research_menu(monkeypatch):
+    """Admit only the research menu mode; return the modes admission was asked.
+
+    The full domain test checks the producer range separately, so the domain
+    is stubbed and the allocation fixture stays small.
+    """
     from prismaquant import tessera_sampled_stack_proposal as mod
     from prismaquant import tessera_menu
     from prismaquant import allocator_candidates
-    joint, *_tail, names = pilot_fixture()
     monkeypatch.setattr(mod, '_domain', lambda *args, **kwargs: {'fixture': 'producer-tested-separately'})
     admitted_modes = []
     def admits(mode):
@@ -95,6 +97,13 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
                                                                  admits=admits))
     monkeypatch.setattr(allocator_candidates, 'serving_lane_route',
                         lambda *args, **kwargs: None)
+    return admitted_modes
+
+
+def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
+    # Real rows and real candidate construction/aggregation/solver/serialization.
+    joint, *_tail, names = pilot_fixture()
+    admitted_modes = _research_menu(monkeypatch)
     result = propose_bound_payload(joint, profile=AtomicProfile(),
         mutable_budget_bytes=600000, immutable_bytes=101, reserve_bytes=11,
         full_legal_families=PRIMARY)
@@ -107,7 +116,51 @@ def test_atomic_panel_price_and_unknown_are_scoped(monkeypatch):
     assert result['observations'][names[3]]['full_population_price'] is None
     assert result['observations'][names[3]]['observed_panel_contribution'] == 0.0
     assert result['exact_bytes']['total'] <= result['exact_bytes']['total_budget']
-    assert result['independent_selected_assignment_validation']['required_for_production_promotion']
+    validation = result['independent_selected_assignment_validation']
+    assert validation['required_for_production_promotion'] and validation['status'] == 'pending'
+    # The schema the proposal requires has an implementation it names: the
+    # archived helper, which is not live code.
+    helper = Path(__file__).resolve().parents[1] / validation['validation_helper_archive']
+    assert helper.parts[-4] == 'archive' and helper.is_file()
+    assert (f"SAMPLED_PROPOSAL_VALIDATION_SCHEMA = \"{validation['validation_helper_schema']}\""
+            in helper.read_text(encoding='utf-8'))
+
+
+def test_both_aggregators_read_the_rows_the_candidate_builder_admitted(monkeypatch):
+    """Packed and fused aggregation price one table, the builder's cost rows.
+
+    Synthesized and canonical rows exist only in that table; an aggregator
+    given the raw payload would see a member without them and drop the
+    group's option instead of pricing it.
+    """
+    from prismaquant import tessera_sampled_stack_proposal as mod
+    joint, *_tail, names = pilot_fixture()
+    _research_menu(monkeypatch)
+    tables = {}
+    real_build = mod.build_candidates
+
+    def build(*args, **kwargs):
+        result = real_build(*args, **kwargs)
+        tables['admitted'] = result.cost_rows
+        return result
+
+    def reading(stage, real):
+        def aggregate(stats, costs, *args, **kwargs):
+            tables[stage] = costs
+            return real(stats, costs, *args, **kwargs)
+        return aggregate
+
+    monkeypatch.setattr(mod, 'build_candidates', build)
+    monkeypatch.setattr(mod, 'aggregate_packed_serving_groups',
+                        reading('packed', mod.aggregate_packed_serving_groups))
+    monkeypatch.setattr(mod, 'aggregate_fused_siblings',
+                        reading('fused', mod.aggregate_fused_siblings))
+    propose_bound_payload(joint, profile=AtomicProfile(),
+        mutable_budget_bytes=600000, immutable_bytes=101, reserve_bytes=11,
+        full_legal_families=PRIMARY)
+    assert tables['packed'] is tables['admitted']
+    assert tables['fused'] is tables['admitted']
+    assert tables['admitted'] is not joint['costs']
 
 
 def test_stack_members_reach_aggregation_with_whole_menus(monkeypatch):

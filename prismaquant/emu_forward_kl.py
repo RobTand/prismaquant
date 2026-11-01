@@ -38,7 +38,7 @@ from typing import Mapping
 import torch
 
 from . import format_registry as fr
-from .allocator_candidates import PASSTHROUGH_SOURCE_REQUIREMENTS
+from prismaquant.source_format_contracts import PASSTHROUGH_SOURCE_REQUIREMENTS
 from .measure_quant_cost import canonical_linear_name
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from .kl_fisher import forward_kl_per_token
@@ -61,7 +61,7 @@ _CONFIDENT_PROB = 0.5
 
 
 def _git_commit() -> str | None:
-    from prismaquant.aura_cost import _git_head_commit
+    from prismaquant.aura_provenance import (producer_git_head_commit as _git_head_commit)
 
     return _git_head_commit()
 
@@ -364,6 +364,8 @@ def measure_emulated_kl(
     cut): an empty lane has no mean, and emitting 0.0 over nothing would
     report a win on an empty set.
     """
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     torch.manual_seed(0)
@@ -461,6 +463,8 @@ def _expand_uniform(model, fmt: str, col_weights: dict) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     ap = argparse.ArgumentParser(
         description="Whole-model emulated forward KL-vs-BF16.")
     ap.add_argument("--model", required=True)

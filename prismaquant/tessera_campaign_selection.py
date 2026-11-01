@@ -1,5 +1,7 @@
 """Torch-free campaign selection metadata shared by runtime and readset owners."""
 from collections.abc import Mapping
+import json
+from pathlib import Path
 
 UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
 UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
@@ -88,3 +90,8 @@ def selection_priced_units(selection: Mapping) -> tuple[set, set, dict]:
         for name, value in (entry.get("inclusion_probability") or {}).items():
             pi[str(name)] = float(value)
     return priced, audit, pi
+
+
+def load_unit_selection(path) -> dict:
+    """Read a ``--units`` selection file through the shared metadata owner."""
+    return validate_unit_selection(json.loads(Path(path).read_text()), path=path)

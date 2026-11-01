@@ -6,6 +6,9 @@ E2M1 codes in the same low-nibble/high-nibble layout used by the exporter.
 """
 from __future__ import annotations
 
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.native_render_levers import NativeRenderLevers
+
 import torch
 import triton
 import triton.language as tl
@@ -55,6 +58,8 @@ def _indices_from_signed_e2m1_values(values: torch.Tensor) -> torch.Tensor:
 
 def nvfp4_pack_weight(
     weight: torch.Tensor,
+    *,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Pack a BF16/FP32 ``[N, K]`` weight for ``nvfp4_fused_aw_matmul``.
 
@@ -77,17 +82,17 @@ def nvfp4_pack_weight(
     # per-tensor global). We bake the EFFECTIVE real scale per group into
     # w_scales and set the global multiplier to 1, so the Triton dequant
     # codes*scales reproduces the export dequant exactly.
-    from prismaquant import export_native_compressed as enc
-
     w_float = weight.detach().float()
     grouped = w_float.reshape(rows, cols // _NVFP4_GROUP_SIZE, _NVFP4_GROUP_SIZE)
-    scale_real, global_real = enc._select_nvfp4_pack_scales_and_global(grouped)
-    codec = enc._nvfp4_quantize_grouped_codec(
+    scale_real, global_real = _native_render_codec.select_nvfp4_pack_scales_and_global(
+        grouped, levers=levers)
+    codec = _native_render_codec.nvfp4_quantize_grouped_codec(
         grouped,
         global_real=global_real,
         scale_real=scale_real,
+        levers=levers,
     )
-    eff_scale = enc._nvfp4_effective_scale_from_fp8(
+    eff_scale = _native_render_codec.nvfp4_effective_scale_from_fp8(
         codec.scale, global_real,
     )
     fp4_indices = codec.indices.reshape(rows, cols)
@@ -373,7 +378,8 @@ def ensure_nvfp4_fused_warmup() -> bool:
         with torch.no_grad():
             x = torch.zeros((8, 64), device=device, dtype=torch.bfloat16)
             weight = torch.zeros((8, 64), device=device, dtype=torch.bfloat16)
-            w_packed, w_scales, w_global_scale = nvfp4_pack_weight(weight)
+            w_packed, w_scales, w_global_scale = nvfp4_pack_weight(
+                weight, levers=NativeRenderLevers())
             out = torch.empty((8, 8), device=device, dtype=torch.bfloat16)
             nvfp4_fused_aw_matmul(x, w_packed, w_scales, w_global_scale, out=out)
             torch.cuda.synchronize(device)

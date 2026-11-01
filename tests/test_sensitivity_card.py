@@ -80,11 +80,11 @@ def _provenance() -> CardProvenance:
 
 
 def test_marginal_identity_holds():
-    """sum(row) == sum(col) == h_trace_raw. Free consistency check."""
-    u = _synthetic_unit()
-    assert np.isclose(u.fisher_row.sum(), u.h_trace_raw)
-    assert np.isclose(u.fisher_col.sum(), u.h_trace_raw)
-    u.validate()
+    """The row and column marginals both sum to the unnormalized trace."""
+    unit = _synthetic_unit()
+    assert np.isclose(unit.fisher_row.sum(), unit.h_trace_raw)
+    assert np.isclose(unit.fisher_col.sum(), unit.h_trace_raw)
+    unit.validate()
 
 
 def test_validate_rejects_inconsistent_marginals():

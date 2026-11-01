@@ -12,7 +12,7 @@ Read-only reproduction of four per-unit loops that idle the GPU:
                       ``{name: tensor_identity(H)}`` plus the capture seal.
 * ``journal``      -- ``cost_stage_checkpoint.prepare_journal`` over a completed
                       row's unit shards.
-* ``wireverify``   -- the resumed row's ``_checkpoint_wire_record`` loop, which
+* ``wireverify``   -- the resumed row's ``checkpoint_wire_record`` loop, which
                       reads and verifies every cached wire blob.
 
 Nothing here writes to the campaign workspace, and no campaign module is
@@ -402,12 +402,11 @@ def phase_journal(args):
 
 
 def phase_wireverify(args, data):
-    """The resumed row's per-anchor _checkpoint_wire_record loop."""
+    """The resumed row's per-anchor checkpoint_wire_record loop."""
     from prismaquant.cost_stage_checkpoint import prepare_journal
-    from prismaquant.tessera_campaign import (
-        CampaignAnchor, _campaign_bound_identities, _checkpoint_anchor_identity,
-        _checkpoint_wire_record,
-    )
+    from prismaquant.tessera_campaign_table import (CampaignAnchor)
+    from prismaquant.tessera_campaign import _campaign_bound_identities, _checkpoint_anchor_identity
+    from prismaquant.tessera_campaign_wire import checkpoint_wire_record
     manifest = json.loads(Path(args.journal_manifest).read_text())
     qnames = [entry["qname"] for entry in manifest["units"]]
     _root, _digest, completed = prepare_journal(
@@ -434,7 +433,7 @@ def phase_wireverify(args, data):
             anchor, weights=data.weights, menus=menus, calibration_source=source,
             static_scales=data.scales, projected_units=data.projected_units,
             bound_unit=held[name])
-        return _checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
+        return checkpoint_wire_record(anchor, wire_dir, identity, existing=existing)
 
     with Phase("wireverify", len(jobs)) as phase:
         if args.threads > 1:
@@ -512,10 +511,8 @@ def phase_headafter(args, data):
 def phase_wireverifyafter(args, data):
     """The resumed row's adopt loop as #492 runs it: gates in order, verify on N."""
     from prismaquant.cost_stage_checkpoint import prepare_journal
-    from prismaquant.tessera_campaign import (
-        CampaignAnchor, _SealAhead, _campaign_bound_identities,
-        _checkpoint_anchor_identity, _verify_wire_records_on_threads,
-    )
+    from prismaquant.tessera_campaign_table import (CampaignAnchor)
+    from prismaquant.tessera_campaign import _SealAhead, _campaign_bound_identities, _checkpoint_anchor_identity, _verify_wire_records_on_threads
     manifest = json.loads(Path(args.journal_manifest).read_text())
     qnames = [entry["qname"] for entry in manifest["units"]]
     _root, _digest, completed = prepare_journal(

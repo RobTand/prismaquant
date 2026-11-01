@@ -33,6 +33,10 @@ import types
 
 import pytest
 
+from prismaquant import campaign_container_spec as container_spec
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant.joint_campaign_ledger import seal_quantum_record
+
 from stage_a_spool_spec import stage_a_plan, with_spool
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +46,6 @@ for _entry in (ROOT, ROOT / "tools"):
 
 import dispatch_joint_quanta as joint  # noqa: E402
 import dispatch_tessera_campaign as campaign  # noqa: E402
-import tessera_campaign_container as container_tool  # noqa: E402
 
 IMAGE = "sha256:" + "a" * 64
 OTHER_IMAGE = "sha256:" + "b" * 64
@@ -240,7 +243,7 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
                           "prepared_sha256": "2" * 64,
                           "read_manifest_sha256": "4" * 64}
     record["adjoint"] = {"receipt_sha256": None}
-    (records / record_path.name).write_text(json.dumps(record))
+    (records / record_path.name).write_text(json.dumps(seal_quantum_record(record)))
     manifest = _joint_manifest(tmp_path, {"plan_sha256": "1" * 64,
                                           "prepared_sha256": "2" * 64,
                                           "read_manifest_sha256": "4" * 64})
@@ -270,7 +273,7 @@ def _base_spec(**extra) -> dict:
 
 
 def _row(spec: dict, **kwargs) -> dict:
-    return campaign._row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 
@@ -383,7 +386,7 @@ def _portable_spec(**extra):
 def test_shared_owner_and_campaign_row_honor_portable_admission():
     spec = _portable_spec()
     expected = spec["container_admission_reference"]
-    assert container_tool.admission_image_reference(spec) == expected
+    assert container_spec.admission_image_reference(spec) == expected
     row = _row(spec)
     assert row["container_images"] == [expected]
     assert _embedded_spec(row["argv"])["container_admission_reference"] == expected
@@ -413,7 +416,7 @@ def test_portable_admission_requires_inspected_image_identity():
     spec = _portable_spec()
     del spec["container"]["content_sha256"]
     with pytest.raises(RuntimeError, match="portable image admission"):
-        container_tool.admission_image_reference(spec)
+        container_spec.admission_image_reference(spec)
 
 
 def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
@@ -434,26 +437,26 @@ def test_explicit_archive_admission_keeps_the_joint_override_semantics():
     spec = _portable_spec()
     spec["container"]["archive"] = {"path": "/mnt/shared/images/campaign.tar",
                                      "sha256": ARCHIVE_SHA}
-    assert container_tool.admission_image_reference(spec) == spec["container_admission_reference"]
+    assert container_spec.admission_image_reference(spec) == spec["container_admission_reference"]
 
 
 def test_an_archive_backed_container_yields_no_admission_reference():
     container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
                  "archive": {"path": "/mnt/shared/images/campaign.tar",
                              "sha256": ARCHIVE_SHA}}
-    assert container_tool.admission_image_reference(
+    assert container_spec.admission_image_reference(
         {"container": container}) is None
 
 
 def test_an_image_container_yields_the_exact_reference():
-    assert container_tool.admission_image_reference(
+    assert container_spec.admission_image_reference(
         {"container": {"image": REPO_IMAGE}}) == REPO_IMAGE
 
 
 def test_no_container_yields_no_admission_reference():
-    assert container_tool.admission_image_reference({}) is None
+    assert container_spec.admission_image_reference({}) is None
 
 
 def test_a_malformed_container_refuses_rather_than_declines():
     with pytest.raises(RuntimeError):
-        container_tool.admission_image_reference({"container": {"mounts": []}})
+        container_spec.admission_image_reference({"container": {"mounts": []}})

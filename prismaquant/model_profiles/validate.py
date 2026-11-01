@@ -254,6 +254,8 @@ def _check_name_remap(profile) -> CheckResult:
 
 
 def _check_mtp(profile, cfg: dict, model_path: str) -> CheckResult:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     if not profile.has_mtp():
         return CheckResult("MTP module constructs + loads weights",
                            True, "profile reports no MTP (skipped)")
@@ -272,9 +274,17 @@ def _check_mtp(profile, cfg: dict, model_path: str) -> CheckResult:
     if mtp is None:
         return CheckResult("MTP module constructs + loads weights", False,
                            "build_mtp_module returned None despite has_mtp()")
+    from .base import load_complete_mtp_state_dict
+    try:
+        raw = profile.read_mtp_source_state_dict(model_path)
+        load_complete_mtp_state_dict(profile, mtp, raw, where="profile MTP validation")
+    except Exception as e:
+        return CheckResult("MTP module constructs + loads weights", False,
+                           f"MTP source load failed: {type(e).__name__}: {e}")
     return CheckResult("MTP module constructs + loads weights", True,
                        f"{type(mtp).__name__} with "
-                       f"{sum(1 for _ in mtp.named_parameters())} parameters")
+                        f"{sum(1 for _ in mtp.named_parameters())} parameters "
+                        f"loaded from {len(raw)} source tensors")
 
 
 def _check_source_passthrough(profile, model_path: str) -> CheckResult:

@@ -8,6 +8,8 @@ are pinned by the baseline tripwire. Values: byte-identical to hashlib.
 """
 import hashlib
 
+from prismaquant import joint_campaign_ledger as ledger
+
 import prismaquant.joint_layer_quanta as quanta
 from prismaquant.digests import bytes_sha256hex
 
@@ -38,7 +40,7 @@ def _parent():
 
 def _record(campaign):
     return {
-        "schema": quanta.LAYER_QUANTUM_SCHEMA,
+        "schema": ledger.LAYER_QUANTUM_SCHEMA,
         "quantum_id": "layer-000",
         "layer": 0,
         "campaign": campaign,

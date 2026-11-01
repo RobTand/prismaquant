@@ -39,9 +39,9 @@ def test_head_census_binds_the_lift_and_refuses_body_scope(tmp_path):
     args = _args(allow_pinned='lm_head', pinned_roster_only=True)
     path, payload = _census(tmp_path, args, roster)
     assert payload['pinned_roster']['lifted'] == ['lm_head']
-    tc.load_calibration_census(path, args=args)
+    tc.load_calibration_census(path, request=args)
     with pytest.raises(RuntimeError, match='must be the same scope'):
-        tc.load_calibration_census(path, args=_args())
+        tc.load_calibration_census(path, request=_args())
 
 
 def test_an_explicit_head_token_still_refuses_if_the_head_is_absent():

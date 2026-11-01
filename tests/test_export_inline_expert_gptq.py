@@ -43,6 +43,10 @@ os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 import pytest
 import torch
 
+import prismaquant.export_native_compressed as _test_exporter
+import prismaquant.native_render_codec as _native_render_codec
+from prismaquant.native_render_levers import NativeRenderLevers
+
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(),
     reason="inline packed-expert render is GPU-or-bust",
@@ -52,6 +56,18 @@ _SCRATCH_ROOT = "/home/rob/dq-runs"
 _REPO_ROOT = str(Path(__file__).resolve().parents[1])
 _STREAM_TEST = str(Path(__file__).resolve().parent
                    / "test_streaming_production_cache.py")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_export_inputs():
+    saved = (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+             _test_exporter._INPUT_GLOBAL_SCALES)
+    _test_exporter._RENDER_LEVERS = None
+    _test_exporter._CACHED_ACTIVATIONS = None
+    _test_exporter._INPUT_GLOBAL_SCALES = None
+    yield
+    (_test_exporter._RENDER_LEVERS, _test_exporter._CACHED_ACTIVATIONS,
+     _test_exporter._INPUT_GLOBAL_SCALES) = saved
 
 
 def _load_toy_fixtures():
@@ -111,19 +127,20 @@ def _set_export_act_globals(enc, act_dir):
     """Populate the export module's activation globals from the act cache."""
     from prismaquant.measure_quant_cost import ActivationIndex
 
+    levers = NativeRenderLevers.resolve({
+        "gptq": True, "scale_sweep": False,
+        "static_act_order": True, "joint_scale_opt": True})
+    enc._RENDER_LEVERS = levers
     idx = ActivationIndex(act_dir, [])
     enc._CACHED_ACTIVATIONS = enc._LazyActivationCache(idx)
     scales: dict[str, float] = {}
     for name in idx.names():
         try:
-            scales[name] = enc.compute_nvfp4_input_global_scale(idx.load(name))
+            scales[name] = _native_render_codec.compute_nvfp4_input_global_scale(
+                idx.load(name), levers=levers)
         except Exception:
             pass
     enc._INPUT_GLOBAL_SCALES = scales
-    enc._ACT_AWARE_FLAGS["gptq"] = True
-    enc._ACT_AWARE_FLAGS["scale_sweep"] = False
-    enc._ACT_AWARE_FLAGS["static_act_order"] = True
-    enc._ACT_AWARE_FLAGS["joint_scale_opt"] = True
 
 
 def _packed_tensor_bytes(tensors):
@@ -138,7 +155,9 @@ def _inline_export_body(workdir: str) -> None:
 
     toy = _load_toy_fixtures()
     from prismaquant.model_profiles import profile_from_model
-    from prismaquant.sensitivity_probe import _is_packed_experts_module
+    from prismaquant.probe_inventory import (
+        is_packed_experts_module as _is_packed_experts_module,
+    )
 
     model = toy.ToyModel().to(device=device, dtype=torch.bfloat16).eval()
     profile = profile_from_model(model)
@@ -187,8 +206,7 @@ def _inline_export_body(workdir: str) -> None:
     )
 
     saved = (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-             enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES,
-             dict(enc._ACT_AWARE_FLAGS))
+             enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES, enc._RENDER_LEVERS)
     try:
         enc._PRODUCTION_WEIGHT_CACHE = cache
         enc._INLINE_EXPERT_GPTQ = False
@@ -204,8 +222,7 @@ def _inline_export_body(workdir: str) -> None:
             model, assignment, bf16_passthrough=set(), profile=profile)
     finally:
         (enc._PRODUCTION_WEIGHT_CACHE, enc._INLINE_EXPERT_GPTQ,
-         enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES) = saved[:4]
-        enc._ACT_AWARE_FLAGS.update(saved[4])
+         enc._CACHED_ACTIVATIONS, enc._INPUT_GLOBAL_SCALES, enc._RENDER_LEVERS) = saved
 
     packed_a = _packed_tensor_bytes(tensors_a)
     packed_b = _packed_tensor_bytes(tensors_b)

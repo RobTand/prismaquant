@@ -11,7 +11,7 @@ and it would find out at serve time -- the defect ``lane_eligibility`` exists
 to stop, one field over.
 
 One rule, one home.  The DECISION is Tessera's
-(``tessera.serving.scheme.decide_lane_requirements``) and is called, never
+(``tessera.metadata.decide_lane_requirements``) and is called, never
 restated: nothing in this repository spells "rates must be in [1, 2, 4]".
 PrismaQuant's half is the FACTS -- ``tessera_render.planned_wire_facts``,
 the wire this producer's encoder is going to write for a family at a rung,
@@ -23,32 +23,26 @@ every admission leg reads it: the menu (``tessera_attesting_cells``), the
 development contract (``TesseraContract.native_cells``) and the per-unit
 export gate (``resolve_unit_route``).
 
-Consequence on the pinned table, stated because it is what a reviewer needs:
-since the v31 withdrawals NO pinned cell launches through an extension -- the
-streamed E4M3 cells that executed the ``window_gemv`` lane are withdrawn, and
-the dense E2M1 pair's span-2 provider retired with the CUDA decoder -- so the
-pinned table's every cell reads the gate as admitted and the lane-gated shapes
-these tests decide are synthesised (see ``_claiming_lane``/``_gated_carrier``
-below).  Nothing is refused today.  The BF16 rung the lane's ``routes`` also
-names would NOT pass -- rung 1792 plans rate 7 -- and no BF16 cell exists to
-claim that launch at all; the test below pins that a cell which did would be
-refused by name at all three legs, on the E2M1 dense pair, whose rung 896
-plans rate 7 for the same reason.
+The pinned table carries fused routed extension lanes. These tests check
+their exact cell roster and admitted plans. Synthetic lane-only carriers
+also exercise refusal without a compact fallback, including a plan whose
+rate is outside the claimed lane's requirements.
 """
 import copy
 import dataclasses
 import hashlib
 import json
 from types import SimpleNamespace
+from importlib.resources import as_file
 
+from tests.tessera_metadata_fixture import install_metadata
 import pytest
 import torch
-from importlib.resources import as_file
+from tests.conftest import set_cell_census
 
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
-from tests.conftest import set_cell_census
 
 
 WINDOW_LANE = "tessera_window_gemv"
@@ -221,9 +215,7 @@ def test_a_table_is_not_readable_without_the_extension_table(payload):
     block, formats = payload["lane_eligibility"], payload["formats"]
     with pytest.raises(TypeError):
         lane._parse_table(block, formats, "", "", "x")
-    # The refusal is about launches the reader cannot DECIDE, and no pinned
-    # cell names one since the v31 withdrawals -- so the gated shape is
-    # synthesised on a copy before the table is withheld.
+    # The synthetic lane-only carrier isolates a launch with no fallback.
     gated = _gated_carrier(payload)
     with pytest.raises(lane.LaneEligibilityError, match="native_extensions"):
         lane._parse_table(gated["lane_eligibility"], gated["formats"],
@@ -244,9 +236,7 @@ def test_a_table_whose_cells_launch_only_through_torch_needs_no_extension_table(
     block, formats = moved["lane_eligibility"], moved["formats"]
     table = lane._parse_table(block, formats, "", "", "x", native_extensions=None)
     assert table.present and table.lanes == ()
-    # ... and the refusal, when it fires, says WHICH launch it cannot decide.
-    # The pinned table no longer carries an extension-qualified launch, so
-    # the claiming copy supplies one.
+    # The claiming copy isolates the exact extension launch in the refusal.
     gated = _claiming_lane(payload)
     with pytest.raises(lane.LaneEligibilityError, match="tessera_window_gemv::gemv"):
         lane._parse_table(gated["lane_eligibility"], gated["formats"],
@@ -373,18 +363,21 @@ def test_planned_wire_facts_are_the_facts_the_encoded_bytes_carry(name, family, 
     and the two must be one object.  Read the facts off a unit encoded by the
     render path itself, in Tessera's OWN byte-side vocabulary."""
     from tessera.decode import reconstruct_unit
-    from tessera.serving.scheme import wire_facts_of_parsed
 
     torch.manual_seed(0)
     weight = torch.randn(4, 512, dtype=torch.bfloat16)
     unit, forests = render._encode_planned_unit(weight, name)
     spec, _rung = render.parse_tessera_format_name(name)
-    on_bytes = wire_facts_of_parsed(SimpleNamespace(unit=unit, grid=render._grid_for(spec)))
     planned = render.planned_wire_facts(family, rate)
-    assert set(planned) == set(on_bytes)
-    assert set(on_bytes["rates"]) == set(planned["rates"])
-    for key in set(planned) - {"rates"}:
-        assert planned[key] == on_bytes[key], key
+    assert set(unit.rates) == set(planned["rates"])
+    assert unit.window_bits == planned["window_bits"]
+    assert unit.body.name == planned["body"]
+    assert unit.scale_plane.name == planned["plane"]
+    assert unit.release_index.numel() == planned["release_overrides"]
+    assert (unit.diagonals is not None) == planned["diagonals"]
+    assert planned["start_state"] is False
+    assert unit.rotation.name == planned["rotation"]
+    assert render._grid_for(spec).arity == planned["grid_arity"]
     assert None not in planned.values()
     # And the render IS that unit's reconstruction, not a second encode.
     rendered = render.render_tessera_weight(weight, name)
@@ -393,11 +386,33 @@ def test_planned_wire_facts_are_the_facts_the_encoded_bytes_carry(name, family, 
         .to(dtype=weight.dtype))
 
 
+@pytest.mark.parametrize("name, family, rate", [
+    (E4M3_NAME, E4M3, E4M3_RATE),
+    (BF16_NAME, BF16, BF16_RATE),
+])
+def test_planned_wire_facts_equal_the_producers_byte_derived_facts(name, family, rate):
+    """Principle 14: the producer's own byte-side reader, where its serving
+    package is installed beside the tests, derives exactly the planned facts
+    from a unit the render path encoded."""
+    scheme = pytest.importorskip("tessera.serving.scheme")
+    torch.manual_seed(0)
+    weight = torch.randn(4, 512, dtype=torch.bfloat16)
+    unit, _forests = render._encode_planned_unit(weight, name)
+    spec, _rung = render.parse_tessera_format_name(name)
+    on_bytes = scheme.wire_facts_of_parsed(
+        SimpleNamespace(unit=unit, grid=render._grid_for(spec)))
+    planned = render.planned_wire_facts(family, rate)
+    assert set(planned) == set(on_bytes)
+    assert set(on_bytes["rates"]) == set(planned["rates"])
+    for key in set(planned) - {"rates"}:
+        assert planned[key] == on_bytes[key], key
+
+
 def test_the_planned_facts_speak_the_decision_cores_whole_vocabulary(payload):
     """Every published requirement is decided on a fact this producer
     supplies: an 'was not read' refusal would mean the plan is silent on a
     condition the loader enforces."""
-    from tessera.serving.scheme import decide_lane_requirements
+    from tessera.metadata import decide_lane_requirements
 
     requires = _row(payload, WINDOW_LANE)["lane"]["requires"]
     assert decide_lane_requirements(
@@ -562,13 +577,15 @@ def test_all_three_admission_legs_read_the_one_gate(payload, monkeypatch):
     context = _context(moved, CLAIMING, "resident")
 
     # 1. The menu.
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
+    install_metadata(monkeypatch, moved)
+
     assert render.tessera_attesting_cells(CLAIMING_NAME, serving_context=context) == ()
-    admitted, reason = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    verdict = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    admitted, reason = verdict.admitted, verdict.reason
+    assert verdict.kind == "lane_requirements"
     assert not admitted
     assert "column_rates" in reason and CLAIMING in reason and WINDOW_LANE in reason
-    assert not render.tessera_lane_attested(CLAIMING_NAME, serving_context=context)
+    assert not (render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)).admitted
 
     # 2. The per-unit export gate names the cell AND the reason.
     facts = lane.UnitStructuralFacts(
@@ -595,9 +612,11 @@ def test_the_untouched_table_admits_the_same_rung_at_every_leg(payload, monkeypa
     the family or the rung."""
     table, formats = _table(payload), _formats(payload)
     context = _context(payload, CLAIMING, "resident")
-    monkeypatch.setattr(render, "_pinned_serving_table", lambda: (table, formats))
-    monkeypatch.setattr(render, "_release_pin_satisfied", lambda: True)
-    assert render.tessera_lane_admission(CLAIMING_NAME, serving_context=context) == (True, "")
+    install_metadata(monkeypatch, payload)
+
+    verdict = render.tessera_lane_admission(CLAIMING_NAME, serving_context=context)
+    assert verdict.admitted is True
+    assert verdict.reason == ""
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     assert parsed.native_cells(CLAIMING_FAMILY, CLAIMING_RATE, serving_context=context)
 

@@ -47,7 +47,7 @@ def actual_execution(source_proof, repo_root):
     caller-chosen label is refused here.
     """
     observed = checkout_head_commit(repo_root)
-    from .aura_cost import _checkpoint_git_commit
+    from .aura_provenance import (checkpoint_git_commit as _checkpoint_git_commit)
     commit = _checkpoint_git_commit()
     _require(commit == observed, "checkpoint Git identity contradicts the sealed checkout HEAD")
     return {"git_commit": commit, **source_proof()}

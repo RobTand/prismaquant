@@ -6,9 +6,11 @@ import json
 from pathlib import Path
 
 from prismaquant.joint_aura_source_transition import (
-    _CONTRACT, _canonical, _sha, create_transition, load_transition,
+    _CONTRACT, create_transition, load_transition,
     require_verified_transition, source_proof,
 )
+
+from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 
 
 def main():
@@ -46,9 +48,9 @@ def main():
               "device": "cpu", "gpu_work": False, "receipt": receipt, "proof": proof,
               "execution": verified.execution_provenance, "preserved_units": _CONTRACT["preserved_units"],
               "total_units": _CONTRACT["total_units"], "changed_seed_rejected": rejected,
-              "manifest_sha256_after": _sha(checkpoint / "manifest.json"),
-              "prepared_sha256_after": _sha(bindings["prepared"]["path"])}
-    (args.output_dir / "result.json").write_bytes(_canonical(result) + b"\n")
+              "manifest_sha256_after": file_sha256hex(checkpoint / "manifest.json"),
+              "prepared_sha256_after": file_sha256hex(bindings["prepared"]["path"])}
+    (args.output_dir / "result.json").write_bytes(DIRECT_UTF8_STRICT.encoded(result) + b"\n")
     print(json.dumps(result, sort_keys=True))
 
 

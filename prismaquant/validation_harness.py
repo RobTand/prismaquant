@@ -101,20 +101,24 @@ def validate_artifact(
     config_payload, _config_path = _load_layer_config_input(layer_config)
     config_sha = layer_config_sha256(config_payload)
 
+    metric_options = {
+        "device": device,
+        "dtype": dtype,
+        "n_wikitext_tokens": int(n_wikitext_tokens),
+        "n_mmlu_questions": int(n_mmlu_questions),
+        "calib_seqlen": int(calib_seqlen),
+        "calib_n_samples": int(calib_n_samples),
+        "calib_split": str(calib_split),
+        "calib_seed": int(calib_seed),
+        "wikitext_max_window_tokens": _wikitext_window_limit(),
+    }
     backend = _metric_backend or _env_metric_backend() or _compute_metrics
     raw_metrics = dict(
         backend(
             model_path=model_path,
             layer_config=config_payload,
             cache_dir=cache_dir,
-            device=device,
-            dtype=dtype,
-            n_wikitext_tokens=int(n_wikitext_tokens),
-            n_mmlu_questions=int(n_mmlu_questions),
-            calib_seqlen=int(calib_seqlen),
-            calib_n_samples=int(calib_n_samples),
-            calib_split=str(calib_split),
-            calib_seed=int(calib_seed),
+            **metric_options,
             progress=bool(progress),
         )
     )
@@ -144,15 +148,21 @@ def validate_artifact(
         metrics["ppl_mmlu_acc"] = mmlu_value  # explicit-skip sentinel
     else:
         metrics["ppl_mmlu_acc"] = _finite_metric(raw_metrics, "ppl_mmlu_acc")
-    metrics["model_sha"] = _sha256_model_reference(model_path)
+    model_sha, model_identity_scope = _sha256_model_reference(model_path)
     metrics["layer_config_sha"] = config_sha
     metrics["eval_seconds"] = float(time.monotonic() - started)
-    # Metric-era marker (QC on review-batch): the end-KL eval split moved
-    # from wikitext TRAIN to TEST on 2026-06-12 — pre-marker registry
-    # records were measured on train and are NOT comparable at face value.
-    # Records without 'eval_split' are the train era.
-    metrics["eval_split"] = "test"
-    metrics["metric_era"] = "2026-06-12-test-split"
+    # eval_split retains the fixed test marker; calib_split records end-KL.
+    eval_meta = {
+        **metric_options,
+        "model_sha": model_sha,
+        "model_identity_scope": model_identity_scope,
+        "eval_split": "test",
+        "metric_era": "2026-06-12-test-split",
+        "wikitext_split": "test",
+    }
+    for key in ("model_sha", "eval_split", "metric_era"):
+        metrics[key] = eval_meta[key]
+    metrics["eval_meta"] = eval_meta
     return metrics
 
 
@@ -190,8 +200,11 @@ def _compute_metrics(
     calib_n_samples: int,
     calib_split: str,
     calib_seed: int,
+    wikitext_max_window_tokens: int,
     progress: bool,
 ) -> dict:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     try:
         import torch
         from datasets import load_dataset
@@ -205,31 +218,62 @@ def _compute_metrics(
 
     torch_device = _resolve_torch_device(torch, device)
     torch_dtype = _torch_dtype(torch, dtype, torch_device)
+    assignment = _layer_config_to_assignment(layer_config)
+    from .streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    source_root = resolve_source_checkpoint_path(model_path)
+    loading_path = str(source_root)
+    native_source = source_model_decode_contract(source_root) is not None
+    production_cache = None
+    if _active_assignment(assignment) and os.environ.get(
+        "PRISMAQUANT_VALIDATION_PROD_CACHE"
+    ):
+        expected_source_binding = build_source_model_binding(
+            source_root, dtype=torch_dtype,
+        )
+        production_cache = _load_validation_production_cache(
+            expected_source_binding=expected_source_binding,
+        )
     tokenizer = AutoTokenizer.from_pretrained(
-        model_path,
+        loading_path,
         cache_dir=str(cache_dir / "hf"),
         trust_remote_code=True,
     )
     if tokenizer.pad_token_id is None and tokenizer.eos_token is not None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        cache_dir=str(cache_dir / "hf"),
-        torch_dtype=torch_dtype,
-        trust_remote_code=True,
-    )
-    model.to(torch_device)
+    if native_source:
+        from .memory_management import CaptureMemoryGuard
+        from .streaming_model import load_resident_source_model
+
+        model = load_resident_source_model(
+            loading_path, device=torch_device, dtype=torch_dtype,
+            offload_folder=str(cache_dir / "resident-source-offload"),
+            resource_check=CaptureMemoryGuard(torch_device).check,
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            loading_path,
+            cache_dir=str(cache_dir / "hf"),
+            torch_dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+        model.to(torch_device)
     model.eval()
 
-    assignment = _layer_config_to_assignment(layer_config)
     cal_hash = hashlib.blake2b(
         canonical_layer_config_json(layer_config).encode("utf-8"),
         digest_size=16,
     ).hexdigest()
 
     with torch.no_grad():
-        with _perturbed_model(model, assignment, cache_dir, cal_hash):
+        with _perturbed_model(
+            model, assignment, cache_dir, cal_hash,
+            production_weight_cache=production_cache,
+        ):
             ppl_wikitext = _wikitext_ppl(
                 model=model,
                 tokenizer=tokenizer,
@@ -237,6 +281,7 @@ def _compute_metrics(
                 cache_dir=cache_dir,
                 device=torch_device,
                 n_tokens=n_wikitext_tokens,
+                max_window_tokens=wikitext_max_window_tokens,
                 progress=progress,
             )
             ppl_mmlu_acc = _mmlu_accuracy(
@@ -264,6 +309,7 @@ def _compute_metrics(
                 calib_seed=calib_seed,
                 cal_hash=cal_hash,
                 progress=progress,
+                production_weight_cache=production_cache,
             )
     return {
         "ppl_wikitext": float(ppl_wikitext),
@@ -289,12 +335,34 @@ def _torch_dtype(torch, dtype: str, device) -> Any:
     raise ValueError(f"unsupported dtype: {dtype!r}")
 
 
+def _load_validation_production_cache(*, expected_source_binding: Mapping[str, Any]):
+    """Resolve one configured render for all metrics in a validation run."""
+    prod_cache_obj = None
+    prod_cache_path = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE")
+    if prod_cache_path:
+        import pickle as _pickle
+        with open(prod_cache_path, "rb") as _fh:
+            prod_cache_obj = _pickle.load(_fh)
+        prod_cache_obj.require_source_binding(
+            expected_source_binding, where="validation production cache",
+        )
+        override_dir = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_DIR")
+        if override_dir and hasattr(prod_cache_obj, "relocate"):
+            prod_cache_obj.relocate(override_dir)
+        lru_gb = float(os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_LRU_GB", "16"))
+        if lru_gb > 0 and hasattr(prod_cache_obj, "enable_lru"):
+            prod_cache_obj.enable_lru(int(lru_gb * 1024**3))
+    return prod_cache_obj
+
+
 @contextlib.contextmanager
 def _perturbed_model(
     model,
     assignment: Mapping[str, str],
     cache_dir: Path,
     cal_hash: str,
+    *,
+    production_weight_cache,
 ):
     active = _active_assignment(assignment)
     if not active:
@@ -302,26 +370,13 @@ def _perturbed_model(
         return
     from .perturbed_x_cache import PerturbedActivationCache
 
-    prod_cache_obj = None
-    prod_cache_path = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE")
-    if prod_cache_path:
-        import pickle as _pickle
-        with open(prod_cache_path, "rb") as _fh:
-            prod_cache_obj = _pickle.load(_fh)
-        override_dir = os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_DIR")
-        if override_dir and hasattr(prod_cache_obj, "relocate"):
-            prod_cache_obj.relocate(override_dir)
-        lru_gb = float(os.environ.get("PRISMAQUANT_VALIDATION_PROD_CACHE_LRU_GB", "16"))
-        if lru_gb > 0 and hasattr(prod_cache_obj, "enable_lru"):
-            prod_cache_obj.enable_lru(int(lru_gb * 1024**3))
-
     hooks = PerturbedActivationCache(
         model,
         active,
         cache_dir / "validation_perturbed_hooks",
         input_rows=0,
         cal_hash=cal_hash,
-        production_weight_cache=prod_cache_obj,
+        production_weight_cache=production_weight_cache,
     )
     if hooks.missing:
         preview = ", ".join(hooks.missing[:8])
@@ -374,6 +429,7 @@ def _wikitext_ppl(
     device,
     n_tokens: int,
     progress: bool,
+    max_window_tokens: int | None = None,
 ) -> float:
     input_ids = _load_wikitext_ids(
         tokenizer,
@@ -391,15 +447,7 @@ def _wikitext_ppl(
     # token of every window sees no context from the previous window. This is
     # deliberately NOT strided/sliding-window evaluation. The env knob keeps
     # its historical name for compatibility but sets the window (chunk) size.
-    max_window = 2048
-    raw_window = os.environ.get("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE")
-    if raw_window:
-        try:
-            max_window = max(2, int(raw_window))
-        except ValueError as exc:
-            raise ValueError(
-                "PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE must be an integer"
-            ) from exc
+    max_window = _wikitext_window_limit() if max_window_tokens is None else max_window_tokens
     window_len = min(_model_context_length(model, tokenizer), max_window, seq_len)
     window_len = max(int(window_len), 2)
     nll_sum = 0.0
@@ -443,6 +491,16 @@ def _wikitext_ppl(
     if token_count <= 0:
         raise ValueError("WikiText PPL accumulated zero target tokens")
     return float(math.exp(nll_sum / float(token_count)))
+
+
+def _wikitext_window_limit() -> int:
+    raw_window = os.environ.get("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE")
+    if not raw_window:
+        return 2048
+    try:
+        return max(2, int(raw_window))
+    except ValueError as exc:
+        raise ValueError("PRISMAQUANT_VALIDATION_WIKITEXT_STRIDE must be an integer") from exc
 
 
 def _load_wikitext_ids(
@@ -670,6 +728,7 @@ def _end_kl(
     calib_seed: int,
     cal_hash: str,
     progress: bool,
+    production_weight_cache=None,
 ) -> float:
     active = _active_assignment(assignment)
     if not active:
@@ -719,6 +778,7 @@ def _end_kl(
             # student log-probs (audit M7). measure_assignment_kl also
             # hard-fails on any teacher/student shape mismatch now.
             kl_scope="last_token",
+            production_weight_cache=production_weight_cache,
         )
     )
 
@@ -859,21 +919,21 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
-def _sha256_model_reference(model_path: str) -> str:
+def _sha256_model_reference(model_path: str) -> tuple[str, str]:
     path = Path(model_path)
     h = hashlib.sha256()
     if path.is_file():
         _hash_file(h, path)
-        return h.hexdigest()
+        return h.hexdigest(), "local_content"
     if path.is_dir():
         for child in sorted(p for p in path.rglob("*") if p.is_file()):
             rel = child.relative_to(path).as_posix()
             h.update(rel.encode("utf-8"))
             h.update(b"\0")
             _hash_file(h, child)
-        return h.hexdigest()
+        return h.hexdigest(), "local_content"
     h.update(f"hf:{model_path}".encode("utf-8"))
-    return h.hexdigest()
+    return h.hexdigest(), "remote_identifier"
 
 
 def _hash_file(h: "hashlib._Hash", path: Path) -> None:
@@ -968,17 +1028,7 @@ def _main_validate(argv: list[str]) -> int:
             ppl_wikitext=metrics["ppl_wikitext"],
             ppl_mmlu_acc=metrics["ppl_mmlu_acc"],
             end_kl=metrics["end_kl"],
-            eval_meta={
-                "model_sha": metrics["model_sha"],
-                "n_wikitext_tokens": args.n_wikitext_tokens,
-                "n_mmlu_questions": args.n_mmlu_questions,
-                "calib_seqlen": args.calib_seqlen,
-                "calib_n_samples": args.calib_n_samples,
-                "calib_split": args.calib_split,
-                "calib_seed": args.calib_seed,
-                "device": args.device,
-                "dtype": args.dtype,
-            },
+            eval_meta=metrics["eval_meta"],
             created_at=utc_timestamp(),
             notes=args.notes,
         )

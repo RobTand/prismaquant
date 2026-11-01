@@ -1,4 +1,5 @@
 """Verified, reserved reads before admit stay inside the existing window (#1743)."""
+
 from collections import Counter
 import threading
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from prismaquant.tessera_campaign_requests import AnchorPlacement
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.tessera_row_stream import RowStream
 from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, OUTPUT_FEATURES,
@@ -99,7 +101,7 @@ def test_a_new_head_starts_first_reads_before_run_identity(monkeypatch, tmp_path
     campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
     started = threading.Event()
     original_load = cc._verified_capture_entry
-    original_identity = campaign._campaign_checkpoint_identity
+    original_identity = campaign.campaign_checkpoint_identity
 
     def verified(*args, **kwargs):
         started.set()
@@ -110,7 +112,7 @@ def test_a_new_head_starts_first_reads_before_run_identity(monkeypatch, tmp_path
         return original_identity(*args, **kwargs)
 
     monkeypatch.setattr(cc, "_verified_capture_entry", verified)
-    monkeypatch.setattr(campaign, "_campaign_checkpoint_identity", identity)
+    monkeypatch.setattr(campaign, "campaign_checkpoint_identity", identity)
     assert campaign.main(argv) == 0
 
 
@@ -157,7 +159,8 @@ def test_existing_journal_keeps_the_before_read_resume_gate(tmp_path, existing):
     paths[existing].mkdir()
     calls = []
     getattr(campaign, "_prime_first_anchor_batch")(SimpleNamespace(prime=calls.append),
-        args=SimpleNamespace(seed_checkpoint=[], finalize_checkpoint=False),
+        placement=AnchorPlacement(3, None, False, 1), seed_checkpoint=None,
+        batch_size=1, max_artifact_bpp=0,
         checkpoint=checkpoint, targets=[], menus={}, weights={}, profile=None,
         expert_members=None, encode_structure={}, projected_units={}, audit_units=set(),
         route_cache={})
@@ -179,7 +182,8 @@ def test_ambiguous_journal_access_is_not_treated_as_a_new_row(monkeypatch, tmp_p
     calls = []
     with pytest.raises(PermissionError, match="prime path unreadable"):
         getattr(campaign, "_prime_first_anchor_batch")(SimpleNamespace(prime=calls.append),
-            args=SimpleNamespace(seed_checkpoint=[], finalize_checkpoint=False),
+            placement=AnchorPlacement(3, None, False, 1), seed_checkpoint=None,
+        batch_size=1, max_artifact_bpp=0,
             checkpoint=checkpoint, targets=[], menus={}, weights={}, profile=None,
             expert_members=None, encode_structure={}, projected_units={}, audit_units=set(),
             route_cache={})
@@ -197,7 +201,8 @@ def test_partitioned_head_keeps_full_group_planning_before_any_early_read(monkey
     monkeypatch.setattr(type(checkpoint), "stat", premature_stat)
     calls = []
     getattr(campaign, "_prime_first_anchor_batch")(SimpleNamespace(prime=calls.append),
-        args=SimpleNamespace(), checkpoint=checkpoint, targets=[], menus={}, weights={},
+        placement=AnchorPlacement(3, None, False, 1), seed_checkpoint=None,
+        batch_size=1, max_artifact_bpp=0, checkpoint=checkpoint, targets=[], menus={}, weights={},
         profile=None, expert_members=None, encode_structure={}, projected_units={},
         audit_units=set(), route_cache={}, partitioned=True)
     assert not calls

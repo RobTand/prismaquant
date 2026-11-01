@@ -53,6 +53,13 @@ copy with that missing metadata reconstructed from the committed producer.
 The source hash and the evidence commits accompany the reconstruction; no
 cost value or campaign artifact is changed, and the production gate still
 refuses an unstamped table.
+
+The allocation fixture uses the five units with a real E4M3 R1024 price.
+The historical table has no R1024 price for layer 0's query and key units.
+The campaign covers one layer. The source probe covers the full model.
+The allocator requires costs for every mutable unit in its input population.
+The full-population refusal is covered in
+``tests/test_allocator_body_candidate_coverage_audit.py``.
 """
 from __future__ import annotations
 
@@ -109,15 +116,13 @@ def installed_contract(monkeypatch):
     this module reads a serving contract, so substituting it is substituting
     the whole attestation and nothing else: ``route_admission``,
     ``_producer_eligible``, ``expand_menu_tokens`` and the guard all run
-    exactly as production runs them.  ``_load_at`` is the parser
-    ``load_tessera_contract`` itself calls, keyed on the file's sha, so the
-    contract this returns is the same object the pin would return if the pin
-    named this build.
+    exactly as production runs them. ``read_tessera_contract`` verifies the
+    declared bytes and shares the development reader's parsed-snapshot cache.
     """
     path = trc.contract_path()
     raw = path.read_bytes()
     sha = hashlib.sha256(raw).hexdigest()
-    contract = trc._load_at(str(path), sha, f"installed:{sha[:12]}")
+    contract = trc.read_tessera_contract(str(path), sha, f"installed:{sha[:12]}")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     return contract
 
@@ -250,13 +255,29 @@ def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
     so these tests passed on an allocation Tessera could not build.
     """
     from prismaquant import allocator
+    import pickle
 
     tmp_path.mkdir(parents=True, exist_ok=True)
     costs = _historical_cost_fixture(tmp_path)
+    probe_bytes = PROBE.read_bytes()
+    original_probe = pickle.loads(probe_bytes)
+    cost_rows = pickle.loads(costs.read_bytes())["costs"]
+    priced_units = {name for name, rows in cost_rows.items()
+                    if "TESSERA_E4M3_K1_R1024" in rows}
+    assert set(cost_rows) - priced_units == {
+        "model.layers.0.self_attn.q_proj", "model.layers.0.self_attn.k_proj"}
+    assert priced_units and priced_units < set(original_probe["stats"])
+    probe = {**original_probe, "stats": {
+        name: entry for name, entry in original_probe["stats"].items()
+        if name in priced_units}}
+    assert set(probe["stats"]) == priced_units
+    probe_path = tmp_path / "campaign-population-probe.pkl"
+    probe_path.write_bytes(pickle.dumps(probe))
+    assert PROBE.read_bytes() == probe_bytes, "historical campaign probe changed"
     layer_config = tmp_path / "layer_config.json"
     monkeypatch.setattr("sys.argv", [
         "allocator",
-        "--probe", str(PROBE),
+        "--probe", str(probe_path),
         "--costs", str(costs),
         "--formats", "TESSERA",
         "--target-bits", target_bits,
@@ -266,7 +287,9 @@ def _allocate(tmp_path, monkeypatch, *, target_bits="4.5"):
         *_scope_flags(),
     ])
     allocator.main()
-    return json.loads(layer_config.read_text())
+    config = json.loads(layer_config.read_text())
+    assert set(_assignment(config)) == priced_units
+    return config
 
 
 def _assignment(config) -> dict[str, str]:
@@ -479,7 +502,7 @@ def test_the_pin_and_the_one_read_allocate_identically(tmp_path, monkeypatch):
     monkeypatch.delenv(trc.TESSERA_DEV_PIN_ENV)
     path = trc.contract_path()
     sha = hashlib.sha256(path.read_bytes()).hexdigest()
-    contract = trc._load_at(str(path), sha, f"installed:{sha[:12]}")
+    contract = trc.read_tessera_contract(str(path), sha, f"installed:{sha[:12]}")
     monkeypatch.setattr(tm, "tessera_runtime_contract", lambda: contract)
     via_read = _allocate(tmp_path / "read", monkeypatch)
 

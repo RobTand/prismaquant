@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 def main():
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument('--image-build', type=Path, required=True)
     parser.add_argument('--image-build-sha256', required=True)

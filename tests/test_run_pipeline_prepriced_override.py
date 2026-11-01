@@ -39,7 +39,7 @@ def _input(tmp_path, mode="local", *, tessera=False):
     fmt = "TESSERA_E4M3_K1_R1024" if tessera else "BF16"
     row = {"predicted_dloss": 0.0}
     if tessera:
-        from prismaquant.tessera_campaign import CURRENCY
+        from prismaquant.tessera_campaign_table import (CURRENCY)
         row = {"weight_mse": 1e-4, "output_mse": 2e-4,
                "output_mse_measured": True, "currency": CURRENCY}
     payload = {

@@ -46,13 +46,19 @@ ROOT = Path(__file__).resolve().parents[1]
 # resource ceilings and plans.
 MODULES = (
     "prismaquant/aura_cost.py",
+    "prismaquant/aura_checkpoint_journal.py",
+    "prismaquant/aura_provenance.py",
+    "prismaquant/joint_price_step.py",
     "prismaquant/cost_currency.py",
-    "prismaquant/cost_streaming.py",
+    'prismaquant/cost_streaming.py',
+    'prismaquant/streamed_boundary_artifacts.py',
+    'prismaquant/streamed_model_identity.py',
     "prismaquant/dev_mode.py",
     "prismaquant/glm_kda_capture_kernel.py",
     "prismaquant/joint_adjoint_band.py",
     "prismaquant/joint_adjoint_checkpoints.py",
     "prismaquant/joint_catalog_extension.py",
+    "prismaquant/joint_campaign_ledger.py",
     "prismaquant/joint_cost_quantum.py",
     "prismaquant/joint_cost_read_schedule.py",
     "prismaquant/joint_cost_stage_a.py",
@@ -60,6 +66,7 @@ MODULES = (
     "prismaquant/joint_forward_resume.py",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/joint_projection_backend.py",
+    "prismaquant/joint_projection_contract.py",
     "prismaquant/joint_quanta_join.py",
     "prismaquant/joint_quantum_handoff.py",
     "prismaquant/joint_replay_spill.py",
@@ -76,6 +83,7 @@ MODULES = (
     "prismaquant/stage_a_chain_split.py",
     "prismaquant/stage_inputs.py",
     "prismaquant/tessera_acquisition_inputs.py",
+    "prismaquant/tessera_campaign_table.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
@@ -98,38 +106,46 @@ RESOURCE = "resource"
 # ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
 # keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
-    ("prismaquant/aura_cost.py", "_decode_aura_unit_checkpoint"): (
+    ("prismaquant/aura_checkpoint_journal.py", "_decode_unit"): (
         1, INTEGRITY, "a unit checkpoint's envelope digest against its payload bytes"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed"): (
-        4, AMBIGUOUS, "render coverage against the roster and the render tensor proof "
-        "(integrity); a restored row's probe and activation identity (ambiguous, #1147 "
-        "report)"),
+        2, INTEGRITY, "render coverage against the roster and the render tensor proof"),
+    ("prismaquant/joint_price_step.py", "JointResumeContract.require_probe"): (
+        1, AMBIGUOUS, "full-run restored probe equality retains its existing strict policy"),
+    ("prismaquant/joint_price_step.py", "JointResumeContract.require_activation"): (
+        1, AMBIGUOUS, "full-run restored activation identity retains its existing strict policy"),
+    ("prismaquant/joint_price_step.py", "JointPriceStep.restore_unit"): (
+        1, INTEGRITY, "actual restored rendered-weight identity against its admitted tensor proof"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed.commit_streamed_units"): (
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed._record_joint_operator"): (
         1, INTEGRITY, "the operator measured is the render the cache holds, within one run"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.inspect_published_session"): (
         3, WALL, "the bind digest covers calibration/data and reproduces the selected "
         "generation's session; a dev resume first checks fields and adopts the stored "
         "bind identity (wall). Pending-only exact policy equality authenticates the "
         "issued empty namespace, including byte ceilings; the requested completed "
         "metadata owner's session, policy, label and bound fields agree (structure). "
         "Ordinary resume byte-ceiling differences still go through seal_check"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
         1, STRUCTURE, "a resumed boundary entry belongs to this generation"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.attach"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.attach"): (
         1, STRUCTURE, "the attached forward recovery is the session it records"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts._entry_identity"): (
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts._entry_identity"): (
         1, STRUCTURE, "a boundary reference names a live generation"),
-    ("prismaquant/cost_streaming.py", "_hash_one_source_shard"): (
+    ('prismaquant/streamed_model_identity.py', "_strict_streamed_digest_entries"): (
+        1, INTEGRITY, "an explicit streamed proof's recorded checkpoint map against the live index"),
+    ('prismaquant/streamed_model_identity.py', "_hash_one_source_shard"): (
         1, INTEGRITY, "a source shard changed while it was hashed"),
-    ("prismaquant/cost_streaming.py", "build_source_checkpoint_identity"): (
+    ('prismaquant/streamed_model_identity.py', "build_source_checkpoint_identity"): (
         1, INTEGRITY, "source metadata changed while it was hashed"),
-    ("prismaquant/cost_streaming.py", "_read_streamed_model_identity_cache"): (
+    ('prismaquant/streamed_model_identity.py', "_read_streamed_model_identity_cache"): (
         1, INTEGRITY, "an identity cache for another source is not this source's hashes"),
-    ("prismaquant/cost_streaming.py", "validate_streamed_model_identity"): (
+    ('prismaquant/streamed_model_identity.py', "validate_source_model_binding"): (
+        2, INTEGRITY, "a binding's checkpoint schema and content digest against its own serialized body"),
+    ('prismaquant/streamed_model_identity.py', "validate_streamed_model_identity"): (
         2, INTEGRITY, "the identity schema, and content_sha256 against its shard digests"),
-    ("prismaquant/cost_streaming.py", "validate_cached_streamed_model_identity"): (
+    ('prismaquant/streamed_model_identity.py', "validate_cached_streamed_model_identity"): (
         1, INTEGRITY, "a cached identity whose tensor-to-shard map is not this checkpoint's"),
     ("prismaquant/joint_adjoint_checkpoints.py", "unpack_shared_states"): (
         1, INTEGRITY, "a pack member against its recorded digest"),
@@ -145,15 +161,16 @@ ALLOWLIST = {
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
     ("prismaquant/joint_dispatch_pilot.py", "_authenticated_quantum_record"): (
-        2, INTEGRITY, "the PB producer original quantum bytes against the bound argv digest "
-        "and declared length, then decoded bytes against their digest; no running identity"),
+        2, INTEGRITY, "the explicit consumer copy of the original quantum wire, read within "
+        "the declared bound, against the sealed argv digest and declared length; "
+        "the producer path remains provenance, with no running identity seal"),
     ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_completion"): (
         1, INTEGRITY, "supplied counters bytes against the authenticated PB producer reference"),
     ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_source_contract"): (
         1, STRUCTURE, "the independently reviewed pilot implementation names the proposed "
         "code; this is the explicitly overridable fanout qualification gate, not a resume seal"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
-        3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
+        2, AMBIGUOUS, "record bytes and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_cost_quantum.py", "require_chain_readset"): (
         1, INTEGRITY, "the staged data manifest is the readset the record names"),
@@ -178,8 +195,10 @@ ALLOWLIST = {
         1, INTEGRITY, "the stored session digest reproduces from the stored bind identity"),
     ("prismaquant/joint_forward_resume.py", "build_forward_recovery"): (
         1, INTEGRITY, "a local export manifest changed after it was written"),
-    ("prismaquant/joint_layer_quanta.py", "check_quantum_for_campaign"): (
-        3, AMBIGUOUS, "the record reproduces its own seal (integrity); the unit roster "
+    ("prismaquant/joint_campaign_ledger.py", "require_quantum_identity"): (
+        1, INTEGRITY, "the quantum record's canonical identity reproduces its own body"),
+    ("prismaquant/joint_campaign_ledger.py", "require_quantum_campaign"): (
+        2, AMBIGUOUS, "the unit roster "
         "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
@@ -203,15 +222,14 @@ ALLOWLIST = {
         "binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_projection_backend.py", "normalize_projection_backend"): (
         1, INTEGRITY, "the kernel binary against its packaged qualification"),
-    ("prismaquant/joint_projection_backend.py", "validate_projection_backend_identity"): (
+    ("prismaquant/joint_projection_contract.py", "validate_projection_backend_identity"): (
         1, AMBIGUOUS, "a serialized arithmetic record must name a qualified backend "
         "(numerics; the runtime comparison is a seal_check)"),
     ("prismaquant/joint_projection_backend.py", "prewarm_projection_backend"): (
         3, INTEGRITY, "the compiled source, flags and loaded binary against the "
         "qualification's bytes"),
     ("prismaquant/joint_quanta_join.py", "_check_record"): (
-        3, INTEGRITY, "the record's own seal, a retargeted receipt, and the unit roster "
-        "(wall)"),
+        1, INTEGRITY, "a receipt's identity must refer to its authenticated quantum record"),
     ("prismaquant/joint_quanta_join.py", "_read_status"): (
         1, INTEGRITY, "a status receipt belongs to its quantum"),
     ("prismaquant/joint_quanta_join.py", "_load_cost_payload"): (
@@ -263,13 +281,11 @@ ALLOWLIST = {
         1, AMBIGUOUS, "a record's Stage A slice against the proof for its layer"),
     ("tools/dispatch_joint_quanta.py", "_read_bound_slice"): (
         1, INTEGRITY, "slice bytes against the digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_json"): (
-        1, INTEGRITY, "a plan input's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_digest"): (
+    ("prismaquant/tessera_campaign_table.py", "selection_stack_samples"): (
+        1, INTEGRITY, "the declared sampling-size vector digest matches the replayed draw"),
+    ("prismaquant/tessera_campaign_table.py", "_bound_digest"): (
         1, INTEGRITY, "a file's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "_bound_pickle"): (
-        1, INTEGRITY, "a pickle's bytes against its bound digest"),
-    ("tools/dispatch_tessera_campaign.py", "verify_joint_campaign_scope"): (
+    ("prismaquant/tessera_campaign_table.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
     ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
         1, WALL, "row-work predictions bind the census roster and shapes they price; "
@@ -278,11 +294,11 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the capture binds this census (calibration data)"),
     ("tools/dispatch_tessera_campaign.py", "_merge_export_hessian_references.accepted_rows"): (
         1, INTEGRITY, "reference commitments bind the priced row they merge"),
-    ("tools/dispatch_tessera_campaign.py", "merge_checkpoint"): (
+    ("prismaquant/tessera_campaign_table.py", "merge_checkpoint"): (
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
-    ("tools/dispatch_tessera_campaign.py", "_merge_acquisition_settings"): (
+    ("prismaquant/tessera_campaign_table.py", "_merge_acquisition_settings"): (
         1, WALL, "each acquisition wire record names the checkpoint unit weight that produced it"),
-    ("tools/dispatch_tessera_campaign.py", "_check_acquisition_identity"): (
+    ("prismaquant/tessera_campaign_table.py", "check_acquisition_identity"): (
         1, WALL, "authenticated locator-independent controls, cost/run/probe and current regime "
         "agree across real rows and plan; only raw request provenance uses seal_check"),
     # Opt-in #1986 namespace ownership only; no general source/calibration gate.
@@ -302,13 +318,10 @@ ALLOWLIST = {
         1, INTEGRITY, "the inspected Docker image content reproduces its declared content digest"),
     ("tools/regenerate_joint_quanta.py", "_load_json"): (
         1, INTEGRITY, "bytes against the pinned digest"),
-    ("tools/regenerate_joint_quanta.py", "_check_authorized_diff"): (
-        1, INTEGRITY, "a regenerated record reproduces its own seal"),
     ("tools/regenerate_joint_quanta.py", "_prior_slice_manifest"): (
         1, INTEGRITY, "manifest bytes against the digest the prior record stored"),
     ("tools/regenerate_joint_quanta.py", "_check_authorized_metadata_diff"): (
-        2, INTEGRITY, "the new manifest digest hashes the new slice; the record reproduces "
-        "its own seal"),
+        1, INTEGRITY, "the relocated manifest's digest must hash its newly produced slice bytes"),
     ("tools/regenerate_joint_quanta.py", "_load_production_cache"): (
         1, INTEGRITY, "production cache bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "main"): (
@@ -337,6 +350,8 @@ ALLOWLIST = {
         "declared keys; a shape check, not a seal"),
     ("prismaquant/tessera_joint_aura.py", "require_encoder_source_reuse_record"): (
         1, STRUCTURE, "a reuse record names two different encoder seals"),
+    ("tools/dispatch_joint_quanta.py", "_dispatch"): (
+        1, INTEGRITY, "a reused PB result belongs to the exact quantum request bytes recorded at its submission"),
     ("tools/dispatch_joint_quanta.py", "_container_wrap"): (
         1, RESOURCE, "the container's host and device envelope against the plan's own bound "
         "resource policy, both running values"),
@@ -533,7 +548,9 @@ def test_d32_consumers_add_no_run_identity_refusals():
         'prismaquant/joint_aura.py': {
             'paired_assignment_difference': 0,
             '_validated_assignment': 1,  # operator coordinate against the row's own unit
-            '_require_probe_alignment': 1,  # same mathematical probe coordinates
+        },
+        'prismaquant/joint_aura_rows.py': {
+            'require_probe_alignment': 1,  # same mathematical probe coordinates
         },
     }
     for path, expected in scopes.items():
@@ -653,7 +670,7 @@ def test_a_new_seal_fails_the_lint(allowed):
     problems = violations(sources)
     assert len(problems) == 1
     assert "seal_check" in problems[0]
-    assert ("verify_quantum_identity: 4" if allowed else "load_run: 1") in problems[0]
+    assert ("verify_quantum_identity: 3" if allowed else "load_run: 1") in problems[0]
 
 
 NEW_SEAL_FORMS = {
@@ -730,10 +747,10 @@ def test_incoming_readset_classification_allows_only_its_existing_slice_check():
 
 
 @pytest.mark.parametrize("path,scope,existing,indent,allowed", [
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session",
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.inspect_published_session",
      '        directory = Path(self.config["directory"]) / str(session["generation"])\n',
      "        ", 3),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind",
+    ('prismaquant/streamed_boundary_artifacts.py', "StreamedBoundaryArtifacts.rebind",
      '        session, directory = self.inspect_published_session(session, identity=identity)\n',
      "        ", 0),
     ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture",

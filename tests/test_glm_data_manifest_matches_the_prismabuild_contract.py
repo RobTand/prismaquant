@@ -15,8 +15,8 @@ and a mismatch is the only thing this test exists to catch.
 import json
 import posixpath
 
-from experiments import glm_data_manifests
-from experiments.glm_data_manifests import SCHEMA, build_manifest
+from prismaquant import campaign_data_manifests as glm_data_manifests
+from prismaquant.campaign_data_manifests import SCHEMA, build_campaign_row_manifest
 
 from test_glm_arc_prewarm_weight_extents import _campaign
 
@@ -36,7 +36,7 @@ def test_a_built_manifest_carries_exactly_the_keys_prismabuild_accepts(
     # rather than moving the fixture.
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(tmp_path))
 
-    manifest = build_manifest(
+    manifest = build_campaign_row_manifest(
         campaign, "row-0000", {"tool": "test", "unix": 0})
 
     assert set(manifest) == PB_MANIFEST_KEYS

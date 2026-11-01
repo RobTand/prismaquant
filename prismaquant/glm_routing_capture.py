@@ -98,7 +98,8 @@ def capture_streamed_glm_routes(runner, calibration_ids, *, calibration,
     authority = owner = source_identity = None
     if original:
         from .calibration_data import _validate_calibration_draw
-        from .cost_streaming import StreamedBoundaryArtifacts, build_streamed_model_identity
+        from .streamed_boundary_artifacts import StreamedBoundaryArtifacts
+        from .streamed_model_identity import build_streamed_model_identity
         from .joint_aura import source_execution_identity
         from .source_generation import _control, original_source_runtime, validate_original_source_runtime
         from .tessera_calibration_cache import require_original_source_authority

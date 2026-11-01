@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -84,6 +85,57 @@ def _owner(tmp_path, monkeypatch, *, n_batches=chain.GROUP_SIZE):
     owner._local_output_spool = ProducedOutputSpool(
         backend, capacity_deferred=CapacityDeferred)
     return owner, publication, backend
+
+
+@pytest.mark.parametrize("options", [{}, {"paced": None}, {"paced": True}, {"paced": False}])
+def test_submit_selects_only_the_requested_group_pacing(tmp_path, options):
+    calls = []
+
+    class Export(ControlledExport):
+        def submit_group(self, batch_id, *, entries, **kwargs):
+            calls.append(kwargs)
+            return super().submit_group(batch_id, entries=entries)
+
+    adapter = ProducedOutputSpool(Export(tmp_path / "local"), capacity_deferred=CapacityDeferred)
+    adapter.reserve("batch", 65536)
+    ref = write_exact_activation_cache_entry(
+        adapter.directory("batch"), "entry", torch.arange(8), identity={"session": "fixture"},
+        max_tensor_bytes=64, max_file_bytes=65536)
+    adapter.record("batch", ref, tmp_path / "canonical")
+    adapter.submit("batch", **options)
+    assert calls == ([options] if options.get("paced") is not None else [{}])
+
+
+@pytest.mark.parametrize("options", [{}, {"paced": None}, {"paced": True}, {"paced": False}])
+def test_produced_files_select_only_the_requested_group_pacing(tmp_path, monkeypatch, options):
+    from test_streamed_boundary_artifacts import _bound
+
+    calls = []
+    commits = []
+
+    class Export(ControlledExport):
+        def submit_group(self, batch_id, *, entries, **kwargs):
+            calls.append(kwargs)
+            answer = super().submit_group(batch_id, entries=entries)
+            self.acknowledge(batch_id)
+            return answer
+
+    backend = Export(tmp_path / "spool")
+    adapter = ProducedOutputSpool(backend, capacity_deferred=CapacityDeferred)
+    with _bound(tmp_path / "writer") as owner, monkeypatch.context() as patch:
+        patch.setattr(owner, "_produced", SimpleNamespace(
+            batch_id_for=lambda **kwargs: "batch",
+            require_prewrite=lambda **kwargs: None))
+        patch.setattr(owner, "_produced_plan", {"write_only": True})
+        patch.setattr(owner, "_local_output_spool", adapter)
+        patch.setattr(owner, "_produced_commit_origin", commits.append)
+        refs = owner.write_produced_files(
+            [("record.bin", b"original-bytes")], kind="handoff-record", boundary_index=0,
+            **options)
+        assert calls == ([options] if options.get("paced") is not None else [{}])
+        assert Path(refs[0].path).read_bytes() == b"original-bytes"
+        assert commits == [{"batch_id": "batch", "references": refs}]
+        assert backend.groups["batch"]["released"]
 
 
 def test_preallocation_uses_serialized_inode_and_preserves_exact_bytes(tmp_path, monkeypatch):
@@ -246,12 +298,6 @@ def test_a_checkpoint_entry_declares_its_class_and_a_payload_entry_stays_unchang
     adapter.await_group("g")
     assert [ref.path for ref in adapter.durable_entries()] == [
         str(tmp_path / "canonical" / Path(ref.path).name) for ref in references]
-
-
-def test_the_former_stage_a_import_names_the_same_client():
-    from prismaquant import stage_a_local_spool as former
-    assert former.BoundaryOutputSpool is ProducedOutputSpool
-    assert former.BoundarySpoolRefused is ProducedOutputSpoolRefused
 
 
 def _landed_read_back_group(adapter, backend, batch_id, tmp_path):
@@ -466,7 +512,7 @@ class _RecordingExport(ControlledExport):
 def _write_only_owner(adapter, groups):
     """An owner's settle state around a real spool: only what it reads."""
     from types import SimpleNamespace
-    from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 
     owner = StreamedBoundaryArtifacts.__new__(StreamedBoundaryArtifacts)
     owner._local_output_spool = adapter

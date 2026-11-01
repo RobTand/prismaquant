@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from prismaquant import priced_cell
 from prismaquant import allocator_candidates as ac
 from prismaquant.model_profiles import DefaultProfile
 from test_joint_aura_assignment_diagnostics import _row, _rebuild
@@ -272,7 +273,7 @@ def test_fused_uniform_and_mixed_prices_share_one_paired_cost_table(monkeypatch)
     group = next(iter(grouped))
     for candidate in grouped[group]:
         row = grouped_costs[group][candidate.fmt]
-        assert ac.cost_entry_predicted_dloss(grouped_stats[group], row) == candidate.predicted_dloss
+        assert priced_cell.cost_entry_predicted_dloss(grouped_stats[group], row) == candidate.predicted_dloss
         assert row["paired_rate_trade"]["candidate_point_cost"] == row["predicted_dloss"]
 
 
@@ -400,7 +401,7 @@ def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path,
     import json
     import pickle
     from prismaquant import allocator
-    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.joint_aura_rows import make_joint_aura_entry
     from test_allocator_measured_runtime_cli import _main_fixture
     names = [f"model.layers.5.mlp.experts.{e}.{p}_proj" for e in (0, 1)
              for p in ("gate", "up", "down")]
@@ -459,14 +460,14 @@ def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path,
 
 
 def _assert_complete_cli_trade(actual, costs, selected, baseline, z):
-    from prismaquant.joint_aura import identity_sha256
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     expected = ac.price_paired_rate_trade(costs, selected, baseline, profile=DefaultProfile(), ucb_z=float(z))
     assert actual == expected
     assert actual["probe_ids"] == costs[next(iter(selected))][LOW]["probe_ids"]
     for key, assignment in (("assignment_a", selected), ("assignment_b", baseline)):
         identities = {n: costs[n][f]["joint_operator_identity_sha256"] for n, f in sorted(assignment.items())}
         assert actual[key]["operator_identity_sha256_by_unit"] == identities
-        assert actual[key]["assignment_identity_sha256"] == identity_sha256(identities)
+        assert actual[key]["assignment_identity_sha256"] == joint_identity_sha256(identities)
     return expected
 
 
@@ -566,7 +567,7 @@ def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tm
     import json
     import pickle
     from prismaquant import allocator
-    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.joint_aura_rows import make_joint_aura_entry
     from prismaquant.layer_config import load_assignment
     from test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
     admit_synthetic_table(monkeypatch)  # producer attestation only; parse and hash checks still run
@@ -697,7 +698,7 @@ def test_real_cli_packed_menu_emits_and_final_guard_refuses_dominant_trade(tmp_p
     import json
     import pickle
     from prismaquant import allocator
-    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.joint_aura_rows import make_joint_aura_entry
     from prismaquant.layer_config import load_assignment
     from test_allocator_measured_runtime_cli import _main_fixture
     _layer, names = _two_expert_layer()

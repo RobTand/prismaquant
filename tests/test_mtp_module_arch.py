@@ -280,8 +280,10 @@ def test_load_mtp_state_dict_folds_packed_experts():
         "layers.0.mlp.experts.1.down_proj.weight":
             torch.full((hidden, inter), 0.5),
     }
-    missing, _extra = profile.load_mtp_state_dict(mtp, raw)
+    missing, extra = profile.load_mtp_state_dict(mtp, raw)
     assert missing == [], missing
+    assert "layers.0.mlp.experts.gate_up_proj" in extra
+    assert "layers.0.mlp.experts.down_proj" in extra
 
     params = dict(mtp.named_parameters())
     gate_up = params["layers.0.mlp.experts.gate_up_proj"]
@@ -295,6 +297,7 @@ def test_load_mtp_state_dict_folds_packed_experts():
 
 
 def test_load_mtp_state_dict_reports_unmatched_keys():
+    from prismaquant.model_profiles.base import load_complete_mtp_state_dict
     from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
 
     import torch
@@ -304,6 +307,52 @@ def test_load_mtp_state_dict_reports_unmatched_keys():
     missing, _ = profile.load_mtp_state_dict(
         mtp, {"not.a.real.key": torch.zeros(1)})
     assert missing == ["not.a.real.key"]
+    with pytest.raises(RuntimeError, match="unmatched_source=.*not.a.real.key"):
+        load_complete_mtp_state_dict(
+            profile, mtp, {"not.a.real.key": torch.zeros(1)}, where="unmatched control",
+        )
+
+
+@pytest.mark.parametrize("dtype_name", ["bfloat16", "float32"])
+def test_load_mtp_state_dict_accepts_complete_exact_packed_zero_weights(dtype_name):
+    import torch
+    from prismaquant.model_profiles.base import load_complete_mtp_state_dict
+    from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
+
+    profile = Qwen3_5Profile()
+    module = profile.build_mtp_module(_minimal_moe_text_config()).to(getattr(torch, dtype_name))
+    raw = {name: torch.zeros_like(tensor) for name, tensor in module.state_dict().items()}
+    assert profile.load_mtp_state_dict(module, raw) == ([], [])
+    load_complete_mtp_state_dict(profile, module, raw, where="exact packed control")
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in module.state_dict().values())
+
+
+@pytest.mark.parametrize("projection", ["gate_proj", "up_proj", "down_proj"])
+def test_load_mtp_state_dict_refuses_broadcastable_incomplete_projection(projection):
+    import torch
+    from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
+
+    profile = Qwen3_5Profile()
+    module = profile.build_mtp_module(_minimal_moe_text_config())
+    gate_up = dict(module.named_parameters())["layers.0.mlp.experts.gate_up_proj"]
+    inter, hidden = gate_up.shape[1] // 2, gate_up.shape[2]
+    width = inter if projection == "down_proj" else hidden
+    raw = {f"layers.0.mlp.experts.0.{projection}.weight": torch.full((1, width), 0.25)}
+    with pytest.raises(RuntimeError, match="MTP source/module coverage failure.*shape=.*expected="):
+        profile.load_mtp_state_dict(module, raw)
+
+
+def test_load_mtp_state_dict_refuses_expert_outside_packed_shape():
+    import torch
+    from prismaquant.model_profiles.qwen3_5 import Qwen3_5Profile
+
+    profile = Qwen3_5Profile()
+    module = profile.build_mtp_module(_minimal_moe_text_config())
+    gate_up = dict(module.named_parameters())["layers.0.mlp.experts.gate_up_proj"]
+    experts, two_inter, hidden = gate_up.shape
+    raw = {f"layers.0.mlp.experts.{experts}.gate_proj.weight": torch.zeros(two_inter // 2, hidden)}
+    with pytest.raises(RuntimeError, match="MTP source/module coverage failure.*cannot address packed shape"):
+        profile.load_mtp_state_dict(module, raw)
 
 
 def test_read_mtp_source_state_dict_strips_the_prefix(tmp_path):

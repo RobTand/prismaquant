@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from experiments.glm_full_capture_profile import CaptureObserver
-from prismaquant.tessera_campaign import _collect_activations
+from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
 
 def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path, monkeypatch):
@@ -21,7 +21,7 @@ def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path, mo
     torch.manual_seed(917)
     model = torch.nn.Sequential(torch.nn.Linear(4, 3)).cuda()
     batches = [torch.randn(1, 7, 4) for _ in range(34)]
-    baseline = _collect_activations(model, ['0'], batches, 11, 'cuda',
+    baseline = capture_activation_statistics(model, ['0'], batches, 11, 'cuda',
                                     want_hessian=True, forward_batch=model)
     seen = []
     def forward(batch):
@@ -30,7 +30,7 @@ def test_observer_keeps_exact_cuda_capture_and_original_batch_order(tmp_path, mo
     with CaptureObserver(tmp_path/'observed', profile_layers=(0,)) as observer:
         observer.result['netdata']['interval_seconds'] = 0.05
         observer.result['python_sampler']['interval_seconds'] = 0.05
-        actual = observer.wrap_collector(_collect_activations)(
+        actual = observer.wrap_collector(capture_activation_statistics)(
             model, ['0'], batches, 11, 'cuda', want_hessian=True,
             forward_batch=forward)
     assert len(seen) == len(batches)

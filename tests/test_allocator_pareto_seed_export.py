@@ -87,11 +87,17 @@ def test_allocator_exports_expanded_pareto_seed_assignments(tmp_path):
     assert manifest["schema"] == "prismaquant.allocator.pareto_manifest.v1"
     assert len(manifest["candidates"]) >= 2
 
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import load_assignment
+
     saw_mxfp8 = False
     for row in manifest["candidates"]:
         payload = json.loads(Path(row["path"]).read_text())
         assert payload["schema"] == "prismaquant.allocator.pareto_assignment.v2"
         assignment = payload["assignment"]
+        assert assignment_serialization_sha256(load_assignment(row["path"])) == (
+            assignment_serialization_sha256(assignment)
+        )
         assert set(assignment) == expected_assignment_names
         assert all(".__siblings__." not in name for name in assignment)
         assert len(payload["label"]) > len("allocator_target_")

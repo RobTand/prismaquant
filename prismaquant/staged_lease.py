@@ -175,7 +175,7 @@ def _refuse(reason: str, *, kind: str) -> LeaseRefused:
     return LeaseRefused(reason, kind=kind)
 
 
-def _classify(refusal: str) -> str:
+def classify_refusal(refusal: str) -> str:
     """Integrity or availability for an SDK refusal string."""
     head = str(refusal).split(":", 1)[0]
     if head in _INTEGRITY_REFUSALS:
@@ -183,6 +183,11 @@ def _classify(refusal: str) -> str:
     if head in _AVAILABILITY_REFUSALS:
         return "availability"
     return "integrity"
+
+
+#: Private alias kept for one release (PQ #2616). New code imports
+#: ``classify_refusal``.
+_classify = classify_refusal
 
 
 def set_lease_helper_root(path: str | Path | None) -> None:
@@ -914,7 +919,7 @@ def resolve_ram_covers(resolver, declared, entry):
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     got = expected.get(key) if isinstance(expected, dict) else None
     if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
@@ -967,7 +972,7 @@ def resolve_stage_covers(resolver, declared, entry):
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     got = expected.get(key) if isinstance(expected, dict) else None
     if (not isinstance(got, dict) or got.get("bytes") != entry["bytes"]
@@ -1064,7 +1069,7 @@ def _resolve_window_covers(resolver, items, *, tier_id: str, epoch: str,
                       kind="integrity") from None
     if not isinstance(answer, dict) or not answer.get("ok"):
         refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
-        raise _refuse(str(refusal), kind=_classify(refusal))
+        raise _refuse(str(refusal), kind=classify_refusal(refusal))
     expected = answer.get("expected")
     for key, (_declared, entry) in zip(keys, items):
         got = expected.get(key) if isinstance(expected, dict) else None
@@ -1219,49 +1224,99 @@ def acquire_entry_window(resolver, declared, entry: dict):
     return window, key
 
 
+#: How the strict exact-entry reader leased its windows, this process
+#: (PQ #997). ``windows_batched`` counts multi-entry lease windows and
+#: ``entries_batched`` the entries they served; ``entries_single`` counts
+#: entries leased one at a time, and ``batch_fallbacks`` the groups whose
+#: batched lease was refused and re-read one entry at a time.
+EXACT_LEASE_COUNTERS = {"windows_batched": 0, "entries_batched": 0,
+                        "entries_single": 0, "batch_fallbacks": 0}
+
+
+def exact_lease_counters() -> dict:
+    """A copy of :data:`EXACT_LEASE_COUNTERS` for a report."""
+    return dict(EXACT_LEASE_COUNTERS)
+
+
+def enter_group_lease(entry_resolver, members, live_windows, counters=None):
+    """Pin one group in at most two windows (RAM, then SSD), or ``None``.
+
+    The group-granular form of ``acquire_entry_window``'s RAM-first rule.
+    Entries offering a RAM copy share one RAM window when RAM is allowed,
+    and the rest share one SSD window. When the RAM cover lookup refuses as
+    availability for the whole set (the epoch moved, nothing is published
+    at it, the tier is not announced), each of those entries records the
+    RAM fallback and joins the SSD window, which is what the single-entry
+    leg does for each of them.
+
+    Every other refusal returns ``None`` after releasing whatever this call
+    pinned, and the caller re-reads the group one entry at a time, keeping
+    the single-entry refusal kinds exactly. This covers a partial RAM cover,
+    any refusal of the SSD lookup, and any refusal to enter. A batched
+    lookup that misses one key refuses the whole set as
+    ``source-coverage-gap`` (integrity), where that entry alone would
+    refuse ``unpublished`` (availability). A read is never served on a
+    batched proof alone: the SDK re-verifies every key under the ownership
+    lock at acquire, and every key is still opened through the SDK under
+    the pin.
+
+    ``members`` is ``[(ref, staged entry), ...]`` where ``ref.path`` is the
+    declared file. ``counters`` is the report this call adds to
+    (:data:`EXACT_LEASE_COUNTERS` unless the caller keeps its own, as the
+    PWC retained window does).
+    """
+    if counters is None:
+        counters = EXACT_LEASE_COUNTERS
+    from .staged_tier_policy import tier_is_allowed
+    ram = ([member for member in members if member[1].get("ram_path") is not None]
+           if tier_is_allowed("ram") else [])
+    ssd = [member for member in members if member not in ram]
+    assignments, entered = {}, []
+
+    def items(subset):
+        return [(Path(ref.path), staged) for ref, staged in subset]
+
+    try:
+        plans = []
+        if ram:
+            try:
+                plans.append(acquire_entries_window(entry_resolver, items(ram), tier="ram")
+                             + (ram,))
+            except LeaseRefused as refusal:
+                # ``source-coverage-gap`` (a partial RAM cover) is classed
+                # integrity, so it takes the per-entry path below.
+                if refusal.kind != "availability":
+                    raise
+                for ref, _staged in ram:
+                    entry_resolver.record_ram_fallback(Path(ref.path), str(refusal))
+                ssd = list(members)
+        if ssd:
+            plans.append(acquire_entries_window(entry_resolver, items(ssd), tier="ssd")
+                         + (ssd,))
+        for lease_window, keys, subset in plans:
+            lease_window.__enter__()
+            # Owned by the caller's cleanup from the moment it is entered,
+            # so a failed release below can never strand the pin.
+            live_windows.append(lease_window)
+            entered.append(lease_window)
+            for (ref, _staged), key in zip(subset, keys):
+                assignments[ref] = (lease_window, key)
+    except LeaseRefused:
+        for lease_window in entered:
+            lease_window.__exit__(None, None, None)
+            live_windows.remove(lease_window)
+        counters["batch_fallbacks"] += 1
+        return None
+    counters["windows_batched"] += len(entered)
+    counters["entries_batched"] += len(members)
+    return assignments
+
+
 #: Backoff between release attempts: doubles from the first delay up to the
 #: cap. Neither changes what a retry can do (release is idempotent); they
 #: only set how soon a transient clears is noticed.
 _RELEASE_RETRY_FIRST_S = 0.05
 _RELEASE_RETRY_CAP_S = 5.0
-
-
-def _mount_options(path: str, mountinfo: str = "/proc/self/mountinfo"):
-    """``(fstype, {option: value})`` of the mount holding ``path``, or ``None``.
-
-    The longest mount point that is a path prefix wins, as the kernel
-    resolves it. Super options (after the `` - `` separator) carry the NFS
-    ``timeo``/``retrans`` values; per-mount options are merged under them.
-    """
-    target = os.path.abspath(path)
-    best = None
-    try:
-        with open(mountinfo, encoding="utf-8") as stream:
-            rows = stream.read().splitlines()
-    except OSError:
-        return None
-    for row in rows:
-        head, sep, tail = row.partition(" - ")
-        fields = head.split()
-        if not sep or len(fields) < 6:
-            continue
-        point = fields[4].replace("\\040", " ")
-        if not (target == point or target.startswith(point.rstrip("/") + "/")
-                or point == "/"):
-            continue
-        tail_fields = tail.split()
-        if len(tail_fields) < 3:
-            continue
-        options = {}
-        for text in (fields[5], tail_fields[2]):
-            for item in text.split(","):
-                name, _eq, value = item.partition("=")
-                options[name] = value
-        if best is None or len(point) > len(best[0]):
-            best = (point, tail_fields[0], options)
-    if best is None:
-        return None
-    return best[1], best[2]
 
 
 def release_retry_horizon_s(path: str, mountinfo: str = "/proc/self/mountinfo") -> float:
@@ -1279,10 +1334,12 @@ def release_retry_horizon_s(path: str, mountinfo: str = "/proc/self/mountinfo") 
     pin on any other filesystem has no such horizon -- a failure there is not
     transient -- so it is not retried (``0``).
     """
-    found = _mount_options(path, mountinfo)
-    if found is None or not found[0].startswith("nfs"):
+    from .mount_facts import find_mount
+
+    found = find_mount(path, table=mountinfo)
+    if found is None or not found.filesystem.startswith("nfs"):
         return 0.0
-    options = found[1]
+    options = found.options
     try:
         timeo_s = int(options.get("timeo", "")) / 10.0
         retrans = int(options.get("retrans", ""))
@@ -1445,7 +1502,7 @@ class LeaseWindow:
                 if not isinstance(answer, dict) or not answer.get("ok"):
                     refusal = answer.get("refusal", "unknown") if isinstance(answer, dict) else "unknown"
             if not isinstance(answer, dict) or not answer.get("ok"):
-                raise _refuse(str(refusal), kind=_classify(refusal))
+                raise _refuse(str(refusal), kind=classify_refusal(refusal))
         # Successful acquire: bind state without reporting entry until the
         # very end. Any failure below releases exactly the just-acquired
         # ref (ids known) or retains the idempotent token for an explicit

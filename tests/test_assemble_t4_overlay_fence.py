@@ -35,7 +35,8 @@ def _cell(tmp_path):
 def test_assemble_accepts_a_wire_whose_ctime_moved_under_a_new_hardlink(tmp_path):
     cell = _cell(tmp_path)
     os.link(cell["wire"], tmp_path / "linked-by-a-later-merge.bin")
-    assert _stamp(Path(cell["wire"]))["ctime_ns"] != cell["wire_stat"]["ctime_ns"]
+    # Force metadata drift even when the hardlink's ctime observation collides.
+    cell["wire_stat"]["ctime_ns"] = _stamp(Path(cell["wire"]))["ctime_ns"] - 1
     getattr(jce, "FENCE_REHASHED", {}).clear()
     _tool().fence_cell_artifacts(cell)
     assert getattr(jce, "FENCE_REHASHED", None) == {"assemble catalog wire fence": 1}
@@ -44,5 +45,9 @@ def test_assemble_accepts_a_wire_whose_ctime_moved_under_a_new_hardlink(tmp_path
 def test_assemble_refuses_a_same_size_wire_with_different_bytes(tmp_path):
     cell = _cell(tmp_path)
     Path(cell["wire"]).write_bytes(b"WIRE-BYTES")
-    with pytest.raises(Exception):
+    # Force the digest path even when the write's timestamps are indistinguishable.
+    cell["wire_stat"]["ctime_ns"] = _stamp(Path(cell["wire"]))["ctime_ns"] - 1
+    getattr(jce, "FENCE_REHASHED", {}).clear()
+    with pytest.raises(ValueError, match="content re-hash after stat drift"):
         _tool().fence_cell_artifacts(cell)
+    assert getattr(jce, "FENCE_REHASHED", None) == {}

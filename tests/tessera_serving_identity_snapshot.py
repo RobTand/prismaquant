@@ -24,6 +24,9 @@ At PQ #2262 the snapshot is re-taken on public 2dbac191/v56: v11 rule
 coverage, four extensions and 22 eager cells move the expected answer.
 At PQ #2426, PB da8fbb6d706a generates the snapshot from fca4c6ce0/v60.
 Only the pin commit and contract digest change. The admission answer remains unchanged.
+At the 2026-10-15 public metadata API backport, only the pin commit moves to
+exact d2e98b3c, then aaa417003f on 2026-10-16 for the additional producer APIs.
+Packaged v60 bytes and every parsed admission answer stay equal.
 This is an admission snapshot, never compiled/model/performance qualification.
 
 Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.
@@ -36,6 +39,8 @@ import os
 import pathlib
 import sys
 
+from prismaquant.tessera_runtime_contract import installed_runtime_snapshot
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TRACE_509 = ROOT / "tests" / "fixtures" / "tessera_route_trace_509"
 TRACE_M44E1 = ROOT / "tests" / "fixtures" / "tessera_route_trace_m44e1"
@@ -46,7 +51,7 @@ TRACE_M44E1_FILES = ("routes-rank0-sparky.json", "routes-rank1-sparklina.json")
 _GRIDS = {"TESSERA_E2M1_K2": "E2M1x2", "TESSERA_E4M3_K1": "E4M3",
           "TESSERA_BF16_K1": "BF16"}
 
-#: A digest no tree hashes to, stamped into a copy of each trace header to
+#: A chosen foreign fixture digest, stamped into a copy of each trace header to
 #: show what a v2 pin does with a header key it does not read.
 FOREIGN_DIGEST = "ab" * 32
 
@@ -131,10 +136,10 @@ def _dev_answer() -> dict:
                         residency=residency, runtime_image=cell.runtime_image,
                         execution_mode=mode)
                     admitted.append({
-                        "cell": cell.cell_id, "rate_q256": rate,
+                        "cell": cell.id, "rate_q256": rate,
                         "residency": residency, "execution_mode": mode,
                         "native_cells": [
-                            c.cell_id for c in contract.native_cells(
+                            c.id for c in contract.native_cells(
                                 cell.family, rate, serving_context=context)],
                     })
     return {"answer": trc.contract_answer(contract), "native_cells": admitted}
@@ -184,9 +189,8 @@ def _trace_verdicts() -> dict:
 
 
 def snapshot() -> dict:
-    from prismaquant import tessera_render
-
-    table, _formats = tessera_render._pinned_serving_table()
+    snapshot = installed_runtime_snapshot()
+    table, _formats = snapshot.eligibility, snapshot.published_formats
     return {
         "pin": _pin_answer(),
         "cells": [cell.as_dict() for cell in table.cells],

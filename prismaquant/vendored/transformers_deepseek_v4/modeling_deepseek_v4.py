@@ -1299,11 +1299,13 @@ class DeepseekV4HashRouter(nn.Module):
 
 
 class DeepseekV4SparseMoeBlock(nn.Module):
+    experts_type = DeepseekV4Experts
+
     def __init__(self, config: DeepseekV4Config, layer_idx: int):
         super().__init__()
         self.is_hash = layer_idx < config.num_hash_layers
         self.gate = DeepseekV4HashRouter(config) if self.is_hash else DeepseekV4TopKRouter(config)
-        self.experts = DeepseekV4Experts(config)
+        self.experts = self.experts_type(config)
         # PRISMAQUANT: PR #45643 bug — DeepseekV4MLP defaults
         # `intermediate_size = config.intermediate_size` (=18432, dense),
         # but shared_experts is meant to use `moe_intermediate_size`

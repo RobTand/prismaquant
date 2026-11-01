@@ -26,17 +26,16 @@ from prismaquant.shipcard import (
     REQUIRED_SLOTS,
     ROUTE_HISTOGRAM_SCHEMA,
     UNIFORM_CONTROL_SLOT,
-    build_shipcard,
+    open_shipcard,
     compute_model_sha,
     fill_slot,
     load_shipcard,
-    make_record,
-    make_uniform_control_record,
     required_slots,
     uniform_control_summary,
     verify,
     write_shipcard,
 )
+from prismaquant.shipcard_slots import make_record, make_uniform_control_record
 from prismaquant.shipcard_cli import main as shipcard_cli
 from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT, make_route_census_record
 from prismaquant.validate_quantized_model import (
@@ -210,7 +209,7 @@ def _artifact(tmp_path, *, name="exported", rate_axis=True):
         build["route_histogram"] = {
             "schema": ROUTE_HISTOGRAM_SCHEMA, "units_total": 1,
             "route_status_counts": {"unattested": 1}, "activation_contracts": {}}
-    card = build_shipcard(model_dir, build=build,
+    card = open_shipcard(model_dir, build=build,
                           lane=("tessera" if rate_axis else None))
     write_shipcard(model_dir / "shipcard.json", card)
     return model_dir
@@ -640,6 +639,14 @@ def test_a_spec_decode_tainted_control_arm_refuses(tmp_path):
     assert any("spec_decode_detected is TRUE" in p for p in problems), problems
 
 
+@pytest.mark.parametrize("spec", [0, "", [], {}])
+def test_a_falsy_non_boolean_control_arm_refuses(tmp_path, spec):
+    model_dir, path = _built(
+        tmp_path, candidate=0.1500, arm=_control_arm(spec_decode_detected=spec))
+    problems = _problems(model_dir, path)
+    assert any("control arm: spec_decode_detected" in p for p in problems), problems
+
+
 def test_a_verdict_that_disagrees_with_its_own_two_kls_refuses(tmp_path):
     block = _block(candidate=0.1500)
     block["verdict"]["candidate_over_control"] = 0.5
@@ -954,3 +961,41 @@ def test_generic_control_producer_refuses_invalid_evidence_without_writing(tmp_p
     ]) == 2
     assert path.read_bytes() == before
 
+
+def test_override_preserves_measurement_written_during_confirmation(tmp_path, monkeypatch):
+    import prismaquant.shipcard_cli as cli
+
+    model_dir, path = _built(tmp_path)
+    slot = "native_export.graph"
+    record = copy.deepcopy(load_shipcard(path)["slots"][slot])
+    record["detail"] = "Acknowledged during override confirmation"
+
+    def confirm(*args):
+        fill_slot(path, slot, record)
+        return model_dir.name
+
+    monkeypatch.setattr(cli, "_confirm_artifact_name", confirm)
+    assert shipcard_cli([
+        "override-control", str(path), "--reason", "r", "--authorized-by", "a",
+    ]) == 0
+    stored = load_shipcard(path)
+    assert stored["slots"][slot] == record
+    assert stored["uniform_control_override"] is True
+
+
+def test_override_rechecks_current_measurement_after_confirmation(tmp_path, monkeypatch):
+    import prismaquant.shipcard_cli as cli
+
+    model_dir, path = _built(tmp_path)
+
+    def confirm(*args):
+        _fill_control(path, model_dir, block=_block(measured=False))
+        return model_dir.name
+
+    monkeypatch.setattr(cli, "_confirm_artifact_name", confirm)
+    assert shipcard_cli([
+        "override-control", str(path), "--reason", "r", "--authorized-by", "a",
+    ]) == 2
+    stored = load_shipcard(path)
+    assert not uniform_control_summary(stored, model_dir=model_dir)["measured"]
+    assert "uniform_control_override" not in stored

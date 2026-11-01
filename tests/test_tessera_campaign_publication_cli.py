@@ -15,12 +15,16 @@ from __future__ import annotations
 
 import hashlib
 import pickle
-import sys
 import time
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
+
+from prismaquant import tessera_render
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
 
 torch = pytest.importorskip("torch")
 
@@ -46,10 +50,9 @@ def _fixture(monkeypatch, tmp_path):
         model.model.layers[index].proj = linear
     rows = torch.randn(4, 256, generator=torch.Generator().manual_seed(183))
 
-    transformers = ModuleType("transformers")
-    transformers.AutoModelForCausalLM = SimpleNamespace(
-        from_pretrained=lambda *_args, **_kwargs: model)
-    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    from transformers import AutoModelForCausalLM
+    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained",
+                        lambda *_args, **_kwargs: model)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
     monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: DefaultProfile())
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
@@ -57,7 +60,7 @@ def _fixture(monkeypatch, tmp_path):
     })
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
                         lambda *_args: ([torch.ones(1, 256, dtype=torch.long)], "one draw"))
-    monkeypatch.setattr(tessera_campaign, "_collect_activations", lambda *_args, **kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **kwargs: (
         {name: rows for name in UNITS}, {}, {name: 0 for name in UNITS},
         {name: 3.0 for name in UNITS}))
     monkeypatch.setattr(tessera_campaign, "expand_menus_for_targets",
@@ -92,17 +95,17 @@ def _payload(tmp_path):
 def _batched(monkeypatch, campaign, render, seen):
     """Force the batched adapter over two dense units.
 
-    Which units may share a batch is `_anchor_batches`' decision and
+    Which units may share a batch is `compatible_batches`' decision and
     `tests/test_tessera_campaign_batch.py` owns it. This test is about what
     the batched path does with a publisher, so the grouping is supplied.
     """
     monkeypatch.setattr(render, "require_tessera_batch_encoder", lambda: None)
-    monkeypatch.setattr(campaign, "_anchor_batches",
+    monkeypatch.setattr(cell_measurement, "compatible_batches",
                         lambda pending, **_kwargs: [list(pending)])
 
     def encode(weights, format_name, *, recipe, activation_kwargs, hessian_required):
         seen.append(len(weights))
-        return [campaign._encode_and_render(
+        return [tessera_render.encode_tessera_unit(
             weight, format_name, recipe=recipe, activation_kwargs=kwargs,
             hessian_required=hessian_required)
             for weight, kwargs in zip(weights, activation_kwargs)]
@@ -306,7 +309,7 @@ def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
             # Never applied, so everything is still staged at close.
             return 0
     monkeypatch.setattr(ledger_cls, "apply_completed", apply_completed)
-    real_encode = campaign._encode_and_render
+    real_encode = tessera_render.encode_tessera_unit
     calls = []
 
     def encode(weight, format_name, **kwargs):
@@ -315,7 +318,7 @@ def test_a_fatal_encode_error_still_journals_the_batch_that_succeeded(
             raise HessianContractError("no Hessian for this Linear")
         return real_encode(weight, format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, "_encode_and_render", encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", encode)
     with pytest.raises(HessianContractError, match="no Hessian"):
         campaign.main([*_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)])
 
@@ -349,7 +352,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
     campaign, _render = _fixture(monkeypatch, tmp_path)
     next_encode_started = threading.Event()
     calls: list[str] = []
-    real_encode = campaign._encode_and_render
+    real_encode = tessera_render.encode_tessera_unit
 
     def encode(weight, format_name, **kwargs):
         calls.append(format_name)
@@ -357,9 +360,9 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
             next_encode_started.set()
         return real_encode(weight, format_name, **kwargs)
 
-    monkeypatch.setattr(campaign, "_encode_and_render", encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", encode)
     held: list[dict] = []
-    real_record = campaign._checkpoint_wire_record
+    real_record = campaign_wire.checkpoint_wire_record
 
     def record(anchor, wire_dir, identity, **kwargs):
         if not held:
@@ -367,7 +370,7 @@ def test_the_post_work_of_one_batch_runs_while_the_next_batch_encodes(
                              next_encode_started=next_encode_started.wait(20.0)))
         return real_record(anchor, wire_dir, identity, **kwargs)
 
-    monkeypatch.setattr(campaign, "_checkpoint_wire_record", record)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', record)
     assert campaign.main([
         *_argv(tmp_path), "--publication-overlap-bytes", str(1 << 20)]) == 0
     assert held == [dict(thread="tessera-publication", next_encode_started=True)]
@@ -383,11 +386,10 @@ def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
         monkeypatch, tmp_path):
     """Overlap plus a bound identity, on the selected-source path, vs neither.
 
-    This is the configuration the pipelined arm runs.  The bound identity is
-    derived on the writer (the thread name is asserted), and everything a
-    resume or an export reads -- the journal identity, each unit's envelope
-    digest, its anchor rows, its wire receipt and the wire bytes -- is the
-    synchronous path's, byte for byte.
+    The bound identity is derived on the writer thread. The two arms compare
+    journal and envelope identities, wire receipts and wire bytes. Anchor
+    rows exclude seconds and encoding_batch_size; costs exclude encode_seconds.
+    Envelope payload digests are not compared.
     """
     import json
     import threading
@@ -429,9 +431,8 @@ def test_the_pipelined_selected_path_prices_the_same_bytes_and_identities(
         wires = {name: (root / "cache" / "wire" / name).read_bytes()
                  for name in (record["file"] for record in state["wire_records"].values())}
         costs = _payload(root)["costs"][UNIT]
-        # The envelope's payload digest binds the anchor rows' wall-clock
-        # ``seconds``, so two runs never share it; everything else in the
-        # unit state is compared by value below.
+        # Payload digests include run-dependent anchor fields. Compare their
+        # stable fields and the envelope's identity below.
         runs[label] = dict(
             identity_sha256=manifest["identity_sha256"],
             envelope_identity=envelope["identity_sha256"],

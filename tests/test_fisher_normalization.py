@@ -36,16 +36,13 @@ import pytest
 import torch
 from torch import nn
 
-from prismaquant.allocator import (
-    clip_probe_fisher_outliers,
-    renormalize_probe_fisher,
-)
-from prismaquant.incremental_probe import finalize_fisher_stats
-from prismaquant.measure_quant_cost import (
-    HDetailIndex,
-    h_detail_expected_norm_tokens,
-)
-from prismaquant.sensitivity_probe import FisherAccumulator, h_detail_blob
+from prismaquant.allocator import clip_probe_fisher_outliers
+from prismaquant.probe_statistics import renormalize_probe_fisher
+from prismaquant.probe_statistics import finalize_fisher_stats
+from prismaquant.measure_quant_cost import HDetailIndex
+from prismaquant.probe_statistics import h_detail_expected_norm_tokens
+from prismaquant.sensitivity_probe import FisherAccumulator
+from prismaquant.probe_statistics import h_detail_blob
 
 
 def _h_trace_raw(x: torch.Tensor, gy: torch.Tensor) -> float:

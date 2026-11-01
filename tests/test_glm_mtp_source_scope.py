@@ -20,6 +20,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_selection as campaign_selection
+
 torch = pytest.importorskip("torch")
 pytest.importorskip(
     "transformers.models.glm5_next",
@@ -241,8 +244,8 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, published
 
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant import tessera_campaign
-    from prismaquant.cost_streaming import (SELECTED_SOURCE_MEMBERS, SelectedSource,
-                                            build_streamed_causal_lm)
+    from prismaquant.streamed_boundary_artifacts import SELECTED_SOURCE_MEMBERS
+    from prismaquant.cost_streaming import SelectedSource, build_streamed_causal_lm
 
     assert set(SELECTED_SOURCE_MEMBERS) == {
         "source_layers", "num_layers", "layer_index_for_qname", "selected_weight_specs",
@@ -300,7 +303,7 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
     groups = [f"u:{SHARED_DOWN}", f"s:{STACK}"]
     selection = tmp_path / "units.json"
     selection.write_text(json.dumps(dict(
-        schema=campaign.UNITS_SCHEMA, model=str(env.source), layer_stride=1,
+        schema=campaign_selection.UNITS_SCHEMA, model=str(env.source), layer_stride=1,
         groups=[dict(key=key, members=census["anchor_groups"][key]) for key in groups])))
     monkeypatch.setattr(campaign, "_calibration_tokens",
                         lambda *_args, **_kwargs: (_calibration_rows(env.ids), CALIBRATION_TEXT))
@@ -308,7 +311,7 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
     def no_forward(*_args, **_kwargs):
         pytest.fail("a selected MTP row must not run a calibration forward")
 
-    monkeypatch.setattr(campaign, "_collect_activations", no_forward)
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", no_forward)
     original_menus = campaign.expand_menus_for_targets
 
     def one_rung(weights, targets, **kwargs):

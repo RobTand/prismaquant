@@ -23,6 +23,7 @@ from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
 )
 from .schemas import Contract
+from .tessera_campaign_table import STAGE
 from .digests import bytes_sha256hex, file_sha256hex
 
 PLAN_SCHEMA = "prismaquant.tessera_anchored_replay.plan.v1"
@@ -81,7 +82,7 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
     _require(bytes_sha256hex(payload_bytes) == binding["payload_sha256"], "payload hash mismatch")
     manifest = json.loads(checkpoint_path.read_text())
     _require(manifest.get("schema") == MANIFEST_SCHEMA
-             and manifest.get("stage") == "Tessera campaign", "unsupported checkpoint")
+             and manifest.get("stage") == STAGE, "unsupported checkpoint")
     identity = manifest["identity"]
     seal = _digest(identity)
     _require(seal == manifest.get("identity_sha256")
@@ -124,7 +125,7 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
     receipts = {}
     for unit, rows in sorted(payload["costs"].items()):
         _require(unit in units, f"unknown source unit {unit}")
-        state = _load_unit(unit_path(journal, unit), stage="Tessera campaign",
+        state = _load_unit(unit_path(journal, unit), stage=STAGE,
                            qname=unit, identity_sha256=seal)
         _require(set(state) == {"anchors", "wire_records"}, "invalid anchor state")
         anchors = {row["format_name"]: row for row in state["anchors"]}

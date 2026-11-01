@@ -31,7 +31,7 @@ from pathlib import Path
 import torch
 
 from prismaquant import format_registry as fr
-from prismaquant import read_traffic
+from prismaquant import read_traffic, calibration_data
 from prismaquant.build_rtn_cache import (
     cache_reference_log_probs,
     kl_divergence,
@@ -69,7 +69,6 @@ from prismaquant.select_validated_frontier import (
     TAIL_VETO_COLUMNS as _TAIL_REPEAT_COLUMNS,
 )
 from prismaquant.schemas import validate_cost_payload
-from prismaquant.sensitivity_probe import load_calibration
 from prismaquant.source_prefetch import (
     _available_memory_bytes,
     prefetch_safetensors_checkpoint,
@@ -155,8 +154,14 @@ def _assignment_bpp_details(
 ) -> dict[str, float | int]:
     names = [
         name for name, fmt in assignment.items()
-        if name in stats and not _profile_excludes_bpp_name(str(name), str(fmt), profile)
+        if not _profile_excludes_bpp_name(str(name), str(fmt), profile)
     ]
+    missing = [name for name in names if name not in stats]
+    if missing:
+        raise ValueError(
+            f"{where}: missing probe stats for {len(missing)} mutable assigned "
+            f"tensor(s), sample={missing[:8]}. Rebuild the probe stats to cover "
+            "the full mutable assignment before reporting bpp.")
     total_params = sum(int(stats[name].get("n_params", 0) or 0) for name in names)
     if total_params <= 0:
         return {
@@ -206,12 +211,22 @@ def _lookup_cost_entry(costs: Mapping, name: str, fmt: str) -> Mapping | None:
 def _assignment_cost_summary(
     costs: Mapping,
     assignment: Mapping[str, str],
+    *, stats: Mapping,
 ) -> dict[str, object]:
     """Summarize local cost-table MSE for an assignment.
 
     These are local render/probe metrics, not end-to-end KL.  BF16 entries are
     counted as zero-error because they preserve the original Linear weights.
+    The row-price estimate uses the shared estimator with unit gains, no family
+    transfer, no UCB hedge and ordinary output MSE. It is not a replay of the
+    allocator's recorded clipping, calibration or grouped objective.
     """
+    from .per_row_pricing import price_row
+    from .priced_cell import CostPricingPolicy, cost_entry_prices_unmeasured_activation_at_zero
+
+    policy = CostPricingPolicy(ucb_z=0.0, fisher_output_mse=False)
+    prices: list[float] = []
+    price_missing: list[str] = []
     sums = {
         "weight_mse": 0.0,
         "output_mse": 0.0,
@@ -233,10 +248,21 @@ def _assignment_cost_summary(
         fmt = fr.canonical_format_name(str(raw_fmt).strip().upper())
         format_counts[fmt] += 1
         if fmt == "BF16":
+            prices.append(0.0)
             for key in ("weight_mse", "output_mse", "rel_output_mse"):
                 counts[key] += 1
             continue
         entry = _lookup_cost_entry(costs, str(name), fmt)
+        try:
+            price = price_row(str(name), fmt, stats[str(name)], costs.get(str(name), {}),
+                activation_pricing=None, pricing_policy=policy)
+            if entry is not None and cost_entry_prices_unmeasured_activation_at_zero(
+                    stats[str(name)], entry, max(price, 0.0), fmt):
+                price_missing.append(str(name))
+            else:
+                prices.append(price)
+        except KeyError:
+            price_missing.append(str(name))
         if entry is None:
             missing.append(str(name))
             continue
@@ -256,6 +282,9 @@ def _assignment_cost_summary(
         key: (sums[key] / counts[key] if counts[key] else None)
         for key in sums
     }
+    recorded_predicted_count = counts["predicted_dloss"]
+    counts["predicted_dloss"] = len(prices)
+    estimated_price = sum(prices) if not price_missing else None
     return {
         "objective": "local_cost_table_mse",
         "weight_mse_sum": float(sums["weight_mse"]),
@@ -266,8 +295,15 @@ def _assignment_cost_summary(
         "fisher_output_mse_mean": means["fisher_output_mse"],
         "rel_output_mse_sum": float(sums["rel_output_mse"]),
         "rel_output_mse_mean": means["rel_output_mse"],
-        "predicted_dloss_sum": float(sums["predicted_dloss"]),
-        "predicted_dloss_mean": means["predicted_dloss"],
+        "predicted_dloss_sum": estimated_price,
+        "predicted_dloss_mean": (estimated_price / len(prices)
+                                 if estimated_price is not None and prices else None),
+        "predicted_dloss_basis": "unadjusted_cost_row_estimate",
+        "recorded_predicted_dloss_sum": (float(sums["predicted_dloss"])
+                                         if recorded_predicted_count else None),
+        "recorded_predicted_dloss_count": recorded_predicted_count,
+        "price_missing_count": len(price_missing),
+        "price_missing_sample": price_missing[:8],
         "counts": dict(counts),
         "formats": dict(format_counts),
         "missing_count": int(len(missing)),
@@ -363,8 +399,9 @@ def _upstream_calibration_hashes(payload: object) -> set[str]:
 def _assert_calibration_disjoint(
     calib_repeat_hashes: Sequence[str],
     upstream: Mapping[str, set[str]],
+    *, purpose: str = "selection",
 ) -> dict[str, object]:
-    """Refuse to select on text an upstream cost/probe stage already consumed.
+    """Refuse selection overlap; report overlap for labelled additivity measurements.
 
     R14: held-out disjointness was a *convention* enforced only by the driver
     passing ``--calib-skip-first``; a hash intersection makes it an explicit.
@@ -379,7 +416,7 @@ def _assert_calibration_disjoint(
             "upstream_hashes": len(hashes),
             "overlap": overlap,
         }
-        if overlap:
+        if overlap and purpose != "additivity":
             raise ValueError(
                 f"held-out violation: the selection calibration shares "
                 f"{len(overlap)} calibration draw(s) with the {source} "
@@ -573,111 +610,6 @@ def _activation_quant_assignment(
     return out
 
 
-def _load_calibration_repeats(tokenizer, args) -> list[torch.Tensor]:
-    repeats = max(int(args.calib_repeats), 1)
-    n_samples = int(args.n_calib_samples)
-    skip = max(int(getattr(args, "calib_skip_first", 0) or 0), 0)
-    if skip and not args.dataset:
-        # R14(iii): --calib-skip-first is the held-out mechanism, and it is
-        # only implemented on the --dataset branch below. The wikitext branch
-        # used to compute `skip` and then never apply it, so a manual
-        # `--calib-skip-first 32` on wikitext silently measured selection KL on
-        # the SAME windows the cost stage consumed. In-sample "validation" has
-        # already regressed once here; refuse rather than pretend.
-        raise ValueError(
-            "--calib-skip-first is only implemented for --dataset calibration; "
-            f"got --calib-skip-first {skip} with no --dataset (wikitext "
-            f"split={args.calib_split!r}). The wikitext loader is seeded per "
-            "repeat, not window-sliced, so the skip cannot be honored and the "
-            "selection split would silently overlap the cost split. Pass a "
-            "--dataset, or use a distinct --calib-seed / --calib-split for the "
-            "held-out draw. From run-pipeline.sh: set a jsonl DATASET (the "
-            "default), or VALIDATED_FRONTIER_SKIP_CALIB=0 with a distinct "
-            "VALIDATED_FRONTIER_DATASET."
-        )
-
-    def _load_jsonl(n: int) -> torch.Tensor:
-        # --calib-skip-first K: drop the first K windows of the deterministic
-        # loader so selection KL is measured on windows DISJOINT from the
-        # probe/cost/render calibration (which consumes windows [0, K)).
-        # load_calibration is prefix-stable at a fixed seed, so [K, K+n) is
-        # token-disjoint from [0, K) by construction. House rule: held-out
-        # split is disjoint from cost generation (review criticals C3/C5).
-        all_ids = load_calibration(
-            tokenizer,
-            args.dataset,
-            n + skip,
-            args.calib_seqlen,
-            calib_seed=int(getattr(args, "calib_seed", 42) or 42),
-        )
-        if all_ids.size(0) < n + skip:
-            raise RuntimeError(
-                f"calibration source yielded {all_ids.size(0)} windows; "
-                f"need {n + skip} (n={n} + skip-first={skip}). Use a larger "
-                "corpus or reduce --calib-skip-first."
-            )
-        return all_ids[skip:]
-
-    if repeats == 1:
-        if args.dataset:
-            return [_load_jsonl(n_samples)]
-        return [load_wikitext_calibration_windowed(
-            tokenizer,
-            n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=args.calib_seed,
-        )]
-    if args.dataset:
-        all_ids = _load_jsonl(n_samples * repeats)
-        if all_ids.size(0) < n_samples * repeats:
-            raise RuntimeError(
-                f"requested {repeats} calibration repeats of {n_samples} samples, "
-                f"but only loaded {all_ids.size(0)} samples"
-            )
-        return [
-            all_ids[idx * n_samples:(idx + 1) * n_samples].contiguous()
-            for idx in range(repeats)
-        ]
-    stride = int(args.calib_repeat_seed_stride)
-    return [
-        load_wikitext_calibration_windowed(
-            tokenizer,
-            n_samples,
-            args.calib_seqlen,
-            split=args.calib_split,
-            seed=int(args.calib_seed) + idx * stride,
-        )
-        for idx in range(repeats)
-    ]
-
-
-def _load_expert_render_calib(tokenizer, args) -> torch.Tensor | None:
-    """Calib draw for the M4 lazy packed-expert (FP8) render — the BUILD/render
-    split, DISJOINT from the selection split that KL is measured on.
-
-    With ``--calib-skip-first K`` the selection calib is windows ``[K, K+n)``
-    (see ``_load_calibration_repeats``); this returns ALL K withheld render
-    windows ``[0, K)`` at the validator's seqlen — token-disjoint from
-    selection by construction (same-seqlen windowing; do NOT draw at a
-    different seqlen or the [0,K)/[K,K+n) split stops being token-disjoint).
-    Known volume caveat: the eager NVFP4 rung was rendered on the BUILD's
-    calib volume, which can exceed this draw under thin-frontier configs — a
-    render-volume asymmetry in the NVFP4-vs-FP8 comparison that the served
-    re-validation gate, not this screen, ultimately arbitrates. Without a
-    disjoint render split (skip==0) or a dataset it returns ``None`` so the
-    caller can fall back to the selection calib WITH a loud in-sample warning
-    (the FP8 rung is then in-sample and a reject-FP8 outcome is
-    conservative-only — never promote an FP8-favorable frontier point off an
-    in-sample render). House rule: held-out split disjoint from cost/render
-    generation."""
-    skip = max(int(getattr(args, "calib_skip_first", 0) or 0), 0)
-    if skip <= 0 or not args.dataset:
-        return None
-    ids = load_calibration(
-        tokenizer, args.dataset, skip, args.calib_seqlen,
-        calib_seed=int(getattr(args, "calib_seed", 42) or 42))
-    return ids[:skip].contiguous() if ids.size(0) >= 1 else None
 
 
 def _persist_lazy_expert_renders(
@@ -1035,6 +967,8 @@ def _measure_inplace_assignment_kl(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     parser = argparse.ArgumentParser(description="Validate assignment JSONs with real KL")
     parser.add_argument("--model", required=True)
     parser.add_argument("--probe", required=True)
@@ -1043,7 +977,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="Optional measure_quant_cost pickle. When supplied, each result "
         "includes assignment-level local MSE / predicted-Δloss summaries "
-        "from the same cost table the allocator optimized.",
+        "from the supplied table. Predicted loss is an unadjusted row estimate, "
+        "not a replay of the allocator's objective.",
     )
     parser.add_argument("--base-assignment", required=True)
     parser.add_argument(
@@ -1059,11 +994,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calib-split", default="train")
     parser.add_argument("--calib-seed", type=int, default=42)
     parser.add_argument(
+        "--measurement-purpose", choices=("selection", "additivity"), default="selection",
+        help="Selection requires a held-out draw. Additivity measures the current "
+             "base assignment on its cost draw and records it as in-sample.",
+    )
+    parser.add_argument(
         "--calib-skip-first", type=int, default=0,
-        help="Drop the first K windows of the deterministic calibration "
-        "loader before drawing validation windows. Pass the render "
-        "calibration's NSAMPLES here to make selection KL token-disjoint "
-        "from probe/cost/render calibration (review criticals C3/C5).")
+        help="Withhold K fit windows after checking the requested fit prefix "
+        "against the captured dataset draw. Use matching source, seed and "
+        "sequence length for upstream fitting; mismatched provenance cannot "
+        "establish a held-out split.")
     parser.add_argument(
         "--calib-repeats",
         type=int,
@@ -1224,6 +1164,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         (label, load_assignment_json(path, base=base_assignment), str(path))
         for label, path in labeled_paths
     ]
+    if args.measurement_purpose == "additivity" and (
+        len(assignments) != 1 or assignments[0][1] != base_assignment
+    ):
+        parser.error("additivity requires one current base assignment")
     assignment_budget_metadata: dict[tuple[str, str], Mapping | None] = {}
     for (label, assignment, path), (_path_label, raw_path) in zip(
         assignments, labeled_paths
@@ -1245,11 +1189,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     # Load the render cache before tokenizer/model construction.
+    dtype = _dtype_from_name(args.dtype)
     production_cache = None
     pristine_cache_dir: object = "__unset__"
+    from prismaquant.streamed_model_identity import (
+        build_source_model_binding, resolve_source_checkpoint_path,
+        source_model_decode_contract,
+    )
+
+    args.model = str(resolve_source_checkpoint_path(
+        args.model, local_files_only=args.local_files_only,
+    ))
+    native_source = source_model_decode_contract(args.model) is not None
     if args.production_weight_cache:
         with Path(args.production_weight_cache).open("rb") as fh:
             production_cache = pickle.load(fh)
+        expected_source_binding = build_source_model_binding(
+            args.model, dtype=dtype, local_files_only=args.local_files_only,
+        )
+        production_cache.require_source_binding(
+            expected_source_binding, where="assignment validation cache attachment",
+        )
         if args.production_cache_dir_override:
             # Remember the as-pickled cache_dir: if the M4 lazy gap-fill
             # re-pickles this cache, the session's dir override must not be
@@ -1273,7 +1233,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "validate_assignments_kl requires a CUDA-resident model. CPU/offload "
             f"device_map={args.device_map!r} is not allowed."
         )
-    dtype = _dtype_from_name(args.dtype)
+    profile = detect_profile_with_warning(
+        args.model,
+        entrypoint="validate-kl",
+    )
+    for label, assignment, path in assignments:
+        _assignment_bpp_details(
+            stats, assignment, specs_by_name, profile=profile,
+            where=f"assignment {label!r} ({path})",
+        )
     staged, cleanup = stage_multimodal(args.model)
     if args.work_dir:
         work_root = Path(args.work_dir)
@@ -1313,39 +1281,58 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif device.type == "cuda":
             load_kwargs["device_map"] = device_str
         tokenizer = AutoTokenizer.from_pretrained(staged, **tokenizer_kwargs)
-        calib_repeats = _load_calibration_repeats(tokenizer, args)
+        calibration_draw = calibration_data.load_validation_calibration(
+            tokenizer, calibration_data.CalibrationRequest.from_namespace(args))
+        calib_repeats = calibration_draw.selection_repeats
         calib_provenance = _calibration_provenance(calib_repeats)
+        calib_provenance["measurement_purpose"] = args.measurement_purpose
+        calib_provenance["in_sample"] = args.measurement_purpose == "additivity"
         calib_provenance["held_out_check"] = _assert_calibration_disjoint(
             calib_provenance["calib_repeat_hashes"],
             {"probe": probe_calib_hashes, "cost": cost_calib_hashes},
+            purpose=args.measurement_purpose,
         )
-        source_prefetch_stats = prefetch_safetensors_checkpoint(
-            staged,
-            mode=args.source_prefetch,
-            max_resident_bytes=(
-                int(float(args.source_prefetch_max_gb) * 1024**3)
-                if float(args.source_prefetch_max_gb) > 0
-                else None
-            ),
-            headroom_gb=float(args.source_prefetch_headroom_gb),
-            workers=int(args.source_prefetch_workers),
-            progress=True,
-            log_prefix="[validate-kl/source]",
-        )
-        try:
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-        except ValueError as exc:
-            if (
-                "requires `accelerate`" not in str(exc)
-                and "requires accelerate" not in str(exc)
-            ):
-                raise
-            load_kwargs.pop("device_map", None)
-            model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
-            if device.type == "cuda":
+        if native_source:
+            from prismaquant.memory_management import CaptureMemoryGuard
+            from prismaquant.streaming_model import load_resident_source_model
+
+            model = load_resident_source_model(
+                args.model, device=device, dtype=dtype,
+                offload_folder=str(work_root / "resident-source-offload"),
+                resource_check=CaptureMemoryGuard(device).check,
+            )
+            source_prefetch_stats = {
+                "skipped": True,
+                "reason": "native FP8 uses the resident source owner's bounded prefetch",
+            }
+        else:
+            source_prefetch_stats = prefetch_safetensors_checkpoint(
+                staged,
+                mode=args.source_prefetch,
+                max_resident_bytes=(
+                    int(float(args.source_prefetch_max_gb) * 1024**3)
+                    if float(args.source_prefetch_max_gb) > 0
+                    else None
+                ),
+                headroom_gb=float(args.source_prefetch_headroom_gb),
+                workers=int(args.source_prefetch_workers),
+                progress=True,
+                log_prefix="[validate-kl/source]",
+            )
+            try:
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+            except ValueError as exc:
+                if (
+                    "requires `accelerate`" not in str(exc)
+                    and "requires accelerate" not in str(exc)
+                ):
+                    raise
+                load_kwargs.pop("device_map", None)
+                model = AutoModelForCausalLM.from_pretrained(staged, **load_kwargs)
+                if device.type == "cuda":
+                    model.to(device)
+            if not args.device_map and device.type != "cuda":
                 model.to(device)
-        if not args.device_map and device.type != "cuda":
-            model.to(device)
         model.eval()
         model_device = next(model.parameters()).device
         materialization_mode = args.assignment_materialization
@@ -1372,10 +1359,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "--production-cache-lru-gb budget"
                 )
 
-        profile = detect_profile_with_warning(
-            args.model,
-            entrypoint="validate-kl",
-        )
         # Every repeat's references must exist before the first measurement --
         # the in-place install is one-way and destroys the model that produces
         # them. Holding them all in the pool is what broke repeats>=4 at 27B
@@ -1388,9 +1371,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             # These are pure scratch and they are LARGE -- 8.14 GiB per repeat
             # at 27B, so a 3-arm A/B would strand ~98 GiB. Keeping >=10% of the
             # disk free is a standing rule here, and a leak this size eats the
-            # margin in one campaign. atexit covers normal exit and SIGTERM
-            # (which is what the memory watchdog sends); a SIGKILL still
-            # strands them, so the directory is prefixed for easy sweeping.
+            # margin in one campaign. atexit covers normal interpreter exit.
+            # Signal termination can strand files, so the directory is
+            # prefixed for easy sweeping.
             atexit.register(shutil.rmtree, str(_ref_dir), True)
             ref_log_prob_repeats = [
                 _SpilledRefLogProbs(
@@ -1446,7 +1429,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             # the frontier compares NVFP4 vs FP8 under the same no-gate recipe,
             # but ship export must REUSE this cache (not re-render assignment-
             # mode) or the selection rides on different bytes (principle #8).
-            _expert_render_ids = _load_expert_render_calib(tokenizer, args)
+            _expert_render_ids = calibration_draw.fit_ids
             if _expert_render_ids is None:
                 _expert_render_ids = calib_repeats[0]
                 print(
@@ -1752,7 +1735,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "operator_non_tensor_reserve"
                 )
             if costs is not None:
-                result["mse"] = _assignment_cost_summary(costs, assignment)
+                result["mse"] = _assignment_cost_summary(costs, assignment, stats=stats)
             if cache_diagnostics is not None:
                 result["production_cache_diagnostics"] = cache_diagnostics
             if prefetch_stats is not None:
@@ -1761,9 +1744,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             mse_msg = ""
             if costs is not None:
                 mse = result["mse"]
+                price_text = (f"{mse['predicted_dloss_sum']:.6g}"
+                              if mse["predicted_dloss_sum"] is not None else "unavailable")
                 mse_msg = (
                     f" output_mse={mse['output_mse_sum']:.6g}"
-                    f" pred_dloss={mse['predicted_dloss_sum']:.6g}"
+                    f" unadjusted_row_dloss={price_text}"
                     f" mse_missing={mse['missing_count']}"
                 )
             print(

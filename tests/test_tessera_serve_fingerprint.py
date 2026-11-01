@@ -25,9 +25,8 @@ exists (``native_extensions``), and the chain is:
    another runtime with nothing here to refuse it -- and it was already wrong
    by one character (``"tessera_nvfp4"`` where the load path's constant is
    ``"tessera_nvfp4_"``).
-2. pin -> tool: the tool is stdlib-only and cannot read either file from
-   inside a serving container, so it carries the rows and any disagreement
-   fails here.
+2. pin -> tool: the stdlib-only tool reads the pin JSON transported beside
+   its source in the serving container. These tests compare those rows.
 3. the tool's PREDICATE -> the contract's ``match`` rule: the old pattern was
    a bare substring search over the whole mapped path, and the contract says
    the runtime is matched by ``basename_fnmatch`` against
@@ -35,9 +34,8 @@ exists (``native_extensions``), and the chain is:
    them is the runtime's.
 
 The contract is read by ``json`` through ``tessera_runtime_contract`` -- located
-through ``importlib.resources.files("tessera.serving")``, which imports only
-that package's lazy ``__init__`` (it defines ``register()`` and calls nothing
-at module scope, so it registers nothing and needs no GPU), and never through
+through ``importlib.resources.files("tessera").joinpath("serving")``. That lookup
+imports only the Tessera package root, and never imports
 ``tessera.serving.contract``, whose validator imports the plugin's dispatch
 tables -- and never by vendoring a copy.
 """
@@ -61,11 +59,7 @@ from prismaquant.tessera_serving_runtime_pin import (
 
 
 def _serve_fingerprint():
-    """Load the tool by path, the way the container bootstrap does.
-
-    It is stdlib-only by construction and must not import torch or vllm, so it
-    is not a package member and cannot be imported by name.
-    """
+    """Load the stdlib-only tool by path, as the container bootstrap does."""
     path = (Path(__file__).resolve().parents[1]
             / "tools" / "serve_fingerprint.py")
     spec = importlib.util.spec_from_file_location("serve_fingerprint", path)
@@ -78,8 +72,8 @@ def _packaged_contract() -> dict:
     """The installed plugin's contract payload, as JSON.
 
     ``trc.contract_path()`` locates the table through
-    ``importlib.resources.files("tessera.serving")``: that imports only the
-    package's lazy ``__init__``, never ``tessera.serving.contract`` (whose
+    ``importlib.resources.files("tessera").joinpath("serving")``: that imports only the
+    Tessera package root, never ``tessera.serving.contract`` (whose
     validator imports the plugin's dispatch tables) and never vLLM.
     """
     return json.loads(trc.contract_path().read_text(encoding="utf-8"))

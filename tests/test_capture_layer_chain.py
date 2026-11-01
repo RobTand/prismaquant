@@ -43,7 +43,7 @@ import pytest
 
 from prismaquant import capture_layer_chain as chain
 from prismaquant.capture_layer_chain import CaptureChainRefused
-from prismaquant.cost_streaming import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
+from prismaquant.streamed_boundary_artifacts import LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA
 from prismaquant.streaming_model import (
     _SELECTED_INITIALIZATION_SCHEMA, _initialization_digest,
     merge_selected_initialization_witnesses, validate_streaming_selected_initialization_witness,

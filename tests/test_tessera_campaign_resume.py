@@ -1,10 +1,16 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
+
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_table as campaign_table
 import hashlib
 import json
 import pickle
 import shutil
-import sys
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,10 +48,9 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
             format_name=format_name, family=format_name.rsplit("_R", 1)[0],
             body_rate_q256=int(format_name.rsplit("_R", 1)[1]), bpp=4.0)] if priced else []),
     }
-    transformers = ModuleType("transformers")
-    transformers.AutoModelForCausalLM = SimpleNamespace(
-        from_pretrained=lambda *_args, **_kwargs: model)
-    monkeypatch.setitem(sys.modules, "transformers", transformers)
+    from transformers import AutoModelForCausalLM
+    monkeypatch.setattr(AutoModelForCausalLM, "from_pretrained",
+                        lambda *_args, **_kwargs: model)
     # The fresh run prices under the default static-scale policy so a test
     # can change the policy afterwards and see the identity refuse it.
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
@@ -56,7 +61,7 @@ def _main_fixture(monkeypatch, tmp_path, *, priced=False, unit=UNIT,
     })
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
                         lambda *_args: (inputs["tokens"], inputs["text"]))
-    monkeypatch.setattr(tessera_campaign, "_collect_activations", lambda *_args, **kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **kwargs: (
         {unit: inputs["rows"]},
         {unit: inputs["hessian"]} if kwargs["want_hessian"] else {},
         {unit: len(inputs["rows"]) if kwargs["want_hessian"] else 0},
@@ -85,14 +90,14 @@ def test_main_refuses_unbound_checkpoint_before_accepting_anchors(
     monkeypatch, tmp_path, checkpoint_unit,
 ):
     campaign, checkpoint, argv, _model, _inputs = _main_fixture(monkeypatch, tmp_path)
-    anchor = campaign.CampaignAnchor(
+    anchor = campaign_table.CampaignAnchor(
         qname=checkpoint_unit, family="TESSERA_E4M3_K1",
         format_name="TESSERA_E4M3_K1_R1024", body_rate_q256=1024,
         dloss=0.25, dloss_stderr=0.0, memory_bytes=8, bits_per_param=4.0,
         activation_contract="a8", activation_quantized=True, wire_bytes=8,
         seconds=1.0, hessian_applied=False,
     )
-    checkpoint.write_text(json.dumps({"schema": campaign.SCHEMA, "anchors": [vars(anchor)]}))
+    checkpoint.write_text(json.dumps({"schema": campaign_table.SCHEMA, "anchors": [vars(anchor)]}))
     with pytest.raises(RuntimeError, match="checkpoint.*identity|resume.*identity"):
         campaign.main(argv)
 
@@ -216,7 +221,7 @@ def test_main_bootstraps_loo_from_two_endpoints(
 def _forbid_reencode(monkeypatch, campaign):
     def forbidden(**_kwargs):
         pytest.fail("resume attempted another encode instead of validating the priced bytes")
-    monkeypatch.setattr(campaign, "_measure_anchor", forbidden)
+    monkeypatch.setattr(cell_measurement, "measure_cell", forbidden)
 
 
 def test_main_resumes_identical_cost_and_wire_without_reencoding(
@@ -247,7 +252,7 @@ def test_main_registers_resumed_wire_before_receipt_read(
     (campaign, _checkpoint, argv, _model, inputs), _payload = priced_campaign()
     caches = []
     cache_type = pwc.ProductionWeightCache
-    verify = campaign._checkpoint_wire_record
+    verify = campaign_wire.checkpoint_wire_record
     expected = {(UNIT, inputs["menu"][0].format_name)}
 
     def capture_cache(**kwargs):
@@ -265,7 +270,7 @@ def test_main_registers_resumed_wire_before_receipt_read(
         return verify(*args, **kwargs)
 
     monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
-    monkeypatch.setattr(campaign, "_checkpoint_wire_record", read_wire)
+    monkeypatch.setattr(campaign_wire, 'checkpoint_wire_record', read_wire)
     _forbid_reencode(monkeypatch, campaign)
     assert campaign.main(argv) == 0
     assert len(reads) == 1
@@ -432,7 +437,6 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
     assert checkpoint.read_bytes() == original_manifest
 
 
-
 @pytest.mark.parametrize("changed", ["producer", "encoder", "mixed", "certified",
                                      "tampered_wire", "other_wire_identity"])
 def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
@@ -456,7 +460,7 @@ def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_camp
         blob = bytearray(wire.read_bytes())
         blob[-1] ^= 1
         wire.write_bytes(blob)
-    api = campaign._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     verifications = []
     original_verify = api.verify_cached_unit
 
@@ -501,8 +505,6 @@ def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_camp
             assert "[DEV-MODE]" not in capsys.readouterr().out
     assert checkpoint.read_bytes() == original_manifest
     assert unit_path(root, UNIT).read_bytes() == original_shard
-
-
 
 
 @pytest.mark.parametrize("suffix,contract", [("indexer.weights_proj", "a32"), ("kv_b_proj", "a16")])
@@ -559,7 +561,7 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
         invalid["anchors"][0][damage] = value
         write_unit(root, stage="Tessera campaign", qname=name,
             identity_sha256=manifest["identity_sha256"], state=invalid)
-        with pytest.raises(campaign.ActivationScaleContractError,
+        with pytest.raises(ActivationScaleContractError,
                            match="activation (contract|observation)"):
             campaign.main(argv)
         rejected = list(argv)
@@ -567,7 +569,7 @@ def test_direct_campaign_publishes_resumes_and_seeds_the_measured_price(
         rejected[rejected.index("--checkpoint") + 1] = str(tmp_path / (label + ".anchors.json"))
         rejected[rejected.index("--cache-dir") + 1] = str(tmp_path / (label + "-cache"))
         rejected[rejected.index("--out") + 1] = str(tmp_path / (label + "-cost.pkl"))
-        with pytest.raises(campaign.ActivationScaleContractError,
+        with pytest.raises(ActivationScaleContractError,
                            match="activation (contract|observation)"):
             campaign.main([*rejected, "--seed-checkpoint", str(checkpoint)])
         assert not (tmp_path / (label + "-cost.pkl")).exists()
@@ -596,17 +598,17 @@ def _architecture_profile(profile_name, architecture):
 ])
 def test_declared_architecture_controls_direct_contract_and_memory(
         suffix, contract, element_bytes, profile_name, architecture, is_glm):
-    from prismaquant import tessera_campaign as campaign
-    from prismaquant.tessera_formats import get_tessera_family
 
     profile = _architecture_profile(profile_name, architecture)
     name = "model.layers.0.self_attn." + suffix
-    family = get_tessera_family("TESSERA_E4M3_K1")
-    assert campaign._direct_consumer_activation_contract(
-        name, profile=profile) == (contract if is_glm else None)
-    assert campaign._direct_consumer_memory_bytes(
-        name, family, (128, 64), profile=profile) == (
-            128 * 64 * element_bytes if is_glm else 0)
+    recipe = cell_measurement.CellRecipe.prepare(qname=name,
+        format_name="TESSERA_E4M3_K1_R1024", activation_kwargs_for=None,
+        hessian_required=False, static_input_scale=None, profile=profile)
+    assert recipe.direct_contract == (contract if is_glm else None)
+    shape = (128, 64)
+    assert recipe.memory_bytes_for_shape(shape) == (
+        recipe.spec.memory_bytes_for_shape(shape) +
+        (128 * 64 * element_bytes if is_glm else 0))
 
 
 def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
@@ -617,7 +619,9 @@ def test_non_glm_campaign_with_kv_b_proj_leaf_has_no_direct_cache_charge(
     profile = _architecture_profile("future_mla", "FutureMLAForCausalLM")
     campaign, checkpoint, argv, model, _inputs = _main_fixture(
         monkeypatch, tmp_path, priced=True, unit=name, profile=profile)
-    assert campaign._direct_consumer_activation_contract(name, profile=profile) is None
+    recipe = cell_measurement.CellRecipe.prepare(qname=name, format_name="TESSERA_E4M3_K1_R1024",
+        activation_kwargs_for=None, hessian_required=False, static_input_scale=None, profile=profile)
+    assert recipe.direct_contract is None
     assert campaign.main(argv) == 0
     with (tmp_path / "cost.pkl").open("rb") as handle:
         price = pickle.load(handle)["costs"][name]["TESSERA_E4M3_K1_R1024"]

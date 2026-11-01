@@ -154,7 +154,7 @@ def test_candidates_resolve_same_format_separately_for_dense_and_routed_units(mo
         stats, costs, [spec],
         target_profile=_PROFILE,
         context_by_unit=contexts,
-    )
+    ).candidates
 
     assert set(candidates) == set(contexts)
     for name, context in contexts.items():
@@ -264,7 +264,7 @@ def test_v5_unmatched_context_masks_only_the_attested_candidate(monkeypatch, mod
     candidates = ac.build_candidates(
         stats, costs, specs, target_profile=_PROFILE,
         context_by_unit=contexts, mask_records=masks,
-    )
+    ).candidates
 
     assert observed == [context]
     expected_formats = {"BF16", _FORMAT} if mode == tm.MENU_RESEARCH else {"BF16"}
@@ -294,7 +294,7 @@ def test_v5_scope_refusal_cannot_silently_remove_a_whole_unit(monkeypatch):
     with pytest.raises(ValueError, match="unit.a"):
         ac.build_candidates(
             stats, costs, specs, target_profile=_PROFILE, context_by_unit={},
-        )
+        ).candidates
 
 
 def _legacy_scope_candidate_fixture(monkeypatch, *, context, mode, include_bf16=True):
@@ -342,7 +342,7 @@ def test_legacy_context_refusal_masks_only_explicit_attested_candidates(
         stats, costs, specs, target_profile=_PROFILE,
         context_by_unit={} if context is None else {"unit.a": context},
         mask_records=masks,
-    )
+    ).candidates
 
     refused = context is not None and mode == tm.MENU_ATTESTED
     expected = {"BF16"} if refused else {"BF16", _FORMAT}
@@ -366,4 +366,4 @@ def test_legacy_explicit_context_refusal_cannot_remove_the_final_unit_choice(mon
         ac.build_candidates(
             stats, costs, specs, target_profile=_PROFILE,
             context_by_unit={"unit.a": context},
-        )
+        ).candidates

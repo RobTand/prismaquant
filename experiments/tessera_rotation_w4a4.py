@@ -118,7 +118,7 @@ def main():
             hp, hr = tessera_hat(w, RotationState.NONE), \
                      tessera_hat(w, RotationState.R_IN_ONLY)
             w_plain, w_rot = rel(x_ev @ hp.T), rel(xr_ev @ hr.T)
-            # 3. the composite that actually ships under W4A4
+            # 3. combined weight and activation error for this W4A4 screen
             both_plain, both_rot = rel(xq @ hp.T), rel(xrq @ hr.T)
             rows.append({"layer": layer, "expert": k.split("experts.")[1],
                          "block": size,

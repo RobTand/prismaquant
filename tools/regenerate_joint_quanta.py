@@ -104,16 +104,12 @@ import zlib
 from pathlib import Path
 
 if __package__:
-    from prismaquant.joint_layer_quanta import (
-        check_quantum_for_campaign, derive_stride,
-        emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, seal_manifest_bytes)
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+    from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from prismaquant.joint_layer_quanta import (
-        check_quantum_for_campaign, derive_stride,
-        emit_quantum_boundary_readsets, emit_quantum_executable_readsets,
-        layer_quanta, seal_manifest_bytes)
+    from prismaquant.joint_campaign_ledger import (require_quantum_campaign)
+    from prismaquant.joint_layer_quanta import (derive_stride, emit_quantum_boundary_readsets, emit_quantum_executable_readsets, layer_quanta, seal_manifest_bytes)
 
 EXIT_REFUSED = 3
 
@@ -220,7 +216,6 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     a receipt; otherwise it must be equal.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
-    from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     old_root = old_root.rstrip("/")
     # The new tree root is whatever the first moved path swapped to; every
@@ -275,11 +270,8 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the moved "
                          f"paths")
-    body = {key: value for key, value in new.items()
-            if key != "identity_sha256"}
-    if canonical_sha256(body, where=f"Gate 1 {where} {qid}") != new.get(
-            "identity_sha256"):
-        raise ValueError(f"Gate 1 {where}: {qid} identity does not recompute")
+    from prismaquant.joint_campaign_ledger import require_quantum_identity
+    require_quantum_identity(new)
 
 
 # --- Control-metadata generation seam (PQ #884) ---------------------------
@@ -447,7 +439,6 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
     (``output_space``, ``adjoint.boundary_artifacts``) and every scientific
     field stay byte-equal; the new identity must recompute."""
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
-    from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     original_root = original_root.rstrip("/")
     if old.get("output_space") != new.get("output_space"):
@@ -501,11 +492,8 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
     if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the "
                          "relocated control metadata")
-    body = {key: value for key, value in new.items()
-            if key != "identity_sha256"}
-    if canonical_sha256(body, where=f"Gate 1 {where} {qid}") != new.get(
-            "identity_sha256"):
-        raise ValueError(f"Gate 1 {where}: {qid} identity does not recompute")
+    from prismaquant.joint_campaign_ledger import require_quantum_identity
+    require_quantum_identity(new)
 
 
 #: NEW-record top-level blocks that are pure control placement/binding in
@@ -571,7 +559,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
         if bound_slice is not None:
             binding["adjoint_slice_sha256"] = bound_slice
         try:
-            check_quantum_for_campaign(record, binding)
+            require_quantum_campaign(record, binding)
         except ValueError as exc:
             raise ValueError(f"compare {qid}: the prior record fails its "
                              f"own identity check: {exc}") from exc
@@ -754,7 +742,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     producer, and nothing it reads is re-read by a quantum. Returns
     ``{layer: {"bytes", "binding"}}``; nothing is written.
     """
-    from prismaquant.aura_cost import _aura_source_sha256
+    from prismaquant.aura_provenance import producer_package_sha256
     from prismaquant.joint_layer_quanta import qname_layer
     from prismaquant.joint_stage_b_head import (
         HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
@@ -773,7 +761,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
         config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
         completion=prepared, production_cache=production_cache, data=data,
         layers=layers, layer_of=qname_layer,
-        implementation_sha256=_aura_source_sha256())
+        implementation_sha256=producer_package_sha256())
     sealed = {}
     for layer, head_slice in slices.items():
         raw = head_slice_bytes(head_slice)

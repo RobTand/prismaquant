@@ -31,6 +31,7 @@ from prismaquant.incremental_probe import (
     build_extended_shard_regexes,
     build_shard_schedule,
     merge_probe_pickles,
+    probe_shard_is_reusable,
     scan_cached_linear_stats,
     synthesize_shard_from_linear_cache,
 )
@@ -436,3 +437,22 @@ def test_merge_rejects_overlap_when_synthesis_double_covers(tmp_path):
             sorted(out_dir.glob("probe_shard_*.pkl")),
             tmp_path / "merged.pkl",
         )
+
+
+@pytest.mark.parametrize("field", [
+    "sample_parallel", "sample_parallel_importance", "sample_parallel_activation_scope",
+    "sample_parallel_execution_identity", "sample_parallel_qname_census",
+])
+@pytest.mark.parametrize("location", ["top-level", "incremental-shard"])
+def test_ordinary_resume_refuses_recorded_sample_metadata(tmp_path, field, location):
+    path = tmp_path / "probe_shard_000.pkl"
+    _write_shard(path, _stats_for([0]))
+    expected = _anchor()
+    assert probe_shard_is_reusable(path, expected)
+    with path.open("rb") as handle:
+        data = pickle.load(handle)
+    target = data["meta"] if location == "top-level" else data["meta"].setdefault("incremental_shard", {})
+    target[field] = {"identity_sha256": "a" * 64}
+    with path.open("wb") as handle:
+        pickle.dump(data, handle)
+    assert not probe_shard_is_reusable(path, expected)

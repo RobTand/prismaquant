@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_quantum_row as quantum_row
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan
 from test_quantum_executable_readset import (
@@ -224,8 +225,8 @@ def test_cli_completes_in_new_generation_preserving_prior_tiling(tmp_path):
         assert hashlib.sha256(wire).hexdigest() == record["executable_readset"]["manifest_sha256"]
         manifest = json.loads(gzip.decompress(wire))
         for layer in record["adjoint"]["chain_layers"] + [record["layer"]]:
-            name = (jl.executable_own_source_phase_name(layer)
-                    if layer == record["layer"] else jl.executable_source_phase_name(layer))
+            name = (quantum_row.executable_own_source_phase_name(layer)
+                    if layer == record["layer"] else quantum_row.executable_source_phase_name(layer))
             assert not jl.uncovered_source_spans(_phase_entries(manifest, name), spans[layer])
         # PQ #1095: the head phase stages the resident head, and the bound
         # record carries the selection the loader compares with its own.

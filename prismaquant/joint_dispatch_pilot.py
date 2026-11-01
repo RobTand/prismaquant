@@ -5,10 +5,10 @@ Missing measurements refuse; an operator may explicitly override the gate.
 """
 from __future__ import annotations
 
-import base64
 import re
 import math
 from collections.abc import Mapping
+from pathlib import Path
 
 from .digests import bytes_sha256hex, canonical_json_sha256, is_sha256hex
 from .io_spans import EXPOSED_WAIT_SCHEMA, GB10_POWER_ENVELOPE_W, derive_wait_bound
@@ -16,16 +16,18 @@ from .joint_replay_regime import normalize_replay_regime
 
 PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
 QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
-QUANTUM_RECORD_MAX_BYTES = 1024 * 1024
+#: The CEO approved this 4 MiB quantum control bound in PQ #2603.
+#: The producer and consumer use the same bound through the shared reader.
+#: The completion carries a descriptor, never the wire or its base64 form.
+QUANTUM_RECORD_MAX_BYTES = 4 * 1024 * 1024
 PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
 PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
 PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
-
-#: The completion's inlined original-quantum-record block names these three
-#: fields; the wire bytes are base64 and must decode to exactly
-#: ``quantum_record_bytes`` bytes hashing to ``quantum_record_sha256``.
+#: The completion's external original-quantum-record entry names these three
+#: fields. Its path is provenance; the consumer supplies an original wire copy
+#: and checks its bytes against the declared length and sealed digest.
 QUANTUM_RECORD_FIELDS = (
-    "quantum_record", "quantum_record_bytes", "quantum_record_sha256")
+    "path", "sha256", "bytes")
 
 
 class PilotRefused(ValueError):
@@ -34,7 +36,7 @@ class PilotRefused(ValueError):
 
 def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
                               counters_sha256: str, counters_bytes: int,
-                              quantum_record_sha256: str,
+                              quantum_record_sha256: str, quantum_record_path,
                               quantum_record_bytes: int | None = None) -> dict:
     """Match supplied counters to an authenticated PB producer completion.
 
@@ -43,13 +45,13 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
     does not establish this provenance. Paths are retained as provenance;
     the byte digest permits an exact copy of the counters to be consumed.
 
-    The completion also inlines the ORIGINAL quantum wire bytes the producer
-    authenticated (PQ #1293). ``quantum_record_sha256``/``quantum_record_bytes``
-    authenticates the sealed ``--quantum-sha256``; an optional independently
-    known length must agree too. The declared length is capped before decode,
-    then checked against the owned bytes. The caller derives the pilot binding
-    from those authenticated bytes, never from the record path, so
-    cross-output-namespace equivalence is preserved.
+    The completion names the original wire digest and length.
+    Both must match the sealed invocation and any independently known length.
+    The caller supplies quantum_record_path for an exact original wire copy.
+    The producer-local path remains provenance only.
+    The declared length bounds the read before allocation.
+    The caller derives the pilot binding from these authenticated original bytes.
+    Different producer and consumer namespaces do not change that binding.
     """
     try:
         if not isinstance(completion, Mapping) or completion.get("schema") != QUANTUM_COMPLETION_SCHEMA:
@@ -81,28 +83,32 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
             raise PilotRefused("pilot counters bytes differ from the PB producer result")
         record = _authenticated_quantum_record(
             completion, quantum_record_sha256=quantum_record_sha256,
-            quantum_record_bytes=quantum_record_bytes)
+            quantum_record_bytes=quantum_record_bytes,
+            quantum_record_path=quantum_record_path)
         return {**dict(reference), "quantum_record": record}
     except (KeyError, TypeError, AttributeError) as error:
         raise PilotRefused("pilot PB completion reference is incomplete or malformed") from error
 
 
 def _authenticated_quantum_record(completion, *, quantum_record_sha256,
-                                  quantum_record_bytes):
-    """The completion's inlined original record bytes, authenticated.
+                                  quantum_record_bytes, quantum_record_path):
+    """The completion's external original record entry, authenticated.
 
-    The inlined block is the producer's own owned read, bounded before decode
-    and matched byte for byte against the sealed ``--quantum-sha256``. A
-    missing, oversized, over-large-after-decode or digest-mismatched block
-    refuses; no path is reopened and nothing is canonical-reencoded.
+    The entry is the producer's own descriptor for the wire its identity
+    gate read, bounded before the read and matched byte for byte against
+    the sealed --quantum-sha256. The caller supplies a consumer-visible copy.
+    The producer path remains provenance and is never reopened here.
+    The shared reader bounds the copy before allocation and verifies its digest.
+    Missing, malformed, oversized, unreadable, or changed bytes refuse.
     """
-    if set(completion) & set(QUANTUM_RECORD_FIELDS) != set(QUANTUM_RECORD_FIELDS):
+    entry = completion.get("quantum_record")
+    if not isinstance(entry, Mapping) or set(entry) != set(QUANTUM_RECORD_FIELDS):
         raise PilotRefused("pilot PB completion carries no original quantum record")
-    encoded = completion["quantum_record"]
-    declared_bytes = completion["quantum_record_bytes"]
-    declared_sha = completion["quantum_record_sha256"]
-    if not isinstance(encoded, str) or not encoded:
-        raise PilotRefused("pilot completion quantum record is not a base64 string")
+    path = entry["path"]
+    declared_bytes = entry["bytes"]
+    declared_sha = entry["sha256"]
+    if not isinstance(path, str) or not path:
+        raise PilotRefused("pilot completion quantum record path is malformed")
     if type(declared_bytes) is not int or declared_bytes <= 0:
         raise PilotRefused("pilot completion quantum record length is malformed")
     if declared_bytes > QUANTUM_RECORD_MAX_BYTES:
@@ -115,25 +121,18 @@ def _authenticated_quantum_record(completion, *, quantum_record_sha256,
     if ((quantum_record_bytes is not None and declared_bytes != quantum_record_bytes)
             or declared_sha != quantum_record_sha256):
         raise PilotRefused("pilot completion names another quantum record than the sealed argv")
-    if len(encoded) > _MAX_BASE64_CHARS(declared_bytes):
-        raise PilotRefused("pilot completion quantum record exceeds its declared length")
+    if not isinstance(quantum_record_path, (str, Path)) or not str(quantum_record_path):
+        raise PilotRefused("pilot consumer quantum record path is malformed")
+    from .stage_inputs import read_bound as _read_bound
     try:
-        raw = base64.b64decode(encoded, validate=True)
-    except (ValueError, base64.binascii.Error) as error:
-        raise PilotRefused("pilot completion quantum record is not valid base64") from error
+        raw = _read_bound({"path": str(quantum_record_path), "sha256": declared_sha},
+                          "pilot completion quantum record", max_bytes=declared_bytes)
+    except (ValueError, OSError) as error:
+        raise PilotRefused(
+            "pilot completion quantum record bytes do not match their digest") from error
     if len(raw) != declared_bytes or bytes_sha256hex(raw) != declared_sha:
         raise PilotRefused("pilot completion quantum record bytes do not match their digest")
     return raw
-
-
-def _MAX_BASE64_CHARS(declared_bytes: int) -> int:
-    """The most base64 characters that can carry ``declared_bytes`` bytes.
-
-    Computed before decoding, so an oversized or hostile block is refused on
-    its encoded length rather than after allocating the decoded form. Four
-    characters per three bytes, rounded up to the next 4-character group.
-    """
-    return 4 * ((declared_bytes + 2) // 3)
 
 
 def _pilot_binding_digest(value, where):

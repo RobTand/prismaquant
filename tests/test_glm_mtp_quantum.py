@@ -14,6 +14,7 @@ The rows are synthetic measurements on random weights; they make no claim
 about GLM-5.3's costs.
 """
 from __future__ import annotations
+from prismaquant import joint_aura_rows
 
 import copy
 import pickle
@@ -32,7 +33,7 @@ from prismaquant import genuine_weight_initialization  # noqa: E402
 from prismaquant import glm_mtp, glm_mtp_quantum as quantum, glm_mtp_selection  # noqa: E402
 from prismaquant import joint_aura as joint  # noqa: E402
 from prismaquant.cost_currency import probe_identity_walls_differ  # noqa: E402
-from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
+from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.joint_statistics_replay import SCHEMA as WINDOWS_SCHEMA  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
@@ -54,7 +55,7 @@ def _source_model():
                "weight_map": {"fixture.weight": "fixture.safetensors"},
                "shards": [{"path": "/fixture/fixture.safetensors", "size": 1, "sha256": "a" * 64}]}
     return {"schema": STREAMED_MODEL_IDENTITY_SCHEMA, "source": "synthetic",
-            "resolved_commit": None, **content, "content_sha256": joint.identity_sha256(content)}
+            "resolved_commit": None, **content, "content_sha256": joint_aura_rows.joint_identity_sha256(content)}
 
 
 def _layer(seed=20260927):
@@ -209,7 +210,7 @@ def test_activation_rungs_carry_their_quantized_input_terms(env):
     assert any(part["mixed"] != 0.0 for part in parts)
     for rows in payload["costs"].values():
         for row in rows.values():
-            assert joint.validate_joint_aura_entry(row)
+            assert joint_aura_rows.validate_joint_aura_entry(row)
 
 
 def test_rows_carry_the_mtp_objective_and_one_probe_identity(env):
@@ -236,7 +237,7 @@ def test_payload_is_what_the_allocator_mtp_path_reads(env, tmp_path):
     path.write_bytes(pickle.dumps(payload))
     loaded = glm_mtp_selection.load_mtp_cost(path)
     record = glm_mtp_selection.select_mtp_rungs(
-        loaded, byte_budget=10 ** 9,
+        loaded.payload, byte_budget=10 ** 9,
         constants={"t_ms": 20.0, "d0_ms": 1.0, "c_ms_per_bit": 0.2, "source": "fixture"})
     assert set(record["assignment"]) == set(env.modules)
     assert set(record["rung_by_group"]) == set(env.census["anchor_groups"])
@@ -365,21 +366,21 @@ def test_the_source_model_identity_is_validated_once_not_per_row(env, monkeypatc
     source identity once per row, about 4 GPU-idle minutes for GLM-5.3's
     1734 rows. The count must not grow with the rows.
     """
-    from prismaquant import cost_streaming
+    from prismaquant import streamed_model_identity as cost_streaming_identity
 
-    original = cost_streaming.validate_streamed_model_identity
+    original = cost_streaming_identity.validate_streamed_model_identity
     calls = []
 
     def counted(*args, **kwargs):
         calls.append(kwargs.get("where"))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", counted)
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", counted)
     payload = env.run()
     rows = [row for rows in payload["costs"].values() for row in rows.values()]
     assert len(rows) > 2
     assert len(calls) <= 1, calls
     for row in rows:
         assert type(row["probe_identity"]) is dict
-    monkeypatch.setattr(cost_streaming, "validate_streamed_model_identity", original)
-    assert all(joint.validate_joint_aura_entry(row) for row in rows)
+    monkeypatch.setattr(cost_streaming_identity, "validate_streamed_model_identity", original)
+    assert all(joint_aura_rows.validate_joint_aura_entry(row) for row in rows)

@@ -8,14 +8,11 @@ the cover: that between them the children answered the roster exactly once.
 
 WHERE THE CODE UNDER TEST COMES FROM
 ====================================
-PrismaBuild's decomposition is on the unmerged draft pull request PB #518 and is
-**not deployed to the fleet** -- see the module comment on
-``prismaquant.quality_prefill_pb_adapter``.  So this harness runs against a
-*checkout* of that branch, never against the live fleet: nothing here submits
-anything to ``/mnt/shared/prismabuild-fleet``, and the queue, the CAS and the
-checkouts all live under ``tmp_path``.  Point ``QP_PB517_ROOT`` at the worktree;
-without it the module skips, because the alternative -- a green suite that
-silently tested nothing -- is worse than a visible skip.
+This harness runs against a compatible PrismaBuild checkout selected by
+``QP_PB517_ROOT``. It does not infer fleet deployment from the source merge
+of PB #518. The queue, CAS and child checkouts live under ``tmp_path``;
+nothing here submits to ``/mnt/shared/prismabuild-fleet``. A missing checkout
+produces an explicit skip.
 
 The producers below are test producers.  A real one measures something; these
 answer instantly, which is what makes running every child of a real cut cheap
@@ -51,10 +48,9 @@ _missing = not (PB517_ROOT / "src" / "prismabuild" / "decomposition.py").is_file
 pytestmark = pytest.mark.skipif(
     _missing,
     reason=(
-        f"PrismaBuild pre-execution decomposition (PB #517 / draft PR #518) is "
-        f"not checked out at {PB517_ROOT}; it is not deployed to the fleet "
-        f"either, so this harness has nothing to run against. Set QP_PB517_ROOT "
-        f"to a checkout of the #518 branch."
+        f"PrismaBuild pre-execution decomposition (PB #517 / PR #518) is "
+        f"not checked out at {PB517_ROOT}. Set QP_PB517_ROOT to a compatible "
+        f"PrismaBuild checkout."
     ),
 )
 

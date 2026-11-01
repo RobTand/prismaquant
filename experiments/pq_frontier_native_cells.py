@@ -24,8 +24,9 @@ PrismaQuant side, in one admitted GPU action:
 The cost identity this produces is real (a fresh joint AURA probe on the real
 model and the real rendered bytes), but the rendered bytes are NOT the served
 artifacts' layer-0 wires: those were rendered by the campaign under its own
-calibration. Timing does not read weight values, so a same-shape same-rung
-operator prices the artifact's operator; the doc that cites these rows says so.
+calibration. These measurements use fresh renders with the same declared
+operator shape and rung; they do not attest the served artifact's weight bytes.
+Applicability is limited to the matched native operator contract.
 
 The native FP8 operator executes Tessera's unclipped ``fp8_per_token_dynamic``
 contract; the joint rows and the reference QDQ must be priced under the same
@@ -152,6 +153,8 @@ def bind_priced_arithmetic():
 
 
 def prepare(args):
+    from prismaquant.model_runtime import initialize_model_runtime
+    initialize_model_runtime()
     import torch
     from safetensors import safe_open
     from safetensors.torch import save_file
@@ -159,8 +162,10 @@ def prepare(args):
     from experiments.pq237_joint_aura_streamed import _capture_and_render, expected_currency_bindings
     from prismaquant.aura_cost import compute_aura_cost_streamed
     from prismaquant.calibration_data import load_calibration_input
-    from prismaquant.cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
-    from prismaquant.joint_aura import arithmetic_identity, identity_sha256, prefetch_joint_cache
+    from prismaquant.cost_streaming import build_streamed_causal_lm
+    from prismaquant.streamed_model_identity import build_streamed_model_identity
+    from prismaquant.joint_aura import arithmetic_identity, prefetch_joint_cache
+    from prismaquant.joint_aura_rows import joint_identity_sha256
     from prismaquant.model_profiles import detect_profile
     from prismaquant.native_operator_panel import EXECUTION, prepare_native_inputs
     from prismaquant.perturbed_x_cache import activation_cache_filename
@@ -283,7 +288,7 @@ def prepare(args):
             raise ValueError("streamed producer probe identity differs from frozen inputs")
         for name, rows in payload["costs"].items():
             for fmt, row in rows.items():
-                if identity_sha256(row["joint_operator_identity"]) != expected[name][fmt]:
+                if joint_identity_sha256(row["joint_operator_identity"]) != expected[name][fmt]:
                     raise ValueError("streamed operator differs from independently recorded production render")
     finally:
         runner.shutdown()

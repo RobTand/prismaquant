@@ -17,8 +17,8 @@ import pytest
 
 pytest.importorskip("torch")
 
-from prismaquant import cost_streaming  # noqa: E402
-from prismaquant.cost_streaming import build_source_checkpoint_identity  # noqa: E402
+from prismaquant import streamed_model_identity as cost_streaming_identity  # noqa: E402
+from prismaquant.streamed_model_identity import build_source_checkpoint_identity  # noqa: E402
 
 _SHARDS = 6
 
@@ -81,13 +81,13 @@ def test_partial_cache_hits_merge_in_order(tmp_path, monkeypatch):
     payload["entries"] = payload["entries"][::2]  # keep every other shard
     cache.write_text(json.dumps(payload), encoding="utf-8")
     hashed: list[str] = []
-    real = cost_streaming._file_sha256
+    real = cost_streaming_identity._file_sha256
 
     def recording(path):
         hashed.append(Path(path).name)
         return real(path)
 
-    monkeypatch.setattr(cost_streaming, "_file_sha256", recording)
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", recording)
     assert _identity(root, monkeypatch, 4, cache) == reference
     shard_reads = sorted(n for n in hashed if n.endswith(".safetensors"))
     assert shard_reads == [p.name for p in paths[1::2]]
@@ -99,14 +99,14 @@ def test_parallel_path_really_runs_concurrently(tmp_path, monkeypatch):
     root = tmp_path / "ckpt"
     _write_checkpoint(root)
     barrier = threading.Barrier(2, timeout=30)
-    real = cost_streaming._file_sha256
+    real = cost_streaming_identity._file_sha256
 
     def gated(path):
         if Path(path).name.endswith(".safetensors"):
             barrier.wait()
         return real(path)
 
-    monkeypatch.setattr(cost_streaming, "_file_sha256", gated)
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", gated)
     _identity(root, monkeypatch, 2)
 
 
@@ -114,7 +114,7 @@ def test_shard_mutated_mid_hash_is_refused_in_parallel(tmp_path, monkeypatch):
     root = tmp_path / "ckpt"
     paths = _write_checkpoint(root)
     target = paths[3]
-    real = cost_streaming._file_sha256
+    real = cost_streaming_identity._file_sha256
 
     def mutating(path):
         digest = real(path)
@@ -124,7 +124,7 @@ def test_shard_mutated_mid_hash_is_refused_in_parallel(tmp_path, monkeypatch):
                 handle.write(b"\xff")
         return digest
 
-    monkeypatch.setattr(cost_streaming, "_file_sha256", mutating)
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", mutating)
     with pytest.raises(RuntimeError, match="changed while hashing") as excinfo:
         _identity(root, monkeypatch, 4, tmp_path / "cache.json")
     assert target.name in str(excinfo.value)
@@ -137,7 +137,7 @@ def test_first_failure_in_sorted_order_is_raised(tmp_path, monkeypatch):
     paths = _write_checkpoint(root)
     early, late = paths[1].resolve(), paths[4].resolve()
     late_failed = threading.Event()
-    real = cost_streaming._file_sha256
+    real = cost_streaming_identity._file_sha256
 
     def failing(path):
         path = Path(path)
@@ -151,7 +151,7 @@ def test_first_failure_in_sorted_order_is_raised(tmp_path, monkeypatch):
                 late_failed.set()
         return real(path)
 
-    monkeypatch.setattr(cost_streaming, "_file_sha256", failing)
+    monkeypatch.setattr(cost_streaming_identity, "_file_sha256", failing)
     for _ in range(3):
         late_failed.clear()
         with pytest.raises(OSError, match="early read failed"):
@@ -162,8 +162,8 @@ def test_thread_override_and_default(monkeypatch):
     import os
 
     monkeypatch.setenv("PRISMAQUANT_SOURCE_HASH_THREADS", "3")
-    assert cost_streaming.source_identity_hash_threads() == 3
+    assert cost_streaming_identity.source_identity_hash_threads() == 3
     monkeypatch.setenv("PRISMAQUANT_SOURCE_HASH_THREADS", "0")
-    assert cost_streaming.source_identity_hash_threads() == 1
+    assert cost_streaming_identity.source_identity_hash_threads() == 1
     monkeypatch.delenv("PRISMAQUANT_SOURCE_HASH_THREADS")
-    assert cost_streaming.source_identity_hash_threads() == len(os.sched_getaffinity(0))
+    assert cost_streaming_identity.source_identity_hash_threads() == len(os.sched_getaffinity(0))

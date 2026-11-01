@@ -31,7 +31,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from prismaquant.cost_streaming import StreamedBoundaryArtifacts
+from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import adjoint_space
 from prismaquant.stage_a_chain_resume import chain_state_path
 from prismaquant.tessera_joint_aura import HEAD_WALK_INPUT_KEYS

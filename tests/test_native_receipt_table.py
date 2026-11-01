@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant import native_receipt_table as emitter
-from prismaquant.joint_aura import make_joint_aura_entry
+from prismaquant.joint_aura_rows import make_joint_aura_entry
 from prismaquant.measured_runtime_prices import (
     RuntimePriceError, identity_sha256, parse_measured_runtime_table, parse_runtime_context,
 )

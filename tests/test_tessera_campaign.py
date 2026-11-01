@@ -22,6 +22,10 @@ from functools import lru_cache
 
 import pytest
 
+from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
+
 torch = pytest.importorskip("torch")
 
 CUDA = pytest.mark.skipif(
@@ -57,7 +61,7 @@ def test_next_anchor_splits_the_worst_predicted_interval():
 # ---------------------------------------------------------------------------
 
 def _anchor(qname, family, rung, dloss, *, bytes_=1000):
-    from prismaquant.tessera_campaign import CampaignAnchor
+    from prismaquant.tessera_campaign_table import CampaignAnchor
     from prismaquant.format_registry import get_format
 
     return CampaignAnchor(
@@ -83,10 +87,8 @@ def _menu(qname, family, rungs):
 
 
 def test_measured_and_interpolated_rows_are_told_apart():
-    from prismaquant.allocator_candidates import (
-        cost_entry_is_band_interpolated, cost_entry_source,
-    )
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.priced_cell import cost_entry_is_band_interpolated, cost_entry_source
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -111,10 +113,11 @@ def test_an_interpolated_row_is_priced_in_output_space():
     the DP would rank Tessera's rungs against each other on a scale nothing
     else on the menu uses.
     """
-    from prismaquant.allocator_candidates import (
-        cost_entry_activation_pricing_branch, cost_entry_predicted_dloss,
+    from prismaquant.priced_cell import (
+        cost_entry_activation_pricing_branch,
+        cost_entry_predicted_dloss,
     )
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -133,7 +136,7 @@ def test_an_interpolated_row_is_priced_in_output_space():
 
 
 def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -148,7 +151,7 @@ def test_a_rung_outside_the_envelope_is_omitted_not_extrapolated():
 
 
 def test_non_monotone_anchors_are_recorded_not_laundered():
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d) for r, d in
@@ -211,16 +214,16 @@ def test_no_embedded_axis_on_the_wire():
     on the serialised wire costs its own encode, which is the fact that makes
     an anchor campaign necessary rather than merely convenient.
     """
-    from prismaquant.tessera_campaign import _encode_and_render
+    from prismaquant.tessera_render import encode_tessera_unit
 
     torch.manual_seed(0)
     W = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
     # Weights-only deliberately: this pins a property of the WIRE (that a
     # deeper encode is not a superset of a shallower one), and the encoder's
     # weights-only bytes are unchanged by the H-aware default.
-    _, lo = _encode_and_render(W, "TESSERA_E2M1_K2_R384",
+    _, lo = encode_tessera_unit(W, "TESSERA_E2M1_K2_R384",
                                hessian_required=False)
-    _, hi = _encode_and_render(W, "TESSERA_E2M1_K2_R512",
+    _, hi = encode_tessera_unit(W, "TESSERA_E2M1_K2_R512",
                                hessian_required=False)
     assert len(hi) > len(lo)
     assert not bytes(hi).startswith(bytes(lo))
@@ -230,7 +233,7 @@ def test_no_embedded_axis_on_the_wire():
 def test_the_priced_render_is_the_decoded_wire():
     """Principle 8, at the one place it could silently break.
 
-    ``_encode_and_render`` passes ``verify=False`` to the encoder because the
+    ``encode_tessera_unit`` passes ``verify=False`` to the encoder because the
     encoder's ``verify`` compares its in-memory reconstruction against the
     decoded artifact and this campaign only ever uses the latter. That is the
     right call only if the two agree, which nothing downstream re-checks --
@@ -268,7 +271,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
     """
     from prismaquant import format_registry as fr
     from prismaquant.production_weight_cache import _local_forward_render_score
-    from prismaquant.tessera_campaign import _encode_and_render
+    from prismaquant.tessera_render import encode_tessera_unit
 
     torch.manual_seed(0)
     W = torch.randn(256, 512, device="cuda", dtype=torch.bfloat16)
@@ -278,7 +281,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R896"):
         # Weights-only on both arms, so the A-leg ratio is the only thing
         # that differs between the routes -- an H would be a second variable.
-        render, _ = _encode_and_render(W, name, hessian_required=False)
+        render, _ = encode_tessera_unit(W, name, hessian_required=False)
         spec = fr.get_format(name)
         under_route = _local_forward_render_score(
             reference_weight=W.float(), rendered_weight=render.float(),
@@ -298,7 +301,7 @@ def test_the_same_weight_rate_costs_differently_on_the_two_routes():
 
 
 def _anchor_harness(monkeypatch, tmp_path):
-    """Run ``_measure_anchor`` with the encode stubbed to the identity.
+    """Run ``measure_cell`` with the encode stubbed to the identity.
 
     The activation-quantiser choice is the thing under test, not the trellis
     encode, and a CPU E2M1 encode is ~a minute; the stub returns the weight
@@ -306,12 +309,9 @@ def _anchor_harness(monkeypatch, tmp_path):
     """
     from types import SimpleNamespace
 
-    from prismaquant import tessera_campaign as campaign
-
-    monkeypatch.setattr(
-        campaign, "_encode_and_render", lambda w, name, **kw: (w, b""))
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", lambda w, name, **kw: (w, b""))
     cache = SimpleNamespace(weights={}, cache_dir=None)
-    return lambda **kw: campaign._measure_anchor(
+    return lambda **kw: cell_measurement.measure_cell(
         cache=cache, wire_dir=tmp_path, hessian_required=False, **kw)
 
 
@@ -364,17 +364,16 @@ def test_a_w4a4_anchor_with_no_static_scale_refuses_before_encoding(
     cost an encode, and the campaign loop must not absorb it as one failed
     anchor.
     """
-    from prismaquant import tessera_campaign as campaign
 
     def _must_not_encode(*a, **k):
         raise AssertionError("the refusal must precede the encode")
 
-    monkeypatch.setattr(campaign, "_encode_and_render", _must_not_encode)
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit", _must_not_encode)
     from types import SimpleNamespace
 
-    with pytest.raises(campaign.ActivationScaleContractError,
+    with pytest.raises(ActivationScaleContractError,
                        match="static activation contract"):
-        campaign._measure_anchor(
+        cell_measurement.measure_cell(
             qname="m.q_proj",
             weight=torch.randn(32, 256, dtype=torch.bfloat16),
             activations=torch.randn(8, 256),
@@ -405,7 +404,7 @@ def test_the_priced_scale_travels_into_the_cost_rows(monkeypatch, tmp_path):
     """
     import dataclasses
 
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     scale = 448.0 * 6.0 / 37.5
@@ -430,29 +429,28 @@ def test_resume_refuses_w4a4_anchors_priced_under_another_contract():
     """
     import dataclasses
 
-    from prismaquant.tessera_campaign import (
-        ActivationScaleContractError, _checkpoint_anchor_identity,
-        _require_resumable_anchor,
-    )
+    from prismaquant.nvfp4_activation_contract import ActivationScaleContractError
+    from prismaquant.tessera_cell_measurement import require_resumable_cell
+    from prismaquant.tessera_campaign import _checkpoint_anchor_identity
 
     old = _anchor("m.q_proj", "TESSERA_E2M1_K2", 896, 1e-3)
     with pytest.raises(ActivationScaleContractError,
                        match="pre-served-.*contract"):
-        _require_resumable_anchor(old, {"m.q_proj": 71.68})
+        require_resumable_cell(old, {"m.q_proj": 71.68})
     other_draw = dataclasses.replace(old, input_global_scale=10.0)
     with pytest.raises(ActivationScaleContractError,
                        match="mixes two activation calibrations"):
-        _require_resumable_anchor(other_draw, {"m.q_proj": 71.68})
-    _require_resumable_anchor(
+        require_resumable_cell(other_draw, {"m.q_proj": 71.68})
+    require_resumable_cell(
         dataclasses.replace(old, input_global_scale=71.68),
         {"m.q_proj": 71.68})
     # A dynamic-route row never carried a scale and resumes untouched; one
     # that does carry a scale was stamped by no producer this campaign has.
     dynamic = _anchor("m.up", "TESSERA_E4M3_K1", 1024, 1e-3)
-    _require_resumable_anchor(dynamic, {})
+    require_resumable_cell(dynamic, {})
     with pytest.raises(ActivationScaleContractError,
                        match="dynamic activation quantiser"):
-        _require_resumable_anchor(
+        require_resumable_cell(
             dataclasses.replace(dynamic, input_global_scale=71.68), {})
 
     # The rule's one home on the resume path is the per-anchor identity
@@ -826,11 +824,11 @@ def test_a_missing_qname_in_the_hessian_map_is_a_hard_failure():
     nothing and produces a plausible tensor. The Hessian map is keyed the same
     way, so the miss is made loud here.
     """
-    from prismaquant.tessera_campaign import _measure_anchor
+    from prismaquant.tessera_cell_measurement import measure_cell
     from prismaquant.tessera_render import HessianContractError
 
     with pytest.raises(HessianContractError) as excinfo:
-        _measure_anchor(
+        measure_cell(
             qname="model.layers.0.self_attn.q_proj",
             weight=torch.randn(64, 256, dtype=torch.bfloat16),
             activations=torch.randn(8, 256),
@@ -850,7 +848,7 @@ def test_the_hessian_sees_every_row_not_just_the_scored_ones():
     the test that says so: with ``max_rows`` far below the rows the module
     sees, H must still equal the full Gram.
     """
-    from prismaquant.tessera_campaign import _collect_activations
+    from prismaquant.tessera_calibration_forward import capture_activation_statistics
 
     torch.manual_seed(0)
     cols, batches, rows_per_batch = 32, 3, 40
@@ -865,7 +863,7 @@ def test_the_hessian_sees_every_row_not_just_the_scored_ones():
 
     net = _Net().eval()
     tokens = [torch.randn(rows_per_batch, cols) for _ in range(batches)]
-    rows, hess, seen, amax = _collect_activations(
+    rows, hess, seen, amax = capture_activation_statistics(
         net, ["lin"], tokens, max_rows=5, device="cpu", want_hessian=True)
 
     every = torch.cat(tokens, dim=0).to(torch.float32)
@@ -1046,7 +1044,7 @@ def test_every_cost_row_carries_the_captures_digest():
     """``campaign_cost_payload`` copies the capture digest the campaign wrote
     into each row's ``hessian_identity`` (measured and interpolated), which
     is how it reaches the allocator's stamp and then the export gate."""
-    from prismaquant.tessera_campaign import campaign_cost_payload
+    from prismaquant.tessera_campaign_table import campaign_cost_payload
 
     q, fam = "m.0.q_proj", "TESSERA_E2M1_K2"
     anchors = {q: {fam: [_anchor(q, fam, r, d)
@@ -1272,9 +1270,7 @@ def test_every_payload_row_carries_the_hessian_identity():
     the measured branch stamped it, a table could be 3 stamped rows and 766
     unstamped ones and still pass a uniformity check.
     """
-    from prismaquant.tessera_campaign import (
-        CampaignAnchor, campaign_cost_payload,
-    )
+    from prismaquant.tessera_campaign_table import (CampaignAnchor, campaign_cost_payload)
     from prismaquant.tessera_menu import (
         assert_uniform_hessian_identity, expand_tessera_menu,
     )
@@ -1412,28 +1408,6 @@ def test_the_weights_only_lever_forms_no_hessian_at_all():
         monkey.undo()
 
 
-def test_a_production_cache_miss_does_not_fall_back_to_the_registry():
-    """``STRICT_PRODUCTION_CACHE=0`` is not permission to price other bytes.
-
-    Both miss paths end at the format's registry ``quantize_dequantize``; for
-    Tessera that is the weights-only reconstruction, so the fallback would put
-    a different tensor behind the same format name with nothing raised. CB
-    already refuses there for the same reason.
-    """
-    from prismaquant.weight_session import WeightSession
-
-    lin = torch.nn.Linear(32, 8, bias=False).to(torch.bfloat16)
-    session = WeightSession(torch.nn.Sequential(lin),
-                            production_weight_cache=None,
-                            strict_production_cache=False)
-    # The qname map normally comes from a model profile; registering the
-    # alias directly keeps this test about the fallback and not about
-    # architecture discovery.
-    session._linear_by_qname["lin"] = (lin, "weight")
-    with pytest.raises(RuntimeError, match="Tessera"):
-        session._format_weight("lin", "TESSERA_E2M1_K2_R256")
-
-
 def test_the_aura_dw_fallback_refuses_tessera():
     """``aura_cost``'s ``dW`` fallback is the one whose guard is off by default.
 
@@ -1476,7 +1450,7 @@ def test_the_perturbed_x_cache_fallback_refuses_tessera():
 def test_a_non_tessera_render_does_not_import_the_tessera_package():
     """Asking "is this mine?" must not drag in the answer's dependencies.
 
-    `render_production_weight` and the three cache-miss fallbacks are on the
+    `render_production_weight` and the live cache-miss fallbacks are on the
     hot path of every *non*-Tessera format too. Both `tessera_formats` and
     `tessera_render` require the `tessera` package at import, so routing the
     predicate through either would have made Tessera a hard dependency of the
@@ -1504,16 +1478,6 @@ r = render_production_weight(w, "FP8_DYNAMIC", qname="q",
                              activations={"q": torch.randn(128, 256)},
                              levers={})
 assert tuple(r.shape) == (64, 256)
-from prismaquant.weight_session import WeightSession
-lin = torch.nn.Linear(32, 8, bias=False).to(torch.bfloat16)
-s = WeightSession(torch.nn.Sequential(lin), production_weight_cache=None,
-                  strict_production_cache=False)
-s._linear_by_qname["lin"] = (lin, "weight")
-try:
-    s._format_weight("lin", "TESSERA_E2M1_K2_R256")
-    raise SystemExit("weight_session did not refuse")
-except RuntimeError as e:
-    assert "Tessera" in str(e), e
 from prismaquant.aura_cost import _delta_w
 try:
     _delta_w("lin", "TESSERA_E2M1_K2_R256", torch.randn(8, 32), None)

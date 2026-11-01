@@ -330,8 +330,6 @@ class ResidencyResolver:
         # The serving-tier record (ID-07/INV-04): where bytes were actually
         # served from, under which tier/epoch, noted at open time before
         # payload trust. Counters observe; this record authorizes nothing.
-        # ``lease_id`` is None until the PB reader-lease API (RNG-02/SM-03)
-        # lands — the gap is explicit, not hidden.
         self._serving_tiers: list[dict] = []
         self._serving_tier_count = 0
 
@@ -1276,10 +1274,10 @@ class ResidencyResolver:
                             range_ref: str | None = None) -> None:
         """Note where an open actually served from, before payload trust.
 
-        ``tier`` is ``ram`` or ``stage``. The tier/epoch halves are the
-        resolver's own; ``lease_id`` is None until the PB reader-lease API
-        (RNG-02/SM-03) exists. Bounded like the fallback lists; the count
-        is not. Counters observe — this record authorizes nothing.
+        ``tier`` is ``ram`` or ``stage``. The resolver owns the tier/epoch.
+        ``lease_id`` records the successful lifetime pin when supplied;
+        unpinned records retain None. Records are bounded like the fallback
+        lists; the count is not. This record authorizes nothing.
 
         Under a lifetime pin, callers pass the SDK serving record's
         ``pin_id``/``range_ref``: the record is emitted at the successful

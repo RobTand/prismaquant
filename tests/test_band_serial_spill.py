@@ -193,7 +193,7 @@ def test_band_serial_under_the_spill_equals_the_chain_rebuild(campaign, monkeypa
             assert resumed == chain_evidence, "a complete resume"
             windows = campaign.preflight[0]
             if len(windows) > 1:
-                from prismaquant.aura_cost import _aura_unit_checkpoint_path
+                from prismaquant.cost_stage_checkpoint import unit_path as _aura_unit_checkpoint_path
                 for window in windows[1:]:
                     for name in window.original_full_target_names:
                         _aura_unit_checkpoint_path(

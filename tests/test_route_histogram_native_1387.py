@@ -22,6 +22,7 @@ import pytest
 import prismaquant.allocator as alloc
 import prismaquant.allocator_candidates as ac
 from prismaquant import shipcard
+from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.layer_config import read_layer_config_metadata
 from prismaquant.serving_profiles import ResolvedServingLane
 from test_footprint import _write_safetensors
@@ -433,18 +434,20 @@ def test_a_historical_native_card_without_the_marker_still_verifies(tmp_path):
 # #1387: the validated-frontier selector must not refuse the new provenance
 # ---------------------------------------------------------------------------
 def _run_selector(tmp_path, meta):
+    assignment = {
+        "model.layers.0.self_attn.q_proj": "NVFP4",
+        "model.layers.0.mlp.down_proj": "BF16",
+    }
     assignment_path = tmp_path / "cand.json"
     assignment_path.write_text(json.dumps({
         "schema": "prismaquant.allocator.pareto_assignment.v1",
-        "assignment": {
-            "model.layers.0.self_attn.q_proj": "NVFP4",
-            "model.layers.0.mlp.down_proj": "BF16",
-        },
+        "assignment": assignment,
     }))
     validation = tmp_path / "validation.json"
     validation.write_text(json.dumps({"results": [{
         "label": "alloc_4.0", "path": str(assignment_path), "bpp": 4.0,
         "last_token_kl": 0.02,
+        "assignment_sha256": assignment_serialization_sha256(assignment),
         "format_counts": {"NVFP4": 1, "BF16": 1},
     }]}))
     layer_config = tmp_path / "layer_config.json"

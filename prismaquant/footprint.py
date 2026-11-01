@@ -970,7 +970,7 @@ def assignment_artifact_bytes(
     ``n_missing_stats``, ``missing_stats_names``, ``regime``,
     ``source_accounting``.
     """
-    from prismaquant.allocator_candidates import SOURCE_PASSTHROUGH_FORMATS
+    from prismaquant.source_format_contracts import SOURCE_PASSTHROUGH_FORMATS
 
     body_quant = 0
     reenc_by_name: dict[str, int] = {}

@@ -19,7 +19,7 @@ the per-Linear path was. The compute itself is identical to the
 per-Linear path — we are amortizing kernel launches, not skipping work.
 
 The math is bitwise-equivalent to the per-Linear functions in
-`export_native_compressed`. Equivalence tests live in
+`native_render_codec`. Equivalence tests live in
 `tests/test_export_batched_gptq.py`.
 """
 from __future__ import annotations
@@ -27,19 +27,20 @@ from __future__ import annotations
 import logging
 
 import torch
+from .native_render_levers import NativeRenderLevers
 
 logger = logging.getLogger(__name__)
 
-# Re-import codebook helpers from the main export module to avoid
+# Import codebook helpers from the native codec owner to avoid
 # duplicating the FP4 grid definition.
-from .export_native_compressed import (
-    _activation_matrix_for_gptq,
-    _gptq_column_block_size,
-    _gptq_obs_rounding_nvfp4,
-    _nvfp4_effective_scale_from_real,
-    _nvfp4_quantize_dequantize_with_eff_scale,
-    _rtn_dequant_nvfp4,
-    _select_nvfp4_group_scales,
+from .native_render_codec import (
+    activation_matrix_for_gptq,
+    gptq_column_block_size,
+    gptq_obs_rounding_nvfp4,
+    nvfp4_effective_scale_from_real,
+    nvfp4_quantize_dequantize_with_eff_scale,
+    rtn_dequant_nvfp4,
+    select_nvfp4_group_scales,
     FP8_E4M3_MAX,
 )
 from .nvfp4_activation_contract import _E2M1_POSITIVE
@@ -53,6 +54,8 @@ def _build_H_stack(
     clip_threshold: float | None = None,
     clip_rescale: str | None = None,
     row_weights_list: list[torch.Tensor | None] | None = None,
+    *,
+    levers: NativeRenderLevers,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Build a stacked activation covariance tensor across E Linears.
 
@@ -75,10 +78,10 @@ def _build_H_stack(
     (routed-token-count differs per expert).
     """
     if damp is None:
-        from prismaquant.export_native_compressed import (
-            _resolve_gptq_fixed_damp,
+        from prismaquant.native_render_codec import (
+            resolve_gptq_fixed_damp,
         )
-        damp = _resolve_gptq_fixed_damp()
+        damp = resolve_gptq_fixed_damp(levers=levers)
 
     E = len(activations_list)
     H_stack = torch.zeros(
@@ -111,20 +114,21 @@ def _build_H_stack(
             if row_weights_list is not None and e < len(row_weights_list)
             else None
         )
-        X = _activation_matrix_for_gptq(
+        X = activation_matrix_for_gptq(
             a,
             in_features,
             device=device,
             clip_threshold=clip_threshold,
             clip_rescale=clip_rescale,
             row_weights=row_weights,
+            levers=levers,
         )
         H = X.t() @ X
         # Dead columns (all-zero activation channel): detect BEFORE
         # damping (damping lifts every diagonal above zero, which made
         # this check unreachable), exclude dead entries from the damp
         # reference mean, and give dead diagonals an identity entry so
-        # the Cholesky succeeds. Mirrors _gptq_obs_rounding_nvfp4.
+        # the Cholesky succeeds. Mirrors gptq_obs_rounding_nvfp4.
         diag0 = torch.diagonal(H)
         dead = diag0 <= 0
         alive = ~dead
@@ -152,6 +156,7 @@ def gptq_obs_rounding_nvfp4_batched(
     expert_chunk: int = 32,
     static_act_order: bool = False,
     joint_scale_opt: bool = False,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Batched NVFP4 GPTQ across E same-shape Linears.
 
@@ -180,10 +185,10 @@ def gptq_obs_rounding_nvfp4_batched(
       weights, ready for the standard NVFP4 packer.
     """
     if damp is None:
-        from prismaquant.export_native_compressed import (
-            _resolve_gptq_fixed_damp,
+        from prismaquant.native_render_codec import (
+            resolve_gptq_fixed_damp,
         )
-        damp = _resolve_gptq_fixed_damp()
+        damp = resolve_gptq_fixed_damp(levers=levers)
 
     if weights.dim() != 3:
         raise ValueError(f"weights must be [E, out, in]; got {weights.shape}")
@@ -212,7 +217,7 @@ def gptq_obs_rounding_nvfp4_batched(
                 if row_weights_list is not None and e < len(row_weights_list)
                 else None
             )
-            outputs.append(_gptq_obs_rounding_nvfp4(
+            outputs.append(gptq_obs_rounding_nvfp4(
                 weights[e],
                 activations_list[e],
                 group_size=group_size,
@@ -223,6 +228,7 @@ def gptq_obs_rounding_nvfp4_batched(
                 fisher_row_weights=row_weights,
                 static_act_order=static_act_order,
                 joint_scale_opt=joint_scale_opt,
+                levers=levers,
             ))
         return torch.stack(outputs, dim=0)
 
@@ -245,6 +251,7 @@ def gptq_obs_rounding_nvfp4_batched(
                 row_weights_list[e_start:e_end]
                 if row_weights_list is not None else None
             ),
+            levers=levers,
         )
         # We do NOT zero the weights of dead columns (deliberate
         # serving-safe deviation from reference GPTQ — a column
@@ -302,13 +309,13 @@ def gptq_obs_rounding_nvfp4_batched(
             grouped_full = W.reshape(
                 Ec, out_features, in_features // group_size, group_size,
             )
-            s_g_real_full = _select_nvfp4_group_scales(grouped_full)
+            s_g_real_full = select_nvfp4_group_scales(grouped_full, levers=levers)
             global_real = (
                 s_g_real_full.reshape(Ec, -1).amax(dim=-1) / FP8_E4M3_MAX
             ).clamp_min(1e-12)  # [Ec]
         grouped = W.reshape(Ec, out_features, in_features // group_size, group_size)
-        s_g_real = _select_nvfp4_group_scales(grouped)
-        scale_by_col = _nvfp4_effective_scale_from_real(
+        s_g_real = select_nvfp4_group_scales(grouped, levers=levers)
+        scale_by_col = nvfp4_effective_scale_from_real(
             s_g_real,
             global_real.view(Ec, 1, 1),
             quantize_fp8=True,
@@ -317,7 +324,7 @@ def gptq_obs_rounding_nvfp4_batched(
         # 4. FP-Quant/GPTQ column update. Quantizer parameters are fixed
         # before the solve, then each column's OBS error is propagated
         # through later columns inside the GPTQ block and later blocks.
-        block_size = _gptq_column_block_size(in_features)
+        block_size = gptq_column_block_size(in_features, levers=levers)
         for block_start in range(0, in_features, block_size):
             block_end = min(block_start + block_size, in_features)
             ncols = block_end - block_start
@@ -328,7 +335,7 @@ def gptq_obs_rounding_nvfp4_batched(
                 col_idx = block_start + i
                 col = block[:, :, i]  # [Ec, out]
                 eff_scale = scale_by_col[:, :, col_idx].unsqueeze(-1)
-                _idx, col_dq = _nvfp4_quantize_dequantize_with_eff_scale(
+                _idx, col_dq = nvfp4_quantize_dequantize_with_eff_scale(
                     col.unsqueeze(-1),
                     eff_scale,
                 )
@@ -373,10 +380,11 @@ def gptq_obs_rounding_nvfp4_batched(
                     if global_real_overrides is not None
                     else None
                 )
-                W[j] = _rtn_dequant_nvfp4(
+                W[j] = rtn_dequant_nvfp4(
                     weights[e_start + j],
                     group_size=group_size,
                     global_real_override=override,
+                    levers=levers,
                 )
 
         out_buf[e_start:e_end] = W
@@ -397,11 +405,12 @@ def scale_sweep_nvfp4_batched(
     grid: int = 32,
     span: tuple[float, float] = (0.5, 1.5),
     expert_chunk: int = 32,
+    levers: NativeRenderLevers,
 ) -> torch.Tensor:
     """Batched NVFP4 scale sweep across E same-shape Linears.
 
     Same closed-form joint-(scale, rounding) search as the per-Linear
-    `_scale_sweep_nvfp4`, but the per-group MSE evaluation is run
+    `scale_sweep_nvfp4`, but the per-group MSE evaluation is run
     across all E in a chunk in one pass. The expensive intermediate
     ``[chunk, n_g, grid, gs, len(cb)]`` peak is bounded by the existing
     row-chunking in the per-Linear path; we add an outer expert chunk
@@ -453,7 +462,7 @@ def scale_sweep_nvfp4_batched(
                 and (e_start + j) < len(row_weights_list)
                 else None
             )
-            a32 = _activation_matrix_for_gptq(
+            a32 = activation_matrix_for_gptq(
                 a,
                 in_features,
                 device=device,
@@ -461,13 +470,14 @@ def scale_sweep_nvfp4_batched(
                 clip_rescale=clip_rescale,
                 clip_quantile=0.0 if clip_threshold is None else None,
                 row_weights=row_weights,
+                levers=levers,
             )
             col_imp[j] = a32.pow(2).mean(dim=0).clamp_min(1e-12)
         col_imp_g = col_imp.reshape(Ec, 1, n_g, group_size)  # [Ec, 1, n_g, gs]
 
         ref_g = W_ref.reshape(Ec, out_features, n_g, group_size)
         in_g = W_in.reshape(Ec, out_features, n_g, group_size)
-        s_g_real = _select_nvfp4_group_scales(ref_g)
+        s_g_real = select_nvfp4_group_scales(ref_g, levers=levers)
         if global_real_overrides is not None:
             global_real = global_real_overrides[e_start:e_end].to(
                 device, dtype=torch.float32).clamp_min(1e-12)
@@ -475,7 +485,7 @@ def scale_sweep_nvfp4_batched(
             global_real = (
                 s_g_real.reshape(Ec, -1).amax(dim=-1) / FP8_E4M3_MAX
             ).clamp_min(1e-12)
-        eff_scale0 = _nvfp4_effective_scale_from_real(
+        eff_scale0 = nvfp4_effective_scale_from_real(
             s_g_real,
             global_real.view(Ec, 1, 1),
             quantize_fp8=True,
@@ -509,7 +519,7 @@ def scale_sweep_nvfp4_batched(
             # gexp: [Ec, oc, n_g, 1, gs]; sexp: [Ec, oc, n_g, grid, 1]
             gexp = ref_c.unsqueeze(3)
             sexp = scales_c.unsqueeze(4)
-            _idx, Wq_cand = _nvfp4_quantize_dequantize_with_eff_scale(
+            _idx, Wq_cand = nvfp4_quantize_dequantize_with_eff_scale(
                 gexp,
                 sexp,
             )  # [Ec, oc, n_g, grid, gs]

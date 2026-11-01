@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from prismaquant import format_registry as fr
-from prismaquant.allocator_candidates import cost_entry_predicted_dloss
+from prismaquant.priced_cell import cost_entry_predicted_dloss
 from prismaquant.kl_measurement import assignment_bit_total
 from prismaquant.layer_config import load_assignment
 from prismaquant.schemas import validate_cost_payload

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Production-faithful end-to-end on Qwen3-4B:
+# Historical cross-layer experiment on Qwen3-4B.
+# This launcher references modules now archived or removed from the live tree.
+# Retained as research context; it is not a supported quantization launcher.
 #   1. Build prod cache (NVFP4 GPTQ + scale_sweep)
 #   2. Re-measure four-term with prod cache active (production δw)
 #   3. Build dense cone from the prod-faithful payload
 #   4. Real-KL validate cone with prod cache
 #   5. Polish from the new knee
 #
-# Total wall: ~30-40 min on 4B.
+# The historical run estimate was ~30-40 min on 4B.
 set -euo pipefail
 
 MODEL_PATH="${MODEL_PATH:-/home/rob/.cache/huggingface/hub/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c}"

@@ -297,3 +297,78 @@ def test_an_undeclared_split_format_group_still_fails(tmp_path, no_profile):
     ]
     with pytest.raises(ArtifactIncomplete):
         assert_artifact_complete(root)
+
+
+def _publish_current_config(root: Path):
+    legacy = root / "quant_config.json"
+    quantization = json.loads(legacy.read_text())
+    (root / "config.json").write_text(json.dumps({
+        "architectures": ["Qwen3ForCausalLM"],
+        "quantization_config": quantization,
+    }))
+    legacy.unlink()
+    return quantization
+
+
+def test_current_config_claims_native_fp8_without_legacy_sidecar(tmp_path, wrapper_profile):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=_LM_HEAD)
+    _publish_current_config(root)
+    report = check_artifact_completeness(root)
+    assert report.ok
+    assert report.cb_units == ["lm_head"]
+
+
+def test_current_config_claims_packed_native_weight(tmp_path, wrapper_profile):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=[
+        ("lm_head.weight_packed", "I32", (32, 1), 128),
+        ("lm_head.weight_scale", "F32", (32, 1), 128),
+    ])
+    _publish_current_config(root)
+    assert check_artifact_completeness(root).ok
+
+
+@pytest.mark.parametrize("quantization", [{}, None])
+def test_current_config_without_decoder_reports_unclaimed_fp8(tmp_path, wrapper_profile, quantization):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=_LM_HEAD)
+    _publish_current_config(root)
+    (root / "config.json").write_text(json.dumps({"quantization_config": quantization}))
+    report = check_artifact_completeness(root)
+    assert not report.ok
+    assert report.undeclared == ["lm_head"]
+
+
+def test_plain_float_artifact_needs_no_quantization_config(tmp_path, wrapper_profile):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=[], tensors=[("lm_head.weight", "BF16", (2, 2), 8)])
+    (root / "quant_config.json").unlink()
+    (root / "config.json").write_text("{}")
+    assert check_artifact_completeness(root).ok
+
+
+def test_matching_current_and_legacy_config_retains_historical_evidence(tmp_path, wrapper_profile):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=_LM_HEAD)
+    quantization = _publish_current_config(root)
+    (root / "quant_config.json").write_text(json.dumps(quantization))
+    assert check_artifact_completeness(root).ok
+
+
+def test_conflicting_current_and_legacy_decoder_is_refused(tmp_path, wrapper_profile):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=_LM_HEAD)
+    _publish_current_config(root)
+    (root / "quant_config.json").write_text(json.dumps({"config_groups": {}}))
+    with pytest.raises(ValueError, match="conflicting quantization"):
+        check_artifact_completeness(root)
+
+
+@pytest.mark.parametrize("config", [[], {"quantization_config": []}, {"quantization_config": "fp8"}])
+def test_malformed_current_config_cannot_hide_behind_valid_legacy(tmp_path, wrapper_profile, config):
+    root = tmp_path / "artifact"
+    _write_artifact(root, targets=["lm_head"], tensors=_LM_HEAD)
+    (root / "config.json").write_text(json.dumps(config))
+    with pytest.raises(ValueError, match="object"):
+        check_artifact_completeness(root)

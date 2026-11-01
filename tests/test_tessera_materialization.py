@@ -1,4 +1,5 @@
 """Selection is non-exportable; materialization preserves chosen prices and bytes."""
+
 import copy
 import hashlib
 import json
@@ -9,6 +10,12 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from prismaquant import tessera_campaign_rows as campaign_rows
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_render
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_calibration_forward as calibration_forward
+from prismaquant import tessera_campaign_table as campaign_table
 from prismaquant import tessera_materialization as tm
 from prismaquant import tessera_campaign as tc
 from prismaquant import tessera_expert_projection as tep
@@ -52,7 +59,7 @@ def selection(case, tmp_path):
     output = tmp_path / 'final-layer-config.json'
     tm.write_selection_request(request_path, layer_config=config, assignment=assignment,
                                cost_path=cost_path, cost_payload=cost, output_path=output)
-    census = dict(schema=tc.CENSUS_SCHEMA, model=str(case.model), nsamples=2, seqlen=4, seed=0,
+    census = dict(schema=campaign_table.CENSUS_SCHEMA, model=str(case.model), nsamples=2, seqlen=4, seed=0,
         layer_stride=1, text_sha256='a'*64, fit_ids_sha256='b'*64,
         counts={n:8 for n in _units()}, max_abs={n:1.0 for n in _units()},
         anchor_groups={'s:'+STACK: _units()}, unit_shapes={n:[N,N] for n in _units()},
@@ -97,24 +104,59 @@ def test_request_refuses_input_drift(selection, defect):
 
 
 def _plan(selection, monkeypatch):
-    from tools import dispatch_tessera_campaign as dispatcher
     calls = []
     def row(spec, argv, **kwargs):
         calls.append((argv, kwargs))
         return dict(argv=argv, **kwargs)
-    monkeypatch.setattr(dispatcher, '_row', row)
+    monkeypatch.setattr(campaign_rows, 'prismabuild_row', row)
     result = tm.plan(selection.request, selection.census, selection.workspace, selection.spec)
     return selection.workspace / 'plan.json', result, calls
 
 
-def test_plan_uses_census_quanta_and_pb_row_sizing(selection, monkeypatch):
-    path, result, calls = _plan(selection, monkeypatch)
-    assert len(result['groups']) == len(calls) == 1
+def test_plan_uses_census_quanta_and_pb_row_sizing(selection):
+    s = selection
+    result = tm.plan(s.request, s.census, s.workspace, s.spec, anchor_batch_size=2)
+    rows = json.loads((s.workspace / 'manifest.json').read_text())
+    assert len(result['groups']) == len(rows) == 1
     assert result['groups'][0]['assignment'] == {n:FMT for n in _units()}
-    assert calls[0][1]['module'] == 'prismaquant.tessera_materialization'
-    assert calls[0][1]['mem_gb'] >= 3
-    assert (selection.workspace / 'manifest.json').is_file()
-    assert not selection.output.exists()
+    assert rows[0]['argv'] == [
+        'python', '-u', '-m', 'prismaquant.tessera_materialization', 'run',
+        '--plan', str(s.workspace / 'plan.json'), '--group', '0',
+        '--anchor-batch-size', '2']
+    assert rows[0]['demand']['gpu'] == rows[0]['demand']['cpu'] == 1
+    assert rows[0]['demand']['mem_gb'] >= 3
+    assert not s.output.exists()
+
+
+@pytest.mark.parametrize('campaign_argv', [[], ['--max-act-rows', '1024'],
+                                        ['--streaming', '--max-act-rows', '1024']])
+def test_plan_sizes_resident_materialization_from_the_priced_cap(
+        selection, monkeypatch, campaign_argv):
+    s = selection
+    spec = json.loads(s.spec.read_text())
+    spec.update(campaign_argv=campaign_argv, max_act_rows=1024)
+    s.spec.write_text(json.dumps(spec))
+    observed = []
+    real_demand = campaign_rows.row_memory_demand
+
+    def demand(*args, **kwargs):
+        result = real_demand(*args, **kwargs)
+        observed.append(result)
+        return result
+
+    monkeypatch.setattr(campaign_rows, 'row_memory_demand', demand)
+    result = tm.plan(s.request, s.census, s.workspace, s.spec)
+    census = json.loads(s.census.read_text())
+    cap = s.cost['provenance']['max_act_rows']
+    assert cap != spec['max_act_rows']
+    assert len(observed) == len(result['groups']) == 1
+    columns = [census['unit_shapes'][name][1]
+               for name in result['groups'][0]['assignment']]
+    expected = (campaign_rows._model_bytes(spec['model'])
+                + sum(width ** 2 * 4 + width * cap * 4 for width in columns))
+    assert observed[0]['plan_bytes'] == expected
+    row = json.loads((s.workspace / 'manifest.json').read_text())[0]
+    assert row['demand']['mem_gb'] == observed[0]['mem_gb']
 
 
 def test_plan_refuses_different_calibration(selection, monkeypatch):
@@ -159,7 +201,7 @@ def _completed(selection, monkeypatch, *, hessian=False):
         tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
             cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, data, _calls = _plan(selection, monkeypatch)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:ReceiptAPI())
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())
     monkeypatch.setattr(th, 'encoder_recipe', lambda:{'fixture':True})
     monkeypatch.setattr(tm, '_verify_source', lambda *args:None)
     monkeypatch.setattr(tep, 'source_unit_weight', lambda *args:torch.ones(N,N))
@@ -294,7 +336,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
     api.unit_input_identity = unit_identity
     api.make_unit_record = lambda blob, identity, filename: dict(file=filename,
         blob_bytes=len(blob), blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:api)
     monkeypatch.setattr(th, 'encoder_recipe', lambda:{'fixture':True})
     monkeypatch.setattr(tm, '_verify_source', lambda *args:None)
     weight = torch.ones(N,N)
@@ -311,7 +353,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         assert not reuse, 'materialization repeated the calibration forward'
         captures.append((list(targets), max_rows))
         return ({n:torch.ones(4,N) for n in targets}, {}, {n:8 for n in targets}, {n:1.0 for n in targets})
-    monkeypatch.setattr(tc, '_collect_activations', collect)
+    monkeypatch.setattr(calibration_forward, 'capture_activation_statistics', collect)
     monkeypatch.setattr(tc, '_static_input_scales', lambda *args, **kwargs:(
         s.cost['provenance']['activation_static_scales']['units'],
         s.cost['provenance']['activation_static_scales']['policy']))
@@ -322,19 +364,22 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
         measured.append((name, kwargs['format_name']))
         record = s.case.receipts[name]
         (kwargs['wire_dir']/record['file']).write_bytes((s.case.wire_dir/record['file']).read_bytes())
-        return tc.CampaignAnchor(qname=name, family='TESSERA_E4M3_K1', format_name=FMT,
+        return campaign_table.CampaignAnchor(qname=name, family='TESSERA_E4M3_K1', format_name=FMT,
             body_rate_q256=1024, dloss=0.1, dloss_stderr=0.0, memory_bytes=128,
             bits_per_param=4, activation_contract='fixture', activation_quantized=True,
             wire_bytes=record['blob_bytes'], seconds=0.0)
-    monkeypatch.setattr(tc, '_measure_anchor', measure)
+    monkeypatch.setattr(cell_measurement, "measure_cell", measure)
     batches = []
+    real_batch = cell_measurement.measure_cells
     def batch(**kwargs):
+        if len(kwargs['qnames']) == 1:
+            return real_batch(**kwargs)
         assert kwargs.get('structures') == {name: 'routed_moe' for name in kwargs['qnames']}
         batches.append(kwargs['qnames'])
         return [measure(qname=n, format_name=kwargs['format_name'], wire_dir=kwargs['wire_dir'],
                         structure=kwargs['structures'][n])
                 for n in kwargs['qnames']]
-    monkeypatch.setattr(tc, '_measure_anchor_batch', batch)
+    monkeypatch.setattr(cell_measurement, "measure_cells", batch)
     from prismaquant import tessera_render
     monkeypatch.setattr(tessera_render, 'require_tessera_batch_encoder', lambda:None)
     tm.run(path, 0, anchor_batch_size=batch_size)
@@ -361,14 +406,14 @@ def test_selected_subcap_identity_verifies_real_served_wire_and_refuses_research
     from prismaquant.tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
     from prismaquant.tessera_render import encode_tessera_unit
 
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     _, _, _, units, _ = tm._request(selection.request)
     unit = units[selection.missing]
     weight = torch.ones(unit['rows'], unit['cols'], dtype=torch.bfloat16)
     fmt = f'TESSERA_E2M1_K2_R{rung}'
     family, _ = parse_tessera_format_name(fmt)
     served = tessera_served_wire_recipe(family, rung, structure='routed_moe')
-    expected = tm._expert_input_identity(api, weight, unit, fmt, None)
+    expected = campaign_wire.expert_input_identity(api, weight, unit, fmt, None)
     assert expected['recipe'] == {'grid': family.payload_grid().name, 'q256': rung,
                                   **served.to_config()}
     _, blob = encode_tessera_unit(weight, fmt, hessian_required=False, recipe=served)
@@ -391,12 +436,12 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     from prismaquant import tessera_hessian as th
     campaign, argv, model, encoded = _bridge_main_fixture(monkeypatch, tmp_path)
     measured_anchors = {}
-    real_measure = campaign._measure_anchor
+    real_measure = cell_measurement.measure_cell
     def remember(**kwargs):
         anchor = real_measure(**kwargs)
         measured_anchors.setdefault(anchor.qname, {}).setdefault(anchor.family, []).append(anchor)
         return anchor
-    monkeypatch.setattr(campaign, '_measure_anchor', remember)
+    monkeypatch.setattr(cell_measurement, "measure_cell", remember)
     assert campaign.main(argv) == 0
     census_path = tmp_path/'census.json'
     assert campaign.main([*argv, '--census-out', str(census_path)]) == 0
@@ -413,14 +458,14 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
         stats = _packed_probe_row(shape[0], [1.0]*shape[0],
             packed_param=packed.rsplit('.',1)[-1], out_features=shape[1], in_features=shape[2])
         stats['_packed_experts_module'] = REAL_STACK
-        samples[packed] = campaign.stack_sample_from_probe(packed, stats, profile,
+        samples[packed] = campaign_table.stack_sample_from_probe(packed, stats, profile,
             sampled_experts=[0,1], inclusion_prob={0:2/3, 1:2/3, 2:2/3}, seed=0)
     retained = {n for sample in samples.values() for members in sample.members.values() for n in members}
     dense = 'model.layers.0.attention'
     measured = {n:rows for n,rows in measured_anchors.items() if n == dense or n in retained}
-    prices = campaign.campaign_cost_payload(measured, {}, loo={},
+    prices = campaign_table.campaign_cost_payload(measured, {}, loo={},
         provenance={'provenance':cost['provenance']}, stack_samples=samples)
-    prices['provenance'][tep.POPULATION_KEY] = campaign.campaign_population_block(
+    prices['provenance'][tep.POPULATION_KEY] = campaign_table.campaign_population_block(
         dense_targets=[dense], expert_targets=population.qnames, dense_all=[dense], pinned=[],
         population=population, layer_stride=1, costs=prices['costs'],
         menus={n:[RUNG] for n in prices['costs']}, stack_samples=samples, profile=profile)
@@ -563,7 +608,7 @@ def test_materialization_refuses_unbound_producer_source(selection, monkeypatch)
     tm.write_selection_request(s.request, layer_config=s.config, assignment=s.assignment,
         cost_path=s.cost_path, cost_payload=s.cost, output_path=s.output)
     path, _data, _calls = _plan(s, monkeypatch)
-    monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:ReceiptAPI())
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda:ReceiptAPI())
     with pytest.raises(RuntimeError, match='no priced producer receipt'):
         tm._inputs(path)
 
@@ -590,13 +635,13 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     api.make_unit_record = lambda blob, identity, filename: dict(
         file=filename, blob_bytes=len(blob),
         blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
-    monkeypatch.setattr(tc, "_checkpoint_identity_api", lambda: api)
+    monkeypatch.setattr(campaign_wire, 'require_checkpoint_identity_api', lambda: api)
     family, rung = parse_tessera_format_name(FMT)
     seed_blob = b"priced seed wire"
     seed_record = copy.deepcopy(s.case.receipts[s.missing])
     seed_record.update(api.make_unit_record(seed_blob,
-        tm._expert_input_identity(api, weight, units[second], FMT, None),
-        tc._wire_path(s.case.wire_dir, second, FMT).name))
+        campaign_wire.expert_input_identity(api, weight, units[second], FMT, None),
+        campaign_wire.wire_path(s.case.wire_dir, second, FMT).name))
     if malformed:
         seed_record["file"] = "other-coordinate.tessera"
     seed_path = s.case.wire_dir / seed_record["file"]
@@ -621,7 +666,7 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
                         lambda *_args: (torch.ones(2, 4), "fixture"))
     calibration = provenance["hessian"]["calibration_identity"]
     monkeypatch.setattr(th, "calibration_identity", lambda *_args, **_kwargs: calibration)
-    monkeypatch.setattr(tc, "_collect_activations", lambda *_args, **_kwargs: (
+    monkeypatch.setattr(calibration_forward, "capture_activation_statistics", lambda *_args, **_kwargs: (
         {name: torch.ones(4, N) for name in names}, {}, census["counts"], census["max_abs"]))
     monkeypatch.setattr(tc, "_static_input_scales", lambda *_args, **_kwargs: (
         provenance["activation_static_scales"]["units"],
@@ -629,14 +674,14 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     spec = SimpleNamespace(bits_for_shape=lambda shape: 8 * shape[0] * shape[1],
                            memory_bytes_for_shape=lambda shape: shape[0] * shape[1],
                            act_dtype_name="a16")
-    monkeypatch.setattr(tc, "_prepare_anchor", lambda **_kwargs: dict(
-        spec=spec, family=family, rung=rung, wire="fixture",
-        activation_qdq=lambda value: value, input_scale=None,
+    monkeypatch.setattr(cell_measurement.CellRecipe, "prepare", lambda **_kwargs: cell_measurement.CellRecipe(
+        spec=spec, family=family, rung=rung, wire="fixture", structure="routed_moe",
+        activation_contract="a16", direct_consumer=None, activation_qdq=lambda value: value, input_scale=None,
         activation_kwargs=None, hessian_required=False))
-    monkeypatch.setattr(tc, "_encode_and_render",
+    monkeypatch.setattr(tessera_render, "encode_tessera_unit",
                         lambda tensor, *_args, **_kwargs: (tensor * 0.75, b"fresh wire"))
     publications, links, reads = [], [], []
-    store, link, verify = pwc._store_rendered_weight_entry, tc._link_seed_wire, api.verify_cached_unit
+    store, link, verify = pwc._store_rendered_weight_entry, campaign_wire.link_seed_wire, api.verify_cached_unit
 
     def publish(**kwargs):
         publications.append(kwargs["qname"])
@@ -664,7 +709,7 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
 
     monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry", publish)
-    monkeypatch.setattr(tc, "_link_seed_wire", seed_link)
+    monkeypatch.setattr(campaign_wire, 'link_seed_wire', seed_link)
     monkeypatch.setattr(api, "verify_cached_unit", read_wire)
     if malformed:
         with pytest.raises(RuntimeError, match="wire filename differs"):
@@ -684,8 +729,8 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
         assert publications == [first]
         assert len(links) == len(reads) == 1
         group_wire = s.workspace / "groups" / "0" / "wire"
-        assert tc._wire_path(group_wire, first, FMT).read_bytes() == b"fresh wire"
-        assert tc._wire_path(group_wire, second, FMT).read_bytes() == seed_blob
+        assert campaign_wire.wire_path(group_wire, first, FMT).read_bytes() == b"fresh wire"
+        assert campaign_wire.wire_path(group_wire, second, FMT).read_bytes() == seed_blob
         # A real resume re-registers completed coordinates without injection.
         tm.run(tmp_path / "plan.json", 0)
         assert publications == [first]

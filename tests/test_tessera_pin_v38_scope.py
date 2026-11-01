@@ -118,7 +118,7 @@ def test_answer_drift_reports_a_reused_id_whose_scope_moved():
     installed answer, and the id-keyed drift must name each as changed."""
     raw = _packaged_bytes()
     with as_file(tr.tessera_serving_contract_path()) as path:
-        installed = contract.contract_answer(contract._load_at(
+        installed = contract.contract_answer(contract.read_tessera_contract(
             str(path), hashlib.sha256(raw).hexdigest(), contract.TESSERA_DEV_PIN_COMMIT))
     assert contract._answer_drift(installed, installed) == []
     reviewed = copy.deepcopy(installed)

@@ -11,6 +11,42 @@ def _api():
     return importlib.import_module("prismaquant.boundary_control")
 
 
+def _producer_tree(root):
+    paths = (
+        "prismaquant/boundary_control.py",
+        "prismaquant/validate_quantized_model.py",
+        "prismaquant/shipcard.py",
+        "prismaquant/shipcard_slots.py",
+        "tools/measure_boundary_control.py",
+        "tools/serve_fingerprint.py",
+        "tools/prismaquant_source_bootstrap.py",
+        "prismaquant/tessera_runtime/tessera_serving_runtime_pin.json",
+    )
+    for name in paths:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(name + "\n")
+
+
+def test_producer_source_identity_changes_when_the_slot_policy_owner_changes(tmp_path):
+    api = _api()
+    _producer_tree(tmp_path)
+    before = api.producer_source_hashes(tmp_path)
+    owner = "prismaquant/shipcard_slots.py"
+    (tmp_path / owner).write_text("changed boundary schema and thresholds\n")
+    after = api.producer_source_hashes(tmp_path)
+    assert api.digest(after) != api.digest(before)
+    assert {name for name in before if before[name] != after[name]} == {owner}
+
+
+def test_producer_source_identity_refuses_a_missing_slot_policy_owner(tmp_path):
+    api = _api()
+    _producer_tree(tmp_path)
+    (tmp_path / "prismaquant/shipcard_slots.py").unlink()
+    with pytest.raises(FileNotFoundError):
+        api.producer_source_hashes(tmp_path)
+
+
 def _response(cap, *, finish="stop", text="<think>work</think> answer"):
     return {"choices": [{"message": {"content": text}, "finish_reason": finish}],
             "usage": {"completion_tokens": min(cap, 12)}}

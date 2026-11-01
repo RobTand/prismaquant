@@ -85,9 +85,9 @@ class _ComputeClock:
     after comparison cannot rest on them. This clock does not: it times
     every call the driver makes into the owner, and separately the raw
     tensor writes and reads inside those calls. Owner time less raw tensor
-    I/O is what the compute thread spent on the owner's bookkeeping and on
-    PrismaBuild, which is the time a GPU would have been idle. It reads the
-    same on any owner implementation.
+    I/O is foreground wall time spent on bookkeeping and PrismaBuild calls.
+    This synthetic cycle does not measure GPU idle time. The call boundaries
+    stay the same across owner implementations.
     """
 
     def __init__(self):
@@ -187,8 +187,7 @@ def _chain_cycle(publication, report, report_progress, *,
 
     import torch
 
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
 
     groups, n_probes, layers = 2, 4, 2
     n_batches = group_size * groups
@@ -534,8 +533,7 @@ def main() -> int:
         ap.error("--entry-mib is nonnegative and --group-size is positive")
 
     from prismaquant.calibration_data import _read_calibration_payload
-    from prismaquant.cost_streaming import (
-        BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts)
+    from prismaquant.streamed_boundary_artifacts import BOUNDARY_STORAGE_SCHEMA, StreamedBoundaryArtifacts
     from prismaquant.prismabuild_progress import report as report_progress
     from prismaquant.residency_map import (
         bind_residency_manifest, residency_resolver)

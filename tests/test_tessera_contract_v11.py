@@ -51,9 +51,9 @@ def test_v11_preserves_census_and_derives_only_censused_tables():
     payload = _payload()
     parsed = _parse(payload)
     for raw, cell in zip(payload["lane_eligibility"]["cells"], parsed.cells):
-        assert cell.rungs_q256 == frozenset(raw["rungs_q256"])
+        assert set(cell.rungs_q256) == set(raw["rungs_q256"])
         if cell.family != "TESSERA_E4M3_K1":
-            assert cell.covered_rungs_q256 == frozenset()
+            assert not cell.covered_rungs_q256
             continue
         tables = {tuple(t) for t in raw["run_tables"]}
         for q in range(255, 2050):
@@ -140,7 +140,7 @@ def test_installed_package_scope_matches_the_reviewed_answer():
     raw = runtime.contract_path().read_bytes()
     assert hashlib.sha256(raw).hexdigest() == pin.TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
     parsed = _parse(json.loads(raw))
-    assert {c.cell_id for c in parsed.cells} == {
+    assert {c.id for c in parsed.cells} == {
         row[0] for row in runtime.TESSERA_DEV_PIN_ANSWER["cells"]}
     assert all("compiled" not in c.execution_modes for c in parsed.cells)
     assert all(c.requires_plugin == pin.TESSERA_SERVING_PLUGIN_NAME for c in parsed.cells)

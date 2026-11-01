@@ -1,7 +1,7 @@
 """Same-pass disjoint FIT/HELDOUT calibration row moments (Stage-1 research).
 
 ``DisjointRowMoments`` is the external ``row_consumer`` for the default-off
-seam in :func:`prismaquant.tessera_campaign._collect_activations`.  The seam
+seam in :func:`prismaquant.tessera_calibration_forward.capture_activation_statistics`.  The seam
 calls :meth:`consume` ONCE per canonical shared input group -- dense pre-hook
 or routed derivation, both feed the single ``accumulate`` path -- with the
 uncapped flat rows, before any scoring-prefix cap and independent of
@@ -17,8 +17,9 @@ per-expert derivations legally produce any non-empty subset of one sample.
 
 Moment residency: the ``XᵀX`` gram is accumulated ON the rows' device into ONE
 owned float32 buffer per canonical ``(role, group)``, mutated in place per
-batch; nothing but the bounded owned prefix ever leaves the capture device
-before :meth:`finish`.  ``resource_check`` runs BEFORE every allocation
+batch. Before :meth:`finish`, only the bounded prefix leaves the capture
+device when ``prefix_device="cpu"``. The device prefix stays resident.
+``resource_check`` runs BEFORE every allocation
 (moment growth, prefix growth) and BEFORE every device-to-CPU transfer, and
 its refusals propagate.  Aliases of one proven shared input map to the same
 state: exactly one H per group, materialized once and handed to every alias
@@ -158,10 +159,10 @@ class DisjointRowMoments:
             take = min(self.max_prefix_rows - state["prefix_rows"],
                        int(flat.shape[0]))
             if self.prefix_device == "device":
-                chunk = flat.detach().to(dtype=torch.float32)[:take].clone()
+                chunk = flat.detach()[:take].to(dtype=torch.float32).clone()
             else:
-                chunk = (flat.detach().to(dtype=torch.float32, device="cpu")
-                         [:take].clone())
+                chunk = (flat.detach()[:take].to(dtype=torch.float32, device="cpu")
+                         .clone())
             state["inputs"].append(chunk)
             # One int64 sample index per retained row.
             state["prefix_sample_ids"].extend([index] * take)

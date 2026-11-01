@@ -97,9 +97,9 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
 
-from .allocator_solver import collapse_to_dp_bins, prune_dominated
 from .lane_eligibility import (
     SCOPED_LANE_SCHEMAS,
+    NATIVE_ROUTE_STATUSES,
     legacy_runtime_scope_refusal,
     ROUTE_STATUS_BACKED,
     ROUTE_STATUS_BACKED_WITH_SERVE_FLAG,
@@ -120,6 +120,13 @@ from .tessera_formats import (
     tessera_wire_recipe,
     Q256_UNIT,
 )
+from .tessera_menu_modes import (
+    MENU_ATTESTED,
+    MENU_MODES,
+    MENU_MODE_ENV,
+    MENU_READABLE,
+    MENU_RESEARCH,
+)
 
 __all__ = [
     "MENU_ATTESTED",
@@ -135,7 +142,6 @@ __all__ = [
     "RouteAdmission",
     "TesseraMenuError",
     "check_tessera_activation_agreement",
-    "collapse_to_dp_bins",
     "expand_tessera_menu",
     "MENU_CACHE_SHAPES_ENV",
     "DEFAULT_MENU_CACHE_SHAPES",
@@ -146,7 +152,6 @@ __all__ = [
     "GEOMETRY_CACHE_SHAPES",
     "menu_families",
     "menu_mode",
-    "prune_dominated",
     "fused_module_licence",
     "route_admission",
     "shard_shape",
@@ -165,25 +170,6 @@ class TesseraMenuError(ValueError):
 #: differ per unit (E4M3's per-unit planes make its rate a function of the
 #: shape, so even the byte cost is not knowable until a Linear is named).
 MENU_TOKEN = "TESSERA"
-
-#: Only rungs the pinned serving release attests.  The production default.
-MENU_ATTESTED = "attested"
-#: Every writable, shape-legal rung, each stamped ``unattested``.  Opt-in, and
-#: refused by the export gate exactly as any other unattested unit is.
-MENU_RESEARCH = "research"
-#: Only rungs the pinned contract's own decoder accepts: the family is
-#: published and the rate lies inside its ``reader_rate_range_q256``.  Opt-in,
-#: still stamped ``unattested``, and refused by the export gate exactly as any
-#: other unattested unit is -- it narrows what a CAMPAIGN pays to encode, not
-#: what an artifact may ship.
-MENU_READABLE = "readable"
-MENU_MODES = frozenset({MENU_ATTESTED, MENU_READABLE, MENU_RESEARCH})
-
-#: The lever that selects the mode.  ONE name, read in ONE place
-#: (:func:`menu_mode`), stamped into every allocation's provenance.  Unset is
-#: the production default, so a run that never mentions it cannot silently
-#: allocate onto rungs no runtime attests.
-MENU_MODE_ENV = "PRISMAQUANT_TESSERA_MENU"
 
 
 def menu_mode(value: "str | None" = None) -> str:
@@ -206,11 +192,6 @@ def menu_mode(value: "str | None" = None) -> str:
             f"accepts; {MENU_RESEARCH}: every writable, shape-legal rung)"
         )
     return text
-
-#: Route statuses under which a pinned runtime executes a rung natively.
-_NATIVE_ROUTE_STATUSES = frozenset(
-    {ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG}
-)
 
 #: How tensor parallelism cuts a Linear.  Column-parallel shards the OUTPUT
 #: features (q/k/v/gate/up); row-parallel shards the INPUT features
@@ -317,7 +298,7 @@ class RouteAdmission:
     @property
     def attested(self) -> bool:
         """Does a pinned runtime execute this rung natively?"""
-        return self.route_status in _NATIVE_ROUTE_STATUSES
+        return self.route_status in NATIVE_ROUTE_STATUSES
 
     def admits(self, mode: str = MENU_ATTESTED) -> bool:
         """Does this rung enter a menu built in ``mode``?"""
@@ -397,21 +378,59 @@ def fused_module_licence():
     return None if contract is None else contract.fused_module
 
 
+@dataclass(frozen=True, slots=True)
+class _TensorParallelFacts:
+    """Both ``tensor_parallel`` facts from ONE captured runtime, or why none.
+
+    ``limits`` is the closed-world attestation ceiling and ``loader_axes`` the
+    per-axis loader status; the contract publishes them on the same unit rows,
+    so they are read from the same verified bytes.  Both are ``None`` when no
+    exact contract is available, and ``refusal`` then says why.
+    """
+
+    limits: "Mapping[str, int] | None"
+    loader_axes: "Mapping[str, Mapping[str, str]] | None"
+    refusal: str = ""
+
+
+def _tensor_parallel_facts(runtime=None) -> _TensorParallelFacts:
+    """Read both TP facts from ``runtime``, capturing it once when not given.
+
+    The development answer pin supplies its parsed maps.  A serving snapshot
+    supplies them only after its own captured bytes pass the exact pin, so a
+    ceiling and a loader axis can never come from two different reads.
+    """
+    from .tessera_runtime_contract import RuntimeContractSnapshot
+    from .tessera_serving_runtime_pin import TesseraServingRuntimePinError
+
+    try:
+        if runtime is None:
+            runtime = _admission_runtime()
+        if isinstance(runtime, RuntimeContractSnapshot):
+            runtime.require_exact_pin()
+            limits, axes = runtime.tensor_parallel
+        else:
+            limits, axes = runtime.max_world_size, runtime.loader_axes
+    except (TesseraServingRuntimePinError, ImportError, OSError) as exc:
+        return _TensorParallelFacts(
+            None, None, f"no exact Tessera serving contract is pinned: {exc}")
+    return _TensorParallelFacts(limits, axes)
+
+
 def tessera_loader_axes() -> "Mapping[str, Mapping[str, str]] | None":
     """What the pinned contract says this build's loader does with each axis.
 
-    ``family -> axis -> status`` from ``tensor_parallel.units[].loader_axes``,
-    or ``None`` when no contract is pinned.  Routed through
-    :func:`tessera_runtime_contract` -- this module's declared one read -- so
-    the axis fact and the route admission cannot come from two different
+    ``family -> axis -> status`` from ``tensor_parallel.units[].loader_axes``
+    of the development answer pin or, without it, of the exact installed
+    serving contract -- the same captured read the attestation leg uses, so
+    the axis fact and the world-size fact cannot come from two different
     Tessera builds inside one run.
 
-    ``None`` is the absence of a table, not a permissive default, and the leg
-    that reads it subtracts on a published status rather than inventing a
-    refusal from silence: see :func:`tessera_tp_axis_legal`.
+    ``None`` is the absence of a verified table, not a permissive default, and
+    the leg that reads it subtracts on a published status rather than
+    inventing a refusal from silence: see :func:`tessera_tp_axis_legal`.
     """
-    contract = tessera_runtime_contract()
-    return None if contract is None else contract.loader_axes
+    return _tensor_parallel_facts().loader_axes
 
 
 def tessera_tp_axis_legal(
@@ -439,7 +458,7 @@ def tessera_tp_axis_legal(
     menu prices unattested rungs on purpose, and a cut the loader will not
     load is not an unattested rung, it is an unloadable one.
 
-    Two absences are pass-throughs, both deliberate. With no pinned contract
+    Two absences are pass-throughs, both deliberate. With no verified contract
     there is no loader fact to read, and refusing here would turn the TP gate
     into a second route gate that empties the research menu. With a contract
     that does not list the family, the closed world lives on
@@ -495,13 +514,14 @@ def tessera_tp_world_attested(
         # whenever no contract is pinned -- including on the research menu,
         # whose entire purpose is to price rungs nothing attests.
         return True, ""
-    contract = tessera_runtime_contract()
-    if contract is None:
-        return False, (
-            "tp_unattested: no Tessera runtime contract is pinned, so no world "
-            "size is attested for any family"
-        )
-    declared = contract.max_world_size.get(spec.name)
+    return _tp_world(spec, tp, _tensor_parallel_facts())
+
+
+def _tp_world(spec: TesseraFamily, tp: int,
+              facts: _TensorParallelFacts) -> tuple[bool, str]:
+    if facts.limits is None:
+        return False, f"tp_unattested: {facts.refusal}"
+    declared = facts.limits.get(spec.name)
     if declared is None:
         return False, (
             f"tp_unattested: the pinned contract's closed-world tensor_parallel "
@@ -568,7 +588,7 @@ def _attested_cell_conditions(name: str, cells) -> tuple[str, tuple[str, ...]]:
     statuses = {cell.route_status for cell in cells}
     if len(statuses) != 1:
         named = ", ".join(
-            f"{getattr(cell, 'cell_id', getattr(cell, 'id', 'unknown'))}={cell.route_status}"
+            f"{cell.id}={cell.route_status}"
             for cell in cells)
         raise TesseraMenuError(
             f"{name}: the pinned contract's native cells disagree about "
@@ -597,103 +617,44 @@ def _contract_reader_range(contract, family: str) -> "tuple[int, int] | None":
     return lo, hi
 
 
-def _published_reader_range(formats, family: str) -> "tuple[int, int] | None":
-    """The packaged ``formats`` table's reader range for one family, or ``None``.
-
-    The field is ``reader_rate_range_q256`` and it is deliberately NOT
-    ``candidate_rungs_q256`` / ``attested_rungs_q256``: those name the rungs a
-    cell attests, which is the narrower question :attr:`RouteAdmission.attested`
-    already answers.  Only a rate-addressed row carries a reader range at all,
-    so a CB row (or an absent one) answers ``None``.
-    """
-    row = formats.get(str(family)) if hasattr(formats, "get") else None
-    if not isinstance(row, Mapping):
-        return None
-    try:
-        lo, hi = (int(v) for v in row["reader_rate_range_q256"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    return lo, hi
-
-
 def _rate_is_readable(rung: int, span: "tuple[int, int] | None") -> bool:
     """Inclusive membership, with absence meaning "no reader is published"."""
     return span is not None and span[0] <= int(rung) <= span[1]
 
 
+def _admission_runtime():
+    from .tessera_runtime_contract import installed_runtime_snapshot
+
+    contract = tessera_runtime_contract()
+    return contract if contract is not None else installed_runtime_snapshot()
+
+
 def route_admission(
-    name: str, *, serving_context: "ServingContext | None" = None,
+    name: str, *, serving_context: ServingContext | None = None,
+    allowability=None, require_allowability: bool = False, allowability_scope=None,
+) -> RouteAdmission:
+    """Decide one route from the optional dev answer or exact serving snapshot."""
+    return _route_admission(
+        name, _admission_runtime(), serving_context=serving_context,
+        allowability=allowability, require_allowability=require_allowability,
+        allowability_scope=allowability_scope)
+
+
+def _route_admission(
+    name: str, runtime, *, serving_context: "ServingContext | None" = None,
     allowability=None, require_allowability: bool = False,
     allowability_scope: "Mapping | None" = None,
 ) -> RouteAdmission:
-    """The pinned runtime's verdict on one Tessera rung.  **The one seam.**
+    """One route decision from a runtime captured at the public query boundary.
 
-    This is the single function in the production path that reads a serving
-    contract on Tessera's behalf.  Everything else -- the menu, the campaign,
-    the candidate gate, the provenance -- consumes :class:`RouteAdmission`, so
-    when the Tessera serving lane publishes its own ``runtime_contract.json``
-    the swap is this function's body and nothing else.
-
-    **Deliberately not memoised**, and the reason is worth keeping. A cache
-    over a runtime-contract read outlives the contract, and here that is not
-    hypothetical: an ``lru_cache`` keyed on the rung name silently inverted
-    ``test_no_tessera_rung_is_producer_eligible_on_the_pinned_release``, which
-    runs after a test that patches the attestation to True and duly read back
-    "eligible" for a rung nothing serves. Putting the resolved callables in the
-    key fixes that case and not the next one -- a test that patches
-    ``_pinned_serving_table`` instead changes the contract without changing any
-    function object, and the stale verdict comes straight back (it did). The
-    key this cache would need is the identity of the contract itself, which it
-    cannot state, so it does not get a cache. It does not need one: the whole
-    lookup is ~0.1 ms (parse 0.002, attest 0.016, serialisable 0.072, recipe +
-    route 0.006 ms) *because the serialisable leg asks the family's grid rather
-    than the rung* -- ask it per rung and one 16-bit menu spends 34 ms a rung
-    re-hashing 65536 values -- the expensive part of a menu is the per-rung
-    Bresenham
-    realisability check.  That check *is* memoised per ``(family, rung, shape)``
-    -- ``_shard_geometry`` and ``tessera_footprint._exact_bits_for_shape``,
-    both sized by :func:`menu_cache_bound` -- but ``expand_tessera_menu``
-    itself is not, and never was: it returns a fresh list its callers are free
-    to keep.
-
-    Today it delegates to ``tessera_render.tessera_lane_admission``, which
-    resolves the rung against **Tessera's own** packaged
-    ``runtime_contract.json`` through the shared ``lane_eligibility`` parser.
-    That table publishes the attested Tessera families and their receipted
-    rungs, so what refuses is the third conjunct whenever the installed
-    Tessera is not the pinned commit/digest, and the fourth whenever the
-    cell's own packaged evidence records a degenerate smoke.  The answer is
-    then :data:`ROUTE_STATUS_UNATTESTED`.  The ``detail`` says which conjunct, verbatim from the
-    admission, because a rung refused by the pin and a rung refused by an
-    absent cell need different fixes and must not read the same.
-
-    Before any of that, it runs :func:`check_tessera_activation_agreement`
-    whenever cells attest the rung: the priced ``route`` and the executed
-    cell ``activation_contract`` must project to the same ``(act_bits,
-    act_group_size)``, on both the dev-pin and the packaged-contract paths.
-
-    ``allowability_scope`` carries the unit priced to the D41 owner: actual
-    serving structure, declared shape, regime M, activation build and recipe.
-    An omitted scope stays unscoped. An unresolved explicit scope waits.
-
-    A v5 development contract requires the caller's complete serving context.
-    Its own scoped lookup checks every required regime under that one target;
-    an absent context cannot borrow the runtime or structure of another cell.
-    A legacy contract retains its context-free admission but cannot attest a
-    newly supplied runtime context it has no per-cell evidence to answer.
-
-    Beside the attestation it also derives :attr:`RouteAdmission.readable` --
-    does the pinned contract's own decoder accept this rate at all -- from the
-    same one read, on both paths: ``reader_rate_range`` on the dev-pin
-    contract and ``reader_rate_range_q256`` on the packaged ``formats`` row.
-    It is deliberately independent of the serving scope, of the release pin
-    and of the cell census, because none of those is what makes a reader
-    accept bytes; and it is deliberately NOT allowed to move ``route_status``,
-    which stays :data:`ROUTE_STATUS_UNATTESTED` until a cell attests the rung.
+    Readability is independent of native-cell and exact-pin admission. The
+    optional development path retains its answer policy and context behavior;
+    serving uses one typed rung verdict. Activation agreement is checked even
+    when the exact pin refuses matched cells. Shape and shard accounting stay
+    with their geometry owners.
     """
     from .tessera_render import (
-        _pinned_serving_table, tessera_attesting_cells, tessera_lane_admission,
-        tessera_lane_attested, tessera_rung_is_serialisable,
+        snapshot_rung_admission, tessera_rung_is_serialisable,
     )
 
     parsed = parse_tessera_format_name(name)
@@ -713,7 +674,9 @@ def route_admission(
     route = tessera_serving_route(family, recipe, rung)
     serialisable = tessera_rung_is_serialisable(name)
 
-    contract = tessera_runtime_contract()
+    from .tessera_runtime_contract import TesseraContract
+
+    contract = runtime if isinstance(runtime, TesseraContract) else None
     flags: tuple[str, ...] = ()
     world: "int | None" = None
     requires_context = False
@@ -744,7 +707,7 @@ def route_admission(
             detail = (
                 f"the pinned Tessera contract attests {len(cells)} native "
                 f"cell(s) naming this rate: "
-                f"{', '.join(cell.cell_id for cell in cells)}"
+                f"{', '.join(cell.id for cell in cells)}"
             )
             check_tessera_activation_agreement(
                 name, route,
@@ -766,35 +729,20 @@ def route_admission(
                     f" under serving context {serving_context.as_dict()}"
                 )
     else:
-        table, formats = _pinned_serving_table()
-        source = _packaged_attestation_source(table)
-        readable = _rate_is_readable(
-            rung, _published_reader_range(formats, family.name))
-        requires_context = table.schema in SCOPED_LANE_SCHEMAS
-        scope = ({"serving_context": serving_context}
-                 if serving_context is not None else {})
-        # The VERDICT stays ``tessera_lane_attested``: it is the seam every
-        # gate consults and the one the tests substitute.  The REASON is read
-        # separately and only when the verdict is False, so patching the
-        # verdict cannot invent a rationale the contract never gave.
-        attesting = tessera_attesting_cells(name, table=table, formats=formats, **scope)
-        if bool(tessera_lane_attested(name, table=table, formats=formats, **scope)):
-            if not attesting:
-                raise TesseraMenuError(f"{name}: admission has no attesting native cells")
+        source = _packaged_attestation_source(runtime)
+        readable = _rate_is_readable(rung, runtime.reader_rate_range(family.name))
+        requires_context = runtime.requires_serving_context
+        verdict = snapshot_rung_admission(name, runtime, serving_context=serving_context)
+        attesting = verdict.cells
+        if verdict.admitted:
             status, flags = _attested_cell_conditions(name, attesting)
-            from .tessera_runtime_contract import published_tensor_parallel_limits
-            from .tessera_render import tessera_serving_contract_path
-            from importlib.resources import as_file
-            with as_file(tessera_serving_contract_path()) as path:
-                world = published_tensor_parallel_limits(
-                    str(path), table.contract_sha256).get(family.name)
+            world = runtime.tensor_parallel[0].get(family.name)
             detail = (
                 "the packaged Tessera contract attests a device-qualified "
-                "native cell naming this rate, under a reviewed release pin"
-            )
+                "native cell naming this rate, under the exact serving pin")
         else:
             status = ROUTE_STATUS_UNATTESTED
-            detail = tessera_lane_admission(name, table=table, formats=formats, **scope)[1]
+            detail = verdict.reason
         if attesting:
             check_tessera_activation_agreement(
                 name, route,
@@ -1215,6 +1163,25 @@ def tessera_tp_legal(
     unit: "str | None" = None,
     structure: "str | None" = None,
 ) -> tuple[bool, str]:
+    """Check TP world, loader axis and actual shard geometry independently."""
+    return _tp_legal(
+        family, body_rate_q256, shape, tp_degree=tp_degree,
+        parallel_kind=parallel_kind, require_attested_world=require_attested_world,
+        unit=unit, structure=structure)
+
+
+def _tp_legal(
+    family: "str | TesseraFamily",
+    body_rate_q256: int,
+    shape: Sequence[int],
+    *,
+    tp_degree: int = 1,
+    parallel_kind: str = PARALLEL_NONE,
+    require_attested_world: bool = False,
+    unit: "str | None" = None,
+    structure: "str | None" = None,
+    tp_facts: "_TensorParallelFacts | None" = None,
+) -> tuple[bool, str]:
     """Is this rung legal on every rank at ``tp_degree``?  ``(legal, reason)``.
 
     Four questions when the menu is the attested one, three when it is not.
@@ -1254,19 +1221,27 @@ def tessera_tp_legal(
     ``parallel_kind`` is the unit's, from the caller's serving profile;
     ``PARALLEL_NONE`` (a packed expert under expert parallelism, a replicated
     head) shards nothing and answers the shape question alone.
+
+    Both contract legs read ``tp_facts``, captured once by the caller (the
+    menu captures it beside its route admissions) or here.
     """
     spec = get_tessera_family(family)
     tp = int(tp_degree)
     if tp < 1:
         raise TesseraMenuError(f"tp_degree must be >= 1, got {tp_degree}")
-    if require_attested_world:
-        attested, why = tessera_tp_world_attested(spec, tp)
-        if not attested:
+    if tp > 1:
+        facts = _tensor_parallel_facts() if tp_facts is None else tp_facts
+        if require_attested_world:
+            attested, why = _tp_world(spec, tp, facts)
+            if not attested:
+                return False, why
+        # An empty table is "no verified loader fact": the axis leg passes
+        # through rather than reading a second, possibly different, contract.
+        loads, why = tessera_tp_axis_legal(
+            spec, tp_degree=tp, parallel_kind=parallel_kind, unit=unit,
+            loader_axes=facts.loader_axes or {})
+        if not loads:
             return False, why
-    loads, why = tessera_tp_axis_legal(
-        spec, tp_degree=tp, parallel_kind=parallel_kind, unit=unit)
-    if not loads:
-        return False, why
     try:
         sharded = shard_shape(shape, tp, parallel_kind)
     except TesseraMenuError as exc:
@@ -1501,22 +1476,24 @@ def expand_tessera_menu(
     n_params = 1
     for d in dims:
         n_params *= d
+    runtime = _admission_runtime()
+    tp_facts = _tensor_parallel_facts(runtime) if int(tp_degree) > 1 else None
     out: list[MenuRung] = []
     for spec in specs:
         lo, hi = spec.mathematical_q256_bounds
         for rung in range(lo, hi + 1, max(1, int(step_q256))):
             name = spec.format_name(rung)
-            admission = (route_admission(name, serving_context=serving_context)
-                         if serving_context is not None else route_admission(name))
+            admission = _route_admission(
+                name, runtime, serving_context=serving_context)
             if not admission.admits(mode):
                 continue
             if require_unquantized_activations and act_bits_quantize_input(admission.act_bits):
                 continue
-            legal, _reason = tessera_tp_legal(
+            legal, _reason = _tp_legal(
                 spec, rung, dims,
                 tp_degree=tp_degree, parallel_kind=parallel_kind,
                 require_attested_world=(mode == MENU_ATTESTED),
-                structure=structure,
+                structure=structure, tp_facts=tp_facts,
             )
             if not legal:
                 continue
@@ -1551,13 +1528,8 @@ def expand_tessera_menu(
 
 
 # ---------------------------------------------------------------------------
-# Making a 3000-rung menu tractable, exactly
+# Expanding the continuous menu token
 # ---------------------------------------------------------------------------
-
-# ``prune_dominated`` and ``collapse_to_dp_bins`` are the DP's own exact
-# reductions and live in ``allocator_solver`` beside ``_charged_bins``, the bin
-# arithmetic the collapse must agree with (decoupling step 6, PQ #1552). They
-# are imported at the top of this module for this module's callers.
 
 
 def expand_menu_tokens(names, priced_formats=()) -> list[str]:
@@ -1680,9 +1652,9 @@ def contract_attested_rung_names() -> tuple[str, ...]:
     A family the contract publishes with no attested rung contributes nothing
     -- absence is absence, not its whole reader range.
     """
-    from .tessera_render import _pinned_serving_table
+    from .tessera_runtime_contract import installed_runtime_snapshot
 
-    _table, formats = _pinned_serving_table()
+    formats = installed_runtime_snapshot().published_formats
     names: list[str] = []
     for entry in (formats or {}).values():
         pattern = str(entry.get("name_pattern", ""))

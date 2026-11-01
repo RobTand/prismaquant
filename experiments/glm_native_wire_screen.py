@@ -5,6 +5,9 @@ this entry point can run. It never treats a partial capture as canonical.
 """
 from __future__ import annotations
 
+from prismaquant import tessera_cell_measurement as cell_measurement
+from prismaquant import tessera_campaign_wire as campaign_wire
+
 import argparse
 import cProfile
 from contextlib import ExitStack
@@ -116,7 +119,7 @@ def main():
     for name in ('fit_ids_sha256', 'text_sha256', 'nsamples', 'seqlen', 'seed'):
         if capture['identity']['calibration'][name] != union['fixed']['calibration'][name]:
             raise ValueError('complete capture differs from the original sealed calibration draw')
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     if api.encoder_source_sha256() != plan['encoder_source_sha256']:
         raise ValueError('actual Tessera encoder source differs from the frozen producer')
     from prismaquant.tessera_runtime_contract import contract_path
@@ -220,7 +223,7 @@ def main():
             raise ValueError('frozen full-census input scale policy differs')
         write_json(output/'input-scales.json', dict(policy=scale_policy, units=scales))
         calibration = th.activation_source(hessians, capture['identity']['calibration'])
-        memo = tc._activation_kwargs_memo(calibration, weights, 'cuda', max_entries=1,
+        memo = cell_measurement.encoder_kwargs_memo(calibration, weights, 'cuda', max_entries=1,
             resource_check=check, factor_scratch_bytes=resources['selected_anchor_resources'][
                 'phases']['resident_anchors']['factorization_scratch_bytes'])
         cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
@@ -247,7 +250,7 @@ def main():
                 active_candidate = next(row for row in result['candidates']
                                         if (row['qname'], row['format']) == (name, fmt))
                 active_candidate['status'] = 'encoding'
-                anchor = phase(f'unit-{unit_index}-encode-{index}', lambda: tc._measure_anchor(
+                anchor = phase(f'unit-{unit_index}-encode-{index}', lambda: cell_measurement.measure_cell(
                     qname=name, weight=weights[name], activations=acts[name], format_name=fmt,
                     cache=cache, wire_dir=wire_dir, activation_kwargs_for=memo,
                     hessian_required=True, static_input_scale=scales.get(name)))
@@ -270,7 +273,7 @@ def main():
                         menus={name: [SimpleNamespace(format_name=fmt)]},
                         calibration_source=calibration, static_scales=scales,
                         projected_units=projected, bound_unit=bound)
-                    record = tc._checkpoint_wire_record(anchor, wire_dir, identity)
+                    record = campaign_wire.checkpoint_wire_record(anchor, wire_dir, identity)
                     render_path = cache_dir/cache.weights[(name, fmt)]
                     cell = dict(anchor=asdict(anchor), record=record,
                         wire=str(wire_dir/record['file']), render=str(render_path),

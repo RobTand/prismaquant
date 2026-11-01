@@ -14,7 +14,8 @@ from pathlib import Path
 import re
 
 from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
-from .joint_aura import identity_sha256, require_native_source_execution, validate_joint_aura_entry
+from .joint_aura import require_native_source_execution
+from prismaquant.joint_aura_rows import joint_identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
 from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
                                     RUNTIME_OPTIONAL_FIELDS, _admit, _bytes, _equal, _executed,
@@ -486,7 +487,7 @@ def _rank_render_proof(member, shape, quality):
             "rows": list(rows), "cols": list(cols), "axis": axis,
             "wire_sha256": member["wire"]["blob_sha256"],
             "encoding_identity_sha256": quality["encoding_identity_sha256"],
-            "qualified_render_sha256": identity_sha256(quality["rendered_weight"]),
+            "qualified_render_sha256": joint_identity_sha256(quality["rendered_weight"]),
             "rendered_weight": member["rendered_weight"]}
 
 
@@ -879,7 +880,7 @@ def _validate_original_source_acquisition(capture, *, source_model_identity,
     launch. This metadata join cannot turn its normalized CPU controls into
     original CUDA, full-draw quality, complete capture or native qualification.
     """
-    from .cost_streaming import validate_streamed_model_identity, canonical_streamed_model_semantic_config
+    from .streamed_model_identity import validate_streamed_model_identity, canonical_streamed_model_semantic_config
     from .source_generation import (_control, _session, _full_calibration, _binding,
         ORIGINAL_AUTHORITY_KEYS, ORIGINAL_STATIC_AUTHORITY_KEYS, normalize_original_source_static_authority)
     from .stage_inputs import require_source_identity
@@ -975,7 +976,7 @@ def _validate_prefix_capture(capture, source_model_identity=None, *, expected_or
     Layers 3..43 need a proper prefix. Layer 44 uses the existing completed
     text-forward witness, never a weakened proper-prefix or HF-load contract.
     """
-    from .streaming_model import (validate_streaming_initialization_contract,
+    from .streaming_initialization import (validate_streaming_initialization_contract,
                                   validate_streaming_prefix_initialization_contract)
     unit = capture.get('unit')
     if not isinstance(unit, str) or _GLM_UNIT.fullmatch(unit) is None:
@@ -1012,7 +1013,7 @@ def _validate_prefix_capture(capture, source_model_identity=None, *, expected_or
             calibration_receipt=calibration_receipt)
         mapping = {name: {"tensor": key, "file": Path(source_model_identity["checkpoint_weight_map"][key]).name}
                    for name, key in source_model_identity["weight_map"].items()}
-        _equal(contract["source_map_sha256"], identity_sha256(mapping), "original prefix live source map")
+        _equal(contract["source_map_sha256"], joint_identity_sha256(mapping), "original prefix live source map")
         return contract
     if any(value is not None for value in (expected_original_authority, expected_original_session,
                                            original_source_authority)):
@@ -1033,7 +1034,7 @@ def _validate_prefix_capture(capture, source_model_identity=None, *, expected_or
         _equal(capture['producer_source']['tensors'],source_model_identity['checkpoint_weight_map'],'prefix checkpoint source map')
         mapping={name:{'tensor':key,'file':Path(source_model_identity['checkpoint_weight_map'][key]).name}
                  for name,key in source_model_identity['weight_map'].items()}
-        _equal(contract['source_map_sha256'],identity_sha256(mapping),'prefix live source map')
+        _equal(contract['source_map_sha256'],joint_identity_sha256(mapping),'prefix live source map')
     return contract
 
 
@@ -1115,10 +1116,10 @@ def packed_reference(experts_module, x, ids, weights, gate_up_weight, down_weigh
     The source module supplies its actual activation operation. Real preparation
     requires CUDA; this arithmetic helper can also exercise small CPU fixtures.
     """
-    from .measure_quant_cost import _packed_experts_forward_with_weights
+    from .routed_experts import packed_experts_forward_with_weights
     from .perturbed_x_cache import _activation_qdq
     _no_preclip()
-    return _packed_experts_forward_with_weights(
+    return packed_experts_forward_with_weights(
         experts_module, x, ids, weights, gate_up_weight, down_weight,
         input_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, input_unit),
         intermediate_quantize=lambda value: _activation_qdq(value, spec, cache.activation_max_abs or {}, intermediate_unit))
@@ -1141,6 +1142,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
     from . import format_registry as fr
     from .joint_aura import activation_identity, prefetch_joint_cache
     from .production_weight_cache import ProductionWeightCache, _cb_cache_tensor_identity
+    from .routed_experts import PACKED_EXPERTS_FORWARD_OPERATION_ID
     _no_preclip()
     format_name = owner_format(shape, format_name)
     shape = {**shape, "format": format_name}
@@ -1310,9 +1312,9 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             "members": actual_members, "profile_role_order": list(ROLES), "routing": dict(routing), "execution": execution,
             "calibration": calibration_receipt, "probe_calibration": probe_calibration_receipt,
             "probe_scope": probe_scope, "routing_capture": routing_capture,
-            "routing_capture_sha256": identity_sha256(routing_capture),
+            "routing_capture_sha256": joint_identity_sha256(routing_capture),
             "numerics": dict(numerics), "runtime_image": runtime_image, "serving_config_sha256": serving_config_sha256, "probe_request": probe_request,
-            "reference": {"operation": "prismaquant.measure_quant_cost._packed_experts_forward_with_weights",
+            "reference": {"operation": PACKED_EXPERTS_FORWARD_OPERATION_ID,
                           "module_class": f"{type(experts_module).__module__}.{type(experts_module).__qualname__}",
                           "module_source_sha256": bytes_sha256hex(reference_file.read_bytes()),
                           "profile": profile.name, "temporary_pack_bytes": packed_bytes,
@@ -1425,7 +1427,7 @@ def _native_member_identity(member):
     return {**({"input_global_scale": member["activation"]["input_global_scale"]}
                if member["activation"].get("input_global_scale") is not None else {}), **{key: member[key] for key in ("unit", "expert", "role", "format", "shape", "source_weight", "rendered_weight")},
             "wire_sha256": member["wire"]["blob_sha256"],
-            "wire_record_sha256": identity_sha256(member["wire"]["record"])}
+            "wire_record_sha256": joint_identity_sha256(member["wire"]["record"])}
 
 
 def _qualified_source_execution(inputs, probe, path, expected_sha256):
@@ -1535,10 +1537,10 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(inputs["profile_role_order"], list(ROLES), "source profile role order")
     _calibration_and_capture(inputs["calibration"], inputs["routing_capture"], unit=inputs["unit"],
                              shape=inputs["shape"], routing=inputs["routing"])
-    _equal(inputs["routing_capture_sha256"], identity_sha256(inputs["routing_capture"]), "routing capture digest")
+    _equal(inputs["routing_capture_sha256"], joint_identity_sha256(inputs["routing_capture"]), "routing capture digest")
     rows = _validated_assignment(cost_rows, "additive")  # validation only; no scalar summary
     if set(rows) != {member["unit"] for member in members}:
-        raise ValueError("native MoE runtime binding must cover exactly all 96 members")
+        raise ValueError("native MoE runtime binding must cover exactly all declared members")
     first = rows[members[0]["unit"]]
     probe, request = first["probe_identity"], inputs["probe_request"]
     from .native_execution_binding import require_reference_quantizer
@@ -1560,7 +1562,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(probe["source_model"]["source"], request["source_model"], "probe source model")
     _equal({Path(item["path"]).name: item["sha256"] for item in probe["source_model"]["shards"]},
            request["source_shards"], "probe source checkpoint bytes")
-    from .cost_streaming import canonical_streamed_model_semantic_config
+    from .streamed_model_identity import canonical_streamed_model_semantic_config
     source = inputs["routing_capture"]["producer_source"]
     _equal(source["files"], request["source_shards"], "capture/probe full source files")
     _equal(source["config_sha256"], request["source_config_sha256"], "captured source config bytes")
@@ -1617,15 +1619,15 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
                           ("profile_role_order", inputs["profile_role_order"]),
                           ("routing_capture_sha256", inputs["routing_capture_sha256"])):
         _equal(operator[key], expected, f"native {key}")
-    _equal(preflight["runtime_sha256"], identity_sha256(preflight["runtime"]), "runtime digest")
-    _equal(preflight["native_tensors_sha256"], identity_sha256(operator["native_tensors"]), "native tensors")
-    _equal(preflight["scheme_sha256"], identity_sha256(operator["scheme"]), "native scheme")
-    _equal(operator["config_sha256"], identity_sha256(operator["config"]), "native MoE config")
+    _equal(preflight["runtime_sha256"], joint_identity_sha256(preflight["runtime"]), "runtime digest")
+    _equal(preflight["native_tensors_sha256"], joint_identity_sha256(operator["native_tensors"]), "native tensors")
+    _equal(preflight["scheme_sha256"], joint_identity_sha256(operator["scheme"]), "native scheme")
+    _equal(operator["config_sha256"], joint_identity_sha256(operator["config"]), "native MoE config")
     _executed(preflight["runtime"]["execution"], inputs["execution"], "native execution")
     _equal(preflight["runtime"]["image"], inputs["runtime_image"], "native image")
     _equal(operator["serving_config_sha256"], _sha(inputs["serving_config_sha256"], "serving configuration"), "native serving config")
     _workspace_identity(preflight["workspace"])
-    _equal(preflight["workspace_sha256"], identity_sha256(preflight["workspace"]), "workspace digest")
+    _equal(preflight["workspace_sha256"], joint_identity_sha256(preflight["workspace"]), "workspace digest")
     route = operator["declared_route"]
     if route.get("decoder") == "torch_materialize_stock":
         # Retain historical FP8 receipt intake. New packed execution preparation
@@ -1786,7 +1788,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_moe_late_binding.v1":
-        from .native_moe_execution_binding import resolve_execution_binding
+        from .native_panel_kind import resolve_execution_binding
         receipt = resolve_execution_binding(receipt, expected_panel)
     if (receipt.get("schema") != "tessera.native_moe_operator_receipt.v1"
             or receipt.get("status") != "timing_admissible"):
@@ -1795,15 +1797,15 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
         raise ValueError("native MoE receipt requires its independently frozen panel")
     _equal(receipt.get("panel"), expected_panel, "receipt panel")
     _admit(receipt, "MoE receipt", MOE_RECEIPT_FIELDS)
-    _equal(receipt["panel_sha256"], identity_sha256(expected_panel), "receipt panel digest")
+    _equal(receipt["panel_sha256"], joint_identity_sha256(expected_panel), "receipt panel digest")
     _equal(receipt["runtime"], expected_panel["runtime"], "receipt runtime")
-    _equal(receipt["runtime_sha256"], identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
+    _equal(receipt["runtime_sha256"], joint_identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
     # The producer publishes workspace identity in its complete frozen panel,
     # with the independently observed bytes/digest in resources below. There
     # are no duplicate top-level workspace fields in the v1 receipt.
     workspace = receipt["panel"]["workspace"]
     _workspace_identity(workspace)
-    _equal(identity_sha256(workspace), expected_panel["workspace_sha256"], "receipt workspace digest")
+    _equal(joint_identity_sha256(workspace), expected_panel["workspace_sha256"], "receipt workspace digest")
     binding = RuntimeBinding.from_dict(expected_panel["runtime_binding"])
     members = _member_roster(expected_panel["unit"], expected_panel["members"], expected_panel["shape"])
     _equal(dict(binding.member_formats), {member["unit"]: member["format"] for member in members}, "runtime member coverage")
@@ -1820,9 +1822,9 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     _equal(operator["members"], [_native_member_identity(member) for member in members], "receipt native members")
     for key in ("shape", "routing", "profile_role_order", "routing_capture_sha256", "serving_config_sha256"):
         _equal(operator[key], expected_panel[key], f"receipt {key}")
-    _equal(identity_sha256(operator["native_tensors"]), expected_panel["native_tensors_sha256"], "receipt native tensors")
-    _equal(identity_sha256(operator["scheme"]), expected_panel["scheme_sha256"], "receipt scheme")
-    _equal(identity_sha256(operator["config"]), expected_panel["config_sha256"], "receipt MoE config")
+    _equal(joint_identity_sha256(operator["native_tensors"]), expected_panel["native_tensors_sha256"], "receipt native tensors")
+    _equal(joint_identity_sha256(operator["scheme"]), expected_panel["scheme_sha256"], "receipt scheme")
+    _equal(joint_identity_sha256(operator["config"]), expected_panel["config_sha256"], "receipt MoE config")
     _equal(operator["config_sha256"], expected_panel["config_sha256"], "receipt MoE config digest")
     resources = _admit(receipt["resources"], "MoE receipt resources", MOE_RESOURCE_FIELDS,
                        MOE_RESOURCE_OPTIONAL_FIELDS)
@@ -1834,7 +1836,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
         if memory_trace_path is None:
             raise ValueError("complete native MoE resource bound requires its actual memory trace")
         trace = json.loads(Path(memory_trace_path).read_text())
-        _equal(identity_sha256(trace), resources["trace_sha256"], "memory trace")
+        _equal(joint_identity_sha256(trace), resources["trace_sha256"], "memory trace")
         _equal(trace["capture"]["collector_library_sha256"],
                expected_panel["runtime"]["resource_collector"]["library_sha256"], "resource collector")
     observations = {}
@@ -1869,7 +1871,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     return {"schema": "prismaquant.native_moe_observation.v1", "status": "operator_evidence",
             "unit": expected_panel["unit"], "format": expected_panel["format"],
             "runtime_binding": binding.as_dict(),
-            "panel_sha256": identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
+            "panel_sha256": joint_identity_sha256(expected_panel), "receipt_sha256": expected_sha256,
             "cost_sha256": expected_panel["cost_sha256"], "probe_scope": expected_panel.get("probe_scope"),
             "phases": observations,
             "serialized_unit_bytes": sum(_bytes(member["wire"]["blob_bytes"], "member wire") for member in members),

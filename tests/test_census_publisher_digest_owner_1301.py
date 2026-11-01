@@ -72,8 +72,8 @@ def _projection_inputs(tmp_path, tool, monkeypatch, *, mutate=False):
     plan = tmp_path / "plan.json"
     argv += ["--out-dir", str(tmp_path / "out"), "--checkpoint-parts", str(tmp_path / "parts"),
              "--plan-layer-config-out", str(plan)]
-    monkeypatch.setattr(tool, "load_assignment", lambda _: {"x": "BF16"})
-    monkeypatch.setattr(tool, "read_layer_config_metadata", lambda _: {})
+    monkeypatch.setattr(tool, "canonicalize_assignment", lambda _: {"x": "BF16"})
+    monkeypatch.setattr(tool, "layer_config_metadata", lambda _: {})
 
     def selected(*_):
         if mutate:

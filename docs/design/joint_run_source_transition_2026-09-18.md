@@ -112,12 +112,12 @@ Differences from the 2026-09-07 contract, and why:
   that names another measurement source, and refuses unit checkpoints without a
   manifest.
 - **The git identity override is accepted, and verified.** The campaign image
-  has no git binary, and `aura_cost._checkpoint_git_commit()` needs one unless
+  has no git binary, and `aura_provenance.checkpoint_git_commit()` needs one unless
   `PRISMAQUANT_IDENTITY_GIT_COMMIT` names the commit. The launcher
   (`tools/tessera_campaign_container.py`) reads HEAD on the host, refuses a
   checkout whose tracked `prismaquant/` bytes differ from it (the check the
   variable disables inside the container, performed over the whole package
-  instead of `aura_cost.py` alone), reports it on its JSON line and hands it to
+  instead of just the declared AURA checkpoint owners), reports it on its JSON line and hands it to
   the container. A spec may not supply the value. The transition loader then
   requires the stamped commit to equal the checkout's own HEAD.
 

@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     run["finished_unix"] = time.time()
     text = json.dumps(run, indent=1)
     if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
         with open(args.out, "w") as handle:
             handle.write(text + "\n")
     print(text)

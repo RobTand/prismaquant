@@ -404,6 +404,9 @@ def _verify_breakdown(breakdown: dict, geometry: dict, sizes: dict,
     """
     if not (isinstance(breakdown, dict)):
         raise ValueError("breakdown must be a JSON object")
+    pad_bytes = breakdown.get("pad_bytes")
+    if type(pad_bytes) is not int or pad_bytes < 0:
+        raise ValueError("breakdown pad_bytes must be a nonnegative integer")
     mismatches = []
 
     def check(name, want, got):
@@ -434,7 +437,7 @@ def _verify_breakdown(breakdown: dict, geometry: dict, sizes: dict,
     check("checksum_bytes", wire.CHECKSUM_BYTES, breakdown.get("checksum_bytes"))
     content = int(sizes["fixed_bytes"]) + selected_body
     check("content_bytes", content, breakdown.get("content_bytes"))
-    check("total_bytes", content + int(breakdown.get("pad_bytes", 0)),
+    check("total_bytes", content + pad_bytes,
           breakdown.get("total_bytes"))
     if breakdown.get("accounting_consistent") is not True:
         mismatches.append("accounting_consistent is not true")

@@ -37,11 +37,7 @@ def bound_json(path, expected):
 
 def cached_checkpoint_identity(model, cache):
     """Use the existing cache, refusing any shard that would require rehashing."""
-    from prismaquant.cost_streaming import (
-        _local_checkpoint_shards, _read_source_checkpoint_digest_cache,
-        _streamed_identity_stat_fingerprint, canonical_fingerprint_key,
-        build_source_checkpoint_identity,
-    )
+    from prismaquant.streamed_model_identity import _local_checkpoint_shards, _read_source_checkpoint_digest_cache, _streamed_identity_stat_fingerprint, canonical_fingerprint_key, build_source_checkpoint_identity
     _, shards = _local_checkpoint_shards(model)
     extras = list(Path(model).rglob("*.safetensors"))
     required = {p.resolve() for p in list(shards or ()) + extras}
@@ -95,23 +91,9 @@ def load_panel(path, *, arrays_root=None):
 
 def token_kl(teacher, candidate, *, tile_rows=32, require_cuda=True):
     """Match upstream token_kld_chunk on raw logits without CPU vocabulary work."""
-    if (teacher.ndim != 2 or teacher.shape != candidate.shape or teacher.shape[1] <= 1
-            or teacher.shape[0] <= 0 or type(tile_rows) is not int or tile_rows <= 0):
-        raise ValueError("teacher/candidate logit geometry or tile size mismatch")
-    if teacher.device != candidate.device or (require_cuda and teacher.device.type != "cuda"):
-        raise ValueError("KL requires co-resident CUDA tensors")
-    result = torch.empty(teacher.shape[0], dtype=torch.float64, device=teacher.device)
-    for start in range(0, teacher.shape[0], tile_rows):
-        end = min(start + tile_rows, teacher.shape[0])
-        t, c = teacher[start:end].to(torch.float64), candidate[start:end].to(torch.float64)
-        if not bool(torch.isfinite(t).all() & torch.isfinite(c).all()):
-            raise ValueError("teacher/candidate logits must be finite")
-        t = torch.log_softmax(t, dim=-1)
-        c = torch.log_softmax(c, dim=-1)
-        result[start:end] = (t.exp() * (t - c)).sum(dim=-1, dtype=torch.float64)
-    if not bool(torch.isfinite(result).all()):
-        raise ValueError("nonfinite full-vocabulary KL")
-    return result
+    from prismaquant.g3_numerics import token_kl as owned_token_kl
+
+    return owned_token_kl(teacher, candidate, tile_rows=tile_rows, require_cuda=require_cuda)
 
 
 LOGITS_LAYOUTS = ("legacy_single", "vllm_v2_chunk1024")

@@ -50,7 +50,7 @@ from tests.boundary_gate import assert_equal, code_strings, escape, python_files
 CORE = (
     "allocator*", "aura_cost", "cost_*", "prepriced_cost", "pipeline",
     "format_registry", "serving_profiles", "shipcard*", "production_weight_cache",
-    "perturbed_x_cache", "weight_session", "select_validated_frontier",
+    "perturbed_x_cache", "select_validated_frontier",
     "layer_config", "autoscale", "unit_topology_restamp", "lane_spec",
     "kl_measurement", "export_native_compressed", "validate_*",
 )

@@ -38,7 +38,7 @@ SCHEMA_V1 = "prismaquant.joint_catalog_extension.v1"
 #: bound run header seals ``campaign_scope: null`` (R13 ran without a
 #: forward-recovery capsule under a plan that declares no scope). The scope is
 #: derived once, at creation, from the original plan by the one scope builder
-#: (``tools.dispatch_tessera_campaign.joint_campaign_scope``, which re-hashes
+#: (``prismaquant.tessera_campaign_table.joint_campaign_scope``, which re-hashes
 #: every artifact the plan binds) against the frozen campaign identity file.
 #: A header that seals its scope keeps producing v2 bytes: the sealed scope
 #: rules, and nothing is embedded over it.
@@ -424,7 +424,7 @@ class EncoderAdoptionValidation:
 
     def verify(self, adoption, *, fmt):
         _require(self._active, "adoption validation is outside its operation")
-        from tools.reseal_campaign_identity import unit_kind, format_family
+        from .tessera_campaign_reseal import unit_kind, format_family
         _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
         reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
         bound = adoption.get("encoder_source_proof")
@@ -485,7 +485,7 @@ def validated_encoder_adoption(adoption, *, fmt):
     cell, and a named proof's bytes and internal consistency stay walls in
     both modes.
     """
-    from tools.reseal_campaign_identity import load_bundle, unit_kind, format_family, Refused
+    from .tessera_campaign_reseal import load_bundle, unit_kind, format_family, Refused
 
     _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
     reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
@@ -663,8 +663,9 @@ def verify_catalog_pair(inputs):
         _same(policy["calibration_input"], old["calibration_input"], "served-group calibration")
         bindings += [new_plan["served_activation_policy"], policy["census"]]
     fences = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in bindings)
-    if fences in _VERIFIED_PAIR:
-        cached = _VERIFIED_PAIR[fences]
+    key = (dev_mode_enabled(), fences)
+    if key in _VERIFIED_PAIR:
+        cached = _VERIFIED_PAIR[key]
         if cached["proof_fences"] == tuple((path, digest, _bound_stat_fence(Path(path)))
                                             for path, digest, _fence in cached["proof_fences"]):
             return dict(cached["evidence"])
@@ -783,11 +784,11 @@ def verify_catalog_pair(inputs):
             "source_qnames": len(old["formats_by_qname"])}
     _same(fences, tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
                         for b in bindings), "catalog metadata changed during verification")
-    # One validated pair per process. Rebinding 45 records does not deserialize
-    # both large PWCs 45 times; every dependency retains the existing bound
-    # reader's inode/size/mtime/ctime fence, and drift revalidates from bytes.
+    # One validated pair under its admission policy. Rebinding 45 records does
+    # not deserialize both large PWCs 45 times. Every dependency keeps the bound
+    # reader's inode/size/mtime/ctime fence; drift revalidates from bytes.
     _VERIFIED_PAIR.clear()
-    _VERIFIED_PAIR[fences] = {"evidence": evidence, "proof_fences": tuple(sorted(proof_fences))}
+    _VERIFIED_PAIR[key] = {"evidence": evidence, "proof_fences": tuple(sorted(proof_fences))}
     return dict(evidence)
 
 
@@ -818,7 +819,7 @@ def _check_capture(header, inputs, original):
     # compare unlike hashes.
     names = sorted(original["formats_by_qname"])
     if (header.get("boundary_storage") or {}).get("forward_recovery") is not None:
-        from .joint_layer_quanta import roster_digest
+        from .joint_campaign_ledger import (roster_digest)
         expected = roster_digest(names)
     else:
         expected = text_sha256hex("".join(name + "\n" for name in names))
@@ -854,8 +855,7 @@ def derive_original_campaign_scope(original_plan, campaign_identity):
     digest. This is the whole cost, paid at creation; consumers recheck the
     embedded block against the plan's stated digests and the identity file.
     """
-    from tools.dispatch_tessera_campaign import (
-        COMPLETE_CAMPAIGN_SCOPE, ScopeRefused, verify_joint_campaign_scope)
+    from prismaquant.tessera_campaign_table import (COMPLETE_CAMPAIGN_SCOPE, ScopeRefused, verify_joint_campaign_scope)
     _require(isinstance(campaign_identity, dict) and set(campaign_identity) == {"path", "sha256"},
              "the frozen campaign identity needs a bound path and SHA256")
     plan = _json(original_plan, "original plan")
@@ -888,9 +888,7 @@ def _check_derived_scope(block, inputs, plan):
     sealed in every record, is what the effective scope is then compared
     with, byte for byte, at every site.
     """
-    from tools.dispatch_tessera_campaign import (
-        CAMPAIGN_IDENTITY_FIELDS, CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA,
-        COMPLETE_CAMPAIGN_SCOPE)
+    from prismaquant.tessera_campaign_table import (CAMPAIGN_IDENTITY_FIELDS, CAMPAIGN_IDENTITY_SCHEMA, CAMPAIGN_SCOPE_SCHEMA, COMPLETE_CAMPAIGN_SCOPE)
     _require(isinstance(block, dict), "derived campaign scope block is not a mapping")
     _same(block.get("schema"), DERIVED_SCOPE_SCHEMA, "derived scope schema")
     _same(block.get("rule"), DERIVED_SCOPE_RULE, "derived scope rule")

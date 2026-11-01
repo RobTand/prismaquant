@@ -4,12 +4,11 @@ Routing: tessera_campaign._publish_capture_load_execution and
 glm_capture_compatibility.create_capture_compatibility must call
 indent2_json_file_bytes for the record and bytes_sha256hex for its digest.
 Values: the delegation is byte-identical to the verbatim old spelling
-(sort_keys, indent 2, allow_nan=False, one LF, UTF-8). _run_streamed_calibration
+(sort_keys, indent 2, allow_nan=False, one LF, UTF-8). run_streamed_calibration
 shares the same one-line recipe; its row is pinned by the baseline tripwire.
 """
 import hashlib
 import json
-import types
 
 import pytest
 
@@ -33,9 +32,8 @@ def _spy(monkeypatch, module, name):
 def test_publish_load_execution_routes(monkeypatch, tmp_path):
     dumps_calls = _spy(monkeypatch, tc, "indent2_json_file_bytes")
     hash_calls = _spy(monkeypatch, tc, "bytes_sha256hex")
-    args = types.SimpleNamespace(cache_dir=str(tmp_path))
     out = tc._publish_capture_load_execution(
-        args, capture={"c": 1}, execution={"e": 2}, resources={})
+        tmp_path, capture={"c": 1}, execution={"e": 2}, resources={})
     assert len(dumps_calls) == 1
     assert len(hash_calls) == 1
     assert out["sha256"] == bytes_sha256hex(indent2_json_file_bytes(dumps_calls[0]))

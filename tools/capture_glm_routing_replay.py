@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import torch
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
-from prismaquant.cost_streaming import build_streamed_model_identity
+from prismaquant.streamed_model_identity import build_streamed_model_identity
 from prismaquant.glm_routing_replay import capture_replayed_glm_routes
 
 from prismaquant.joint_adjoint_checkpoints import reference_from_record

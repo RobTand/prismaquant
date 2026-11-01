@@ -27,7 +27,7 @@ def test_the_env_name_is_still_spelled_the_way_drivers_spell_it():
 def test_a_set_surface_flag_refuses_and_names_the_retired_wire(monkeypatch):
     monkeypatch.setenv(ENV, "/home/rob/some-stale-trellis-manifest.json")
     with pytest.raises(ValueError) as excinfo:
-        ac.build_candidates({}, {}, [])
+        ac.build_candidates({}, {}, []).candidates
     message = str(excinfo.value)
     # The retired wire, by name -- not Tessera's, which is a different
     # plane set and deliberately not a port of it.
@@ -44,14 +44,14 @@ def test_an_unset_surface_flag_is_not_an_error(monkeypatch):
     """The refusal must fire on the flag, never on an ordinary run."""
 
     monkeypatch.delenv(ENV, raising=False)
-    assert ac.build_candidates({}, {}, []) == {}
+    assert ac.build_candidates({}, {}, []).candidates == {}
 
 
 def test_an_empty_surface_flag_is_not_an_error(monkeypatch):
     """`export PRISMAQUANT_TRELLIS_SURFACE=` is not a request for the wire."""
 
     monkeypatch.setenv(ENV, "")
-    assert ac.build_candidates({}, {}, []) == {}
+    assert ac.build_candidates({}, {}, []).candidates == {}
 
 
 def test_the_guard_reads_the_environment_it_is_handed(monkeypatch):

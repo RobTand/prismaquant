@@ -16,12 +16,12 @@ mode refuses at both, dev mode records at both.
 CPU-only.
 """
 from __future__ import annotations
-
 import ast
 from pathlib import Path
 
 import pytest
 
+from prismaquant import joint_projection_contract
 from prismaquant import dev_mode
 from prismaquant import tessera_joint_aura as bridge
 
@@ -96,16 +96,15 @@ def test_stage_b_post_intake_check_uses_the_shared_reader():
 def test_prepared_backend_change_is_one_seal_at_completion_and_cache(
         monkeypatch, capsys, site, certified):
     from copy import deepcopy
-    from prismaquant import joint_projection_backend as backend
     from prismaquant.production_weight_cache import ProductionWeightCache
 
-    qualification, digest = backend._qualification()
-    stored = dict(schema=backend.SCHEMA, name=backend.FUSED_NAME,
+    qualification, digest = joint_projection_contract.projection_qualification()
+    stored = dict(schema=joint_projection_contract.SCHEMA, name=joint_projection_contract.FUSED_NAME,
                   qualification_sha256=digest, build=qualification['build'],
                   runtime=qualification['runtime'],
                   qualified_shapes=qualification['qualified_shapes'],
                   ineligible_layout='torch_reference')
-    running = deepcopy(backend.REFERENCE_IDENTITY)
+    running = deepcopy(joint_projection_contract.REFERENCE_IDENTITY)
     completion = {**_completion(), 'reader_identity': {'reader': 'same'},
                   'projection_backend': deepcopy(stored)}
     cache = ProductionWeightCache({}, {}, metadata={'projection_backend': deepcopy(stored)})

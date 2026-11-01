@@ -206,7 +206,7 @@ def test_rtn_fp8_any_shape_fp16_packed_experts_stay_finite_and_row_independent()
     assert out.dtype == torch.float16
     assert out.shape == experts.shape
     assert torch.isfinite(out).all()
-    # The all-zero expert stays exactly zero and each row matches the
+    # The all-zero row stays exactly zero and each row matches the
     # per-row result: the adapter never couples rows across experts.
     assert torch.equal(out[0, 0], torch.zeros(8, dtype=torch.float16))
     for e in range(experts.shape[0]):

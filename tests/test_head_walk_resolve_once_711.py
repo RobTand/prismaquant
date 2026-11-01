@@ -45,7 +45,7 @@ def _spy_resolves(monkeypatch):
 def test_recorded_paths_match_the_legacy_fully_resolved_joins(tmp_path):
     """The join-from-resolved-roots records the same strings ``resolve()`` did."""
     from prismaquant import tessera_joint_aura as bridge
-    from prismaquant.production_weight_cache import _cache_weight_filename
+    from prismaquant.render_cache_paths import cache_weight_filename
 
     config, names, fmt, _payload, _states = fixture(tmp_path)
     data = bridge.load_measured_anchor_input(config, verify_payloads=False)
@@ -56,7 +56,7 @@ def test_recorded_paths_match_the_legacy_fully_resolved_joins(tmp_path):
         cell = data.cells[name, fmt]
         assert cell["wire"] == str(wire_dir / (name + ".tessera"))
         assert cell["render"] == str(
-            rowdir / "cache" / _cache_weight_filename(name, fmt))
+            rowdir / "cache" / cache_weight_filename(name, fmt))
 
 
 def test_shared_directories_resolve_once_and_no_cell_file_resolves(tmp_path, monkeypatch):

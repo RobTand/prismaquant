@@ -39,6 +39,7 @@ from .sensitivity_card import (
     UnitTopology,
 )
 from .digests import DIRECT_ASCII_SPACED_LAX, text_sha256hex
+from .probe_statistics import fisher_norm_tokens
 
 VECTOR_KEYS = ("fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax")
 
@@ -170,8 +171,8 @@ def card_from_probe(
     stats: Mapping[str, Mapping[str, Any]] = probe.get("stats", {})
     meta: Mapping[str, Any] = probe.get("meta", {}) or {}
 
-    # The global token count is the normalizer for every row. Fall back to the
-    # max observed per-row count, which is the dense rows' value.
+    # Legacy rows lack a writer stamp. Their dense observed count is the
+    # fallback; stamped body and visual rows retain their own pass counts.
     global_tokens = int(
         meta.get("global_tokens")
         or meta.get("n_tokens_total")
@@ -229,7 +230,7 @@ def card_from_probe(
             out_features=out_features,
             in_features=in_features,
             n_params=int(s.get("n_params", out_features * in_features)),
-            n_tokens=global_tokens,
+            n_tokens=fisher_norm_tokens(s, global_tokens),
             h_trace_raw=float(s.get("h_trace_raw", 0.0) or 0.0),
             h_w2_sum_raw=float(s.get("h_w2_sum_raw", 0.0) or 0.0),
             w_norm_sq=float(s.get("w_norm_sq", 0.0) or 0.0),

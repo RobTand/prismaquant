@@ -18,7 +18,7 @@ from typing import Literal, Sequence
 
 import torch
 
-from .export_native_compressed import (
+from .native_render_codec import (
     NVFP4_SCALE_RULE_STATIC_6,
     nvfp4_global_real,
     render_nvfp4_dequant,

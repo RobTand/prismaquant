@@ -21,7 +21,7 @@ may be sealed. It is deliberately free of torch, of the format registry and
 of any PrismaQuant import, because both ends of the contract need it:
 
 * the manifest producer, which runs in a CPU environment without the GPU
-  image (``experiments/glm_data_manifests.py``), loads it by file path;
+  image, imports it from ``campaign_data_manifests``;
 * the preparing action, which walks the order and reports each transition
   only after the files before it are on the end of a completed read.
 

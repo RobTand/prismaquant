@@ -336,7 +336,9 @@ class NvmlStream:
     Staleness is the point of the timestamp: a reader that wedges would
     otherwise freeze its last value into every subsequent row forever, which
     is the silently-dead-column failure this recorder exists to catch. Past
-    STALE_S the cells go empty and the child is respawned with backoff.
+    STALE_S the cells go empty. EOF or launch failure retries with backoff;
+    a child that keeps its output pipe open without writing needs an external
+    restart. Sampling does not interrupt that blocked reader.
     """
 
     STALE_S = 3.0

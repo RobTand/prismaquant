@@ -45,7 +45,8 @@ def test_peak_exceeds_final_size_on_grow_then_shrink_workload(tmp_path):
     assert measurement["valid"], measurement["errors"]
     assert measurement["sample_count"] >= 2
     assert measurement["peak_allocated_bytes"] > measurement["final_allocated_bytes"]
-    assert measurement["final_allocated_bytes"] == 0
+    assert not list(cache.iterdir())
+    assert measurement["final_allocated_bytes"] == 512 * cache.stat().st_blocks
 
 
 def test_initial_inventory_is_captured_before_the_row_runs(tmp_path):
@@ -303,7 +304,8 @@ def test_hard_links_count_once(tmp_path):
     import os
     os.link(target, cache / "link.bin")
     totals = peak_mod.scan_cache_bytes(cache)
-    assert totals["allocated_bytes"] == 512 * target.stat().st_blocks
+    directory_bytes = 512 * cache.stat().st_blocks
+    assert totals["allocated_bytes"] - directory_bytes == 512 * target.stat().st_blocks
     assert totals["files"] == 1
 
 

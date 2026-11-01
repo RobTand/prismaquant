@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
 import re
+import random
 
 import torch
 
@@ -257,3 +259,369 @@ def _dtype_from_name(name: str) -> torch.dtype:
     if name in {"fp32", "float32"}:
         return torch.float32
     raise ValueError(f"unsupported dtype {name!r}")
+
+
+def load_calibration(tokenizer, source: str, n_samples: int,
+                     seqlen: int, *, calib_seed: int = 42,
+                     source_documents: list[frozenset[int]] | None = None) -> torch.Tensor:
+    """Load calibration from a HuggingFace dataset id, a local .jsonl, or
+    a local .txt file. Extensionless regular files are content-sniffed so a
+    bind-mounted JSONL at a canonical container path such as ``/dataset``
+    remains local. JSONL rows can have either {"text": ...} or
+    {"messages": [...]} for chat-style data.
+    If source_documents is supplied, append the original local line indices
+    for each returned window. Include packed tokens and EOS separators.
+    """
+    import os
+
+    # A local-file source that does not exist must NOT fall through to the
+    # HuggingFace loader. It used to: the `.jsonl`/`.txt` branches were guarded
+    # by os.path.exists, so a missing file skipped to the generic `else` and
+    # HF reported `Dataset '/home/.../diverse-v1.jsonl' doesn't exist on the
+    # Hub` -- an error that names a filesystem path as a dataset id and sends
+    # the reader looking for something to download. Nothing is downloadable;
+    # the file is simply absent.
+    if (source.endswith((".jsonl", ".txt")) or os.path.isabs(source)
+            or source.startswith(("./", "../"))) \
+            and not os.path.exists(source):
+        raise FileNotFoundError(
+            f"calibration file not found: {source}\n"
+            "This is a local path, not a HuggingFace dataset id, so there is "
+            "nothing to download. Either:\n"
+            "  * build the default corpus:  python tools/"
+            "build_diverse_calibration.py --output <path> --tokenizer <model>\n"
+            "  * point DATASET at your own .jsonl ({\"text\": ...} or "
+            "{\"messages\": [...]} rows) or .txt (one sample per line)\n"
+            "  * point DATASET at a HuggingFace dataset id "
+            "(e.g. ultrachat_200k)"
+        )
+
+    local_kind: str | None = None
+    if source.endswith(".jsonl") and os.path.isfile(source):
+        local_kind = "jsonl"
+    elif source.endswith(".txt") and os.path.isfile(source):
+        local_kind = "txt"
+    elif (
+        os.path.isfile(source)
+        and not os.path.splitext(os.path.basename(source))[1]
+    ):
+        # Docker commonly mounts one host file at a path-neutral canonical
+        # name.  Do not reinterpret that existing regular file as a Hub
+        # dataset merely because the container target has no suffix.  Sniff
+        # only extensionless files; known alternate local formats retain the
+        # generic datasets-loader behavior they had before this contract.
+        first_nonempty = ""
+        with open(source) as handle:
+            for line in handle:
+                if line.strip():
+                    first_nonempty = line
+                    break
+        try:
+            first_value = json.loads(first_nonempty)
+        except (json.JSONDecodeError, TypeError):
+            first_value = None
+        local_kind = (
+            "jsonl"
+            if isinstance(first_value, dict)
+            and ("text" in first_value or "messages" in first_value)
+            else "txt"
+        )
+
+    if source_documents is not None and local_kind is None:
+        raise ValueError("held-out positions require a local JSONL or text corpus")
+    texts: list[str] = []
+    text_positions: list[int] = []
+    if local_kind == "jsonl":
+        with open(source) as f:
+            for position, line in enumerate(f):
+                if not line.strip():
+                    continue
+                obj = json.loads(line)
+                if "messages" in obj:
+                    try:
+                        texts.append(tokenizer.apply_chat_template(
+                            obj["messages"], tokenize=False))
+                        text_positions.append(position)
+                    except Exception:
+                        # Tokenizer has no chat template (base / pt models
+                        # like DSv4-Flash-Base). Fall back to concatenating
+                        # the message contents — good enough as calibration
+                        # text, mirrors the ultrachat fallback below.
+                        parts = []
+                        for m in obj["messages"]:
+                            if isinstance(m, dict):
+                                c = m.get("content")
+                                if isinstance(c, str) and c:
+                                    parts.append(c)
+                        if parts:
+                            texts.append("\n\n".join(parts))
+                            text_positions.append(position)
+                elif "text" in obj:
+                    texts.append(obj["text"])
+                    text_positions.append(position)
+    elif local_kind == "txt":
+        with open(source) as f:
+            for position, line in enumerate(f):
+                if line.strip():
+                    texts.append(line.strip())
+                    text_positions.append(position)
+    elif source == "ultrachat_200k":
+        from datasets import load_dataset
+
+        ds = load_dataset("HuggingFaceH4/ultrachat_200k",
+                          split="train_sft", streaming=True)
+        for row in ds:
+            msgs = row.get("messages", [])
+            if not msgs:
+                continue
+            try:
+                texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+            except Exception:
+                # Tokenizer has no chat template (base / pt models).
+                # Join plain message contents — good enough as calibration.
+                parts = []
+                for m in msgs:
+                    if isinstance(m, dict):
+                        c = m.get("content")
+                        if isinstance(c, str) and c:
+                            parts.append(c)
+                if parts:
+                    texts.append("\n\n".join(parts))
+            if len(texts) >= n_samples * 8:
+                break
+    else:
+        try:
+            from datasets import load_dataset
+        except ModuleNotFoundError as exc:
+            raise ModuleNotFoundError(
+                "Loading HuggingFace calibration datasets requires the "
+                "'datasets' package. Local .jsonl and .txt calibration files "
+                "do not require it."
+            ) from exc
+        # Generic HF dataset loader. Handles three common schemas:
+        #   1. {"text": "..."} — raw text corpora (pile, wikitext, etc.)
+        #   2. {"messages": [...]} — chat-format SFT (ultrachat, tulu-3, etc.)
+        #   3. anything else — falls back to first string column
+        # Streaming when possible so we don't download the full dataset for
+        # just 32 samples.
+        try:
+            ds = load_dataset(source, split="train", streaming=True)
+            stream = True
+        except Exception:
+            ds = load_dataset(source, split="train")
+            stream = False
+
+        # Probe one row to detect schema
+        iterator = iter(ds) if stream else ds
+        first = next(iterator) if stream else (ds[0] if len(ds) else {})
+        schema = None
+        if "messages" in first:
+            schema = "messages"
+        elif "text" in first:
+            schema = "text"
+        else:
+            # pick first string-valued column
+            for k, v in first.items():
+                if isinstance(v, str):
+                    schema = k
+                    break
+        if schema is None:
+            raise ValueError(f"Could not find text or messages field in {source}")
+        print(f"[probe] {source} schema: {schema}", flush=True)
+
+        # Re-iterate (we consumed the first row)
+        if stream:
+            ds = load_dataset(source, split="train", streaming=True)
+            iterator = iter(ds)
+        else:
+            iterator = iter(ds)
+
+        for row in iterator:
+            if schema == "messages":
+                msgs = row.get("messages") or row.get("conversations") or []
+                if not msgs:
+                    continue
+                try:
+                    texts.append(tokenizer.apply_chat_template(msgs, tokenize=False))
+                except Exception:
+                    # Tokenizer has no chat template (base / pt models)
+                    # or the template rejects this message shape.
+                    # Fall back to concatenating the message contents —
+                    # good enough as calibration text, decouples the
+                    # probe from the tokenizer's chat-template state.
+                    parts = []
+                    for m in msgs:
+                        if isinstance(m, dict):
+                            c = m.get("content")
+                            if isinstance(c, str) and c:
+                                parts.append(c)
+                    if parts:
+                        texts.append("\n\n".join(parts))
+            else:
+                v = row.get(schema)
+                if isinstance(v, str) and v.strip():
+                    texts.append(v)
+            if len(texts) >= n_samples * 8:
+                break
+
+    # Two-pass sampling:
+    #   1) first pass picks any sample already >= seqlen tokens
+    #   2) fallback packs multiple short samples together (separated by
+    #      EOS) to reach seqlen. This makes SFT/chat datasets with short
+    #      turns (tulu-3, glaive) usable without lowering seqlen.
+    # calib_seed controls (a) which subset of dataset texts is tried (shuffle)
+    # and (b) where within each text the seqlen window starts. Default 42
+    # preserves historical long-document selection and window offsets.
+    # Packing excludes those documents, so a mixed-corpus draw can differ.
+    document_order = list(range(len(texts)))
+    if calib_seed != 42:
+        random.Random(calib_seed).shuffle(document_order)
+    rng = random.Random(calib_seed)
+    samples = []
+    window_documents = []
+    used_documents = set()
+    for document in document_order:
+        t = texts[document]
+        ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids
+        if ids.size(1) < seqlen:
+            continue
+        start = rng.randint(0, ids.size(1) - seqlen)
+        samples.append(ids[0, start:start + seqlen])
+        if source_documents is not None:
+            window_documents.append(frozenset({text_positions[document]}))
+        used_documents.add(document)
+        if len(samples) >= n_samples:
+            break
+
+    if len(samples) < n_samples:
+        eos = tokenizer.eos_token_id if tokenizer.eos_token_id is not None else 0
+        # Pack short samples by concatenating with EOS separator
+        buf: list[int] = []
+        buf_documents: list[int] = []
+        for document in document_order:
+            t = texts[document]
+            if document in used_documents:
+                continue
+            ids = tokenizer(t, return_tensors="pt", truncation=False).input_ids[0].tolist()
+            buf.extend(ids)
+            buf.append(eos)
+            if source_documents is not None:
+                buf_documents.extend([text_positions[document]] * (len(ids) + 1))
+            while len(buf) >= seqlen and len(samples) < n_samples:
+                samples.append(torch.tensor(buf[:seqlen], dtype=torch.long))
+                if source_documents is not None:
+                    window_documents.append(frozenset(buf_documents[:seqlen]))
+                    buf_documents = buf_documents[seqlen:]
+                buf = buf[seqlen:]
+            if len(samples) >= n_samples:
+                break
+
+    if len(samples) < n_samples:
+        print(f"[probe] warning: only got {len(samples)}/{n_samples} samples "
+              f"(even with packing). Consider wider corpus.",
+              flush=True)
+    if source_documents is not None:
+        source_documents.extend(window_documents[:n_samples])
+    return torch.stack(samples[:n_samples], dim=0)
+
+
+@dataclass(frozen=True)
+class CalibrationRequest:
+    source: str | None
+    n_samples: int
+    seqlen: int
+    repeats: int
+    seed: int
+    skip_first: int
+    split: str
+    repeat_seed_stride: int
+
+    def __post_init__(self):
+        if min(self.n_samples, self.seqlen, self.repeats) <= 0 or self.skip_first < 0:
+            raise ValueError("calibration counts must be positive and skip-first nonnegative")
+
+    @classmethod
+    def from_namespace(cls, args) -> CalibrationRequest:
+        return cls(
+            source=args.dataset, n_samples=int(args.n_calib_samples),
+            seqlen=int(args.calib_seqlen), repeats=max(int(args.calib_repeats), 1),
+            seed=int(getattr(args, "calib_seed", 42)),
+            skip_first=max(int(getattr(args, "calib_skip_first", 0) or 0), 0),
+            split=args.calib_split, repeat_seed_stride=int(args.calib_repeat_seed_stride),
+        )
+
+
+@dataclass(frozen=True)
+class CalibrationDraw:
+    selection_repeats: tuple[torch.Tensor, ...]
+    fit_ids: torch.Tensor | None = None
+
+
+def load_validation_calibration(tokenizer, request: CalibrationRequest) -> CalibrationDraw:
+    repeats = request.repeats
+    n_samples = request.n_samples
+    skip = request.skip_first
+    if skip and not request.source:
+        # R14(iii): --calib-skip-first is the held-out mechanism, and it is
+        # only implemented on the --dataset branch below. The wikitext branch
+        # used to compute `skip` and then never apply it, so a manual
+        # `--calib-skip-first 32` on wikitext silently measured selection KL on
+        # the SAME windows the cost stage consumed. In-sample "validation" has
+        # already regressed once here; refuse rather than pretend.
+        raise ValueError(
+            "--calib-skip-first is only implemented for --dataset calibration; "
+            f"got --calib-skip-first {skip} with no --dataset (wikitext "
+            f"split={request.split!r}). The wikitext loader is seeded per "
+            "repeat, not window-sliced, so the skip cannot be honored and the "
+            "selection split would silently overlap the cost split. Pass a "
+            "--dataset, or use a distinct --calib-seed / --calib-split for the "
+            "held-out draw. From run-pipeline.sh: set a jsonl DATASET (the "
+            "default), or VALIDATED_FRONTIER_SKIP_CALIB=0 with a distinct "
+            "VALIDATED_FRONTIER_DATASET."
+        )
+
+    if request.source:
+        n = n_samples * repeats
+        complete = load_calibration(
+            tokenizer, request.source, n + skip, request.seqlen,
+            calib_seed=request.seed,
+        )
+        if complete.size(0) < n + skip:
+            raise RuntimeError(
+                f"calibration source yielded {complete.size(0)} windows; "
+                f"need {n + skip} (n={n} + skip-first={skip}). Use a larger "
+                "corpus or reduce --calib-skip-first."
+            )
+        fit_ids = None
+        if skip:
+            independently_requested_fit = load_calibration(
+                tokenizer, request.source, skip, request.seqlen,
+                calib_seed=request.seed,
+            )
+            if not torch.equal(independently_requested_fit, complete[:skip]):
+                raise ValueError(
+                    "calibration source does not preserve the requested fit prefix; "
+                    "skip-first cannot establish a held-out split for this source, "
+                    "seed and sample count. Use a distinct selection corpus."
+                )
+            fit_ids = complete[:skip].contiguous()
+        return CalibrationDraw(tuple(
+            complete[skip + idx * n_samples:skip + (idx + 1) * n_samples].contiguous()
+            for idx in range(repeats)
+        ), fit_ids=fit_ids)
+    if repeats == 1:
+        return CalibrationDraw((load_wikitext_calibration_windowed(
+            tokenizer, n_samples, request.seqlen,
+            split=request.split, seed=request.seed,
+        ),))
+    stride = request.repeat_seed_stride
+    return CalibrationDraw(tuple(
+        load_wikitext_calibration_windowed(
+            tokenizer,
+            n_samples,
+            request.seqlen,
+            split=request.split,
+            seed=request.seed + idx * stride,
+        )
+        for idx in range(repeats)
+    ))

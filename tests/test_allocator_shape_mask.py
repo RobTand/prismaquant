@@ -120,7 +120,7 @@ def test_build_candidates_drops_mxfp8_on_small_n_shape():
     specs = [fr.REGISTRY["NVFP4"], fr.REGISTRY["MXFP8_E4M3"], fr.REGISTRY["BF16"]]
 
     mask_records = []
-    cands = build_candidates(stats, costs, specs, mask_records=mask_records)
+    cands = build_candidates(stats, costs, specs, mask_records=mask_records).candidates
 
     # in_proj_a (out=48): MXFP8 should be dropped.
     a_formats = [c.fmt for c in cands["model.layers.0.linear_attn.in_proj_a"]]
@@ -170,13 +170,13 @@ def test_build_candidates_applies_serving_profile_before_dp():
     }
     specs = [fr.REGISTRY["MXFP4"], fr.REGISTRY["BF16"]]
 
-    research = build_candidates(stats, costs, specs, target_profile="research")
+    research = build_candidates(stats, costs, specs, target_profile="research").candidates
     serving = build_candidates(
         stats,
         costs,
         specs,
         target_profile="vllm_packed_moe",
-    )
+    ).candidates
 
     assert [c.fmt for c in research["model.layers.0.self_attn.o_proj"]] == [
         "MXFP4",

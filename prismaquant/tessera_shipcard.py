@@ -26,12 +26,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from prismaquant.shipcard import (
-    compute_model_sha,
-    fill_slot,
-    load_shipcard,
-    make_record,
-)
+from prismaquant.shipcard import compute_model_sha, fill_slot, load_shipcard
+from prismaquant.shipcard_slots import make_record
 from prismaquant.shipcard_cli import EXIT_NOT_VERIFIED
 
 #: The priced-vs-served route census verdict (PrismaQuant #136).  Tessera's

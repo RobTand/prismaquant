@@ -1,6 +1,9 @@
 """PB-only complete-path A/B of anchor file scans versus verified PWC single reads."""
 from __future__ import annotations
 
+from prismaquant import tessera_campaign_wire as campaign_wire
+from prismaquant import tessera_campaign_table as campaign_table
+
 import argparse
 import copy
 import json
@@ -72,7 +75,8 @@ def main():
     from prismaquant.joint_aura import prefetch_joint_cache
     from prismaquant.model_profiles import detect_profile
     from prismaquant.tessera_reader import load_declared_reader, _source_tree
-    from prismaquant.production_weight_cache import ProductionWeightCache, _cache_weight_filename
+    from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.render_cache_paths import cache_weight_filename
     from prismaquant.tessera_joint_aura import calibrated_maxima, verify_anchor_render, load_measured_anchor_input, _prepare_file_read_bound, _io_counters
     from experiments.file_read_audit import FileReadAudit
 
@@ -126,7 +130,7 @@ def main():
                            identity_sha256=manifest['identity_sha256'])
         for anchor in state['anchors']:
             fmt = anchor['format_name']; record = state['wire_records'][fmt]
-            render = Path(payload['provenance']['cache_dir']) / _cache_weight_filename(name, fmt)
+            render = Path(payload['provenance']['cache_dir']) / cache_weight_filename(name, fmt)
             cells[name, fmt] = dict(anchor=anchor, record=record,
                 wire=str(Path(payload['provenance']['wire_dir']) / record['file']),
                 render=str(render))
@@ -146,7 +150,7 @@ def main():
     if len(names) != 2 or len(cells) != 14:
         raise ValueError('qualification requires original two-unit, fourteen-cell roster')
     # Load the producer API before the reader so module preservation is observable.
-    api = tc._checkpoint_identity_api()
+    api = campaign_wire.require_checkpoint_identity_api()
     import tessera
     from tessera.unit_artifact import read_unit_artifact
     primary_root = Path(tessera.__file__).resolve().parent
@@ -167,7 +171,7 @@ def main():
         'workload': 'two original dense units, fourteen wires/renders; complete metadata intake, payload checks, fresh PWC prefetch and verification in each arm',
         'scope': 'complete relevant file/intake/PWC/verification path; source and original capture held CUDA resident; excludes whole-model streaming',
         'first_pair_policy': 'retained separately; first parse, not claimed disk-cold'}
-    anchors = {name: [tc.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
+    anchors = {name: [campaign_table.CampaignAnchor(**cells[name, fmt]['anchor']) for fmt in formats[name]]
                for name in names}
     kwargs = dict(calibration_source=calibration_source, projected_unit=None, static_scales=scales)
 
