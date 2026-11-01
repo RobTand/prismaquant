@@ -1,0 +1,48 @@
+# Mergify merge queue for PrismaQuant. Tracking: #3140 (Paperclip PRI-1056).
+#
+# One serial slot, one pull request per check and no retries. With these
+# settings Mergify checks a queued pull request in place: it merges main into
+# the pull request branch, waits for the required checks on that integrated
+# head, then merges. No draft queue pull request is created, so the branch
+# naming rule keeps applying to the real pull request.
+#
+# The queue and merge conditions are the branch protection required checks,
+# which Mergify injects. Review policy is unchanged. Nothing is queued
+# automatically: comment "@mergifyio queue" on a pull request to queue it.
+# A pull request labelled "release" goes to the release queue and is served
+# ahead of the default queue.
+#
+# pb-tests is posted from a PrismaBuild run, so a pull request that Mergify
+# updates needs pb-tests again on the new head before the timeout. #3140
+# replaces it with a fleet-run check.
+merge_queue:
+  mode: serial
+  max_parallel_checks: 1
+  reset_on_external_merge: always
+  status_comments: outcomes
+  queue_controls_comment: false
+
+queue_rules:
+  - name: release
+    queue_conditions:
+      - base = main
+      - label = release
+    merge_method: merge
+    update_method: merge
+    batch_size: 1
+    max_checks_retries: 0
+    checks_timeout: 2 hours
+  - name: default
+    queue_conditions:
+      - base = main
+    merge_method: merge
+    update_method: merge
+    batch_size: 1
+    max_checks_retries: 0
+    checks_timeout: 2 hours
+
+priority_rules:
+  - name: release changes first
+    conditions:
+      - label = release
+    priority: high
