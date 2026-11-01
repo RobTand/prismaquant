@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture merged PRs through REST or replay_selection their files against the current population."""
+"""Capture merged PRs through REST or replay their files against the current population."""
 from __future__ import annotations
 
 import argparse

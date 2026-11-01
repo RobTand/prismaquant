@@ -127,9 +127,39 @@ Both retain their hosted run evidence.
 
 ## Qualification measurements
 
-The fixed-main PrismaBuild inventory and hosted 12-versus-16-shard trials are in
-progress. There is no p50, p90, architecture qualification, or budget-enforcement
-claim until the observed runs are recorded here.
+The fixed-main inventory at `8d72e303e2f070925077ce9e072b254df3856909`
+completed three 32-shard repeats. It observed 22,509 nodes and measured 1,312
+files, with no incomplete outcome records. All 96 effective actions have public
+terminal evidence across x64 dl380g10 and ARM sparky and sparklina. The 37 passing
+actions have CAS receipts; the other 59 actions contain final test failures.
+
+There are 76 nodes that failed all three repeats, 228 that changed between pass
+and fail, and 39 that changed between pass and skip. Worker architecture, filesystems, and
+installed dependency availability vary across repeats. These are observed
+outcome changes, not evidence that every affected test fails randomly.
+The exact node lists and file costs are in the retained
+`/home/rob/tmp/pqt-lead/agents/pq-gate-inventory-summary.json`.
+[The inventory evidence comment](https://github.com/RobTand/prismaquant/issues/3180#issuecomment-6554113772)
+records the action and exclusion evidence.
+
+Each action reserved one CPU and one native thread, at priority -10, with no GPU
+and portable placement. The first 2 GiB shard-0 attempt hit its memory cap.
+The same files completed with a 4 GiB reservation, which the later repeats also
+used. The maximum measured aggregate cgroup peak was 3,058,761,728 bytes.
+The six manifest-dependent exclusions and skipped CUDA bodies remain unqualified.
+Fleet Python 3.14.4 and torch 2.11 differ from hosted Python 3.12 and torch 2.15.
+
+A replay of the latest 20 merged PRs selected p50 87 files and p90 1,181 files.
+Eight selections exceeded 300 files. These sizes come from replaying captured
+REST file lists against the gate population, without executing those tests.
+Missing timings for ten collection-skipped files prevent wall estimates.
+
+Hosted 12-versus-16-shard qualification remains in progress. Failed measurement
+runs 41275735452 and 41277228478 took 927 and 748 seconds to the final verdict.
+The first used file scheduling, with a 742-second longest test step. Work stealing
+reduced that step to 390 seconds in the second run. Setup ranged from 57 to 86
+seconds. The second wall time includes the parser-induced retry. These failed
+runs do not contribute to successful-canary p50 or p90.
 
 After the gate merges and its checks pass, the readiness lead removes
 `tests (py3.12, cpu)` from classic branch protection, leaving `linked issue`.
