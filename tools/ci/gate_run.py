@@ -11,6 +11,9 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_partition import assigned_nodes, validate_node_partition
+
 NO_VERDICT = 75
 BUDGET_ENFORCEMENT_TOLERANCE = 1.5
 
@@ -168,13 +171,23 @@ def worker_count(requested=None, *, affinity=None, available_bytes=None):
 
 def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
              files: list[str] | None = None, workers: int | None = None,
-             execute=subprocess.run, affinity=None) -> int:
+             execute=subprocess.run, affinity=None, assignment: dict | None = None) -> int:
     print('GATE_PREFLIGHT_START', flush=True)
     record = {'schema': 'prismaquant.gate_result.v1',
               'population_version': plan.get('population', {}).get('version'),
               'mode': plan.get('mode'), 'base_sha': plan.get('base_sha'), 'head_sha': plan.get('head_sha'), 'files': [], 'verdict': None, 'pytest_exit_code': None}
     try:
         eligible = {row['path'] for row in plan['selected']}
+        partition = assignment.get('node_partition') if assignment else None
+        if assignment is not None:
+            if files is not None:
+                raise ValueError('specify assignment or files, not both')
+            files = assignment['files']
+        if partition:
+            validate_node_partition(partition, files)
+            if partition['index'] != assignment['index']:
+                raise ValueError('assignment index differs from node partition')
+            record['node_partition'] = partition
         files = sorted(eligible) if files is None else files
         if not files:
             if eligible:
@@ -204,6 +217,9 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
         collection_path.unlink(missing_ok=True)
         environment['GATE_COLLECTION_REPORT'] = str(collection_path.resolve())
         environment['GATE_ASSIGNED_FILES'] = json.dumps(files)
+        environment.pop('GATE_NODE_PARTITION', None)
+        if partition:
+            environment['GATE_NODE_PARTITION'] = json.dumps(partition)
         environment['GATE_DESELECT_NODEIDS'] = json.dumps(plan['deselect'])
         environment['PYTHONPATH'] = str(Path(__file__).resolve().parent) + os.pathsep + environment.get('PYTHONPATH', '')
         junit.parent.mkdir(parents=True, exist_ok=True)
@@ -228,6 +244,8 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
             scoped_env.update(GATE_ASSIGNED_FILES=json.dumps(own_files),
                               GATE_DESELECT_NODEIDS=environment['GATE_DESELECT_NODEIDS'],
                               GATE_COLLECTION_REPORT=str(scoped_collection.resolve()))
+            if partition:
+                scoped_env['GATE_NODE_PARTITION'] = json.dumps(partition)
             scoped_command = [sys.executable, '-m', 'pytest', '-q', '-ra', '--timeout=600',
                 '-m', 'own_cgroup', '-p', 'gate_collect', '--rootdir=' + str(root),
                 '--junitxml=' + str(scoped_junit), '-o', 'junit_family=xunit1',
@@ -277,6 +295,18 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
             record['verdict'] = 'pass'
         try:
             costs = _budget_timings(junit, files, config, collected_files)
+            if partition:
+                if not collection or collection['collection_failed']:
+                    raise ValueError('split-file collection is incomplete')
+                collected = collection.get('split_collected', {})
+                if set(collected) != set(partition['owners']):
+                    raise ValueError('split-file collection does not match the partition')
+                executed = [node for case in ET.parse(junit).iter('testcase')
+                            for path, node in [gate_junit_identity(case, files)]
+                            if path in partition['owners'] and node is not None]
+                record['node_coverage'] = {'collected': collected, 'executed': sorted(executed)}
+                if sorted(executed) != assigned_nodes(collected, partition, plan['deselect']):
+                    raise ValueError('split-file nodes did not execute exactly once')
             overruns, warnings = [], []
             for row in costs:
                 target = (overruns if row['seconds'] >
@@ -323,6 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--junitxml', type=Path, required=True)
     parser.add_argument('--workers', type=int, help='resource-class CPU allocation; clamped to inherited affinity')
     assigned = parser.add_mutually_exclusive_group()
+    assigned.add_argument('--assignment', type=Path, help='complete file and node assignment JSON')
     assigned.add_argument('--files-from', type=Path, help='one assigned repository-relative file per line')
     assigned.add_argument('--files', nargs='+', help='explicit assigned test files')
     args = parser.parse_args(argv)
@@ -331,7 +362,8 @@ def main(argv: list[str] | None = None) -> int:
         files = ([line.strip() for line in args.files_from.read_text().splitlines() if line.strip()]
                  if args.files_from else args.files)
         return run_plan(plan, root=args.root, output=args.result, junit=args.junitxml,
-                        files=files, workers=args.workers)
+                        files=files, workers=args.workers,
+                        assignment=json.loads(args.assignment.read_text()) if args.assignment else None)
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f'gate: no verdict: {error}', file=sys.stderr)
         return NO_VERDICT

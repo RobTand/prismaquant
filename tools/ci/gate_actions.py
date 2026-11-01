@@ -11,7 +11,25 @@ import shutil
 import sys
 
 
-def _verdict(plan, files, record):
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gate_partition import assigned_nodes, validate_node_partition
+
+
+def _node_coverage(partition, record, excluded):
+    if record.get('node_partition') != partition:
+        return False
+    coverage = record.get('node_coverage', {})
+    collected, executed = coverage.get('collected'), coverage.get('executed')
+    if not isinstance(collected, dict) or set(collected) != set(partition['owners']):
+        return False
+    for path, nodes in collected.items():
+        if (not isinstance(nodes, list) or any(not isinstance(node, str) or
+                not node.startswith(path + '::') for node in nodes) or len(nodes) != len(set(nodes))):
+            return False
+    return (isinstance(executed, list) and all(isinstance(node, str) for node in executed) and
+            sorted(executed) == assigned_nodes(collected, partition, excluded))
+
+def _verdict(plan, files, record, partition=None):
     if not isinstance(record, dict):
         return None
     if any(record.get(field) != plan.get(field) for field in ('base_sha', 'head_sha', 'mode')):
@@ -32,22 +50,38 @@ def _verdict(plan, files, record):
     verdict = record.get('verdict')
     if not isinstance(verdict, str):
         return None
-    return verdict if verdict == 'fail' or (verdict, code) == ('pass', 0) else None
+    if verdict == 'fail':
+        return verdict
+    if (verdict, code) != ('pass', 0):
+        return None
+    if partition and not _node_coverage(partition, record, plan.get('deselect', [])):
+        return None
+    return verdict
 
 
 def assess_attempts(plan, assignments, attempts):
     """Return retry indices and the final verdict, preserving any test failure."""
     indices = [row['index'] for row in assignments]
-    assigned = Counter(path for row in assignments for path in row['files'])
+    partitions = [row.get('node_partition') for row in assignments]
+    split_files = set()
+    if any(partitions):
+        for row, partition in zip(assignments, partitions):
+            validate_node_partition(partition, row['files'])
+            if (partition['count'] != len(assignments) or partition['index'] != row['index'] or
+                    partition['owners'] != partitions[0]['owners']):
+                raise ValueError('shards must recompute an identical node partition')
+        split_files = set(partitions[0]['owners'])
+    assigned = Counter(path for row in assignments for path in row['files'] if path not in split_files)
     selected = [row['path'] for row in plan['selected']]
     if (len(indices) != len(set(indices)) or len(selected) != len(set(selected)) or
-            set(assigned) != set(selected) or any(count != 1 for count in assigned.values())):
+            set(assigned) | split_files != set(selected) or any(count != 1 for count in assigned.values())):
         raise ValueError('assignments must cover every selected file exactly once, with unique indices')
     retry, failed, missing, effective = [], [], [], {}
     for row in assignments:
         index, files = row['index'], row['files']
-        first = _verdict(plan, files, attempts.get(1, {}).get(index))
-        second = _verdict(plan, files, attempts.get(2, {}).get(index))
+        partition = row.get('node_partition')
+        first = _verdict(plan, files, attempts.get(1, {}).get(index), partition)
+        second = _verdict(plan, files, attempts.get(2, {}).get(index), partition)
         if first is None:
             retry.append(index)
         if 'fail' in (first, second):
@@ -62,9 +96,26 @@ def assess_attempts(plan, assignments, attempts):
             effective[index] = attempt
             if verdict == 'fail':
                 failed.append(index)
+    coverage = None
+    if split_files and not missing and not failed:
+        records = {index: attempts[attempt][index] for index, attempt in effective.items()}
+        reference = next(iter(records.values()))['node_coverage']['collected']
+        drift = [index for index, record in records.items()
+                 if record['node_coverage']['collected'] != reference]
+        if drift:
+            missing.extend(drift)
+            retry.extend(index for index in drift if effective[index] == 1 and index not in retry)
+        else:
+            executed = Counter(node for record in records.values() for node in record['node_coverage']['executed'])
+            expected = {node for nodes in reference.values() for node in nodes} - set(plan.get('deselect', []))
+            if set(executed) != expected or any(count != 1 for count in executed.values()):
+                missing.extend(indices)
+            else:
+                coverage = {'split_files': len(split_files), 'nodes': len(expected), 'exactly_once': True}
     return {'schema': 'prismaquant.gate_aggregate.v1', 'retry_indices': sorted(retry),
             'failed_indices': sorted(failed), 'missing_indices': sorted(missing),
-            'effective_attempts': effective, 'exit_code': 1 if failed else 75 if missing else 0}
+            'effective_attempts': effective, **({'node_coverage': coverage} if coverage else {}),
+            'exit_code': 1 if failed else 75 if missing else 0}
 
 
 def _read_result(path):
@@ -92,9 +143,11 @@ def main(argv=None):
         spec.loader.exec_module(partition)
         plan = json.loads(args.plan.read_text())
         matrix = json.loads(args.matrix.read_text())
-        costs = json.loads(args.durations.read_text())['files']
+        recorded = json.loads(args.durations.read_text())
+        costs = recorded['files']
         assignments = partition.shards([row['path'] for row in plan['selected']], costs,
-                              matrix['shards'], unknown_seconds=partition.default_unknown_seconds(costs))
+                              matrix['shards'], unknown_seconds=partition.default_unknown_seconds(costs),
+                              node_durations=recorded.get('nodes'))
         if (len(matrix['include']) != len(assignments) or
                 sorted(row['index'] for row in matrix['include']) != list(range(len(assignments)))):
             raise ValueError('matrix indices do not match the complete partition')
