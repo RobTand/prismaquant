@@ -18,9 +18,9 @@ trigger this workflow, so Mergify's queue labels cannot restart `pr-gate`.
 
 `GATE_SHARDS` in `.github/workflows/gate.yml` is the full-population shard count.
 Both gates use the same duration-balanced matrix. Small selections can use one
-job; a large selection fans out. The partitioner assigns the longest files to the
-least-loaded shard first. Unknown files cost the nearest-rank p90 of recorded
-file times, or one second before the first inventory. Every selected file occurs
+job; a large selection fans out. The partitioner places the longest file or node on the shard with the earliest
+projected finish on its assigned runner. Unknown files cost the nearest-rank p90 of recorded
+file times, or one second before the first inventory. Every selected node executes
 exactly once. Initial placements start on ARM in both modes; full workflow reruns
 swap the architecture assigned to every shard.
 
