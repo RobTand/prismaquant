@@ -18,9 +18,9 @@ through PrismaBuild; cite their action keys and results in the PR body.
 
 Classic branch protection requires a pull request but no status checks.
 The `queue` label path enforces `linked issue` and `pr-gate` on your pull
-request, and the batch draft is judged by `gate` alone. Mergify would also apply any classic
-required check to the batch draft, which can't pass the issue rule, so keep
-required status checks out of classic protection.
+request, and the batch draft is judged by `gate` alone. Mergify would also
+apply any classic required check to the batch draft, which can't pass the
+issue rule, so keep required status checks out of classic protection.
 
 ## Queue and dequeue
 
