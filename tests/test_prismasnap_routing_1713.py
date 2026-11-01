@@ -14,22 +14,11 @@ import torch
 
 from prismaquant import prismasnap_checkpoint as snap
 from prismaquant.digests import bytes_sha256hex
-
-
-def _spy(monkeypatch):
-    calls = []
-    real = getattr(snap, "bytes_sha256hex", None)
-
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-
-    monkeypatch.setattr(snap, "bytes_sha256hex", stand_in, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def test_probe_hashes_route_to_owner(monkeypatch, tmp_path):
-    hash_calls = _spy(monkeypatch)
+    hash_calls = record_unary_calls(monkeypatch, snap, "bytes_sha256hex")
     tensor = torch.arange(12, dtype=torch.float32).reshape(3, 4)
     digest = snap._tensor_payload_sha256(tensor, where="test")
     assert isinstance(digest, str) and len(digest) == 64

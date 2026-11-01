@@ -16,26 +16,7 @@ import pytest
 
 import prismaquant.joint_adjoint_checkpoints as checkpoints
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
-
-
-def _spies(monkeypatch):
-    calls = {"dumps": [], "hash": []}
-    real_dumps = getattr(checkpoints, "indent2_json_file_bytes", None)
-    real_hash = getattr(checkpoints, "bytes_sha256hex", None)
-
-    def stand_in_dumps(value):
-        calls["dumps"].append(value)
-        return real_dumps(value) if real_dumps is not None else None
-
-    def stand_in_hash(value):
-        calls["hash"].append(value)
-        return real_hash(value) if real_hash is not None else None
-
-    monkeypatch.setattr(checkpoints, "indent2_json_file_bytes", stand_in_dumps,
-                        raising=False)
-    monkeypatch.setattr(checkpoints, "bytes_sha256hex", stand_in_hash,
-                        raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def _pack(member: bytes):
@@ -47,7 +28,10 @@ def _pack(member: bytes):
 
 
 def test_checkpoint_hashes_route_to_owners(monkeypatch, tmp_path):
-    calls = _spies(monkeypatch)
+    calls = {
+        "dumps": record_unary_calls(monkeypatch, checkpoints, "indent2_json_file_bytes"),
+        "hash": record_unary_calls(monkeypatch, checkpoints, "bytes_sha256hex"),
+    }
     space = tmp_path / "space"
     (space / "entries").mkdir(parents=True)
     row = checkpoints._write_shared_state_payload(space, "s", b"payload")

@@ -14,23 +14,12 @@ import pytest
 
 from prismaquant import stage_a_chain_seed as seed
 from prismaquant.digests import bytes_sha256hex, indent2_json_file_bytes
-
-
-def _spy(monkeypatch, name):
-    calls = []
-    real = getattr(seed, name, None)
-
-    def stand_in(value):
-        calls.append(value)
-        return real(value) if real is not None else None
-
-    monkeypatch.setattr(seed, name, stand_in, raising=False)
-    return calls
+from tests.delegation_recording import record_unary_calls
 
 
 def test_envelope_routes_to_owners(monkeypatch, tmp_path):
-    dumps_calls = _spy(monkeypatch, "indent2_json_file_bytes")
-    hash_calls = _spy(monkeypatch, "bytes_sha256hex")
+    dumps_calls = record_unary_calls(monkeypatch, seed, "indent2_json_file_bytes")
+    hash_calls = record_unary_calls(monkeypatch, seed, "bytes_sha256hex")
     plan = types.SimpleNamespace(binding={"b": 1})
     marker = seed.write_seed_marker(tmp_path, plan, run_identity={"r": 1})
     assert (tmp_path / seed.SEED_MARKER_NAME).read_bytes() == \

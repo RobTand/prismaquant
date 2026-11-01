@@ -10,12 +10,9 @@ version = "0.16.2"
 description = "Mixed-precision quantization allocator for LLMs: every layer refracts into a different format based on its sensitivity."
 readme = "README.md"
 license = "LicenseRef-PrismaQuant-Attribution-1.0"
-# 3.12 is the supported floor as of 2026-08-29. 3.11 was technically
-# sufficient for the language features used (prismaquant/schemas.py needs
-# typing.NotRequired, 3.11+), but nothing is exercised on it: the reference
-# box, the release workflow and every venv run 3.12. Claiming support we do
-# not test is the same class of error as the old ">=3.10" claim, which was
-# untrue and went unnoticed because nothing ever installed on 3.10.
+# 3.12 is the supported floor as of 2026-08-29. Hosted CI and release checks
+# exercise that floor; the PrismaBuild queue uses a newer interpreter.
+# Python 3.11 is no longer tested or claimed as supported.
 requires-python = ">=3.12"
 authors = [
     { name = "Rob Tand" },
