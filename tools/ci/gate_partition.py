@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from collections.abc import Mapping, Sequence
 import json
 import sys
@@ -115,13 +116,15 @@ def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
 
 
 def selection_shard_count(files: Sequence[str], durations: Mapping[str, float], maximum: int,
-                          *, workers: int, single_shard_seconds: float) -> int:
+                          *, workers: int, single_shard_seconds: float,
+                          node_durations: Mapping[str, float] | None = None) -> int:
     """Keep small PRs on one slot; larger selections share the full gate matrix."""
     unknown = default_unknown_seconds(durations)
     # Reuse partition validation so an unknown file or invalid cost cannot be free.
-    packed = shards(files, durations, workers, unknown_seconds=unknown)
+    packed = shards(files, durations, workers, unknown_seconds=unknown, node_durations=node_durations)
     wall = max(row['estimated_seconds'] for row in packed)
-    useful = sum(durations.get(path, unknown) > 0 for path in files)
+    node_counts = Counter(node.split('::', 1)[0] for node in (node_durations or {}))
+    useful = sum(max(1, node_counts[path]) for path in files if durations.get(path, unknown) > 0)
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError('workers must be a positive integer')
     if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 1:
@@ -160,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         unknown = default_unknown_seconds(durations) if args.unknown_seconds is None else args.unknown_seconds
         if args.command == 'matrix' and args.single_shard_seconds is not None:
             args.shards = selection_shard_count(files, durations, args.shards, workers=args.workers,
-                                                single_shard_seconds=args.single_shard_seconds)
+                                                single_shard_seconds=args.single_shard_seconds,
+                                                node_durations=recorded.get('nodes'))
         if args.command == 'matrix':
             runners = [name.strip() for name in args.runners.split(',')]
             if not all(runners):
