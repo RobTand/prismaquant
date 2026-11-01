@@ -387,7 +387,7 @@ def test_scratch_owners_cannot_delete_each_others_models():
         model.mkdir(exist_ok=True)
         config = model / 'config.json'
         config.write_text('{}')
-        first.close()
+        assert next(first, None) is None
         assert config.is_file(), 'another worker removed the active model'
     finally:
         first.close()
