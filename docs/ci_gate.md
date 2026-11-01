@@ -62,10 +62,10 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial policy uses eight calibration attempts: 41275735452/1,
+The initial policy uses nine calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
-41281908452/1, and 41282567022/1. Both architecture-swapped attempts and
-successful heads after the first review contribute to its 108 exceptions.
+41281908452/1, 41282567022/1, and 41284744088/1. Both architecture-swapped attempts and
+successful heads after the first review contribute to its 111 exceptions.
 It retains total JUnit setup, call, and teardown time. Fixture setup can move
 between the first tests on xdist workers, so both architectures and swapped
 placements contribute maxima rather than successful runs alone. Slow tests keep
@@ -177,8 +177,8 @@ used. The maximum measured aggregate cgroup peak was 3,058,761,728 bytes.
 The six manifest-dependent exclusions and skipped CUDA bodies remain unqualified.
 Fleet Python 3.14.4 and torch 2.11 differ from hosted Python 3.12 and torch 2.15.
 
-The captured 20-PR replay at `3072020a` selected p50 68 files and p90 1,178
-files from a 1,328-file population. Nine selections exceeded 600 files. These
+The captured 20-PR replay is rerun after selector changes. The PR body records
+the exact replay head and its selection sizes from a 1,328-file population. These
 counts measure work selected, not selection accuracy. Shadow selections are uploaded but are not yet
 compared automatically against full-gate failures. String-based production module
 or subprocess references can remain outside the import graph, so that comparison
@@ -211,7 +211,9 @@ hosted experiment was performed.
 
 Ordinary draft PRs run `pr-gate` too. Mergify drafts need the full gate and the
 current workflow deliberately keeps feedback on other drafts. This can consume
-up to the full shard matrix; account capacity is shared. Existing PR heads that
+up to the full shard matrix; account capacity is shared. The staged FP8 DSv4 oracle now uses the existing `own_process` boundary. A real
+native-import predecessor regression verifies its staged-read assertions and
+retains the parent process's native-override refusal guard. Existing PR heads that
 predate the gate tooling fail with a message to merge `main` and push again.
 
 The queue configuration lands in the same PR as this gate. Landing order:
