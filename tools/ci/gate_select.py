@@ -255,7 +255,7 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
     triggers = sorted(path for path in set(changed) if
         Path(path).name == 'conftest.py' or
         path in {'pytest.ini', 'pyproject.toml', 'setup.cfg', 'setup.py', 'uv.lock',
-                 'tools/resolve_tessera_dev_pin.py',
+                 'tools/resolve_tessera_dev_pin.py', 'prismaquant/tessera_runtime_contract.py',
                  'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json'} or
         path.startswith(('.github/', 'tools/ci/gate_', 'tests/test_gate_')) or
         'constraints' in path or 'requirements' in path)

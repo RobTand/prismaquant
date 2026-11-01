@@ -115,6 +115,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    env:
+      TMPDIR: ${{ runner.temp }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -142,7 +144,9 @@ jobs:
           prismaquant/tessera_runtime/tessera_serving_runtime_pin.json
     - name: Resolve Tessera development pin
       id: tessera-pin
-      run: echo "commit=$(python tools/resolve_tessera_dev_pin.py)" >> "$GITHUB_OUTPUT"
+      run: |
+        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
+        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
@@ -236,6 +240,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.retry-plan.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    env:
+      TMPDIR: ${{ runner.temp }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -263,7 +269,9 @@ jobs:
           prismaquant/tessera_runtime/tessera_serving_runtime_pin.json
     - name: Resolve Tessera development pin
       id: tessera-pin
-      run: echo "commit=$(python tools/resolve_tessera_dev_pin.py)" >> "$GITHUB_OUTPUT"
+      run: |
+        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
+        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       with:
