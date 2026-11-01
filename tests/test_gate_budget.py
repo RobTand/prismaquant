@@ -225,7 +225,7 @@ def test_enabled_enforcement_cannot_be_disabled_against_base(tmp_path):
 
 def test_imported_test_budget_uses_collected_node_not_definition(tmp_path):
     policy(tmp_path, slow={'tests/test_sample.py::test_cost': 42})
-    xml = case('41').replace('file="tests/test_sample.py"', 'file="tests/helpers.py"')
+    xml = case('43').replace('file="tests/test_sample.py"', 'file="tests/helpers.py"')
     xml = xml.replace('/></testsuite>', '><properties><property name="gate_nodeid" '
         'value="tests/test_sample.py::test_cost"/></properties></testcase></testsuite>')
     code, result = budget_run(tmp_path, xml)
