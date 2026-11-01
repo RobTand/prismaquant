@@ -187,8 +187,8 @@ def test_long_files_start_first_without_changing_assigned_coverage(tmp_path):
     assert observed == ['tests/test_z_long.py', 'tests/test_b_medium.py', 'tests/test_a_short.py']
 
 
-def test_a_file_stays_on_one_worker_to_preserve_shared_fixtures(tmp_path):
-    """Shared build and audit fixtures must not be duplicated across workers."""
+def test_a_single_assigned_file_can_use_both_workers(tmp_path):
+    """A long file must share the bounded workers available in its shard."""
     import json
     root = tmp_path / 'project'
     (root / 'tests').mkdir(parents=True)
@@ -207,7 +207,7 @@ def test_case(case, worker_id):
     code = runner.run_plan(plan, root=root, output=root / 'result.json',
                            junit=root / 'junit.xml', workers=2, affinity={0, 1})
     assert code == 0
-    assert len({(root / 'tests' / ('worker-' + str(case))).read_text() for case in range(4)}) == 1
+    assert {(root / 'tests' / ('worker-' + str(case))).read_text() for case in range(4)} == {'gw0', 'gw1'}
 
 
 def test_collection_scans_a_directory_once_and_imports_only_assigned_files(tmp_path):
