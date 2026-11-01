@@ -387,3 +387,46 @@ def test_imported_tests_keep_their_collected_budget_identity(tmp_path):
     assert case.get('file') == 'tests/helpers.py'
     assert [(p.get('name'), p.get('value')) for p in case.findall('properties/property')] == [
         ('gate_nodeid', path + '::test_imported')]
+
+
+def test_quarantine_deselects_only_the_exact_collected_node(tmp_path):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    path = 'tests/test_exact.py'
+    (tmp_path / path).write_text('''from pathlib import Path
+
+def test_bad(): assert False
+
+def test_bad_more(): Path(__file__).with_name('sibling-ran').touch()
+''')
+    code = runner.run_plan({'selected': [{'path': path}], 'deselect': [path + '::test_bad']},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml', workers=1, affinity={0})
+    assert code == 0
+    assert (tmp_path / 'tests/sibling-ran').exists()
+
+
+def test_cgroup_marker_alias_is_discovered_from_collection(tmp_path):
+    import subprocess
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\nmarkers = own_cgroup\n')
+    path = 'tests/test_alias.py'
+    (tmp_path / path).write_text('''from pytest import mark
+from pathlib import Path
+
+@mark.own_cgroup
+def test_scoped(): Path(__file__).with_name('scoped-ran').touch()
+''')
+    calls = []
+    def execute(command, **kwargs):
+        calls.append(command)
+        if command[0] == 'sudo':
+            # Exercise the real serial pytest command without requiring sudo in this PB action.
+            command = command[command.index('env') + 1:]
+            while '=' in command[0]:
+                command = command[1:]
+        return subprocess.run(command, **kwargs)
+    code = runner.run_plan({'selected': [{'path': path}], 'deselect': []}, root=tmp_path,
+        output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml', workers=1, affinity={0}, execute=execute)
+    assert code == 0
+    assert (tmp_path / 'tests/scoped-ran').exists()
+    assert calls[1][:4] == ['sudo', '-n', 'systemd-run', '--scope']
