@@ -8,6 +8,7 @@ import struct
 import pytest
 
 from prismaquant import digests
+from source_framing_recording import record_source_frames
 
 
 MODULES = (
@@ -95,24 +96,11 @@ def _fixture(module, tmp_path, monkeypatch, payload):
 
 
 def _spy(module, monkeypatch):
-    batches = []
-
     class RecordingProfile:
-        def __init__(self):
-            self.owner = digests.LengthFramedSourceSha256()
-            self.rows = []
-            batches.append(self.rows)
-
         def update(self, name, payload):
-            self.rows.append((name, payload))
-            self.owner.update(name, payload)
+            self._record(name, payload)
 
-        def hexdigest(self):
-            return self.owner.hexdigest()
-
-    # Before delegation the legacy code ignores this injected owner entirely.
-    monkeypatch.setattr(module, "LengthFramedSourceSha256", RecordingProfile, raising=False)
-    return batches
+    return record_source_frames(module, monkeypatch, RecordingProfile)
 
 
 @pytest.mark.parametrize("module_name", MODULES)
