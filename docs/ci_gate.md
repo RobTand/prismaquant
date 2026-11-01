@@ -30,7 +30,9 @@ post-merge suite; each file still belongs to exactly one hosted shard.
 
 Tests marked `own_cgroup` run after their shard's ordinary tests, without xdist,
 in a transient systemd scope containing only that pytest process. Both phases
-contribute JUnit evidence and the shard verdict. Optional-dependency module skips
+contribute JUnit evidence and the shard verdict. JUnit carries the collected
+`gate_nodeid` separately from the defining source location of imported tests.
+Coverage, exact budgets, and duration evidence use that collected identity. Optional-dependency module skips
 and complete deselections are recorded separately from incomplete collection.
 
 ## Verdicts and retries
@@ -51,10 +53,11 @@ base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
 hosted run IDs. PrismaBuild inventory times do not set hosted limits.
 
-The initial full hosted trial, run 41275735452, measured Python 3.12 CPU tests
-on x64 and arm64. Its 50 exception limits are twice the largest observed test
-time, rounded up. Enforcement is enabled for the next trials. Each file has one
-architecture sample so far; swapped reruns extend that coverage before handoff.
+Hosted trials 41275735452 and 41277228478 measured Python 3.12 CPU tests
+on x64 and arm64. The 66 bootstrap exceptions are twice the largest observed
+test time, rounded up. Enforcement remains enabled. Work stealing can move
+shared-fixture setup between testcases, so the exception evidence includes both
+schedulers. Swapped reruns extend architecture coverage before handoff.
 The separate hang timeout remains 600 seconds per test.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
