@@ -8,6 +8,50 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+ARTIFACT_SOURCE = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+FORK_SOURCE = "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository"
+FORK_NOTICE = 'artifact uploads skipped: fork PR has no secrets to scan for'
+
+
+def test_artifact_uploads_require_available_secrets_and_repository_source():
+    import shlex
+    for filename in ('gate.yml', 'ci.yml'):
+        workflow = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text())
+        for job in workflow['jobs'].values():
+            steps = job.get('steps', [])
+            for index, upload in enumerate(steps):
+                if not upload.get('uses', '').startswith('actions/upload-artifact@'):
+                    continue
+                scanner = steps[index - 1]
+                assert scanner['if'] == '${{ !cancelled() && ' + ARTIFACT_SOURCE + ' }}'
+                assert upload['if'] == ('${{ !cancelled() && ' + ARTIFACT_SOURCE
+                                         + ' && steps.' + scanner['id'] + ".outcome == 'success' }}")
+                command = shlex.split(scanner['run'])
+                assert command[:2] == ['python3', 'tools/ci/check_no_secret_leak.py']
+                for name in ('BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'):
+                    assert any(command[i:i + 2] == ['--require', name]
+                               for i in range(len(command) - 1))
+                    assert scanner['env'][name] == '${{ secrets.' + name + ' }}'
+
+
+def test_forks_skip_artifact_consumers_and_report_no_verdict():
+    import subprocess
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    jobs = workflow['jobs']
+    for name in ('shards', 'retry-plan'):
+        assert ARTIFACT_SOURCE in jobs[name]['if']
+    assert "needs.retry-plan.result == 'success'" in jobs['retry-shards']['if']
+    assert 'head.repo.full_name == github.repository' in jobs['gate']['if']
+    notice = jobs['plan']['steps'][0]
+    assert notice['if'] == '${{ !cancelled() && ' + FORK_SOURCE + ' }}'
+    assert subprocess.check_output(['bash', '-e', '-c', notice['run']], text=True).strip() == FORK_NOTICE
+    refusal = jobs['pr-gate']['steps'][0]
+    assert refusal['if'] == '${{ !cancelled() && ' + FORK_SOURCE + ' }}'
+    result = subprocess.run(['bash', '-e', '-c', refusal['run']], capture_output=True, text=True)
+    assert result.returncode == 75
+    assert FORK_NOTICE in result.stdout
+    assert 'NO_VERDICT: fork PR gate requires plan and shard artifacts; uploads are disabled' in result.stdout
+
 
 def test_gate_uses_authenticated_batch_heads_and_no_label_events():
     workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
