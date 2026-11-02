@@ -109,3 +109,25 @@ def test_symbol_evidence_tracks_alias_attributes_and_function_local_imports(tmp_
     assert result['symbols'] == ['VALUE', 'helper', 'local']
     assert result['functions'] == ['run']
     assert result['has_module_import']
+
+
+def test_merge_bitset_scorer_matches_cost_for_cycles_launches_and_data():
+    selection = plan.Selection(
+        edges={'test': {'a'}, 'a': {'b'}, 'b': {'a'}, 'child': {'used'}, 'used': set()},
+        roots={'test': {'test'}}, data={'b': {'asset.json'}}, launches={'a': {'child'}})
+    replay = [{'sha': 'a', 'changed': ['asset.json']}, {'sha': 'b', 'changed': ['used']},
+              {'sha': 'c', 'changed': ['unused']}, {'sha': 'd', 'changed': ['uv.lock']}]
+    scorer = plan.Scorer(selection, replay, {'test': 40}, plan.Config())
+    assert scorer.cost() == 30
+    # Cutting the incoming path leaves only the fallback merge.
+    assert scorer.cost({('test', 'a', 'import')}) == 10
+
+
+def test_bazel_adapter_keeps_rule_boundaries_and_repository_source_paths():
+    from tools.bazel.detangle_repo import bazel_selection
+    selection = bazel_selection({'tests/test_x.py': '//tests:test_x'},
+        {('//tests:test_x', '//tests:test_x.py'), ('//tests:test_x', '//pkg:core'),
+         ('//pkg:core', '//pkg:core.py')}, {'//tests:test_x.py', '//pkg:core.py'})
+    assert selection.selected(['pkg/core.py']) == {'tests/test_x.py'}
+    assert selection.without({('//tests:test_x', '//pkg:core', 'import')}).selected(['pkg/core.py']) == set()
+    assert selection.selected(['tests/test_x.py']) == {'tests/test_x.py'}
