@@ -77,7 +77,22 @@ import dataclasses
 import re
 from collections.abc import Iterable, Sequence
 
+
+def block_id_from_qname(qname: str) -> str:
+    """Return the architectural block ID a quantizable Linear belongs to."""
+    parts = qname.split(".")
+    for idx, token in enumerate(parts):
+        if token == "layers" and idx + 1 < len(parts):
+            try:
+                int(parts[idx + 1])
+            except ValueError:
+                continue
+            return ".".join(parts[: idx + 2])
+    return qname
+
+
 __all__ = [
+    "block_id_from_qname",
     "CHECKPOINT",
     "DECLARED_OUT_OF_GRAPH",
     "EXPORT",
@@ -969,8 +984,6 @@ class NameProjection:
 
     def block_id(self, qname: str) -> str:
         """Architectural block id of a unit (shared helper, not a copy)."""
-        from .decision_units import block_id_from_qname
-
         return block_id_from_qname(strip_weight_leaf(str(qname)))
 
     # -------------------------------------------------- packed experts --

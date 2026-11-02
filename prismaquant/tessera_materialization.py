@@ -22,10 +22,10 @@ from types import SimpleNamespace
 
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
+from .tessera_selection_request import REQUEST_SCHEMA, write_selection_request
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
 from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
 
-REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
 STAGE = "tessera_selected_wire"
 
@@ -36,25 +36,6 @@ _sha = file_sha256hex
 def _json(path, value):
     atomic_write_bytes(Path(path), (json.dumps(value, indent=2, sort_keys=True,
                                              allow_nan=False) + '\n').encode())
-
-
-def write_selection_request(path, *, layer_config, assignment, cost_path,
-                            cost_payload, output_path):
-    """Persist decisions and existing evidence without claiming export readiness."""
-    from .layer_config import canonicalize_assignment
-    if canonicalize_assignment(layer_config) != dict(assignment):
-        raise RuntimeError('selection layer config disagrees with resolved assignment')
-    block = tep.selection_expert_projection_block(cost_payload, assignment)
-    if not block.get(tep.PROJECTION_KEY):
-        raise RuntimeError('selected-wire materialization requires a producer projection')
-    config = copy.deepcopy(layer_config)
-    config['__prismaquant__'].update(block)
-    request = dict(schema=REQUEST_SCHEMA, status='selection_only_nonexportable',
-                   layer_config=config, assignment=dict(assignment),
-                   cost_path=str(Path(cost_path).resolve()), cost_sha256=_sha(cost_path),
-                   output_path=str(Path(output_path).resolve()))
-    _json(path, request)
-    return request
 
 
 def _request(path):
@@ -208,8 +189,6 @@ def _journal(plan_data, identity, index, names):
     root.mkdir(parents=True, exist_ok=True)
     return root, prepare_journal(root / 'journal', stage=STAGE, resume=True,
         identity={**identity, 'group': index}, qnames=names)
-
-
 
 
 def run(plan_path, group_index, *, anchor_batch_size=1):

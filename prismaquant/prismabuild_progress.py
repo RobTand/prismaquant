@@ -95,7 +95,7 @@ def _progress_dev_source_sha256():
     """
     global _DEV_SOURCE_SHA256_MEMO
     if _DEV_SOURCE_SHA256_MEMO is None:
-        from .aura_provenance import producer_package_sha256
+        from .producer_package import producer_package_sha256
         _DEV_SOURCE_SHA256_MEMO = producer_package_sha256()
     return _DEV_SOURCE_SHA256_MEMO
 
