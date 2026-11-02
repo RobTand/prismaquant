@@ -106,3 +106,11 @@ def test_runtime_fix_reduces_the_fallback_floor():
     assert ranked[0]['delta_seconds']==75
     assert ranked[0]['remaining_seconds']==25
     assert plan.projected_savings(selection,[{'sha':'a','changed':['MODULE.bazel']}],{'t':100},candidates[0],plan.Config())==75
+
+
+def test_dynamic_gate_inputs_do_not_copy_unobserved_static_data(tmp_path):
+    from tools.bazel.detangle_inputs import add_gate_inputs
+    selection=plan.Selection({'t':set()},{'t':{'t'}},extras={'t':{'unexecuted.json'}})
+    _,observed,_=add_gate_inputs(selection,{'t':['t']},tmp_path,[],'')
+    assert 'unexecuted.json' not in observed['t']
+    assert observed['t']=={'t','pytest.ini','pyproject.toml'}
