@@ -224,7 +224,7 @@ def shortest_hub_path(live, test, targets=None):
 
 def _attribution(base, head, added, *, members=None):
     if members is not None:
-        selected = [(a, b) for a, b in added if a in members and b in members]
+        selected = sorted((a, b) for a, b in added if a in members and b in members)
     else:
         # An added edge can grow fanout when a head test reaches its source and
         # now reaches its target. Discard edges unrelated to any growing reach.
@@ -367,10 +367,20 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
     if causes:
         errors.append('existing test reach grew: ' + ', '.join(f'{t} +{len(reach_growth[t])}' for t in sorted(reach_growth))
                       + '; added edges: ' + ', '.join(f'{a} -> {b}' for a, b in causes))
-    if any(error.startswith('scc_max rose') for error in errors):
-        members = set(head['scc_members'])
-        errors.append(f'SCC grew or merged ({head["scc_max"]} nodes): {", ".join(head["scc_members"])}'
-                      + _attribution(base, head, added, members=members))
+    # Check every component: an unrelated larger cycle can mask SCC growth.
+    # Containment permits components to shrink or gain internal edges without
+    # reporting a merger. Only edges crossing former components cause growth.
+    old_component = {node: frozenset(row) for row in base['components'] for node in row}
+    for component in head['components']:
+        members = set(component)
+        previous = old_component.get(component[0], frozenset())
+        if len(members) <= 1 or members <= previous:
+            continue
+        causes = {(a, b) for a, b in added if a in members and b in members
+                  and (a not in old_component or b not in old_component[a])}
+        if causes and 'scc:' + ','.join(component) not in allowlist:
+            errors.append(f'SCC grew or merged ({len(component)} nodes): {", ".join(component)}'
+                          + _attribution(base, head, causes, members=members))
     for group, rows in head.get('edge_groups', {}).items():
         for edge in sorted(set(rows) - set(base.get('edge_groups', {}).get(group, ()))):
             message = f'new {group} edge: {edge}'

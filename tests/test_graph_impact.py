@@ -95,10 +95,7 @@ def test_every_scc_growth_or_merge_is_attributed(old_edges, added):
     before = measure(edges=old_edges)
     after = measure(edges=old_edges | {added})
     errors = impact.compare(before, after, baseline(before))
-    if after['scc_max'] > before['scc_max']:
-        assert any('SCC grew or merged' in error and f'{added[0]} -> {added[1]}' in error for error in errors)
-    else:
-        assert not errors
+    assert any('SCC grew or merged' in error and f'{added[0]} -> {added[1]}' in error for error in errors)
 
 
 def test_unrelated_added_edge_is_not_blamed_for_cycle_growth():
