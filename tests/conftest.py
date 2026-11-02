@@ -543,9 +543,12 @@ FLEET_DATA_SKIP_REASON = (
     f"(PQ #1014); run with -m {FLEET_DATA_MARK} or {FLEET_DATA_ENV}=1")
 TASK_SUITE_MARK = "task_suite"
 TASK_SUITE_ENV = "PQ_TASK_SUITE_TESTS"
+#: The mark is interpolated, as in ``FLEET_DATA_SKIP_REASON``: a literal
+#: "-m task_suite" reads to the dependency graph as a launch of
+#: ``prismaquant/task_suite.py``, which this file does not run (#3215).
 TASK_SUITE_SKIP_REASON = (
-    "task_suite: run the required layered gate with -m task_suite or "
-    "PQ_TASK_SUITE_TESTS=1; recorded 76 passed, 0 skipped; "
+    f"{TASK_SUITE_MARK}: run the required layered gate with -m {TASK_SUITE_MARK} or "
+    f"{TASK_SUITE_ENV}=1; recorded 76 passed, 0 skipped; "
     "action 20cb79a0504632a78f6412465012eb868f56f5a432b4717cba6ff3c619560bb6; "
     "receipt 0ed9d0134b60b0df181b15dd605b41e0ca5ce7e5e1fe0ef8d0ee14cb25440913")
 
