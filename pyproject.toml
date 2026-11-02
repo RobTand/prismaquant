@@ -98,3 +98,24 @@ prismaquant = [
 [tool.tl3.harness]
 command = ["python", "-m", "pytest"]
 test-files = ["tests/**/*.py"]
+
+[tool.uv]
+# Match the hosted gate's .github/ci-constraints.txt pins without narrowing
+# published dependency ranges. tests/test_uv_lock_ci_constraints.py checks
+# every hosted pin against the resolved lock.
+constraint-dependencies = ["transformers==5.16.1", "pytest==9.1.1"]
+# Resolve the hosted test environment separately from optional serving and
+# evaluation stacks, whose torch/numpy pins otherwise constrain the test lock.
+conflicts = [
+    [{ extra = "test" }, { extra = "serve" }],
+    [{ extra = "test" }, { extra = "task-suite" }],
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+# Only torch uses this index; its aarch64 triton must not enter the x64 hub.
+explicit = true
