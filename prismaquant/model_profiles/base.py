@@ -1427,7 +1427,7 @@ class ModelProfile(ABC):
         stay out by name; body, audio and MTP names never enter.
         Fail-closed: a missing checkpoint or unreadable shard raises.
         """
-        from ..allocator import visual_linear_roster as _roster
+        from ..visual_linears import visual_linear_roster as _roster
 
         return _roster(str(model_path), profile=self, strict=strict)
 

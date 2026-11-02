@@ -64,6 +64,7 @@ from .joint_adjoint_checkpoints import (
     CHAIN_REGIME_KEY,
     DEFAULT_STRIDE,
     QUANTUM_COUNTERS_SCHEMA,
+    AdjointIdentityRefused,
     ChainRegimeRefused,
     KernelTimeProfiler,
     adjoint_space,
@@ -79,6 +80,7 @@ from .joint_adjoint_checkpoints import (
     render_free_layer_roll,
     normalize_chain_regime,
     require_dev_mode,
+    resolve_stride,
     write_adjoint_checkpoint,
     write_adjoint_receipt,
 )
@@ -153,10 +155,6 @@ PREFETCH_OVERRIDE_INPUT_SCHEMA = (
     "prismaquant.joint_adjoint_capture.prefetch_override_input.v1")
 PREFETCH_OVERRIDE_STAMP_SCHEMA = (
     "prismaquant.joint_adjoint_capture.prefetch_override.v1")
-
-
-class AdjointIdentityRefused(RuntimeError):
-    """A plan/prepared digest or binding mismatch, before anything runs."""
 
 
 def shared_adjoint_snapshot(cotangents) -> dict:
@@ -267,21 +265,6 @@ def write_checkpoint_with_snapshot(storage, space, *, boundary, session, cotange
             return write(snapshot)
         finally:
             snapshot.clear()
-
-
-def resolve_stride(config, cli_stride) -> tuple[int, str]:
-    """S comes from the plan's ``distributed_campaign`` block when present
-    (§3.4: a plan knob, not a CLI guess); a CLI value may supply it only for
-    a plan that does not declare the block, and a disagreement refuses."""
-    plan_block = (config.get("distributed_campaign") or {})
-    plan_stride = plan_block.get("cotangent_checkpoint_stride")
-    if plan_stride is not None:
-        if cli_stride is not None and int(cli_stride) != int(plan_stride):
-            raise AdjointIdentityRefused(
-                f"--stride {cli_stride} disagrees with the plan's sealed "
-                f"stride {plan_stride}")
-        return int(plan_stride), "plan"
-    return int(cli_stride if cli_stride is not None else DEFAULT_STRIDE), "cli"
 
 
 def load_prefetch_override(path) -> dict:
