@@ -659,12 +659,22 @@ def main(argv=None):
     initial_best = ranked[0]['best_initial_delta_seconds'] if ranked else 0
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
-    coverage_valid = not failures and coverage.get('sha', source_revision) == source_revision
+    recovery = coverage.get('recovery')
+    revision_matches = (coverage.get('sha', source_revision) == source_revision and
+                        (not recovery or recovery.get('sha') == source_revision))
+    coverage_valid = not failures and revision_matches
+    estimated_wheels = any('uv.lock' in merge['changed'] for merge in replay)
     if not coverage_valid:
         stop['gap_below_ten_percent'] = False
         stop['best_below_two_percent_and_gate_near_floor'] = False
     stop['coverage_complete_and_passing'] = coverage_valid
     residual = ranked[-1]['remaining_seconds'] if ranked else static['mean_seconds']
+    proposed_weights = dict(weights)
+    for candidate in ranked:
+        proposed_weights.update(candidate['runtime_after'])
+    proposed_dynamic = costs(measured_masks, replay, proposed_weights, config)['mean_seconds']
+    ranked_edges = {tuple(edge) for candidate in ranked for edge in candidate['edges']}
+    graph_after_ranked = initial_scorer.cost(ranked_edges)
     static_masks, measured_masks = selection.masks(), dynamic_masks(executed, selection.tests)
     outside_static = sum((measured_masks.get(p, 0) & ~static_masks.get(p, 0)).bit_count() for p in measured_masks)
     result = {'schema': 'detangle.plan.v1', 'revision': source_revision, 'replay_revision': revision, 'metadata': metadata,
@@ -674,8 +684,8 @@ def main(argv=None):
                            'subprocess_coverage': coverage.get('subprocess_coverage', False),
                            'failed_tests': failures, 'sdk_group_installed': coverage.get('sdk_group_installed', False),
                            'observed_pairs_outside_static': outside_static,
-                           'revision_matches': coverage.get('sha', source_revision) == source_revision,
-                           'provisional': not coverage_valid or bool(outside_static)},
+                           'revision_matches': revision_matches, 'recovery': recovery,
+                           'provisional': not coverage_valid or bool(outside_static) or estimated_wheels},
               'static': static, 'dynamic': dynamic, 'gap_seconds': static['mean_seconds'] - dynamic['mean_seconds'],
               'floor_share': static['floor_share'], 'candidates': ranked, 'cycle_cuts': cycle_cuts, 'candidate_count': len(candidates),
               'stopping': stop, 'wall_floor': {'cores': 80, 'fixed_overhead_seconds': overhead,
@@ -683,14 +693,16 @@ def main(argv=None):
                   'gate_seconds': timing.get('gate_seconds'), 'source': timing.get('source', 'unavailable')},
               'causes': {'essential_seconds': dynamic['mean_seconds'] - dynamic['fallback_seconds'],
                          'floor_seconds': static['fallback_seconds'],
-                         'accidental_after_ranked_cuts_seconds': max(0, residual - dynamic['mean_seconds']),
-                         'ranked_cut_savings_seconds': static['mean_seconds'] - residual,
+                         'accidental_after_ranked_cuts_seconds': max(0, residual - proposed_dynamic),
+                         'ranked_cut_savings_seconds': static['mean_seconds'] - graph_after_ranked,
+                         'ranked_runtime_savings_seconds': graph_after_ranked - residual,
+                         'ranked_candidate_savings_seconds': static['mean_seconds'] - residual,
                          'cheap_effort_lines_per_candidate': args.cheap_lines,
                          'accidental_after_all_cheap_cuts_seconds': max(0, after_cheap - dynamic['mean_seconds']),
                          'note': 'Accidental cost is an estimate; cuts require semantic review. Data reads are ignored by the floor unless traced.'}}
     # Installed wheels were not retained by the original coverage sweep.
     result['coverage']['dynamic_wheels'] = 'estimated from imports of observed repository source files'
-    if outside_static or any('uv.lock' in m['changed'] for m in replay):
+    if outside_static or estimated_wheels:
         result['stopping']['gap_below_ten_percent'] = False
         result['stopping']['best_below_two_percent_and_gate_near_floor'] = False
     args.out.parent.mkdir(parents=True, exist_ok=True)

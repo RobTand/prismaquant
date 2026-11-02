@@ -133,6 +133,8 @@ def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypa
     assert result['fallback_comparison']['narrowed']['dynamic_seconds']==100
     assert result['test_costs'][0]['static_seconds_per_merge']==100
     assert result['candidates'][0]['delta_seconds']==80
+    assert result['causes']['ranked_cut_savings_seconds']==0
+    assert result['causes']['ranked_runtime_savings_seconds']==80
     assert result['coverage']['recovery']['sha']=='b'*40
     assert result['coverage']['provisional']
     assert not result['stopping']['coverage_complete_and_passing']
