@@ -60,6 +60,7 @@ import test_strict_reader_tier_enforcement as strict
 # window refuses ``lease-helper-divergent`` (PQ #1032, PB ``e75555fbef1c``).
 # The injection these tests make was also never cleared, so it outlived them.
 from test_strict_reader_tier_enforcement import _forget_state  # noqa: E402,F401 (autouse)
+from fullstack_pb_generation import pinned_pb_source
 
 WINDOW_PAIRS = (
     (0, (("unit-w00-a", "FMT-A"), ("unit-w00-b", "FMT-A"))),

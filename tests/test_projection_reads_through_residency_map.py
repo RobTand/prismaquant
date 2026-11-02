@@ -21,6 +21,7 @@ from prismaquant.tessera_expert_projection import source_unit_weight
 from tests.test_residency_shard_reader import (
     _bind, _header, _stage_range, _stage_root, _write_map,
 )
+from fleet_sdk import installed_client_sdk
 
 #: The resolver validates maps with PrismaBuild's own validator, through the
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

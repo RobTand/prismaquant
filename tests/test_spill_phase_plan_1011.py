@@ -32,6 +32,7 @@ from test_quantum_executable_readset import (  # noqa: E402
 from test_stageb_prepared_render_inputs import (  # noqa: E402
     _bind_prepared, _dispatch_prepared, _prepared_inputs, _render_files,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 
 def test_spill_phase_names():

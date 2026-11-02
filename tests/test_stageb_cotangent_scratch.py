@@ -4,6 +4,7 @@ import weakref
 import torch
 
 from prismaquant import joint_adjoint_checkpoints as checkpoints
+from fullstack_pb_generation import pinned_pb_source
 
 
 def test_checkpoint_load_releases_each_exact_window_before_next(tmp_path, monkeypatch):

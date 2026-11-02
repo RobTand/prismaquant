@@ -50,6 +50,7 @@ from prismaquant.validate_quantized_model import (
     DEFAULT_MIN_GEN_LEN,
     DEFAULT_MIN_MTP_ACCEPT_P0,
 )
+from graph_lane_fixtures import synthetic_graph_lane
 
 
 def _license_card(model_dir):

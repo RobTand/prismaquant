@@ -15,6 +15,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from fleet_sdk import require_prismabuild_sdk
 
 PIN_PATH = Path(__file__).with_name("pb_runtime_generation_pin.json")
@@ -51,10 +53,21 @@ def source_bound():
     before it exits. The installed SDK graph is restored, not substituted or
     accepted as this source tree.
     """
-    from fleet_sdk import prismabuild_imports_restored
+    from prismabuild_imports import prismabuild_imports_restored
 
     root = _resolve_once()  # Authenticate every declared byte before detaching.
     with prismabuild_imports_restored(source_root=root):
+        yield
+
+
+@pytest.fixture
+def pinned_pb_source():
+    """Explicit, non-autouse ownership of the reviewed PB source graph.
+
+    Moved here from ``tests/conftest.py`` (#3215): a test that requests it
+    imports it from this module.
+    """
+    with source_bound():
         yield
 
 

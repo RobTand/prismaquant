@@ -46,6 +46,7 @@ from tools.build_stagea_split_package import (
     build,
     quantum_manifest_name,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 LAYERS = 5
 WALK_READS = ("walk/census.json", "walk/merged_checkpoint.json.parts/units/0.pkl")

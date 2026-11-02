@@ -18,8 +18,8 @@ import sys
 
 import pytest
 
-from fleet_sdk import (
-    prismabuild_entries, prismabuild_imports_restored, require_prismabuild_sdk)
+from fleet_sdk import installed_client_sdk, require_prismabuild_sdk
+from prismabuild_imports import prismabuild_entries, prismabuild_imports_restored
 
 
 def _foreign_tree(tmp_path: Path) -> Path:

@@ -23,6 +23,7 @@ import pytest
 
 from prismaquant import quality_prefill_pb_adapter as adapter
 from prismaquant.schemas import SchemaValidationError
+from fleet_sdk import installed_client_sdk
 
 #: The id grammar and the identity digest are PrismaBuild's, through its
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

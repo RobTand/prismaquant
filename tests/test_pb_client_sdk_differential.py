@@ -34,6 +34,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from fleet_sdk import installed_client_sdk
 
 
 
