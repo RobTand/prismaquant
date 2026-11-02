@@ -312,3 +312,74 @@ def check(base, head, baseline_path, allowlist_path=None, *, changed_tests=(),
     if write_baseline:
         baseline_path.write_text(json.dumps(baseline_record(head, baseline), indent=2) + '\n')
     return 0
+
+
+def _bazel_inputs(dependencies, test_targets, source_labels, manual_tests=(), loc=None):
+    """Project a label graph onto source reach without losing its blame edges."""
+    edges = {(source, target) for source, targets in dependencies.items() for target in targets}
+    labels = set(dependencies) | {target for _, target in edges}
+    sources = set(source_labels)
+    tests = {}
+    for test in sorted(set(test_targets) - set(manual_tests)):
+        if test not in labels:
+            raise ValueError(f'test target missing from dependency graph: {test}')
+        seen, pending = {test}, [test]
+        while pending:
+            for target in dependencies.get(pending.pop(), ()):
+                if target not in seen:
+                    seen.add(target)
+                    pending.append(target)
+        tests[test] = seen & sources
+    weights = {source: loc.get(source, 0) if loc is not None else 1 for source in sorted(sources)}
+    return tests, edges, weights
+
+
+def read_deps(path, test_targets, source_labels, *, manual_tests=(), loc=None):
+    """Read bazel-diff v42 --depEdgesFile (label -> direct dependency labels).
+
+    test_targets comes from ``tests(//...)``; remove manual-tagged targets with
+    manual_tests, or filter them in the caller's query. source_labels comes
+    from --includeTargetType's SourceFile hashes or a source-file query. Do
+    not guess source types from extensions: generated files and rules can
+    share those names. If deps.json omits source-file labels, use read_query
+    on one streamed_jsonproto ``deps(tests(//...))`` query per revision.
+    """
+    dependencies = json.loads(Path(path).read_text())
+    if not isinstance(dependencies, dict) or any(
+            not isinstance(source, str) or not isinstance(targets, list)
+            or any(not isinstance(target, str) for target in targets)
+            for source, targets in dependencies.items()):
+        raise ValueError('deps.json must map labels to lists of dependency labels')
+    labels = set(dependencies) | {target for targets in dependencies.values() for target in targets}
+    if source_labels and not (set(source_labels) & labels):
+        raise ValueError('deps.json has no source-file labels; use the Bazel query fallback')
+    return _bazel_inputs(dependencies, test_targets, source_labels, manual_tests, loc)
+
+
+def read_query(path, *, test_targets=None, loc=None):
+    """Fallback: Bazel query --output=streamed_jsonproto over deps(tests(//...)).
+
+    One record per line. Rule inputs retain the paths through libraries;
+    sourceFile records identify leaves; manual tests remain as dependencies
+    but are excluded from the test population. The optional explicit test
+    population supports custom rules whose class does not end in _test.
+    """
+    dependencies, sources, tests, manual = {}, set(), set(), set()
+    for line in Path(path).read_text().splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if 'sourceFile' in record:
+            name = record['sourceFile']['name']
+            sources.add(name)
+            dependencies.setdefault(name, [])
+        elif 'rule' in record:
+            rule = record['rule']
+            name = rule['name']
+            dependencies[name] = rule.get('ruleInput', [])
+            if rule.get('ruleClass', '').endswith('_test'):
+                tests.add(name)
+            if any(attribute.get('name') == 'tags' and 'manual' in attribute.get('stringListValue', [])
+                   for attribute in rule.get('attribute', [])):
+                manual.add(name)
+    return _bazel_inputs(dependencies, tests if test_targets is None else test_targets, sources, manual, loc)
