@@ -135,3 +135,17 @@ def test_post_merge_suite_can_load_the_gate_collection_plugin(tmp_path, pythonpa
          '-p', 'no:cacheprovider', '-p', plugin, '-q', str(tmp_path / 'test_probe.py')],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_both_shard_attempts_upload_nested_budget_evidence():
+    from fnmatch import fnmatch
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    for job in ('shards', 'retry-shards'):
+        upload = next(step for step in workflow['jobs'][job]['steps']
+                      if step.get('name') == 'Upload verdict and JUnit')
+        patterns = upload['with']['path'].splitlines()
+        for filename in ('gate-artifacts/junit.budget-rerun-0.result.json',
+                         'gate-artifacts/junit.budget-rerun-0.xml',
+                         'gate-artifacts/junit.budget-rerun-0.cgroup.xml',
+                         'gate-artifacts/junit.budget-rerun-0.collection.json'):
+            assert any(fnmatch(filename, pattern) for pattern in patterns), (job, filename)
