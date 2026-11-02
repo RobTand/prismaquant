@@ -1,0 +1,301 @@
+"""Tests that cannot run hermetically, or need hardware, each with its reason.
+
+The remote platform turns networking off and runs each test in a container
+that has a few CPUs of a larger host, as an unprivileged user, on a runfiles
+tree with every input read-only and no .git. A test listed here gets back
+what its tags name. Keep this table short and the reasons true; the PR that
+adds an entry says why the test can't use a declared input instead.
+"""
+
+NONHERMETIC = {
+    "//tests:test_band_serial_batched_regime": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_canonical_consumer_join": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_canonical_quality_quantity": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_capture_layer_chain_glm": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_capture_single_pass_source_1896": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_chain_roll_overlap": struct(
+        tags = ["gpu"],
+        reason = "3 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_derive_per_expert_routing_1931": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_export_inline_expert_gptq": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_fp8_batched_midpoint_parity_audit": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_fp8_dynamic_native_parity": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_full_capture_profile": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_mtp_priced_wires_1413": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_glm_mtp_selection": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_glm_routing_capture": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_selected_anchor_profile": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_tr3_dual_teacher": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_tr3_full_vocab": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_indomain_split_capture": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_joint_aura_streamed": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_joint_operator_statistics": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_joint_projection_reduce": struct(
+        tags = ["gpu"],
+        reason = "6 of its test functions (21 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_kda_capture_kernel": struct(
+        tags = ["gpu"],
+        reason = "10 of its test functions (10 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_kda_kernel_default_1252": struct(
+        tags = ["gpu"],
+        reason = "4 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_kda_kernel_mode": struct(
+        tags = ["gpu"],
+        reason = "5 of its test functions (7 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_layer_major_boundary_capture": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_memory_management": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_model_profile_conformance": struct(
+        tags = ["gpu"],
+        reason = "3 of its test functions (36 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_mtp_formats_menu_1692": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_native_render_fused_joint_global": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_native_retained_cost_source_admission_audit": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_numerics_pairs_1394": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_nvfp4_a16_render_equivalence": struct(
+        tags = ["gpu"],
+        reason = "3 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_nvfp4_codebook_cache": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_nvfp4_served_codebook_residency": struct(
+        tags = ["gpu"],
+        reason = "4 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_nvfp4_served_dequant_kernel": struct(
+        tags = ["gpu"],
+        reason = "11 of its test functions (49 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_nvfp4_served_qdq_no_sync": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_original_source_copy_completion_cuda": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (64 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_packed_grouped_qdq_audit": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_parallel_capture_prefetch": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_prismasnap_checkpoint": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_prismasnap_moe_resume_request_audit": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_production_cache_source_model_binding": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_projected_preparation_2039": struct(
+        tags = ["gpu", "hosted"],
+        reason = "it builds a torch C++ extension, which needs ninja; the hosted image has it, the executor and runner images don't, and .[test] doesn't install it; 3 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_projected_unit_check_1935": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_resident_source_decode_audit": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_row_chunked_qdq": struct(
+        tags = ["gpu"],
+        reason = "4 of its test functions (12 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_rung_allowability": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_rung_allowability_versions": struct(
+        tags = ["requires-network"],
+        reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
+    ),
+    "//tests:test_spaced_lax_tools_routing_1301": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stage_b_pass_profile": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stage_b_workspace_profile": struct(
+        tags = ["gpu"],
+        reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stageb_host_staging_1246": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stageb_one_pass_spill": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stageb_spill_input_digest": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_streamed_cost_checkpoints": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_streaming_production_cache": struct(
+        tags = ["gpu"],
+        reason = "3 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_streaming_static_activations": struct(
+        tags = ["gpu", "runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git; 1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tensor_digest_owner_recipes_2638": struct(
+        tags = ["gpu"],
+        reason = "3 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tensor_digests_1384": struct(
+        tags = ["gpu"],
+        reason = "5 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_campaign": struct(
+        tags = ["gpu"],
+        reason = "5 of its test functions (5 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_campaign_batch": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_joint_aura": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_partial_superblock": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (3 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_selected_source": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_serve_fingerprint": struct(
+        tags = ["runner"],
+        reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_validation_harness": struct(
+        tags = ["gpu"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+}
+
+def nonhermetic(name):
+    """Returns (tags, exec_properties, env) for the named test in this package.
+
+    gpu: some of its tests need CUDA, Triton or vLLM and skip without them. The
+    tag marks it for the GPU lane (tools/bazel/gpu, a follow-up); on the CPU
+    executors it still runs, and those tests skip as they do on hosted shards.
+    requires-network: the remote executor gets a network.
+    runner: the test runs on the Remote Bazel runner itself, a VM like a hosted
+    gate runner (all its CPUs, sudo), with pytest in the runner's git checkout.
+    Its result is never cached, because it reads that checkout.
+    hosted: Bazel never runs the test; the hosted lane runs it with
+    tools/ci/gate_run.py whenever Bazel's selection impacts its target.
+    """
+    entry = NONHERMETIC.get("//%s:%s" % (native.package_name(), name))
+    if not entry:
+        return [], {}, {}
+    tags, properties, env = list(entry.tags), {}, {}
+    if "requires-network" in entry.tags:
+        properties["dockerNetwork"] = "bridge"
+    if "runner" in entry.tags:
+        tags += ["no-remote-exec", "no-sandbox", "no-cache"]
+        env["PQ_BAZEL_LANE"] = "runner"
+    if "hosted" in entry.tags:
+        tags += ["manual", "gate-lane-hosted"]
+    return tags, properties, env

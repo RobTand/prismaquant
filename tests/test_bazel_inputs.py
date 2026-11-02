@@ -99,7 +99,7 @@ def test_shards_partition_the_collected_tests(tmp_path):
         environment = dict(os.environ, PQ_BAZEL_SHARD_INDEX=str(index), PQ_BAZEL_TOTAL_SHARDS='3',
                            PYTHONPATH=str(tmp_path))
         result = subprocess.run([sys.executable, '-m', 'pytest', str(module), '-p', 'bazel_shard',
-                                 '-q', '--collect-only', '-p', 'no:cacheprovider', '-c', os.devnull],
+                                 '-q', '--collect-only', '-p', 'no:cacheprovider'],
                                 cwd=tmp_path, env=environment, capture_output=True, text=True, check=True)
         seen.append({line for line in result.stdout.splitlines() if '::test_' in line})
     assert sum(map(len, seen)) == 7

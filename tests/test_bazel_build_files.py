@@ -555,3 +555,103 @@ def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
 def test_committed_build_files_carry_the_generated_header():
     for path in [ROOT / 'BUILD.bazel', ROOT / 'tests/BUILD.bazel']:
         assert path.read_text().startswith(build_files.HEADER), path
+
+
+def test_files_a_module_globs_below_its_own_directory_are_library_data(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('from pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'SPECS = sorted(_SPEC_DIR.glob("*.json"))\n'
+                                     'SOURCES = sorted(Path(__file__).parent.glob("*.py"))\n'),
+        'prismaquant/lane_specs/tessera.json': '{}', 'prismaquant/other.py': ''})
+    _, data = found.of('prismaquant/lane_spec.py')
+    assert 'prismaquant/lane_specs/tessera.json' in data
+    # A scan of the module's own directory stays a tree read of direct importers.
+    assert 'prismaquant/other.py' not in data
+
+
+def test_a_module_that_imports_a_computed_name_depends_on_modules_its_data_names(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('import json\nfrom importlib import import_module\nfrom pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'def plugin(name):\n'
+                                     '    spec = json.loads((_SPEC_DIR / f"{name}.json").read_text())\n'
+                                     '    return import_module(spec["plugin"])\n'),
+        'prismaquant/lane_specs/tessera.json': '{"plugin": "prismaquant.tessera_lane"}',
+        'prismaquant/tessera_lane.py': ''})
+    assert 'prismaquant/tessera_lane.py' in found.of('prismaquant/lane_spec.py')[0]
+
+
+def test_a_test_that_loads_a_module_by_path_depends_on_its_library(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_audit.py': ('import importlib.util\nfrom pathlib import Path\n'
+                                'FIXTURE = Path.cwd() / "tests" / "test_fixture.py"\n'
+                                'spec = importlib.util.spec_from_file_location("fixture", FIXTURE)\n'),
+        'tests/test_fixture.py': 'from test_helper import X\n', 'tests/test_helper.py': 'X = 1\n'})
+    assert 'tests/test_fixture.py' in found.of('tests/test_audit.py')[0]
+    assert 'tests/test_helper.py' in build_files.Graph(found).test_files('tests/test_audit.py')
+
+
+def test_a_directory_a_test_names_brings_its_files_and_a_top_level_one_does_not(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_copy.py': ('import shutil\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n'
+                               'SOURCE = ROOT / "tests" / "fixture-data" / "figure"\n'
+                               'TOP = ROOT / "docs"\n'),
+        'tests/fixture-data/figure/a.json': '{}', 'tests/fixture-data/figure/b.json': '{}', 'docs/x.md': ''})
+    data = found.of('tests/test_copy.py')[1]
+    assert {'tests/fixture-data/figure/a.json', 'tests/fixture-data/figure/b.json'} <= data
+    assert 'docs/x.md' not in data
+
+
+def test_a_py_path_inside_a_longer_string_is_a_reference(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_snippet.py': ("import subprocess, sys\n"
+                                  "CODE = \"import runpy; runpy.run_path(ROOT + '/experiments/manifests.py')\"\n"
+                                  "subprocess.run([sys.executable, '-c', CODE])\n"),
+        'experiments/manifests.py': 'from prismaquant import core\n', 'prismaquant/core.py': ''})
+    assert 'experiments/manifests.py' in found.of('tests/test_snippet.py')[0]
+
+
+def test_entry_points_a_test_runs_from_its_own_data_table_are_its_inputs(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_entrypoints.py': ('import json, subprocess, sys\nfrom pathlib import Path\n'
+                                      'ROWS = json.loads((Path(__file__).parent / "fixtures" / "rows.json").read_text())\n'
+                                      'def test_help():\n'
+                                      '    for row in ROWS:\n'
+                                      '        subprocess.run([sys.executable, *row["probe"]])\n'),
+        'tests/fixtures/rows.json': '[{"file": "tools/capture.py", "probe": ["-m", "tools.capture", "--help"]}]',
+        'tools/__init__.py': '', 'tools/capture.py': 'from prismaquant import replay\n', 'prismaquant/replay.py': ''})
+    assert 'tools/capture.py' in found.test_modules('tests/test_entrypoints.py')
+    assert 'prismaquant/replay.py' in build_files.Graph(found).test_files('tests/test_entrypoints.py')
+
+
+def test_an_entrypoint_string_with_an_attribute_names_its_module(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('import json\nfrom importlib import import_module\nfrom pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'def consumer(name):\n'
+                                     '    spec = json.loads((_SPEC_DIR / f"{name}.json").read_text())\n'
+                                     '    return import_module(spec["entrypoint"].split(":")[0])\n'),
+        'prismaquant/lane_specs/ct.json': '{"entrypoint": "prismaquant.validate_kl:main"}',
+        'prismaquant/validate_kl.py': ''})
+    assert 'prismaquant/validate_kl.py' in found.of('prismaquant/lane_spec.py')[0]
+
+
+def test_modules_a_test_inputs_entry_names_become_the_tests_dependencies(tmp_path):
+    sources = dict(SMALL, **{
+        'tools/bazel/test_inputs.bzl': ('TEST_INPUTS = {\n    "//tests:test_held": struct(\n'
+                                        '        modules = ["prismaquant/child.py"],\n'
+                                        '        reason = "it runs prismaquant.child from a computed name.",\n    ),\n}\n')})
+    generated = build_files.generate(tmp_path, write(tmp_path, sources))['tests']
+    held = generated[generated.index('name = "test_held"'):].split('\n)\n', 1)[0]
+    assert '"//:prismaquant/child"' in held
+    sources['tools/bazel/test_inputs.bzl'] = sources['tools/bazel/test_inputs.bzl'].replace('child.py', 'gone.py')
+    with pytest.raises(build_files.GenerationError, match='prismaquant/gone.py'):
+        build_files.generate(tmp_path, write(tmp_path, sources))
+
+
+def test_a_deselected_node_with_a_space_stays_one_argument():
+    plan = {'selected': [{'path': 'tests/test_in.py'}], 'deferred': [],
+            'deselect': ["tests/test_in.py::test_x[a b]"]}
+    args = build_files.test_attributes('tests/test_in.py', plan, {})['args']
+    assert build_files.shlex.split(args[0]) == ["--deselect=tests/test_in.py::test_x[a b]"]
