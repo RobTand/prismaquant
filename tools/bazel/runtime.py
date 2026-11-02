@@ -25,6 +25,14 @@ BAZEL_NAMES = {'JAVA_RUNFILES', 'PYTHON_RUNFILES', 'XML_OUTPUT_FILE', 'BAZEL_TES
                'RUNTEST_PRESERVE_CWD', 'TZ', 'BUILD_EXECROOT', 'PQ_BAZEL_LANE', 'PQ_BAZEL_BUDGETS'}
 
 
+def secret(name):
+    """A credential the Remote Bazel runner VM exports (BUILDBUDDY_API_KEY) or any
+    *API_KEY*/*TOKEN*: no test needs one, and a failure that prints its
+    environment would write it into an uploaded log."""
+    upper = name.upper()
+    return 'API_KEY' in upper or 'TOKEN' in upper
+
+
 def gate_environment(environ, root, scratch):
     """The pytest process's environment: the caller's minus Bazel's, plus the gate's.
 
@@ -34,7 +42,7 @@ def gate_environment(environ, root, scratch):
     TEST_TMPDIR is too long for the AF_UNIX sockets tests bind.
     """
     environment = {name: value for name, value in environ.items()
-                   if not name.startswith(BAZEL_PREFIXES) and name not in BAZEL_NAMES}
+                   if not name.startswith(BAZEL_PREFIXES) and name not in BAZEL_NAMES and not secret(name)}
     environment.update(GATE_ENVIRONMENT)
     environment['TMPDIR'] = environment['HOME'] = str(scratch)
     # gate_run puts tools/ci first; the gate workflow sets PYTHONPATH=. at the root.
