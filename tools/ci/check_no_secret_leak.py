@@ -2,13 +2,17 @@
 """Portable secret scanner, shared byte-for-byte across repositories.
 
 Arguments: one or more file/directory paths, recursively scanned, and repeated
---env NAME options naming environment variables containing secrets. There are
-no default names. Secret values never belong in command-line arguments.
+--env NAME or --require NAME options naming environment variables containing
+secrets. At least one name is required; there are no default names. --require
+implies scanning NAME and fails if its value is unset or empty. Secret values
+never belong in command-line arguments.
 
 Exit codes: 0 means no detected value; 1 means a value was detected; 75 means
-invalid arguments, an unreadable path/member or excessive nesting prevented a complete scan.
+invalid arguments, a missing required secret, an unreadable path/member or
+excessive nesting prevented a complete scan.
 Incomplete scans take precedence over detections. Unset/empty variables are
-reported as "not available, not scanned" without failing.
+reported as "not available, not scanned" without failing unless required;
+required ones report "required but not available" and are not scanned.
 
 Checks raw, standard/URL-safe base64, and URL-encoded bytes, including gzip and
 zstd members embedded in files or nested up to 32 levels. Magic at offset zero
@@ -94,11 +98,16 @@ def inspect_secret_members(data, secrets, emit, path, depth=0):
 
 def main(argv=None):
     parser = SecretScanParser(description=__doc__)
-    parser.add_argument('--env', action='append', required=True, metavar='NAME',
+    parser.add_argument('--env', action='append', default=[], metavar='NAME',
                         help='name of a secret environment variable; repeat for each variable')
+    parser.add_argument('--require', action='append', default=[], metavar='NAME',
+                        help='scan this secret environment variable and fail if unset or empty; repeatable')
     parser.add_argument('paths', nargs='+', type=Path)
     args = parser.parse_args(argv)
-    secrets = {name: secret_byte_forms(value) for name in args.env
+    names = list(dict.fromkeys(args.env + args.require))
+    if not names:
+        parser.error('at least one --env or --require name is required')
+    secrets = {name: secret_byte_forms(value) for name in names
                if (value := os.environ.get(name))}
     redactions = sorted({form.decode(errors='replace') for forms in secrets.values() for form in forms},
                         key=len, reverse=True)
@@ -109,11 +118,15 @@ def main(argv=None):
                 message = message.replace(value, '')
         print(message)
 
-    for name in dict.fromkeys(args.env):
-        if name not in secrets:
-            emit(f'{name}: not available, not scanned')
-    detected = False
     incomplete = False
+    for name in names:
+        if name not in secrets:
+            if name in args.require:
+                emit(f'{name}: required but not available')
+                incomplete = True
+            else:
+                emit(f'{name}: not available, not scanned')
+    detected = False
 
     def scan_file(path):
         nonlocal detected, incomplete
