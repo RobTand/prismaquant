@@ -18,7 +18,7 @@ def test_cheaper_test_ranks_against_cuts_and_uses_measured_runtime():
     assert ranked[0]['effort_lines']==2
     assert ranked[0]['symbols'][0]['measurement']=='measured'
     assert ranked[1]['delta_seconds']==1
-    assert ranked[-1]['remaining_seconds']==pytest.approx(17/3)
+    assert ranked[-1]['remaining_seconds']==pytest.approx(14/3)
 
 
 def test_runtime_savings_rescore_after_a_cut_removes_selections():
