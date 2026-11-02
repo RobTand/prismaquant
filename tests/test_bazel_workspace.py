@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = (ROOT / '.bazelrc').read_text().splitlines()
@@ -93,6 +94,19 @@ def test_special_tests_carry_a_reason_and_a_known_lane():
 def test_every_extra_test_input_carries_a_reason():
     table = (ROOT / 'tools/bazel/test_inputs.bzl').read_text()
     assert table.count('struct(') == len(re.findall(r'\n        reason = "[^"]{20,}",', table))
+
+
+def test_arm64_disk_tests_remain_executable_on_amd64():
+    scope = {'struct': SimpleNamespace,
+             'native': SimpleNamespace(package_name=lambda: 'tests')}
+    exec((ROOT / 'tools/bazel/nonhermetic.bzl').read_text(), scope)
+    # Both failed the real arm64 sweep at its disk-space preflight.
+    for name in ('test_capture_layer_chain', 'test_tessera_calibration_cache'):
+        tags, properties, environment = scope['nonhermetic'](name)
+        assert 'hosted-arm64' in tags
+        assert not {'manual', 'gate-lane-hosted', 'no-remote-exec'} & set(tags)
+        assert environment.get('PQ_BAZEL_LANE') != 'runner'
+        assert '0' in scope['NONHERMETIC']['//tests:' + name].reason
 
 
 def test_torch_comes_from_the_cpu_index_per_platform():
