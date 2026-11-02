@@ -112,7 +112,7 @@ jobs:
         PYTHON
     - name: Scan artifact paths for secrets
       id: scan-artifacts-1
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -125,7 +125,7 @@ jobs:
         retention-days: 7
     - name: Scan artifact paths for secrets
       id: scan-artifacts-2
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -218,7 +218,7 @@ jobs:
         exit "$code"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-3
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -354,7 +354,7 @@ jobs:
         exit "$code"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-4
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -427,7 +427,7 @@ jobs:
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-5
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
@@ -491,7 +491,7 @@ jobs:
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-6
-      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
