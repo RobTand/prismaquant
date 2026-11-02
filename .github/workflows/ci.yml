@@ -145,6 +145,11 @@ jobs:
         # need (#3216); its commit is staged_lease.PB_READER_LEASE_PIN_COMMIT.
         run: python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
 
+      - name: Remove installed dependency source checkouts
+        run: |
+          rm -rf .ci/tessera .ci/prismabuild
+          rmdir .ci
+
       - name: Exclude owned hosted quarantine entries
         run: |
           python - <<'PYTHON'

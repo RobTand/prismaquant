@@ -209,6 +209,9 @@ jobs:
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
         python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+        # Provenance checks must name only the executed PQ tree.
+        rm -rf .ci/tessera .ci/prismabuild
+        rmdir .ci
         python --version
         python -m pip --version
     - name: Run assigned gate tests
@@ -360,6 +363,9 @@ jobs:
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
         python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+        # Provenance checks must name only the executed PQ tree.
+        rm -rf .ci/tessera .ci/prismabuild
+        rmdir .ci
         python --version
         python -m pip --version
     - name: Run assigned gate tests
