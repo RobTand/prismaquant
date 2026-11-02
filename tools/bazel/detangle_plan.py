@@ -188,19 +188,32 @@ class Scorer:
     for the many edges whose removal changes no selected tests.
     """
 
-    def __init__(self, selection, replay, weights, config, *, _node_seed=None):
+    def __init__(self, selection, replay, weights, config, *, _node_seed=None, _fixed=None):
         self.selection, self.replay, self.weights, self.config = selection, replay, weights, config
         self.n = len(replay)
         if not self.n:
             raise ValueError('replay must contain at least one merge')
-        self.changed = defaultdict(int)
-        fallbacks = 0
-        for i, merge in enumerate(replay):
-            if any(config.fallback(p) for p in merge['changed']):
-                fallbacks += 1
-            else:
-                for path in merge['changed']:
-                    self.changed[path] |= 1 << i
+        if _fixed is None:
+            self.changed = defaultdict(int)
+            fallbacks = 0
+            for i, merge in enumerate(replay):
+                if any(config.fallback(p) for p in merge['changed']):
+                    fallbacks += 1
+                else:
+                    for path in merge['changed']:
+                        self.changed[path] |= 1 << i
+            self.fallback_cost = fallbacks * sum(weights.values())
+            self.extra_bits = {}
+            for test in selection.roots:
+                bits = self.changed[test]
+                for path in selection.extras.get(test, ()):
+                    bits |= self.changed[path]
+                self.extra_bits[test] = bits
+        else:
+            # Cuts preserve replay, population, test roots and own inputs.
+            self.changed = _fixed.changed
+            self.fallback_cost = _fixed.fallback_cost
+            self.extra_bits = _fixed.extra_bits
         self.edges = selection.combined()
         nodes = set(self.edges) | {t for ts in self.edges.values() for t in ts}
         nodes |= {p for roots in selection.roots.values() for p in roots}
@@ -240,17 +253,14 @@ class Scorer:
                     queue.append(parent)
         self.test_roots = {test: {self.owner[root] for root in roots} for test, roots in selection.roots.items()}
         self.root_tests = defaultdict(set)
-        self.extra_bits, self.test_bits = {}, {}
+        self.test_bits = {}
         for test, roots in self.test_roots.items():
-            bits = self.changed[test]
-            for path in selection.extras.get(test, ()):
-                bits |= self.changed[path]
-            self.extra_bits[test] = bits
+            bits = self.extra_bits[test]
             for root in roots:
                 self.root_tests[root].add(test)
                 bits |= self.bits[root]
             self.test_bits[test] = bits
-        self.baseline = (fallbacks * sum(weights.values()) + sum(
+        self.baseline = (self.fallback_cost + sum(
             bits.bit_count() * weights[test] for test, bits in self.test_bits.items())) / self.n
 
     def cost(self, cuts=frozenset()):
@@ -278,7 +288,7 @@ class Scorer:
                         seed |= self.changed[path]
                     seeds[source] = seed
                 return Scorer(self.selection.without(cuts), self.replay, self.weights, self.config,
-                              _node_seed=seeds).baseline
+                              _node_seed=seeds, _fixed=self).baseline
         changed_deps, changed_seed = {}, {}
         pairs = {(self.owner[s], self.owner[t]) for s, t in removed if self.owner[s] != self.owner[t]}
         for source, target in pairs:
@@ -332,7 +342,8 @@ def rank(selection, replay, weights, candidates, config, limit=20):
     # An upper bound on later marginal gains is NOT safe across SCC cuts.
     # Every candidate is therefore rescored after every pick.
     for iteration in range(limit):
-        scorer = Scorer(selection.without(cuts), replay, weights, config)
+        if cuts:
+            scorer = Scorer(selection.without(cuts), replay, weights, config, _fixed=scorer)
         best = None
         largest_gain = 0
         for candidate in remaining:
