@@ -140,6 +140,8 @@ def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
         pin = root / PIN_RELATIVE
         pin.parent.mkdir(parents=True)
         shutil.copy2(REPO / PIN_RELATIVE, pin)
+        metadata = Path("prismaquant/gold_producer_files.py")
+        shutil.copy2(REPO / metadata, root / metadata)
     return root
 
 

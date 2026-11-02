@@ -50,6 +50,10 @@ from .stage_inputs import (
     source_prefetch as _source_prefetch,
 )
 
+from .tessera_head_walk_schema import (
+    HEAD_WALK_STAGE, HEAD_WALK_STATE_SCHEMA, HEAD_WALK_JOURNAL_SCHEMA,
+)
+
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
 HISTORICAL_WIRE_VALIDATION = "historical_prepared_identity; current_bytes_require_export_gate"
@@ -89,9 +93,6 @@ STAGE = campaign_table.STAGE
 # stage of this campaign already uses (``prepare_journal``/``write_unit``),
 # and a resume re-verifies the banked prefix against the bytes it was banked
 # from before trusting one row of it.
-HEAD_WALK_STAGE = "joint head walk"
-HEAD_WALK_STATE_SCHEMA = "prismaquant.tessera_joint_aura.head_walk_unit.v1"
-HEAD_WALK_JOURNAL_SCHEMA = "prismaquant.tessera_joint_aura.head_walk.v1"
 #: The campaign inputs the head walk reads, each bound by digest in a plan's
 #: ``inputs`` block (``load_measured_anchor_input``).
 HEAD_WALK_INPUT_KEYS = ("campaign_plan", "census", "campaign_receipts", "merged_cost",

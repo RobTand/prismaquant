@@ -2024,7 +2024,7 @@ def _verify_gold_producer_identity(
     producer = manifest.get("producer_identity")
     tool = manifest.get("measurement_tool")
     try:
-        from tools.serve_fingerprint import (
+        from .gold_producer_files import (
             _GOLD_PRODUCER_COMMON_FILES,
             _GOLD_PRODUCER_TOOL_FILES,
         )

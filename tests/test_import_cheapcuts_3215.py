@@ -1,5 +1,4 @@
 """Ranked cheap cuts must remove imports even inside function bodies."""
-import ast
 from pathlib import Path
 
 import pytest

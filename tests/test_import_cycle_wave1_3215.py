@@ -118,7 +118,7 @@ def test_the_lower_module_never_loads_the_higher_one(graph, lower, higher):
 def test_the_graph_counts_function_local_and_package_imports(graph):
     """Positive controls: imports this wave keeps, of each kind the oracle must see."""
     # ``producer_package_sha256`` imports the cache inside the function.
-    assert "prismaquant.production_weight_cache" in graph["prismaquant.aura_provenance"]
+    assert "prismaquant.production_weight_cache" in graph["prismaquant.producer_package"]
     # ``detect_profile`` imports ``..staged_whole_file`` inside the function.
     assert "prismaquant.staged_whole_file" in graph["prismaquant.model_profiles.registry"]
     # A submodule runs its package's ``__init__`` first.
