@@ -293,3 +293,83 @@ def test_invalid_file_budget_is_a_policy_failure(tmp_path, file_seconds):
     policy(tmp_path, file_seconds=file_seconds)
     code, result = budget_run(tmp_path, case('1'))
     assert code == 1 and result['budget']['status'] == 'fail'
+
+
+@pytest.mark.parametrize('first_seconds,first_code,first_failure,again_seconds,again_code,again_failure,expected,outcome', [
+    (31, 0, None, 12, 0, None, 0, 'pass'),
+    (31, 0, None, 31, 0, None, 1, 'fail'),
+    (31, 0, None, 12, 1, 'failure', 1, 'fail'),
+    (31, 0, None, 12, 3, None, 75, 'no_verdict'),
+    (31, 0, None, None, -9, None, 75, 'no_verdict'),
+    (1, 1, 'failure', None, None, None, 1, None),
+    (31, 1, 'failure', None, None, None, 1, None),
+    (31, 0, 'error', None, None, None, 1, None),
+    (31, 3, None, None, None, None, 75, None),
+    (25, 0, None, None, None, None, 0, None),
+])
+def test_budget_only_rerun_verdicts(tmp_path, monkeypatch, first_seconds, first_code,
+                                   first_failure, again_seconds, again_code,
+                                   again_failure, expected, outcome):
+    policy(tmp_path)
+    summary = tmp_path / 'summary.md'
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append((command, kwargs['env']))
+        seconds, code, failure = ((first_seconds, first_code, first_failure) if len(calls) == 1
+                                  else (again_seconds, again_code, again_failure))
+        if seconds is not None:
+            report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+            xml = case(str(seconds))
+            if failure:
+                xml = xml.replace('/></testsuite>', f'><{failure}>defect</{failure}></testcase></testsuite>')
+            report.write_text(xml)
+        return SimpleNamespace(returncode=code)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}],
+                            'deselect': ['tests/test_sample.py::test_quarantined']},
+                           root=tmp_path, output=tmp_path / 'result.json',
+                           junit=tmp_path / 'junit.xml', execute=execute, affinity={1, 2}, workers=2)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == expected
+    if outcome is None:
+        assert len(calls) == 1
+        assert result.get('budget_reruns', []) == []
+        return
+    assert len(calls) == 2
+    assert result['verdict'] == {'pass': 'pass', 'fail': 'fail', 'no_verdict': None}[outcome]
+    assert result['budget_reruns'] == [{
+        'nodeid': 'tests/test_sample.py::test_cost', 'first_seconds': 31.0,
+        'rerun_seconds': again_seconds, 'limit': 30.0, 'outcome': outcome}]
+    command, environment = calls[1]
+    assert command[-1] == str(tmp_path / 'tests/test_sample.py') + '::test_cost'
+    assert command[command.index('-n') + 1] == '2'
+    assert environment['GATE_DESELECT_NODEIDS'] == calls[0][1]['GATE_DESELECT_NODEIDS']
+    assert environment['OMP_NUM_THREADS'] == '1'
+    assert 'tests/test_sample.py::test_cost' in summary.read_text()
+    assert outcome in summary.read_text()
+    # The first report remains the evidence for exact-once shard coverage.
+    assert next(ET.parse(tmp_path / 'junit.xml').iter('testcase')).get('time') == '31'
+
+
+def test_file_budget_reruns_the_complete_file(tmp_path):
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 20})
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        report.write_text(case('16' if len(calls) == 1 else '5').replace(
+            '</testsuite>', '<testcase file="tests/test_sample.py" classname="tests.test_sample" '
+            'name="test_other" time="16"/></testsuite>'))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+                           root=tmp_path, output=tmp_path / 'result.json',
+                           junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0
+    assert len(calls) == 2 and calls[1][-1] == str(tmp_path / 'tests/test_sample.py')
+    assert result['budget_reruns'] == [{'nodeid': 'tests/test_sample.py', 'first_seconds': 32.0,
+                                      'rerun_seconds': 21.0, 'limit': 30.0, 'outcome': 'pass'}]
