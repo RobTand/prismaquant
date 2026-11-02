@@ -165,6 +165,81 @@ def test_zstd_scanned_or_explicitly_unavailable(tmp_path):
     assert secret not in result.stdout + result.stderr
 
 
+def zstd_raw_frame(payload):
+    """Build a single-segment frame with one final raw block, without a decoder."""
+    assert len(payload) < 256
+    return (bytes.fromhex('28b52ffd20') + bytes([len(payload)])
+            + ((len(payload) << 3) | 1).to_bytes(3, 'little') + payload)
+
+
+def test_execution_log_zstd_with_stray_gzip_magic_is_clean(tmp_path):
+    # Synthetic length-delimited protobuf record, like a Bazel execution log.
+    # Its raw zstd block deliberately contains gzip magic with no gzip member.
+    record = b'\x0a\x0a/bin/clang\x12\x04\x1f\x8b\x00\xff'
+    frame = zstd_raw_frame(bytes([len(record)]) + record)
+    scanner = load_scanner()
+    if scanner.zstd is not None:
+        assert scanner.zstd.decompress(frame) == bytes([len(record)]) + record
+    artifact = tmp_path / 'execution_log.binpb.zst'
+    artifact.write_bytes(frame)
+    result = scan(artifact)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if scanner.zstd is None:
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+
+
+@pytest.mark.parametrize('planted', [False, True])
+def test_unknown_binary_magic_does_not_prevent_raw_scan(tmp_path, planted):
+    artifact = tmp_path / 'unknown.bin'
+    artifact.write_bytes(b'\x00binary\x1f\x8b\x00\xff\x28\xb5\x2f\xfd\xff'
+                         + (SECRET.encode() if planted else b'clean'))
+    result = scan(artifact)
+    assert result.returncode == (1 if planted else 0), result.stdout + result.stderr
+    assert SECRET not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('wrapper', ['plain', 'embedded', 'gzip', 'zstd'])
+def test_concatenated_zstd_frames_scan_compressed_secret(tmp_path, wrapper):
+    secret = 'Q' * 64
+    # RLE hides the planted value from the raw byte scan.
+    frames = zstd_raw_frame(b'clean\x1f\x8b\x00\xff') + bytes.fromhex('28b52ffd204003020051')
+    if wrapper == 'embedded':
+        frames = b'prefix\x00' + frames
+    elif wrapper == 'gzip':
+        frames = gzip.compress(frames)
+    elif wrapper == 'zstd':
+        frames = zstd_raw_frame(frames)
+    artifact = tmp_path / 'nested.zst'
+    artifact.write_bytes(frames)
+    result = scan(artifact, values={'SCAN_FAKE_SECRET': secret})
+    if load_scanner().zstd is None:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+    assert secret not in result.stdout + result.stderr
+
+
+def test_corrupt_concatenated_gzip_is_not_silently_passed(tmp_path):
+    artifact = tmp_path / 'broken-concatenated.gz'
+    artifact.write_bytes(gzip.compress(b'clean') + b'\x1f\x8b\x08broken')
+    result = scan(artifact)
+    assert result.returncode == 75
+    assert 'gzip member unreadable, not scanned' in result.stdout
+
+
+def test_corrupt_zstd_is_not_silently_passed_when_supported(tmp_path):
+    artifact = tmp_path / 'broken.zst'
+    artifact.write_bytes(bytes.fromhex('28b52ffdff'))
+    result = scan(artifact)
+    if load_scanner().zstd is None:
+        assert result.returncode == 0
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+    else:
+        assert result.returncode == 75
+        assert 'zstd member unreadable, not scanned' in result.stdout
+
+
 def test_portable_core_matches_cross_repo_pin():
     expected = (SCANNER.with_suffix('.sha256')).read_text().split()[0]
     assert hashlib.sha256(SCANNER.read_bytes()).hexdigest() == expected, (
