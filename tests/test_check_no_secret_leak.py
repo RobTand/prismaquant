@@ -31,7 +31,7 @@ def scan(*paths, variables=('SCAN_FAKE_SECRET',), values=None):
 @pytest.mark.parametrize('payload', [
     SECRET.encode(), base64.b64encode(SECRET.encode()),
     base64.urlsafe_b64encode(SECRET.encode()),
-    quote(SECRET, safe='').encode(), quote_plus(SECRET).encode(),
+    quote(SECRET, safe='').encode(), quote(SECRET).encode(), quote_plus(SECRET).encode(),
     gzip.compress(SECRET.encode()),
     gzip.compress(b'clean') + gzip.compress(SECRET.encode()),
     gzip.compress(gzip.compress(SECRET.encode())),
@@ -40,7 +40,7 @@ def test_secret_forms_in_nested_directory_are_refused(tmp_path, payload):
     nested = tmp_path / 'nested'
     nested.mkdir()
     artifact = nested / 'diagnostic.bin'
-    artifact.write_bytes(b'prefix\n' + payload if not payload.startswith(b'\x1f\x8b') else payload)
+    artifact.write_bytes(b'prefix\n' + payload)
     result = scan(tmp_path)
     assert result.returncode == 1, result.stderr
     output = result.stdout + result.stderr
@@ -115,6 +115,20 @@ def test_corrupt_gzip_is_not_silently_passed(tmp_path):
     result = scan(artifact)
     assert result.returncode == 75
     assert 'not scanned' in result.stdout + result.stderr
+
+
+def test_directory_traversal_errors_fail_closed(tmp_path, monkeypatch, capsys):
+    scanner = load_scanner()
+    monkeypatch.setenv('SCAN_FAKE_SECRET', SECRET)
+
+    def denied(path, *, onerror, **kwargs):
+        onerror(PermissionError(13, SECRET, str(tmp_path)))
+        return iter(())
+
+    monkeypatch.setattr(os, 'walk', denied)
+    assert scanner.main(['--env', 'SCAN_FAKE_SECRET', str(tmp_path)]) == 75
+    output = capsys.readouterr()
+    assert SECRET not in output.out + output.err
 
 
 def test_zstd_scanned_or_explicitly_unavailable(tmp_path):
