@@ -95,8 +95,9 @@ def main(argv=None):
                         key=len, reverse=True)
 
     def emit(message):
-        for value in redactions:
-            message = message.replace(value, '')
+        while any(value in message for value in redactions):
+            for value in redactions:
+                message = message.replace(value, '')
         print(message)
 
     for name in dict.fromkeys(args.env):
