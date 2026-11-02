@@ -3,6 +3,9 @@
   "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088",
   "candidate_commit": "027103d9a8417e06c7f13356e58779a313cd7088",
   "runtime_generation": "027103d9a8417e06c7f13356e58779a313cd7088",
+  "source_tree": "29c056c0db0d91526e3035211b6bef07e74fb55a",
+  "source_timestamp": 1791069395,
+  "git_archive_sha256": "94727274fd0515c5f1ee7c031c90c1106793ef22b38b286caf44f1755675677d",
   "qualification": "SOURCE QUALIFICATION ONLY: reviewed PB #1482 at 027103d9, SDK5; immutable git-archive source bundle. No fleet deployment or GPU qualification is established.",
   "files": {
     "src/prismabuild/action_edges.py": "969abef4dddbf195da96c1d2c3b5a8775efbe348a44f6f80ffac14e3ae8ea9af",
@@ -27,6 +30,9 @@
     "tools/prismabuild_worker.py": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
   },
   "search_paths": [
+    {
+      "env": "PRISMAQUANT_PB_SOURCE_BUNDLE"
+    },
     {
       "path": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk5-20261009/027103d9a8417e06c7f13356e58779a313cd7088"
     }

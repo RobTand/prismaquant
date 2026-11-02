@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.metadata as metadata
+import os
 from pathlib import Path
 
 import pytest
@@ -62,12 +63,19 @@ LEASE_HELPER_SKIP_REASON = "prismabuild lease helper absent: fleet-only, runs un
 #: reviewed commit (``tests/pb_runtime_generation_pin.json``); unlike the
 #: installed SDK it carries PB's ``tools/`` (``tools/fleet/*.py``,
 #: ``tools/prismabuild_worker.py``), which no ``prismabuild`` distribution
-#: installs. Only the fleet's shared mount provides it.
+#: installs. Hosted tests build the same tree from the reviewed source pin.
 PB_SOURCE_BUNDLE_SKIP_REASON = (
     "PrismaBuild source bundle absent: fleet-only, runs under pbtest")
 
 #: The fleet's shared mount, which the bundle and shared fixtures live on.
 SHARED_MOUNT = Path("/mnt/shared")
+
+PB_SOURCE_BUNDLE_ENV = "PRISMAQUANT_PB_SOURCE_BUNDLE"
+
+
+def pb_source_bundle_root(pin: dict) -> Path:
+    """An explicit test bundle replaces the fleet's historical default root."""
+    return Path(os.environ.get(PB_SOURCE_BUNDLE_ENV) or pin["bundle_root"])
 
 
 def require_pb_source_bundle(root: Path) -> None:

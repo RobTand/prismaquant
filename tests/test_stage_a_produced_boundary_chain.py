@@ -110,6 +110,9 @@ _NO_DEBT = {"pending": {}, "abandoned": {}, "unclassified": {},
 # -- pinned candidate resolution -------------------------------------------
 
 def _pin_roots(pin: dict) -> list[Path]:
+    from fleet_sdk import PB_SOURCE_BUNDLE_ENV
+    if override := os.environ.get(PB_SOURCE_BUNDLE_ENV):
+        return [Path(override)]
     roots: list[Path] = []
     for entry in pin["search_paths"]:
         if "env" in entry:
@@ -160,7 +163,13 @@ def _pb_source() -> tuple[Path, Path]:
         except OSError:
             return False
 
-    roots = [root for root in _pin_roots(pin) if _digest_ok(root)]
+    roots = []
+    for root in _pin_roots(pin):
+        if not root.exists():
+            continue
+        assert root.name == pin["runtime_generation"], f"wrong PB generation: {root}"
+        assert _digest_ok(root), f"PB source bundle differs from pinned digests: {root}"
+        roots.append(root)
     already = sys.modules.get("prismabuild")
     if already is not None and roots:
         resolved = Path(already.__file__).resolve().parent

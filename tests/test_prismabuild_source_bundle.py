@@ -110,3 +110,28 @@ def test_hosted_suites_build_the_bundle_and_export_its_locator(workflow):
     assert '"$RUNNER_TEMP/pb-source"' in build["run"]
     assert "PRISMAQUANT_PB_SOURCE_BUNDLE" in build["run"]
     assert '"$GITHUB_ENV"' in build["run"]
+
+
+def test_explicit_bundle_never_falls_back_to_the_fleet_mount(tmp_path, monkeypatch):
+    import fleet_sdk
+    import test_stage_a_produced_boundary_chain as chain
+
+    root = tmp_path / "missing"
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
+    pin = json.loads(chain.PIN_PATH.read_text())
+    assert fleet_sdk.pb_source_bundle_root(pin) == root
+    assert chain._pin_roots(pin) == [root]
+    with pytest.raises(pytest.skip.Exception, match="no PrismaBuild produced-output candidate"):
+        chain._pb_source()
+
+
+def test_produced_candidate_with_wrong_bytes_fails_instead_of_skipping(tmp_path, monkeypatch):
+    import fleet_sdk
+    import test_stage_a_produced_boundary_chain as chain
+
+    pin = json.loads(chain.PIN_PATH.read_text())
+    root = tmp_path / pin["runtime_generation"]
+    root.mkdir()
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
+    with pytest.raises(AssertionError, match="differs from pinned digests"):
+        chain._pb_source()
