@@ -45,7 +45,7 @@ MIGRATIONS_PATH = 'tools/ci/gate_budget_migrations.json'
 MIGRATION_RUNNERS = frozenset({'ubuntu-24.04', 'ubuntu-24.04-arm'})
 
 
-def _finite_positive(value):
+def _positive_seconds(value):
     return (not isinstance(value, bool) and isinstance(value, (int, float)) and
             math.isfinite(value) and value > 0)
 
@@ -85,7 +85,7 @@ def _migration_limits(root, base_policy):
                                     isinstance(row.get('run'), bool) or
                                     not isinstance(row.get('run'), int) or
                                     row.get('runner') not in MIGRATION_RUNNERS or
-                                    not _finite_positive(row.get('seconds')) for row in rows) or
+                                    not _positive_seconds(row.get('seconds')) for row in rows) or
                     {row['runner'] for row in rows} != MIGRATION_RUNNERS):
                 raise BudgetFailure(f'Budget migration for {name} needs hosted evidence '
                                     'from both architectures')
