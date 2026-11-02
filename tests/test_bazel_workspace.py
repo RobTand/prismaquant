@@ -93,3 +93,12 @@ def test_special_tests_carry_a_reason_and_a_known_lane():
 def test_every_extra_test_input_carries_a_reason():
     table = (ROOT / 'tools/bazel/test_inputs.bzl').read_text()
     assert table.count('struct(') == len(re.findall(r'\n        reason = "[^"]{20,}",', table))
+
+
+def test_torch_comes_from_the_cpu_index_per_platform():
+    # pip on the amd64 runner would otherwise install an x86 torch that arm64 executors can't load.
+    assert 'experimental_index_url_overrides = {"torch": "https://download.pytorch.org/whl/cpu"}' in MODULE
+    for platform in ('x86_64', 'aarch64'):
+        export = (ROOT / f'tools/bazel/requirements_linux_{platform}.txt').read_text()
+        assert 'torch==' in export and '+cpu' in export.split('torch==', 1)[1].split()[0]
+        assert '--extra-index-url' not in export
