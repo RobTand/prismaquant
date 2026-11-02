@@ -51,6 +51,7 @@ jobs:
       id: head-contract
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         for file in tools/ci/gate_select.py tools/ci/gate_run.py tools/ci/gate_collect.py tools/ci/gate_partition.py tools/ci/gate_actions.py tools/ci/gate_budget.json tools/ci/gate_durations.json tools/ci/gate_quarantine.json tools/ci/gate_paths.py; do
           if [ ! -f "$file" ]; then
@@ -69,6 +70,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: planning infrastructure failed"; exit 75' ERR
         mkdir -p gate-artifacts
@@ -133,6 +135,70 @@ jobs:
         name: gate-shadow-selection-${{ github.run_attempt }}
         path: gate-artifacts/plan.json
         retention-days: 7
+  graph-impact:
+    name: Graph impact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      verdict: ${{ steps.check.outputs.verdict }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+    - name: Install graph check dependencies
+      run: |
+        unset BUILDBUDDY_API_KEY
+        python -m pip install -c .github/ci-constraints.txt pytest
+    - name: Run required graph impact check
+      id: check
+      shell: bash
+      run: |
+        unset BUILDBUDDY_API_KEY
+        set -Eeuo pipefail
+        mkdir -p graph-impact
+        python -m pytest tests/test_graph_impact.py::test_graph_impact_gate --noconftest \
+          -q --junitxml=graph-impact/junit.xml 2>&1 | tee graph-impact/tests.txt
+        python - <<'GRAPH_VERDICT'
+        import os
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
+        cases = ET.parse('graph-impact/junit.xml').findall('.//testcase')
+        if len(cases) != 1 or cases[0].get('name') != 'test_graph_impact_gate' or any(
+            case.find(tag) is not None for case in cases
+                                  for tag in ('failure', 'error', 'skipped')):
+            raise SystemExit('NO_VERDICT: expected exactly one passing graph impact test')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=pass\n')
+        GRAPH_VERDICT
+    - name: Scan graph artifacts before upload
+      id: scan
+      if: always()
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        unset BUILDBUDDY_API_KEY
+        python - <<'GRAPH_SCAN'
+        import os
+        from pathlib import Path
+        secrets = [value.encode() for name, value in os.environ.items()
+                   if value and ('TOKEN' in name or 'API_KEY' in name)]
+        for path in Path('graph-impact').rglob('*'):
+            if path.is_file() and any(secret in path.read_bytes() for secret in secrets):
+                path.unlink()
+                raise SystemExit('Credential detected; artifact removed')
+        GRAPH_SCAN
+    - if: ${{ always() && steps.scan.outcome == 'success' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: graph-impact-${{ github.run_attempt }}
+        path: graph-impact
+        if-no-files-found: error
+        retention-days: 7
   shards:
     name: shard-${{ matrix.index }}-a1
     needs: plan
@@ -147,6 +213,7 @@ jobs:
     - name: Configure owned temporary space
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -160,6 +227,7 @@ jobs:
     - name: Compute assignment before setup
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
         python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
@@ -174,6 +242,7 @@ jobs:
     - name: Resolve Tessera development pin
       id: tessera-pin
       run: |
+        unset BUILDBUDDY_API_KEY
         tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
         printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
@@ -186,6 +255,7 @@ jobs:
     - name: Install CPU test environment
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
         python -m pip install --upgrade pip
@@ -197,6 +267,7 @@ jobs:
     - name: Run assigned gate tests
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
         printf '## Shard %s, attempt 1\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
@@ -262,6 +333,7 @@ jobs:
       id: retry
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: retry planning infrastructure failed"; exit 75' ERR
         python3 tools/ci/gate_actions.py retries --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/retry-matrix.json             >> "$GITHUB_OUTPUT"
@@ -281,6 +353,7 @@ jobs:
     - name: Configure owned temporary space
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -294,6 +367,7 @@ jobs:
     - name: Compute assignment before setup
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
         python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
@@ -308,6 +382,7 @@ jobs:
     - name: Resolve Tessera development pin
       id: tessera-pin
       run: |
+        unset BUILDBUDDY_API_KEY
         tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
         printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
     - name: Check out pinned Tessera
@@ -320,6 +395,7 @@ jobs:
     - name: Install CPU test environment
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
         python -m pip install --upgrade pip
@@ -331,6 +407,7 @@ jobs:
     - name: Run assigned gate tests
       shell: bash
       run: |
+        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
         printf '## Shard %s, attempt 2\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
@@ -370,15 +447,27 @@ jobs:
     - shards
     - retry-plan
     - retry-shards
+    - graph-impact
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+    - name: Require graph impact verdict
+      env:
+        GRAPH_RESULT: ${{ needs.graph-impact.result }}
+        GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
+      run: |
+        unset BUILDBUDDY_API_KEY
+        if [ "$GRAPH_RESULT" != success ] || [ "$GRAPH_VERDICT" != pass ]; then
+          echo 'GATE_TEST_FAILURE: graph impact failed or has no passing verdict'
+          exit 1
+        fi
     - name: Require a complete plan
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
         HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
         POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
       run: |
+        unset BUILDBUDDY_API_KEY
         if [ "$HEAD_COMPATIBLE" = false ]; then
           echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
           exit 1
@@ -411,6 +500,7 @@ jobs:
         path: verdicts
     - name: Aggregate complete coverage and final verdicts
       run: |
+        unset BUILDBUDDY_API_KEY
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-5
@@ -434,15 +524,27 @@ jobs:
     - shards
     - retry-plan
     - retry-shards
+    - graph-impact
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+    - name: Require graph impact verdict
+      env:
+        GRAPH_RESULT: ${{ needs.graph-impact.result }}
+        GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
+      run: |
+        unset BUILDBUDDY_API_KEY
+        if [ "$GRAPH_RESULT" != success ] || [ "$GRAPH_VERDICT" != pass ]; then
+          echo 'GATE_TEST_FAILURE: graph impact failed or has no passing verdict'
+          exit 1
+        fi
     - name: Require a complete plan
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
         HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
         POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
       run: |
+        unset BUILDBUDDY_API_KEY
         if [ "$HEAD_COMPATIBLE" = false ]; then
           echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
           exit 1
@@ -475,6 +577,7 @@ jobs:
         path: verdicts
     - name: Aggregate complete coverage and final verdicts
       run: |
+        unset BUILDBUDDY_API_KEY
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-6

@@ -1,6 +1,27 @@
 # Hosted merge gate
 
-Every PR push runs `pr-gate`. The selector follows reverse imports, relative imports,
+Every PR push runs `pr-gate`. Its required `Graph impact` job runs
+`tests/test_graph_impact.py::test_graph_impact_gate` in parallel with the shards,
+with full git history and the event's PR base. It needs only pytest. A failed,
+skipped, cancelled, or missing graph verdict fails the aggregate. Its JUnit must
+contain exactly one passing graph test. The live test is excluded from shard
+execution and duration placement; its synthetic unit tests remain in the normal
+population. This job has no test-budget waiver.
+
+PQ's baseline uses `"test_to_test": "reach"`, a minimum edge count, and
+`"test_to_test_strict_by": "2026-11-16"`. It has no count-based switch trigger.
+After that date in UTC, the live check fails until you set `"test_to_test": "strict"`
+in `tests/fixtures/graph_impact_baseline.json` and fix or allowlist any new
+test→test edges. Injected dates cover before, on, and after the deadline, and the
+live check also asserts the real UTC date. The shared core remains unchanged.
+The discarded count target was 956 entries in PrismaBuild's
+`tests/fixtures/import_fanout_baseline.json` at origin/main
+`071094caa54922143398eb0397acb61bf3fed9f9`, already above PQ's 875.
+
+TODO after PR A: switch the graph job from the Python-import bridge to Bazel's
+`deps.json` plus the source-label query fallback described in [bazel.md](bazel.md).
+
+The selector follows reverse imports, relative imports,
 test helpers, and literal repository paths. A change it cannot explain selects the
 full population. Changes to gate tooling, workflows, conftest files, pytest configuration,
 constraints, dependency declarations, or the Tessera pin select the full population.

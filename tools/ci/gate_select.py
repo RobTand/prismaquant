@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import DIRECT_ASCII_LAX
+from tools.ci.gate_partition import DEDICATED_NODEIDS
 
 
 PATH_SPEC = importlib.util.spec_from_file_location('gate_paths', Path(__file__).with_name('gate_paths.py'))
@@ -380,8 +381,6 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         if why:
             reasons[name] = why
             explained.update(imported | referenced)
-    if 'tests/test_graph_impact.py' in population:
-        reasons.setdefault('tests/test_graph_impact.py', []).append('required graph impact check')
     reverse = helper_importers(index, changed, existing=helper_graph)
     pending = sorted(set(reasons) |
                      {path for path in changed if path.startswith('tests/')})
@@ -412,6 +411,8 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
                  for row in exclusions]
     deselect = sorted(row['target'] for row in exclusions if '::' in row['target'] and
                       row['target'].split('::')[0] in {item['path'] for item in selected})
+    deselect = sorted(set(deselect) | {node for node in DEDICATED_NODEIDS
+                      if node.split('::', 1)[0] in {item['path'] for item in selected}})
     files = [row['path'] for row in selected]
     return {'schema': 'prismaquant.gate_plan.v1', 'policy': POLICY,
             'population': {'size': len(population), 'version': version,

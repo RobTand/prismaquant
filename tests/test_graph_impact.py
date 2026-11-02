@@ -170,7 +170,20 @@ def test_vendored_core_hash():
     assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
+def assert_pq_test_edge_deadline(config, *, today=None):
+    from datetime import date, datetime, timezone
+    today = today if today is not None else datetime.now(timezone.utc).date()
+    deadline = date.fromisoformat(config['test_to_test_strict_by'])
+    if config['test_to_test'] == 'strict' or today <= deadline:
+        return
+    raise AssertionError(
+        'Set "test_to_test": "strict" in tests/fixtures/graph_impact_baseline.json '
+        'and fix or allowlist any new test→test edges.'
+    )
+
+
 def test_graph_impact_gate(capsys):
+    assert_pq_test_edge_deadline(json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text()))
     from tools.ci import graph_impact_pq
     with capsys.disabled():
         assert graph_impact_pq.main([]) == 0

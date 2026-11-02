@@ -1,6 +1,7 @@
 # Dependency graph impact
 
-`tests/test_graph_impact.py` runs on every hosted PR gate. It checks the graph
+`tests/test_graph_impact.py::test_graph_impact_gate` runs in its own required
+hosted job, in parallel with the gate shards. It checks the graph
 at the merge base against the PR head, without using run history. `GATE_BASE`
 selects the gate base; local runs use `git merge-base origin/main HEAD`.
 
@@ -10,8 +11,13 @@ fanout, the largest SCC and its members, and median/p90/maximum test reach.
 A new or changed test uses the maximum base reach in its package. An edited
 test can retain its own base reach; a new package uses the recorded global
 budget. New edges that expand existing-source fanout among existing tests,
-or deepen existing-test reach, fail. New test-to-test edges and conftest source
-imports retain their existing restrictions. Every SCC is checked for growth
+or deepen existing-test reach, fail. Conftest source imports remain forbidden.
+The shared core supports `test_to_test: strict|reach`. Strict mode refuses every
+new test-to-test edge. PQ uses reach mode until November 16, 2026: an edge may
+inherit the importer's base package maximum, but deeper reach fails. The total
+edge count may rise by at most five above its recorded minimum, and baseline
+writes retain the minimum. [The CI gate guide](ci_gate.md) describes PQ's
+mandatory switch test and date-only trigger. Every SCC is checked for growth
 or mergers, even when an unrelated larger cycle hides the size change. The
 SCC maximum can only shrink.
 U and LOC-weighted U are reported trends and never fail a PR. Baseline writes

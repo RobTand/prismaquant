@@ -186,6 +186,7 @@ def test_graph_aggregate_refuses_failed_or_missing_verdict(result, verdict, pass
 
 @pytest.mark.parametrize('cases,passes', [
     ('<testcase name="test_graph_impact_gate"/>', True), ('', False),
+    ('<testcase name="other"/>', False),
     ('<testcase><skipped/></testcase>', False), ('<testcase><failure/></testcase>', False),
     ('<testcase><error/></testcase>', False), ('<testcase/><testcase/>', False),
 ])

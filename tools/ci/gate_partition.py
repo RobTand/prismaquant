@@ -14,6 +14,9 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import text_sha256hex
 
+DEDICATED_NODEIDS = frozenset({'tests/test_graph_impact.py::test_graph_impact_gate'})
+
+
 def _cost(value: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
         raise ValueError('durations must be finite nonnegative numbers, not booleans')
@@ -36,7 +39,7 @@ def node_owner(nodeid: str, partition: dict) -> int:
 
 def assigned_nodes(collected: Mapping[str, Sequence[str]], partition: dict,
                    excluded: Sequence[str] = ()) -> list[str]:
-    excluded = set(excluded)
+    excluded = set(excluded) | DEDICATED_NODEIDS
     return sorted(node for nodes in collected.values() for node in nodes
                   if node not in excluded and node_owner(node, partition) == partition['index'])
 
@@ -78,6 +81,11 @@ def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
     nodes = {} if node_durations is None else {node: _cost(value) for node, value in node_durations.items()}
     if any(not isinstance(node, str) or '::' not in node for node in nodes):
         raise ValueError('node durations must name exact pytest node IDs')
+    for node in DEDICATED_NODEIDS:
+        path = node.split('::', 1)[0]
+        if node in nodes and path in costs:
+            costs[path] = max(0.0, costs[path] - nodes[node])
+        nodes.pop(node, None)
     target = sum(costs.get(path, unknown) for path in files) / count
     split = {path: {} for path in sorted(files)
              if count > 1 and node_durations is not None and costs.get(path, unknown) > target}
@@ -123,7 +131,8 @@ def selection_shard_count(files: Sequence[str], durations: Mapping[str, float], 
     # Reuse partition validation so an unknown file or invalid cost cannot be free.
     packed = shards(files, durations, workers, unknown_seconds=unknown, node_durations=node_durations)
     wall = max(row['estimated_seconds'] for row in packed)
-    node_counts = Counter(node.split('::', 1)[0] for node in (node_durations or {}))
+    node_counts = Counter(node.split('::', 1)[0] for node in (node_durations or {})
+                          if node not in DEDICATED_NODEIDS)
     useful = sum(max(1, node_counts[path]) for path in files if durations.get(path, unknown) > 0)
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError('workers must be a positive integer')
