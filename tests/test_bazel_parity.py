@@ -94,3 +94,8 @@ def test_receipts_match_hosted_nodes_and_outcomes(tmp_path):
     del actual['tests/test_a.py::test_two']
     with pytest.raises(RuntimeError, match='missing from Bazel: tests/test_a.py::test_two'):
         bazel_parity.compare_receipts(expected, actual)
+
+
+def test_quoted_args_are_read_as_bazel_tokenizes_them():
+    quoted = rule('tests/test_a.py', args=["'--deselect=tests/test_a.py::test_flaky'"])
+    assert bazel_parity.bazel_tests([quoted])['tests/test_a.py'][0][2] == ['tests/test_a.py::test_flaky']
