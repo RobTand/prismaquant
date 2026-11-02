@@ -290,5 +290,3 @@ def measure_fanout(root: Path = ROOT, evidence: str = 'imports', population: lis
                                        for target in graph.edges[path] if is_test_module(target)),
         'dependents': dict(sorted(dependents.items(), key=lambda item: (-item[1], item[0]))),
     }
-
-
