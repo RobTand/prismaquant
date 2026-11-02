@@ -2602,9 +2602,17 @@ class RuntimeContractSnapshot:
         from copy import deepcopy
         from .lane_eligibility import native_rung_verdict
 
-        return deepcopy(native_rung_verdict(
+        verdict = native_rung_verdict(
             name, self._eligibility, self._format_rows,
-            serving_context=serving_context))
+            serving_context=serving_context)
+        # Deepcopy already returns these parsed integer tuples unchanged.
+        # Keep their identity without walking every covered rate per query.
+        memo = {id(value): value for cell in verdict.cells for value in (
+            cell.rungs, cell.rungs_q256, cell.covered_rungs_q256,
+            cell.run_tables, cell.launch_rungs_q256,
+            cell.launch_covered_rungs_q256,
+        )}
+        return deepcopy(verdict, memo)
 
     @property
     def runtime_version(self) -> str:

@@ -1,0 +1,7 @@
+{
+  "base": "69eaea55a201355ab02f4cad646efcf739acd914",
+  "path": "tests/test_tessera_tp_exact_pin.py",
+  "original_module_statements": 24,
+  "original_assertions": 25,
+  "original_source_preserved": true
+}
