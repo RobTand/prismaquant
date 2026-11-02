@@ -153,3 +153,12 @@ def test_runner_lane_tests_need_a_git_checkout(tmp_path):
     (checkout / '.git').rmdir()
     with pytest.raises(RuntimeError, match='needs a git checkout'):
         runtime.checkout_of(runfiles)
+
+
+def test_no_credential_reaches_a_test_on_any_lane(tmp_path):
+    # The Remote Bazel runner VM exports BUILDBUDDY_API_KEY; runner-lane tests run there.
+    environ = {'PATH': '/usr/bin', 'BUILDBUDDY_API_KEY': 'k', 'GITHUB_TOKEN': 't', 'gh_token': 't',
+               'OTHER_API_KEY_FILE': 'f', 'PQ_BAZEL_LANE': 'runner', 'TOKENIZERS_PARALLELISM': 'false'}
+    environment = runtime.gate_environment(environ, tmp_path, tmp_path / 'scratch')
+    assert not [name for name in environment if 'API_KEY' in name.upper() or 'TOKEN' in name.upper()]
+    assert environment['PATH'] == '/usr/bin'

@@ -589,6 +589,16 @@ class Evidence:
         for path in self.modules:
             for alias in self.module_aliases(path):
                 self.aliases[alias].add(path)
+        # A package whose __init__ sets __path__ to another directory serves that
+        # directory's modules under its own name (tools/g3job/g3_pq_policy -> prismaquant).
+        for path in self.modules:
+            if PurePosixPath(path).name == '__init__.py' and self.trees[path] is not None:
+                for directory in self.path_redirects(path):
+                    for module in self.modules:
+                        if module.startswith(directory + '/'):
+                            tail = '.'.join(dotted_parts(module[len(directory) + 1:]))
+                            for alias in self.module_aliases(path):
+                                self.aliases[f'{alias}.{tail}' if tail else alias].add(module)
         self.lazy, self.lazy_tables = {}, {}
         for path in self.modules:
             if PurePosixPath(path).name == '__init__.py' and self.trees[path] is not None:
@@ -635,6 +645,22 @@ class Evidence:
             if opaque or not directories:
                 self.uncertain[path].add(SYS_PATH_NOT_FOLLOWED)
             found |= directories - {''}
+        return found
+
+    def path_redirects(self, path):
+        """Repository directories a package __init__ assigns to __path__."""
+        found = set()
+        for node in self.trees[path].body:
+            if (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == '__path__'
+                                                     for target in node.targets)
+                    and isinstance(node.value, (ast.List, ast.Tuple))):
+                for item in node.value.elts:
+                    values, _ = self.bindings[path].values(item, path, self.gate_paths)
+                    for value in values:
+                        if value.startswith(self.gate_paths.REPOSITORY + '/'):
+                            directory = posixpath.normpath(value[len(self.gate_paths.REPOSITORY) + 1:])
+                            if directory in self.directories:
+                                found.add(directory)
         return found
 
     def module_aliases(self, path):
@@ -730,9 +756,10 @@ class Evidence:
             anchored.add(reference)
         # A package's BUILD file can be named exactly; patterns never match one.
         builds = {reference for reference in anchored if reference in self.build_files}
-        if '**' in anchored:
-            return builds, set(self.files)
         exact = builds | {reference for reference in anchored if reference in self.file_set}
+        if '**' in anchored:
+            # The whole repository is read; exact names still say what is run or imported.
+            return exact, set(self.files) - exact
         patterns = {reference for reference in anchored if '**' in reference}
         matched = ({path for path in self.files if self.gate_paths.gate_path_matches(path, patterns)}
                    if patterns else set())
@@ -1155,8 +1182,13 @@ def generate(root=ROOT, files=None):
     for target, body in TEST_INPUT_ENTRY.findall(table):
         listed = re.search(r'modules = \[([^\]]*)\]', body)
         if listed:
-            extra_modules[target] = set(re.findall(r'"([^"]+)"', listed.group(1)))
-            unknown = sorted(extra_modules[target] - set(owner))
+            named = set(re.findall(r'"([^"]+)"', listed.group(1)))
+            # A name ending in / is every module below that directory.
+            trees_named = {name for name in named if name.endswith('/')}
+            extra_modules[target] = (named - trees_named) | {
+                module for module in owner if any(module.startswith(tree) for tree in trees_named)}
+            unknown = sorted((named - trees_named) - set(owner)) + sorted(
+                tree for tree in trees_named if not any(module.startswith(tree) for module in owner))
             if unknown:
                 raise GenerationError(f'tools/bazel/test_inputs.bzl names modules that do not exist: {unknown}')
     packages = {package: [] for package in ('', *PACKAGES)}

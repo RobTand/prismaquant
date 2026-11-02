@@ -655,3 +655,24 @@ def test_a_deselected_node_with_a_space_stays_one_argument():
             'deselect': ["tests/test_in.py::test_x[a b]"]}
     args = build_files.test_attributes('tests/test_in.py', plan, {})['args']
     assert build_files.shlex.split(args[0]) == ["--deselect=tests/test_in.py::test_x[a b]"]
+
+
+def test_a_package_that_redirects_its_path_serves_that_directorys_modules(tmp_path):
+    found = evidence(tmp_path, {
+        'tools/g3job/g3_policy/__init__.py': ('from pathlib import Path\n'
+                                              '__path__ = [str(Path(__file__).resolve().parents[3] / "prismaquant")]\n'),
+        'tests/g3job/test_a.py': 'from g3_policy.staged_lease import ReadsetUnbound\nfrom g3_policy import exl3\n',
+        'prismaquant/staged_lease.py': '', 'prismaquant/exl3.py': ''})
+    assert {'prismaquant/staged_lease.py', 'prismaquant/exl3.py'} <= found.of('tests/g3job/test_a.py')[0]
+
+
+def test_exact_names_still_count_beside_a_whole_repository_read(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_golden.py': ('import importlib.util\nfrom pathlib import Path\n'
+                                 'REPOSITORY = Path(__file__).resolve().parents[1]\n'
+                                 'def _load(name, path):\n'
+                                 '    return importlib.util.spec_from_file_location(name, REPOSITORY / path)\n'
+                                 'WIKITEXT = _load("wikitext", "tools/wikitext_inputs.py")\n'),
+        'tools/wikitext_inputs.py': 'import torch\n'})
+    modules, data = found.of('tests/test_golden.py')
+    assert 'tools/wikitext_inputs.py' in modules

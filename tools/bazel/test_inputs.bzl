@@ -11,6 +11,10 @@ name no evidence shows; the generator turns each into its library.
 """
 
 TEST_INPUTS = {
+    "//tests:test_conftest_names_the_test_environment": struct(
+        deps = ["@pq_pip//tessera_quant", "@pq_pip//torch", "@pq_pip//transformers"],
+        reason = "it checks the terminal summary names torch, transformers and tessera-quant versions, which conftest reads from installed metadata without importing them.",
+    ),
     "//tests:test_cost_surrogate_calibration_anchors": struct(
         data = ["//:archive/grouped_kl_2026-05-28/docs/grouped_kl_allocator_results_2026-05-20.md"],
         reason = "tests/fixtures/cost_surrogate_calibration_anchors.json names the source_doc it checks exists.",
@@ -52,6 +56,11 @@ TEST_INPUTS = {
     "//tests:test_serving_runtime_patch_set": struct(
         data = ["//:files/prismaquant/serving_runtime_patches"],
         reason = "it reads each patch set's MANIFEST.json through SERVING_RUNTIME_PATCH_SETS_DIR, a path imported from the module.",
+    ),
+    "//tests:test_tool_imports_1304": struct(
+        data = ["//:files/scripts", "//:files/tools"],
+        modules = ["scripts/", "tools/"],
+        reason = "it parses every file under tools and scripts and imports each prismaquant and tools module they name.",
     ),
     "//tests:test_tessera_core_boundary": struct(
         data = ["//:files/prismaquant"],
