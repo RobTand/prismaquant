@@ -13,11 +13,13 @@ Everything else is refused as before.
 """
 import json
 import math
+from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
-from test_gate_budget import budget_run, case, commit_target, policy
+from test_gate_budget import budget_run, case, commit_target, policy, runner
 
 NODE = 'tests/test_sample.py::test_cost'
 MIGRATIONS = 'tools/ci/gate_budget_migrations.json'
@@ -130,3 +132,31 @@ def test_a_record_must_state_its_reason(tmp_path, reason):
     policy(tmp_path, slow={'tests/test_sample.py::test_known': 40, NODE: 81})
     code, result = budget_run(tmp_path, case('0'), base=base)
     assert code == 1 and 'migration' in result['budget']['reason']
+
+
+@pytest.mark.parametrize('again_seconds,expected,outcome', [(120, 0, 'pass'), (123, 1, 'fail')])
+def test_budget_rerun_uses_the_reviewed_migration_limit(tmp_path, again_seconds, expected, outcome):
+    base, blob = based(tmp_path)
+    record(tmp_path, blob, {NODE: entry()})
+    policy(tmp_path, slow={'tests/test_sample.py::test_known': 40, NODE: 81})
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        report.write_text(case(str(123 if len(calls) == 1 else again_seconds)))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}],
+                            'deselect': [], 'base_sha': base},
+                           root=tmp_path, output=tmp_path / 'result.json',
+                           junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == expected
+    assert len(calls) == 2
+    assert calls[1][-1] == str(tmp_path / 'tests/test_sample.py') + '::test_cost'
+    assert result['budget_reruns'] == [{'nodeid': NODE, 'first_seconds': 123.0,
+        'rerun_seconds': float(again_seconds), 'limit': 121.5, 'outcome': outcome}]
+    assert result['budget']['status'] == outcome
+    nested = json.loads((tmp_path / 'junit.budget-rerun-0.result.json').read_text())
+    assert nested['budget']['baseline_sha'] == base
