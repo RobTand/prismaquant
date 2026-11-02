@@ -121,3 +121,110 @@ The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
 still checks absolute figures, the count limit and every test's reach budget.
 The shrink-only exceptions preserve existing broad tests in that lane.
+
+# Measure the remaining test-selection cost
+
+`tools/bazel/detangle_plan.py` ranks potential dependency cuts by selected test
+seconds saved per estimated changed line. It performs static analysis over a
+stored per-file coverage map. It does not run tests or apply the cuts.
+
+Use measured per-file timings and the same coverage population for both costs:
+
+```sh
+python tools/bazel/detangle_plan.py \
+    --root . --revision origin/main \
+    --timings /path/to/alone.tsv \
+    --dynamic /path/to/coverage.json.gz \
+    --gate-timings /path/to/gate-timings.json \
+    --out /path/to/plan
+```
+
+The command writes `plan.json` and `plan.md`. JSON retains each merge's selection,
+its fallback paths, all ranked symbol evidence, and input provenance. Keep large
+coverage maps and measurement outputs outside the repository.
+
+## Read the costs
+
+For each of the last 100 first-parent merges, the planner uses
+`git diff M^1 M --name-only --no-renames`. It sums the runtime of every selected
+test file, then reports the mean over merges. Run-alone timings take precedence
+over hosted `tools/ci/gate_durations.json`. Missing measurements use the hosted
+median and appear explicitly in `runtime_sources.missing`.
+
+Static selection follows the graph adapter's imports, conftests, data inputs,
+and launched Python programs. Dynamic selection uses the repository source
+files executed by each test. A changed test also selects itself. Both selectors
+apply exactly the same fallback policy for build, lock, configuration, and
+workflow paths. `floor_share` is the fallback contribution divided by total
+static cost. Graph-only costs exclude fallback merges from their denominator.
+
+Coverage input has this shape, optionally compressed with gzip:
+
+```json
+{"sha": "measured commit", "data_reads": false, "subprocess_coverage": true,
+ "tests": {"tests/test_example.py": {"files": ["package/example.py"],
+                                      "exit": 0, "report_exit": 0}}}
+```
+
+Collect each gate file in a fresh process with the hosted gate's environment,
+quarantine, and marker exclusions. `coverage run --source=. -m pytest <file>`
+records imports as execution. Coverage's subprocess patch can instrument Python
+children too. Record failures, skips, and unavailable dependencies in the
+measurement artifact. Missing coverage rejects the input. Test failures or
+observed file/test pairs outside the static graph make the result provisional
+and prevent a stopping claim. If data reads are not traced, the dynamic floor
+ignores them. Reusing coverage after a refactor also requires a fresh sweep
+before treating that revision's floor as measured.
+
+## Read the candidates
+
+The AST adapter reports imported symbols, aliases, attribute uses, owning
+functions, and the target's top-level symbol closure. Effort estimates include
+the definitions and their known importers. They are estimates of changed lines,
+not implementation promises. Localizing an import alone does not change the
+conservative Bazel graph. Its projected saving requires a corresponding target
+boundary or symbol move. Path candidates identify exact literal evidence.
+
+The cycle search uses the weighted Eades-Lin-Smyth feedback-arc heuristic from
+the graph measurements. It tries deterministic orders and restores redundant
+cuts. This yields an inclusion-minimal feedback cut, not an exact minimum.
+Partition cuts split each SCC into large pieces. The planner scores these groups
+as a unit, since individually useless edges can have a useful combined effect.
+After each pick, it recomputes every remaining candidate's marginal gain with
+bitsets. Results are ordered by seconds saved per estimated changed line.
+
+The first stopping condition requires a gap below 10% of static cost. The
+second requires both a best remaining cut below 2% and measured gate wall time
+within 20% of its floor. Supply wall-time evidence as:
+
+```json
+{"fixed_overhead_seconds": 0.0, "gate_seconds": 0.0,
+ "source": "measurement artifact or invocation URL"}
+```
+
+Use measured values in that file. If PrismaQuant lacks them, identify the
+TL3 or PrismaBuild Bazel measurement used as a proxy in `source`. Without wall
+evidence, the second condition remains false. The 80-core wall floor is fixed
+overhead plus the mean longest dynamically selected test across the replay.
+It is a lower bound, not a scheduling estimate. The report separates essential
+execution cost, fallback cost, and accidental cost left after the ranked cuts.
+
+## Use another repository or graph source
+
+`Selection` is the graph contract: `edges` maps nodes to library dependencies,
+`roots` maps test files to starting nodes, `data` maps nodes to non-propagating
+file inputs, `extras` holds test-specific inputs, and `launches` maps programs to
+child programs. File paths and test identifiers are repository-relative.
+
+The cost, dynamic selector, SCC scoring, ranking, and stopping functions have no
+PrismaQuant package assumptions. `detangle_repo.py` is the temporary Python graph
+adapter. Tessera can replace that adapter and pass its fallback names, prefixes,
+suffixes, and requirement-file patterns through `--config`. Config fields match
+the `Config` dataclass. `--files-from` and `--history-root` support exported source
+trees while replay history stays in the designated checkout.
+
+The preferred next source is bazel-diff v42's `deps.json`, generated with
+`generate-hashes --depEdgesFile deps.json`. Use the shared graph-impact reader
+rather than adding a second parser. Feed its rule edges and source-file labels
+through an adapter that preserves the test-file timing identifiers. Only Bazel
+can establish which target boundary actually disappeared after a refactor.
