@@ -147,6 +147,23 @@ The post-merge full suite uses the same exact exclusion hook. Cgroup membership
 comes from collected pytest markers, including aliases and hooks, rather than
 source substrings. Quarantine owners repair their failures and remove entries.
 
+## Secrets
+
+`gate_run.py` strips `BUILDBUDDY_API_KEY` and `MERGIFY_TOKEN` from pytest's
+child environment. Keep this explicit denylist in step with workflow secrets.
+Each upload in `gate.yml` requires a successful preceding
+`tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN`
+scan, with values confined to that step's `env`. `ci.yml` has no uploads;
+the contract test covers both workflows. The shared scanner detects raw,
+base64 and URL-encoded values, including gzip members, and never prints values.
+It uses standard-library `compression.zstd` when available; otherwise zstd is
+reported as "not scanned". Unset/empty secrets do not fail fork PRs. Exit 1
+means a detected value; exit 75 means unreadable or incomplete input.
+Vendor the core and SHA-256 pin in step across PrismaQuant, TL3, PrismaBuild
+and Tessera. Static tests reject secret command-line flags and expressions
+outside step-level `env`. Authentication belongs in the external
+`~/.config/buildbuddy/bazelrc` or a Python API client's environment-fed HTTP header.
+
 ## Reproduce a shard
 
 Plan and inspect the files without executing tests:
