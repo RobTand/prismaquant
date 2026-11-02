@@ -116,7 +116,8 @@ def test_dynamic_gate_inputs_do_not_copy_unobserved_static_data(tmp_path):
     assert observed['t']=={'t','pytest.ini','pyproject.toml'}
 
 
-def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypatch):
+@pytest.mark.parametrize('per_file',[False,True])
+def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypatch,per_file):
     import json
     from tools.bazel import detangle_repo
     selection=plan.Selection({'t':{'x'},'x':set()},{'t':{'t'}})
@@ -126,6 +127,11 @@ def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypa
     coverage=tmp_path/'coverage.json'
     coverage.write_text(json.dumps({'sha':'a'*40,'data_reads':True,'tests':{'t':{'files':['t','x'],'exit':0}},
                                     'recovery':{'sha':'b'*40,'files':['t'],'invocation':'https://example.invalid/recovery'}}))
+    if per_file:
+        record=json.loads(coverage.read_text())
+        del record['recovery']
+        record['tests']['t']['sha']='b'*40
+        coverage.write_text(json.dumps(record))
     fixes=tmp_path/'fixes.json';fixes.write_text(json.dumps({'measured':{'t':20},'effort':{'t':2}}))
     plan.main(['--root',str(tmp_path),'--dynamic',str(coverage),'--runtime-fixes',str(fixes),'--out',str(tmp_path/'report')])
     result=json.loads((tmp_path/'report.json').read_text())
@@ -135,7 +141,10 @@ def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypa
     assert result['candidates'][0]['delta_seconds']==80
     assert result['causes']['ranked_cut_savings_seconds']==0
     assert result['causes']['ranked_runtime_savings_seconds']==80
-    assert result['coverage']['recovery']['sha']=='b'*40
+    if per_file:
+        assert result['coverage']['source_revisions']=={'t':'b'*40}
+    else:
+        assert result['coverage']['recovery']['sha']=='b'*40
     assert result['coverage']['provisional']
     assert not result['stopping']['coverage_complete_and_passing']
     assert not result['stopping']['gap_below_ten_percent']
