@@ -78,3 +78,17 @@ def test_selection_matrix_splits_a_single_heavy_file(tmp_path):
         'ubuntu-24.04-arm,ubuntu-24.04', '--output', str(output)]) == 0
     matrix = json.loads(output.read_text())
     assert matrix['shards'] == 4
+
+
+def test_dedicated_graph_check_has_no_shard_owner_or_cost():
+    path = 'tests/test_graph_impact.py'
+    live = path + '::test_graph_impact_gate'
+    unit = path + '::test_vendored_core_hash'
+    rows = partition.shards([path], {path: 175}, 2, unknown_seconds=1,
+                            node_durations={live: 170, unit: 5})
+    assert sum(row['estimated_seconds'] for row in rows) == 5
+    assert all(live not in row.get('node_partition', {}).get('owners', {}).get(path, {})
+               for row in rows)
+    collected = {path: [live, unit]}
+    assigned = [node for row in rows for node in partition.assigned_nodes(collected, row['node_partition'])]
+    assert assigned == [unit]

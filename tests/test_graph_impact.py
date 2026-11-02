@@ -244,13 +244,17 @@ def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys
     assert 'no base available' in output.out and 'reach 1 exceeds budget 0' in output.err
 
 
-def test_gate_always_selects_graph_impact():
+def test_live_graph_check_belongs_to_dedicated_job():
     from tools.ci import gate_select
-    plan = gate_select.create_plan(ROOT, ['prismaquant/allocator.py'],
+    plan = gate_select.create_plan(ROOT, ['docs/ci_gate.md'],
                                   index={'tests/test_graph_impact.py': (set(), set()),
                                          'tests/test_unrelated.py': (set(), set())},
                                   durations={'files': {}}, quarantine={})
-    assert 'tests/test_graph_impact.py' in {row['path'] for row in plan['selected']}
+    assert plan['selected'] == []
+    plan = gate_select.create_plan(ROOT, ['tests/test_graph_impact.py'],
+                                  index={'tests/test_graph_impact.py': (set(), set())},
+                                  durations={'files': {}}, quarantine={})
+    assert plan['deselect'] == ['tests/test_graph_impact.py::test_graph_impact_gate']
 
 
 from tools.ci import graph_impact_imports as fanout
@@ -563,3 +567,30 @@ def test_bazel_explain_supplements_missing_source_edges(tmp_path, monkeypatch):
                               edges={('//:test', '//:lib'), ('//:lib', '//:lib.rs')})
     assert diagram == 'flowchart TD; source-->test'
     assert json.loads(deps.read_text()) == {'//:test': ['//:lib'], '//:external': ['@repo//:data']}
+
+
+@pytest.mark.parametrize('day,mode,passes', [
+    ('2026-11-15', 'reach', True),
+    ('2026-11-16', 'reach', True),
+    ('2026-11-17', 'reach', False),
+    ('2026-11-17', 'strict', True),
+])
+def test_pq_test_edge_deadline(day, mode, passes):
+    from datetime import date
+    config = {'test_to_test': mode, 'test_to_test_strict_by': '2026-11-16'}
+    if passes:
+        assert_pq_test_edge_deadline(config, today=date.fromisoformat(day))
+    else:
+        with pytest.raises(AssertionError) as error:
+            assert_pq_test_edge_deadline(config, today=date.fromisoformat(day))
+        assert str(error.value) == (
+            'Set "test_to_test": "strict" in tests/fixtures/graph_impact_baseline.json '
+            'and fix or allowlist any new test→test edges.'
+        )
+
+
+def test_pq_transition_baseline_uses_only_the_date_trigger():
+    config = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
+    assert 'test_to_test_strict_at_count' not in config
+    assert config['test_to_test_strict_by'] == '2026-11-16'
+    assert_pq_test_edge_deadline(config)
