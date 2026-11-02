@@ -413,3 +413,74 @@ def test_split_file_node_budget_rerun_uses_node_collection_coverage(tmp_path):
     assert result['node_coverage']['executed'] == [node]
     assert result['execution_coverage'] == {'selected': [node], 'executed': [node]}
     assert calls == [str(tmp_path), str(tmp_path / node)]
+
+
+@pytest.mark.parametrize('scoped', [False, True])
+def test_real_split_node_rerun_keeps_target_and_collection_evidence(tmp_path, scoped):
+    policy(tmp_path)
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\nmarkers = own_cgroup\n')
+    (tmp_path / 'tests/test_sample.py').write_text(
+        'import pytest\n' + ('@pytest.mark.own_cgroup\n' if scoped else '') +
+        'def test_cost(): pass\ndef test_other(): raise AssertionError("foreign node ran")\n')
+    node = 'tests/test_sample.py::test_cost'
+    other = 'tests/test_sample.py::test_other'
+    partition = {'index': 0, 'count': 2,
+                 'owners': {'tests/test_sample.py': {node: 0, other: 1}}}
+
+    def execute(command, **kwargs):
+        if command[0] == 'sudo':
+            command = command[command.index('env') + 1:]
+            environment = dict(kwargs['env'])
+            while '=' in command[0]:
+                key, value = command.pop(0).split('=', 1)
+                environment[key] = value
+            kwargs['env'] = environment
+        result = subprocess.run(command, **kwargs)
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        if 'budget-rerun' not in report.name:
+            # Inject only the first timing; execution and collection stay real.
+            tree = ET.parse(report)
+            for item in tree.iter('testcase'):
+                if item.get('name') == 'test_cost':
+                    item.set('time', '30.819')
+            tree.write(report)
+        return result
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        assignment={'index': 0, 'files': ['tests/test_sample.py'], 'node_partition': partition},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0, result
+    assert result['verdict'] == 'pass'
+    assert result['budget_reruns'][0]['outcome'] == 'pass'
+    nested = json.loads((tmp_path / 'junit.budget-rerun-0.result.json').read_text())
+    assert nested['verdict'] == 'pass'
+    assert nested['collection']['collected'] == [node]
+    assert nested['collection']['seen'] == []
+    assert [runner.gate_junit_identity(item)[1] for item in
+            ET.parse(tmp_path / 'junit.budget-rerun-0.xml').iter('testcase')] == [node]
+    assert result['node_coverage']['executed'] == [node]
+
+
+def test_budget_rerun_prints_nested_infrastructure_reason(tmp_path, capsys):
+    policy(tmp_path)
+
+    def execute(command, **kwargs):
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        if 'budget-rerun' in report.name:
+            raise OSError('nested executor unavailable')
+        report.write_text(case('31'))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    assert code == 75
+    nested = json.loads((tmp_path / 'junit.budget-rerun-0.result.json').read_text())
+    assert nested['infrastructure_reason'] == 'nested executor unavailable'
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert result['budget_reruns'][0]['infrastructure_reason'] == 'nested executor unavailable'
+    line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith('BUDGET_RERUN:'))
+    assert 'no_verdict' in line and 'nested executor unavailable' in line
