@@ -12,6 +12,7 @@ from collections import Counter, defaultdict
 from fnmatch import fnmatchcase
 import json
 import posixpath
+import subprocess
 from pathlib import Path
 
 REPOSITORY = '/__pb_gate_repository__'
@@ -230,3 +231,19 @@ def main(argv=None):
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
+
+def renamed_files(root: Path, base: str, head: str) -> dict[str, str]:
+    """Git-proven old-to-new test paths, excluding copies whose source remains."""
+    result = subprocess.run(['git', 'diff', '--find-renames=50%', '--diff-filter=R',
+                             '--name-status', '-z', base, head, '--', 'tests/'],
+                            cwd=root, capture_output=True, check=True)
+    fields = result.stdout.decode().split('\0')
+    return {fields[index + 1]: fields[index + 2]
+            for index in range(0, len(fields) - 1, 3)}
+
+
+def renamed_target(target: str, renames: dict[str, str]) -> str:
+    """Move only a policy target's file path, preserving its exact node suffix."""
+    path, separator, node = target.partition('::')
+    return renames.get(path, path) + separator + node

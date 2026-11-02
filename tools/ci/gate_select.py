@@ -46,16 +46,6 @@ def changed_files(root: Path, base: str, head: str) -> list[str]:
     return sorted(set(result.stdout.decode().rstrip('\0').split('\0')) - {''})
 
 
-def renamed_files(root: Path, base: str, head: str) -> dict[str, str]:
-    """Git-proven old-to-new test paths, excluding copies whose source remains."""
-    result = subprocess.run(['git', 'diff', '--find-renames=50%', '--diff-filter=R',
-                             '--name-status', '-z', base, head, '--', 'tests/'],
-                            cwd=root, capture_output=True, check=True)
-    fields = result.stdout.decode().split('\0')
-    return {fields[index + 1]: fields[index + 2]
-            for index in range(0, len(fields) - 1, 3)}
-
-
 def module_names(path: str) -> set[str]:
     if not path.endswith('.py') or not path.startswith(('prismaquant/', 'tools/', 'tests/')):
         return set()
@@ -270,11 +260,10 @@ def quarantine_policy(current: dict, baseline: dict | None, changed: list[str], 
     entries = exclusion_entries(current)
     if baseline is None:
         return  # Initial policy, like the budget bootstrap, is reviewed with the gate.
-    previous = {row['target']: row for row in exclusion_entries(baseline)}
-    original_paths = {new: old for old, new in (renames or {}).items()}
+    previous = {gate_paths.renamed_target(row['target'], renames or {}): row
+                for row in exclusion_entries(baseline)}
     def covered(row):
-        path, separator, node = row['target'].partition('::')
-        target = original_paths.get(path, path) + separator + node
+        target = row['target']
         old = previous.get(target, previous.get(target.split('::', 1)[0]))
         return old is not None and row['issue'] == old['issue']
     growth = [row['target'] for row in entries if not covered(row)]
@@ -477,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
         quarantine = load_gate_json(root / QUARANTINE_PATH)
         baseline = base_quarantine(root, args.base)
         quarantine_policy(quarantine, baseline, changed,
-                          renames=renamed_files(root, args.base, args.head) if baseline is not None else None)
+                          renames=gate_paths.renamed_files(root, args.base, args.head) if baseline is not None else None)
         check_quarantine_owners(exclusion_entries(quarantine))
     except ValueError as error:
         print('GATE_POLICY_FAILURE: ' + str(error), file=sys.stderr)
