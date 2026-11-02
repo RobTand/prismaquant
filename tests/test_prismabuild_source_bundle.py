@@ -102,7 +102,7 @@ def test_hosted_suites_build_the_bundle_and_export_its_locator(workflow):
 
     root = Path(__file__).resolve().parents[1]
     jobs = yaml.safe_load((root / ".github/workflows" / workflow).read_text())["jobs"]
-    job = jobs["shards" if workflow == "gate.yml" else "test"]
+    job = jobs["shards" if workflow == "gate.yml" else "tests"]
     steps = job["steps"]
     checkout = next(step for step in steps if step.get("with", {}).get("repository") == "RobTand/prismabuild")
     assert checkout["with"]["ref"] == "${{ steps.prismabuild-pin.outputs.commit }}"
