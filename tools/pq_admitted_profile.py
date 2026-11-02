@@ -11,7 +11,7 @@ import sys
 import time
 
 
-PROFILE_LOCAL_ROOT = Path('/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles')
+from tools.pq_profile_paths import PROFILE_LOCAL_ROOT
 
 
 def run_observed(command, observer_command, observations: Path, *, target_out,
