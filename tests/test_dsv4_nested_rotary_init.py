@@ -9,6 +9,7 @@ the first CSA forward dies with "Cannot copy out of meta tensor"
 and materializes every instance.
 """
 import pytest
+from fullstack_pb_generation import pinned_pb_source
 
 torch = pytest.importorskip("torch")
 

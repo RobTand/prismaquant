@@ -55,6 +55,7 @@ from prismaquant.validate_quantized_model import (
     DEFAULT_MIN_MTP_ACCEPT_P0,
 )
 from tools.publish_artifact import check_shipcard, main as publish_cli
+from graph_lane_fixtures import synthetic_graph_lane
 
 _FAKE_FINGERPRINT = "f" * 64
 _CONTROL_FINGERPRINT = "e" * 64

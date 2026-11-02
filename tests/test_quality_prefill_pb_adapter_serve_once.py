@@ -57,7 +57,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(autouse=True, scope="module")
 def _pb_imports(_no_prismabuild_import_carried_between_modules):
     """Import the candidate only after this module owns its restore scope."""
-    from fleet_sdk import prismabuild_imports_restored
+    from prismabuild_imports import prismabuild_imports_restored
 
     global pb, dc, pool, pbcampaign, pbrun, _IMPORT_EPOCH
 

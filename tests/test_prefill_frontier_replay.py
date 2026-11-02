@@ -190,7 +190,7 @@ def test_tessera_families_and_rates_reach_export_intake(tmp_path, monkeypatch, f
     """
     import hashlib
 
-    from conftest import down_convert_lane_table
+    from lane_table_fixtures import down_convert_lane_table
     from test_allocator_measured_runtime_cli import _main_fixture
     from test_allocator_tessera_priced_inputs import SCALE, _campaign_outputs, _stamp_rows
     from test_prefill_frontier_shape_only_scope import (

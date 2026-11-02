@@ -33,7 +33,7 @@ from prismaquant.joint_adjoint_checkpoints import (
     adjoint_space, checkpoint_directory, write_adjoint_receipt)
 from prismaquant.stage_a_chain_resume import ChainResumeRefused, chain_state_path
 
-from fleet_sdk import require_lease_helper
+from fleet_sdk import installed_client_sdk, require_lease_helper
 from test_stage_a_chain_resume import (  # noqa: F401  (autouse fixture)
     DIGESTS, TWO, _at, _interrupted, _offline_tier_policy, _resume, _run)
 

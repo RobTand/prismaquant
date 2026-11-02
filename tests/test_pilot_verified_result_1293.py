@@ -17,6 +17,7 @@ import pytest
 from test_dispatch_joint_quanta import campaign, records_dir
 from test_joint_dispatch_pilot import _argv, _pilot_spec, _published_pilots, _ready
 from tools import dispatch_joint_quanta as dispatch
+from fleet_sdk import installed_client_sdk, installed_helper_sdk
 
 
 def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):

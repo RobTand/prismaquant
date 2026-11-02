@@ -30,6 +30,7 @@ from prismaquant.layer_streaming import (
     _build_fp8_scale_inv_map,
     _check_mxfp4_packed_grid,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 # Unsupported AutoModel config refusals enumerate Transformers' lazy mapping,
 # importing native DSv4 before these tests detect their synthetic checkpoints.

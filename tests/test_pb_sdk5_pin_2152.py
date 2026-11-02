@@ -9,6 +9,7 @@ import pytest
 
 from fleet_sdk import require_prismabuild_sdk
 from prismaquant import staged_lease
+from fullstack_pb_generation import pinned_pb_source
 
 COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
 

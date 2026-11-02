@@ -15,6 +15,7 @@ from test_glm5_next_streamed_forward_parity import (
 )
 from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+from legacy_capture_fixtures import legacy_capture_mechanism
 
 
 def write_original_layout_checkpoint(model, source):

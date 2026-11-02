@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from prismaquant import tessera_calibration_forward as calibration_forward
-from conftest import (
+from lane_table_fixtures import (
     down_convert_lane_table, lane_cells_on_one_image,
     project_lane_cells_onto_structures)
 

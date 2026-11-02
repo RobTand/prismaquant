@@ -55,6 +55,7 @@ from test_strict_reader_tier_enforcement import (
     MANIFEST,
     STALE_EPOCH,
 )
+from fleet_sdk import installed_client_sdk
 
 
 @pytest.fixture(autouse=True)

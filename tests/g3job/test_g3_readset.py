@@ -97,7 +97,7 @@ def test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path
     fleet_src = Path("/mnt/shared/prismabuild-fleet/repo/src")
     if not fleet_src.is_dir():
         pytest.skip("PrismaBuild runtime source is not mounted on this box")
-    from fleet_sdk import prismabuild_imports_restored
+    from prismabuild_imports import prismabuild_imports_restored
 
     # Own the source graph even when a caller has already imported the installed
     # SDK, and return that caller's modules and import path before leaving.
@@ -109,7 +109,8 @@ def test_manifest_omits_unused_source_and_tracks_repeated_teacher_reads(tmp_path
 
 def test_manifest_validator_restores_caller_imports(tmp_path):
     """A caller's PB graph must neither select nor retain the source validator."""
-    from fleet_sdk import prismabuild_entries, require_prismabuild_sdk
+    from fleet_sdk import require_prismabuild_sdk
+    from prismabuild_imports import prismabuild_entries
 
     require_prismabuild_sdk()
     import prismabuild.core as core

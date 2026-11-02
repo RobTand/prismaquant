@@ -15,6 +15,7 @@ from test_dispatch_joint_quanta import (
     _receipt, _stamp_receipt, _write_receipt, campaign, records_dir,
 )
 from tools.dispatch_joint_quanta import FakeGateway, main
+from fleet_sdk import installed_client_sdk
 
 
 @pytest.fixture(autouse=True)
