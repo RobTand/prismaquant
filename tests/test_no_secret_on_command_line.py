@@ -11,10 +11,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SECRET_REFERENCE = re.compile(r'\$\{\{\s*secrets\.BUILDBUDDY_API_KEY\s*\}\}', re.I)
 FORBIDDEN = [
-    re.compile(r'--remote_header(?:=|\s+)[^\n]*(?:api[-_]key|BUILDBUDDY)', re.I),
+    re.compile(r'--remote_header[\s\\\x27\x22,=]+[^\n]*(?:api[-_]key|BUILDBUDDY)', re.I),
     re.compile(r'x-buildbuddy-api-key\s*=\s*[^\s\x27\x22]+', re.I),
-    re.compile(r'--(?:test_env|action_env|repo_env|host_action_env)(?:=|\s+)'
-               r'[\x27\x22]?[^\s\x27\x22]*(?:BUILDBUDDY|API_KEY)', re.I),
+    re.compile(r'--(?:test_env|action_env|repo_env|host_action_env)[\s\\\x27\x22,=]+'
+               r'[^\s\x27\x22\\,]*(?:BUILDBUDDY|API_KEY)', re.I),
 ]
 
 
@@ -68,7 +68,7 @@ def test_tracked_files_do_not_transport_buildbuddy_secrets():
       for name in ('BUILDBUDDY_API_KEY', 'OTHER_API_KEY')],
     '["--test_env", "BUILDBUDDY_API_KEY"]',
     '--action_env=\\"BUILDBUDDY_API_KEY\\"',
-    '--repo_env \\\n+        BUILDBUDDY_API_KEY',
+    '--repo_env \\\n        BUILDBUDDY_API_KEY',
     'echo "${{ secrets.BUILDBUDDY_API_KEY }}"',
 ])
 def test_forbidden_transports_are_recognized(text):
