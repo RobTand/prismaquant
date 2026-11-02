@@ -1967,6 +1967,36 @@ def solve_with_promotion(
                 hi = mid
 
     if best_assign is None:
+        # Failure path only: the binned search found no feasible iterate. Bin
+        # rounding charges every positive upgrade at least one bin, so even
+        # the floor solve can buy an upgrade whose real bytes overshoot while
+        # the per-unit minimum-byte assignment (the menu floor) still fits.
+        # Consider that exact assignment, promoted with the same legal
+        # formats, before declaring the rung infeasible. The caller still
+        # exact-prices it. Ties on bytes keep the lower predicted Δloss.
+        min_byte_choices = {
+            name: min(options, key=lambda c: (
+                c.memory_bytes, c.predicted_dloss, c.fmt))
+            for name, options in candidates.items()
+        }
+        min_byte_assignment = promote_serving_units(
+            {name: c.fmt for name, c in min_byte_choices.items()},
+            format_rank,
+            profile=profile,
+            include_fused=not no_fused_promote,
+            include_moe=True,
+            legal_formats=legal_formats,
+        )
+        min_byte_achieved, min_byte_loss = compute_achieved(
+            stats, min_byte_assignment, format_specs, candidates=candidates,
+        )
+        diag["min_byte_endpoint_achieved_bits"] = float(min_byte_achieved)
+        if min_byte_achieved - target <= overshoot_tolerance:
+            diag.update(feasible=True, achieved_bits=float(min_byte_achieved),
+                        predicted_dloss=float(min_byte_loss),
+                        min_byte_endpoint_selected=True)
+            return min_byte_assignment, min_byte_achieved
+        diag["min_byte_endpoint_selected"] = False
         if _SOLVER_TRACE:
             print(f"[solver] target={target:.4f} INFEASIBLE after "
                   f"{diag['evals']} evals: floor={min_bits:.4f} "
