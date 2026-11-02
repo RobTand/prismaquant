@@ -162,3 +162,15 @@ def test_fallback_config_accepts_json_arrays():
     assert config.fallback('build/anything')
     assert config.fallback('deps/custom.lock')
     assert not config.fallback('pkg/core.py')
+
+
+def test_ranking_prices_only_remaining_group_effort():
+    selection = plan.Selection(edges={'t': {'a'}, 'a': {'x', 'y', 'z'}, 'x': set(), 'y': set(), 'z': set()},
+                               roots={'t': {'t'}})
+    replay = [{'sha': str(i), 'changed': [path]} for i, path in enumerate(['x', 'x', 'x', 'y', 'z', 'z'])]
+    candidates = [plan.Candidate('move symbols', (('a', 'x', 'import'),), 1, ()),
+                  plan.Candidate('SCC sub-cut', (('a', 'x', 'import'), ('a', 'y', 'import')), 4, ()),
+                  plan.Candidate('move symbols', (('a', 'z', 'import'),), 3, ())]
+    ranked = plan.rank(selection, replay, {'t': 20}, candidates, plan.Config())
+    # The group still needs y after x was picked. Its remaining effort is 4 - 1.
+    assert all(c['effort_lines'] == 3 for c in ranked if ['a', 'y', 'import'] in c['edges'])
