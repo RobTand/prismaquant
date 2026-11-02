@@ -174,12 +174,16 @@ def test_shared_stdlib_core_has_an_independent_helper_namespace(tmp_path):
             '        else:\n'
             '            total -= row.size\n'
             '    return hashlib.sha256(str(total).encode()).hexdigest()\n')
-    paths = ['tools/ci/graph_impact.py', 'tools/ci/graph_impact_pq.py', 'tools/ordinary.py']
+    namespace, = inventory.STANDALONE_HELPER_NAMESPACES
+    core_path = '/'.join(namespace.split('.')) + '.py'
+    adapter = str(Path(core_path).with_name('ordinary_adapter.py'))
+    ordinary = 'tools/ordinary.py'
+    paths = [core_path, adapter, ordinary]
     for name in paths:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body)
     live = inventory.scan(tmp_path)
-    assert live['same_name_helpers']['summary'] == ['tools/ci/graph_impact_pq.py', 'tools/ordinary.py']
-    assert ['tools/ci/graph_impact.py::summary', 'tools/ordinary.py::summary'] in live['near_duplicates']
-    assert 'hashlib:tools/ci/graph_impact.py::summary' in live['primitive_digest_sites']
+    assert live['same_name_helpers']['summary'] == [adapter, ordinary]
+    assert [f'{core_path}::summary', f'{ordinary}::summary'] in live['near_duplicates']
+    assert f'hashlib:{core_path}::summary' in live['primitive_digest_sites']
