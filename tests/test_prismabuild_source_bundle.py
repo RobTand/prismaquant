@@ -110,6 +110,16 @@ def test_hosted_suites_build_the_bundle_and_export_its_locator(workflow):
     assert '"$RUNNER_TEMP/pb-source"' in build["run"]
     assert "PRISMAQUANT_PB_SOURCE_BUNDLE" in build["run"]
     assert '"$GITHUB_ENV"' in build["run"]
+    # Installed dependency sources and gate reports must not dirty provenance.
+    commands = "\n".join(step.get("run", "") for step in steps)
+    assert "rm -rf .ci/tessera .ci/prismabuild" in commands
+    if workflow == "gate.yml":
+        for attempt in (jobs["shards"], jobs["retry-shards"]):
+            downloads = [step for step in attempt["steps"]
+                         if "download-artifact@" in step.get("uses", "")]
+            assert downloads
+            assert all(step["with"]["path"].startswith("${{ runner.temp }}/")
+                       for step in downloads)
 
 
 def test_explicit_bundle_never_falls_back_to_the_fleet_mount(tmp_path, monkeypatch):
