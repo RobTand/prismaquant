@@ -208,3 +208,44 @@ def test_bazel_query_fallback_reads_source_files_and_manual_tags(tmp_path):
     assert tests == {'//t:fast': {'//lib:a.rs'}}
     assert ('//lib:core', '//lib:a.rs') in edges
     assert loc == {'//lib:a.rs': 1}
+
+
+def test_pq_adapter_respects_generator_launch_and_conftest_rules(tmp_path):
+    from tools.ci import graph_impact_pq as pq
+    files = {'tests/test_a.py': 'import subprocess\nsubprocess.run(["python", "tools/run.py"])\n',
+             'tests/sub/test_b.py': '', 'tests/sub/conftest.py': 'import prismaquant.hub\n',
+             'tools/run.py': 'import prismaquant.hub\n', 'prismaquant/hub.py': 'x = 1\n'}
+    for name, text in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    snapshot = pq.load_snapshot(tmp_path, population=['tests/test_a.py', 'tests/sub/test_b.py'], legacy=False)
+    assert snapshot['reach'] == {'tests/sub/test_b.py': ['prismaquant/hub.py'],
+                                  'tests/test_a.py': ['prismaquant/hub.py', 'tools/run.py']}
+
+
+def test_pq_no_git_reports_no_base_and_enforces_absolute_budget(tmp_path, capsys):
+    from tools.ci import graph_impact_pq as pq
+    files = {'tests/test_a.py': 'import tools.hub\n', 'tools/hub.py': 'x = 1\n',
+             'tools/ci/gate_durations.json': '{"files": {}}', 'tools/ci/gate_quarantine.json': '{}',
+             'tests/fixtures/graph_impact_allowlist.json': '{}'}
+    for name, text in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    snapshot = pq.load_snapshot(tmp_path)
+    (tmp_path / 'tests/fixtures/graph_impact_baseline.json').write_text(json.dumps(pq.record(snapshot)))
+    recorded = tmp_path / 'tests/fixtures/graph_impact_baseline.json'
+    data = json.loads(recorded.read_text()); data['reach_budget'] = 0; recorded.write_text(json.dumps(data))
+    assert pq.main(['--root', str(tmp_path)]) == 1
+    output = capsys.readouterr()
+    assert 'no base available' in output.out and 'reach 1 exceeds budget 0' in output.err
+
+
+def test_gate_always_selects_graph_impact():
+    from tools.ci import gate_select
+    plan = gate_select.create_plan(ROOT, ['prismaquant/allocator.py'],
+                                  index={'tests/test_graph_impact.py': (set(), set()),
+                                         'tests/test_unrelated.py': (set(), set())},
+                                  durations={'files': {}}, quarantine={})
+    assert 'tests/test_graph_impact.py' in {row['path'] for row in plan['selected']}
