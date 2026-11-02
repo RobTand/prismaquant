@@ -122,7 +122,7 @@ a git checkout and history. Without git, it reports `no base available` and
 still checks absolute figures, the count limit and every test's reach budget.
 The shrink-only exceptions preserve existing broad tests in that lane.
 
-# Measure the remaining test-selection cost
+## Measure the remaining test-selection cost
 
 `tools/bazel/detangle_plan.py` ranks potential dependency cuts by selected test
 seconds saved per estimated changed line. It performs static analysis over a
@@ -172,9 +172,9 @@ records imports as execution. Coverage's subprocess patch can instrument Python
 children too. Record failures, skips, and unavailable dependencies in the
 measurement artifact. Missing coverage rejects the input. Test failures or
 observed file/test pairs outside the static graph make the result provisional
-and prevent a stopping claim. If data reads are not traced, the dynamic floor
-ignores them. Reusing coverage after a refactor also requires a fresh sweep
-before treating that revision's floor as measured.
+and prevent a stopping claim. Modeled dynamic totals remain provisional when
+coverage mixes source revisions, ignores data reads, or retains SDK skips.
+These inputs do not establish an exact dynamic floor.
 
 ## Read the candidates
 
@@ -232,9 +232,10 @@ can establish which target boundary actually disappeared after a refactor.
 To use the native source, add `--deps-json deps.json`,
 `--bazel-tests tests.json`, and `--source-labels sources.txt`. `tests.json` maps
 repository test files to the non-manual labels returned by `tests(//...)`.
-`sources.txt` lists labels Bazel identifies as source files. Supply
-`--graph-core /path/to/graph_impact.py` while that shared core is on its own
-branch. `--query-json query.json` uses its streamed-query fallback when
+`sources.txt` lists labels Bazel identifies as source files. The planner uses
+`tools/ci/graph_impact.py` from this checkout by default.
+`--graph-core /path/to/graph_impact.py` overrides that path.
+`--query-json query.json` uses its streamed-query fallback when
 `deps.json` lacks source-file labels. Both paths call that core's reader.
 
 Native rule edges remain rule edges. Source-file labels become repository
