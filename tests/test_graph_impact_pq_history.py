@@ -179,3 +179,46 @@ def test_committed_baseline_contains_only_limits():
     assert set(config) == {'schema', 'figures', 'tolerances', 'reach_budget', 'test_to_test',
                            'test_to_test_count', 'test_to_test_strict_by'}
     assert not (ROOT / 'tests/fixtures/import_fanout_baseline.json').exists()
+
+
+def test_removing_a_base_edge_needs_no_list_edit(repo, capsys):
+    with (repo / 'tests/test_a.py').open('a') as out:
+        out.write('from tests import test_b\n')
+    commit(repo, 'existing sibling edge')
+    base = freeze(repo)
+    path = repo / 'tests/test_a.py'
+    path.write_text(path.read_text().replace('from tests import test_b\n', ''))
+    commit(repo, 'remove edge')
+    code, output = check(repo, base, capsys)
+    assert code == 0, output
+
+
+@pytest.mark.parametrize('budget,passes', [(None, True), (0, False)])
+def test_no_history_with_edges_enforces_only_absolute_limits(repo, capsys, budget, passes):
+    import shutil
+    with (repo / 'tests/test_a.py').open('a') as out:
+        out.write('from tests import test_b\n')
+    put(repo, 'tests/conftest.py', 'from prismaquant import owner\n')
+    commit(repo, 'existing edges')
+    freeze(repo)
+    config = json.loads((repo / pq.BASELINE).read_text())
+    if budget is not None:
+        config['reach_budget'] = budget
+        put(repo, str(pq.BASELINE), json.dumps(config))
+    shutil.rmtree(repo / '.git')
+    code = pq.main(['--root', str(repo)])
+    output = capsys.readouterr()
+    assert (code == 0) is passes, output.out + output.err
+    assert 'no base available' in output.out
+    assert 'new test_to_test' not in output.err and 'new conftest' not in output.err
+
+
+def test_workflow_supplies_exact_base_for_authenticated_batches_only():
+    import yaml
+    workflow = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())
+    assert workflow['env']['GATE_BASE'] == '${{ github.event.pull_request.base.sha }}'
+    mode = workflow['env']['GATE_GRAPH_BASE_MODE']
+    for required in ('head.repo.full_name == github.repository', 'mergify/merge-queue/',
+                     "user.login == 'mergify[bot]'", 'user.id == 37929162', "'batch'", "'pr'"):
+        assert required in mode
+    assert 'gate-canary' not in mode
