@@ -31,8 +31,14 @@ commit, and `pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsd
 preserve the existing CPU installation. The `pbsdk` dependency group installs the
 reviewed PrismaBuild client SDK (`prismabuild`, a Git install at
 `staged_lease.PB_READER_LEASE_PIN_COMMIT`), so tests that drive the SDK run on hosted
-runners instead of skipping (#3216). Tests that need the fleet's sealed lease-helper
-generation or PrismaBuild's `tools/` scripts still skip with their own reasons.
+runners instead of skipping (#3216). Each hosted test job also checks out that
+commit and runs `tools/build_prismabuild_source_bundle.py` into runner temp space.
+The builder authenticates the complete Git tree and the shared pin's file digests,
+then seals the source directory. `PRISMAQUANT_PB_SOURCE_BUNDLE` points tests at its
+generation subdirectory, including PrismaBuild's `tools/` scripts. An explicit
+locator suppresses fleet search paths. Missing bundles retain their named skips;
+present bundles with wrong bytes fail. Tests that need other live fleet artifacts
+still skip with their own reasons.
 Pip caches include dependency declarations, constraints, and the Tessera pin.
 Native libraries get one thread each. Pytest workers are bounded by inherited
 CPU affinity and two GiB per worker after reserving one GiB for the runner. Work
