@@ -11512,6 +11512,13 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/check_no_secret_leak",
+    srcs = [
+        "tools/ci/check_no_secret_leak.py",
+    ],
+)
+
+pq_py_library(
     name = "tools/ci/gate_actions",
     srcs = [
         "tools/ci/gate_actions.py",
