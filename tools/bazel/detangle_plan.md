@@ -69,3 +69,10 @@ frequency, and static and dynamic seconds per merge, sorted by static cost.
 Full-suite hosted durations can be supplied as pluggable estimates when paired
 warm measurements are unavailable. Such rankings are planning estimates,
 not measured performance claims.
+
+Coverage rows can record their source revision in `tests[path].sha`. The
+planner retains those identities in `coverage.source_revisions`. A row from
+another revision, or an aggregate recovery marker from another revision,
+makes the report provisional and disables a stopping claim even when every
+test passed. Missing per-file identities inherit the coverage artifact's
+aggregate SHA. Mixed-source recovery must remain visible to reviewers.

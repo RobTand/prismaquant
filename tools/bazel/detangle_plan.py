@@ -660,8 +660,11 @@ def main(argv=None):
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
     recovery = coverage.get('recovery')
+    source_revisions = {test: coverage['tests'][test].get('sha', coverage.get('sha', source_revision))
+                        for test in selection.tests}
     revision_matches = (coverage.get('sha', source_revision) == source_revision and
-                        (not recovery or recovery.get('sha') == source_revision))
+                        (not recovery or recovery.get('sha') == source_revision) and
+                        all(sha == source_revision for sha in source_revisions.values()))
     coverage_valid = not failures and revision_matches
     estimated_wheels = any('uv.lock' in merge['changed'] for merge in replay)
     if not coverage_valid:
@@ -685,6 +688,7 @@ def main(argv=None):
                            'failed_tests': failures, 'sdk_group_installed': coverage.get('sdk_group_installed', False),
                            'observed_pairs_outside_static': outside_static,
                            'revision_matches': revision_matches, 'recovery': recovery,
+                           'source_revisions': source_revisions,
                            'provisional': not coverage_valid or bool(outside_static) or estimated_wheels},
               'static': static, 'dynamic': dynamic, 'gap_seconds': static['mean_seconds'] - dynamic['mean_seconds'],
               'floor_share': static['floor_share'], 'candidates': ranked, 'cycle_cuts': cycle_cuts, 'candidate_count': len(candidates),
