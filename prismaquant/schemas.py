@@ -57,7 +57,7 @@ RETIRED_CODEBOOK_ARCHIVE = "archive/gridbook_lane_2026-09-02"
 #: Shape of a retired codebook rung name (the Gridbook lane, archived
 #: 2026-09-02; remnant cleanup 2026-09-25, #1304). A shape test only,
 #: kept here so the torch-free readers (``schemas``, ``layer_config``)
-#: can spot one; ``retired_formats`` owns the shared refusal.
+#: can spot one without importing the registry.
 RETIRED_CODEBOOK_NAME_RE = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
 
 
