@@ -8,7 +8,7 @@ import pytest
 
 from prismaquant import tessera_expert_projection as tep
 from test_glm_mtp_selection import CONSTANTS, _probe, _row
-from test_tessera_expert_projection import (
+from tests.expert_projection_support import (
     STACK, _declared, _projection, _record,
 )
 

@@ -11,7 +11,7 @@ from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_e
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from prismaquant.tessera_joint_eval_panel import make_panel
 from prismaquant.tessera_sampled_stack_proposal import propose_bound_payload
-from test_tessera_expert_projection import STACK, _declared, _projection
+from tests.expert_projection_support import STACK, _declared, _projection
 from test_tessera_joint_allocation import fixture
 
 PRIMARY = ['TESSERA_E4M3_K1', 'TESSERA_BF16_K1']
@@ -26,7 +26,7 @@ class AtomicProfile:
 
 
 def pilot_fixture():
-    from test_joint_aura_assignment_diagnostics import _rebuild
+    from tests.joint_aura_assignment_support import _rebuild
     names = list(_declared(experts=(0, 1), n=256, k=256)[STACK])
     joint, data, prepared, metadata, kwargs = fixture(names)
     projection = _projection(experts=(0, 1), n=256, k=256)

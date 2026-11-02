@@ -118,7 +118,7 @@ def test_policy_refuses_dependency_mutation_during_verification(policy_fixture, 
 
 def test_handoff_keeps_qualified_activation_but_exports_priced_group_value(policy_fixture, tmp_path, monkeypatch):
     from test_tessera_joint_allocation import fixture
-    from test_joint_aura_assignment_diagnostics import _rebuild
+    from tests.joint_aura_assignment_support import _rebuild
     from prismaquant import joint_catalog_extension
     from prismaquant.tessera_joint_allocation import bind_allocation_payload
     bound, policy, cache, names = policy_fixture

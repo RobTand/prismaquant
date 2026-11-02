@@ -36,7 +36,7 @@ from prismaquant.tessera_serving_runtime_pin import load_tessera_serving_runtime
 from test_tessera_census_cache import (
     DENSE, ENCODING_SCHEMA, FMT, INPUT_SCHEMA, SEAL, _control,
 )
-from test_tessera_expert_projection import _record
+from tests.expert_projection_support import _record
 
 VISION = "model.visual.blocks.0.attn.qkv"
 MERGER = "model.visual.merger.mlp.0"

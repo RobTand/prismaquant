@@ -7,7 +7,7 @@ import pytest
 from prismaquant import priced_cell
 from prismaquant import allocator_candidates as ac
 from prismaquant.model_profiles import DefaultProfile
-from test_joint_aura_assignment_diagnostics import _row, _rebuild
+from tests.joint_aura_assignment_support import _row, _rebuild
 
 LOW = "FP8_E4M3"
 HIGH = "FP8_E5M2"

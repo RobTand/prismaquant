@@ -37,7 +37,7 @@ import prismaquant.allocator as alloc
 from prismaquant import footprint as fp
 from prismaquant import format_registry as fr
 from prismaquant.serve_dispatch_table import SCHEMA as TABLE_SCHEMA
-from test_footprint import _write_safetensors
+from tests.safetensors_support import _write_safetensors
 
 _NAMES = [f"model.layers.{i}.self_attn.o_proj" for i in range(4)]
 _OUT = _IN = 256

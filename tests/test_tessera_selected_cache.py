@@ -11,7 +11,7 @@ import pytest
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.tessera_export_lane import TesseraExportLaneError, selected_cached_units_manifest
 from prismaquant.tessera_reuse_authority import PRODUCER_AUTHORITY
-from test_tessera_expert_projection import (
+from tests.expert_projection_support import (
     STACK, _declared, _projection, _record,
 )
 

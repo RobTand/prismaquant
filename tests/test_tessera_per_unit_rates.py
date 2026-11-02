@@ -56,7 +56,7 @@ from test_tessera_export_projection import (
     _units as _lane_units,
     case,  # noqa: F401  -- pytest fixture
 )
-from test_tessera_expert_projection import STACK, _declared, _projection
+from tests.expert_projection_support import STACK, _declared, _projection
 from test_tessera_plan_writer import (
     STACK as WRITER_STACK,
     STACK_TENSORS,

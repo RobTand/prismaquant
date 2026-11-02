@@ -13,7 +13,7 @@ from prismaquant import build_production_cache as builder
 from prismaquant import export_native_compressed as exporter
 from prismaquant import production_weight_cache as pwc
 from prismaquant.model_profiles import DefaultProfile
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 @pytest.mark.parametrize("changed_source", [False, True], ids=["unchanged", "changed_weights"])

@@ -18,7 +18,7 @@ from prismaquant.schemas import validate_probe_payload
 from prismaquant.tessera_census_stats import (
     DROPPED_FIELDS, META_KEY, CensusStatsError, expand_probe_onto_census,
 )
-from test_tessera_expert_projection import STACK, _declared, _projection
+from tests.expert_projection_support import STACK, _declared, _projection
 
 FMT = "TESSERA_E4M3_K1_R1024"
 DENSE = "model.layers.0.mlp.down_proj"

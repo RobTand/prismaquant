@@ -5,7 +5,7 @@ import copy
 import pytest
 
 from prismaquant import joint_aura as joint
-from test_joint_aura_assignment_diagnostics import _row, UNIT_A
+from tests.joint_aura_assignment_support import _row, UNIT_A
 
 
 def _prepare(row):

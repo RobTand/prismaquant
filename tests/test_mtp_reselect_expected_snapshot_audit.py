@@ -30,7 +30,7 @@ from tools import reselect_mtp_fixed as cli
 
 def _case(tmp_path, monkeypatch):
     import test_glm_mtp_priced_wires_1413 as prices
-    import test_tessera_expert_projection as projection
+    import tests.expert_projection_support as projection
     from test_glm_mtp_selection import CONSTANTS
 
     # Adapt only synthetic factory names to the declared MTP layer/profile.

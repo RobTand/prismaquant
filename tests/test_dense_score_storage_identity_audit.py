@@ -9,7 +9,7 @@ import torch
 from prismaquant import production_render_cost as cost
 from prismaquant import production_weight_cache as pwc
 from prismaquant.native_render_levers import NativeRenderLevers
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 DTYPES = [torch.bfloat16, torch.float16, torch.float32]

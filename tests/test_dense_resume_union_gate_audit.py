@@ -12,7 +12,7 @@ from safetensors.torch import save_file
 from prismaquant import build_production_cache as builder
 from prismaquant import union_production_cache as union
 from prismaquant.model_profiles import DefaultProfile
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 from test_union_production_cache import CODE_IDENTITY, _source_identity
 
 

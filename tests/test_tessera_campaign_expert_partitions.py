@@ -108,7 +108,7 @@ def test_shared_menu_grid_uses_full_group_not_local_partition(monkeypatch):
 
 def test_partition_is_bound_to_real_carried_producer_records():
     from prismaquant import tessera_expert_projection as projection
-    from test_tessera_expert_projection import _declared, _projection, STACK
+    from tests.expert_projection_support import _declared, _projection, STACK
 
     producer = _projection(experts=(0, 1, 2, 3), n=8, k=8)
     bound = projection.bind_expert_projection(

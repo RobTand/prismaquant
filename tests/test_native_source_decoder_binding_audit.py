@@ -17,7 +17,7 @@ from prismaquant import production_weight_cache as pwc
 from prismaquant import streamed_model_identity as identity
 from tests.test_resident_source_decode_audit import _cpu_guard, _load, _source
 from tests.test_production_cache_source_model_binding import _fill as _legacy_fill
-from tests.test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 V1 = "prismaquant.source_model_binding.v1"

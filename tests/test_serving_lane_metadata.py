@@ -41,7 +41,7 @@ import pytest
 
 import prismaquant.allocator as alloc
 from prismaquant import serving_profiles as sp
-from test_footprint import _write_safetensors
+from tests.safetensors_support import _write_safetensors
 
 
 # ---------------------------------------------------------------------------
