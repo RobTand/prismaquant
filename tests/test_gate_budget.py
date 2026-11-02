@@ -27,8 +27,9 @@ def policy(root, seconds=20, slow=None, file_seconds=None):
 
 def budget_run(tmp_path, xml, *, base=None, pytest_code=0):
     plan = {'selected': [{'path': 'tests/test_sample.py'}], 'deselect': [], 'base_sha': base}
-    def execute(*args, **kwargs):
-        (tmp_path / 'junit.xml').write_text(xml)
+    def execute(command, **kwargs):
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        report.write_text(xml)
         return SimpleNamespace(returncode=pytest_code)
     code = runner.run_plan(plan, root=tmp_path, output=tmp_path / 'result.json',
                            junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
@@ -316,7 +317,8 @@ def test_budget_only_rerun_verdicts(tmp_path, monkeypatch, first_seconds, first_
     calls = []
 
     def execute(command, **kwargs):
-        calls.append((command, kwargs['env']))
+        calls.append((command, {key: kwargs['env'][key] for key in
+                               ('GATE_DESELECT_NODEIDS', 'OMP_NUM_THREADS')}))
         seconds, code, failure = ((first_seconds, first_code, first_failure) if len(calls) == 1
                                   else (again_seconds, again_code, again_failure))
         if seconds is not None:
