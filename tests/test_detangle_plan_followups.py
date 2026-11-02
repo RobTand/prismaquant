@@ -140,3 +140,20 @@ def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypa
     assert not result['stopping']['coverage_complete_and_passing']
     assert not result['stopping']['gap_below_ten_percent']
     assert 'make test cheaper' in (tmp_path/'report.md').read_text()
+
+
+def test_editable_repository_package_does_not_add_all_declared_wheel_dependencies(tmp_path):
+    from tools.bazel.detangle_inputs import wheel_graph
+    (tmp_path/'t.py').write_text('from prismaquant import pure_helper\n')
+    lock='[[package]]\nname="prismaquant"\nversion="1"\nsource={editable="."}\ndependencies=[{name="torch"}]\n[[package]]\nname="torch"\nversion="1"\n'
+    edges,_=wheel_graph(tmp_path,['t.py'],lock)
+    assert 'wheel:prismaquant' not in edges.get('t.py',set())
+    assert not edges.get('t.py')
+
+
+def test_lock_diff_also_selects_explicit_readers_of_the_lock_file():
+    selection=plan.Selection({'t':set()},{'t':{'t'}},data={'t':{'uv.lock'}})
+    replay=[{'sha':'a','changed':['uv.lock'],'changed_wheels':[]}]
+    result=plan.costs(selection.masks(),replay,{'t':7},plan.Config.narrowed())
+    assert result['mean_seconds']==7
+    assert plan.Scorer(selection,replay,{'t':7},plan.Config.narrowed()).cost()==7
