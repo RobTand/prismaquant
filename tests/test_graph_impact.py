@@ -252,7 +252,7 @@ def test_gate_always_selects_graph_impact():
     assert 'tests/test_graph_impact.py' in {row['path'] for row in plan['selected']}
 
 
-from tools.ci import import_fanout as fanout
+from tools.ci import graph_impact_imports as fanout
 
 
 def write_tree(root: Path, sources: dict[str, str]) -> Path:
@@ -414,3 +414,13 @@ def test_native_blame_is_requested_for_source_only_regressions(tmp_path, capsys)
     assert impact.check(before, after, path, explain=explain) == 1
     assert explained == ['test']
     assert '```mermaid' in capsys.readouterr().err
+
+
+def test_native_blame_for_cycle_without_new_reach(tmp_path):
+    before = measure({'test': {'a', 'b'}}, {('test', 'a'), ('a', 'b')}, {'a': 1, 'b': 1})
+    after = measure({'test': {'a', 'b'}}, {('test', 'a'), ('a', 'b'), ('b', 'a')}, {'a': 1, 'b': 1})
+    path = tmp_path / 'baseline.json'
+    path.write_text(json.dumps(baseline(before)))
+    explained = []
+    assert impact.check(before, after, path, explain=lambda test: explained.append(test)) == 1
+    assert explained == ['test']

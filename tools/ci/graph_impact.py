@@ -304,7 +304,27 @@ def check(base, head, baseline_path, allowlist_path=None, *, changed_tests=(),
         print('\n'.join(errors), file=sys.stderr)
         if explain is not None:
             affected = (set(head['reach']) - (base['reach'].keys() if base else set())) | set(changed_tests)
-            for test in sorted(affected & head['reach'].keys()):
+            if base is not None:
+                affected.update(test for test, files in head['reach'].items()
+                                if files != base['reach'].get(test))
+                added = set(map(tuple, head['edges'])) - set(map(tuple, base['edges']))
+                reverse = {}
+                for source, target in head['edges']:
+                    reverse.setdefault(target, set()).add(source)
+                pending = [source for source, _ in added]
+                seen = set(pending)
+                while pending:
+                    for source in reverse.get(pending.pop(), ()):
+                        if source not in seen:
+                            seen.add(source)
+                            pending.append(source)
+                affected.update(seen & head['reach'].keys())
+            affected = sorted(affected & head['reach'].keys())
+            # A broad regression can affect thousands of tests. Native explain
+            # is an external process; bound diagnostic work independently of T.
+            if len(affected) > 5:
+                print(f'Mermaid blame: first 5 of {len(affected)} affected tests', file=sys.stderr)
+            for test in affected[:5]:
                 diagram = explain(test)
                 if diagram:
                     print(f'```mermaid\n{diagram.rstrip()}\n```', file=sys.stderr)

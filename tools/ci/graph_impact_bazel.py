@@ -61,9 +61,13 @@ def load(deps, tests, *, hashes=None, sources=None, query=None, loc=None):
 
 
 def explain(command, base_hashes, head_hashes, deps, target):
-    result = subprocess.run([*shlex.split(command), 'explain', '-sh', str(base_hashes),
-                             '-fh', str(head_hashes), '-d', str(deps), '--target', target,
-                             '--format', 'mermaid'], capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run([*shlex.split(command), 'explain', '-sh', str(base_hashes),
+                                 '-fh', str(head_hashes), '-d', str(deps), '--target', target,
+                                 '--format', 'mermaid'], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f'bazel-diff explain unavailable for {target}: {error}', file=sys.stderr)
+        return ''
     if result.returncode:
         print(f'bazel-diff explain unavailable for {target} (exit {result.returncode}): '
               + (result.stderr or result.stdout).strip(), file=sys.stderr)

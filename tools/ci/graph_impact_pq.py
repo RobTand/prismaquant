@@ -28,7 +28,7 @@ if __package__ in (None, ''):
 
 from tools.bazel import build_files as build
 from tools.ci import graph_impact as core
-from tools.ci import import_fanout as legacy_fanout
+from tools.ci import graph_impact_imports as legacy_fanout
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path('tests/fixtures/graph_impact_baseline.json')
