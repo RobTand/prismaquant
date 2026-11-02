@@ -72,8 +72,12 @@ class Selection:
         removed = defaultdict(set)
         for source, target, kind in cuts:
             removed[source, kind].add(target)
-        edges = {s: targets - removed[s, 'import'] for s, targets in self.edges.items()}
-        data = {s: targets - removed[s, 'data'] for s, targets in self.data.items()}
+        # Scoring treats adjacency sets as read-only. Reuse untouched sets; a
+        # test may hold thousands of data files that an import cut cannot alter.
+        edges = {s: targets - removed[s, 'import'] if (s, 'import') in removed else targets
+                 for s, targets in self.edges.items()}
+        data = {s: targets - removed[s, 'data'] if (s, 'data') in removed else targets
+                for s, targets in self.data.items()}
         return Selection(edges, self.roots, data, self.extras, self.launches)
 
     def combined(self):
@@ -539,7 +543,7 @@ def main(argv=None):
     longest = sum(max((weights[t] for i, t in enumerate(sorted(weights)) if row['mask'] & (1 << i)), default=0)
                   for row in dynamic['merges']) / len(replay)
     floor = overhead + longest if overhead is not None else None
-    initial_best = ranked[0]['best_initial_delta_seconds'] if ranked else 0
+    initial_best = ranked[0]['delta_seconds'] if ranked else 0
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
     coverage_valid = not failures and coverage.get('sha', source_revision) == source_revision

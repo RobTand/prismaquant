@@ -194,7 +194,7 @@ After each pick, it recomputes every remaining candidate's marginal gain with
 bitsets. Results are ordered by seconds saved per estimated changed line.
 
 The first stopping condition requires a gap below 10% of static cost. The
-second requires both a best remaining cut below 2% and measured gate wall time
+second requires both the highest-ranked remaining cut below 2% and measured gate wall time
 within 20% of its floor. Supply wall-time evidence as:
 
 ```json
