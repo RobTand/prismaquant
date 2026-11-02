@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-import hashlib
 import io
 import json
 import os
@@ -26,6 +25,7 @@ import time
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from prismaquant.digests import file_sha256hex
 from tools.bazel import build_files as build
 from tools.ci import graph_impact as core
 from tools.ci import graph_impact_imports as legacy_fanout
@@ -103,7 +103,7 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
     loc = {path: len((root / path).read_text(errors='replace').splitlines()) for path in sources}
     live = core.measure(tests, edges, loc, test_packages={test: str(Path(test).parent) for test in tests})
     live['path_edges'] = [list(edge) for edge in sorted(path_edges)]
-    live['contents'] = {test: hashlib.sha256((root / test).read_bytes()).hexdigest() for test in population}
+    live['contents'] = {test: file_sha256hex(root / test) for test in population}
     live['edge_groups'] = {
         'test_to_test_imports': sorted(f'{a} -> {b}' for a, b in edges
                                      if build.is_test_side(a) and build.is_test(b)),

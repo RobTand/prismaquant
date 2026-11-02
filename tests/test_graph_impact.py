@@ -415,7 +415,7 @@ def test_bazel_adapter_uses_query_when_v42_omits_source_edges(tmp_path):
     (tmp_path / 'query').write_text('\n'.join(json.dumps(row) for row in [
         {'rule': {'name': '//t:test', 'ruleClass': 'rust_test', 'ruleInput': ['//s:lib.rs']}},
         {'sourceFile': {'name': '//s:lib.rs'}}]))
-    live = bazel.load(tmp_path / 'deps', tmp_path / 'tests', hashes=tmp_path / 'hashes', query=tmp_path / 'query')
+    live = bazel.load_bazel_graph(tmp_path / 'deps', tmp_path / 'tests', hashes=tmp_path / 'hashes', query=tmp_path / 'query')
     assert live['reach'] == {'//t:test': ['//s:lib.rs']}
     assert 'omits source-file labels' in live['graph_source']
 

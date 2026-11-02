@@ -44,7 +44,7 @@ def hash_values(path):
     return value.get('hashes', value)
 
 
-def load(deps, tests, *, hashes=None, sources=None, query=None, loc=None):
+def load_bazel_graph(deps, tests, *, hashes=None, sources=None, query=None, loc=None):
     population = labels(tests)
     source_files = labels(sources) if sources else {
         label for label, value in hash_values(hashes).items() if value.startswith('SourceFile#')}
@@ -102,13 +102,13 @@ def main(argv=None):
         parser.error('provide --hashes with --includeTargetType, or --sources')
     def read(path):
         return json.loads(path.read_text()) if path else None
-    after = load(args.deps, args.tests, hashes=args.hashes, sources=args.sources,
+    after = load_bazel_graph(args.deps, args.tests, hashes=args.hashes, sources=args.sources,
                  query=args.query, loc=read(args.loc))
     before = None
     if args.base_deps:
         if not args.base_tests or not (args.base_hashes or args.base_sources):
             parser.error('base graph requires --base-tests and --base-hashes or --base-sources')
-        before = load(args.base_deps, args.base_tests, hashes=args.base_hashes, sources=args.base_sources,
+        before = load_bazel_graph(args.base_deps, args.base_tests, hashes=args.base_hashes, sources=args.base_sources,
                       query=args.base_query, loc=read(args.base_loc))
     changed = labels(args.changed_tests) if args.changed_tests else set()
     blame = (lambda target: explain(args.bazel_diff, args.base_hashes, args.hashes, args.deps, target,

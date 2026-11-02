@@ -51,6 +51,9 @@ reached files form the source universe, with unit weights.
 
 The vendoring test checks `tools/ci/graph_impact.sha256`. Update the recorded
 hash only when updating the shared core in all four repositories.
+The duplication inventory permits this exact file's independent helper names;
+its structural and primitive-digest checks still apply. Adjacent adapters use
+PQ owners and remain subject to all duplication checks.
 
 ## Bazel source
 

@@ -69,6 +69,10 @@ ENTRY_POINTS = frozenset({"main", "_main", "parse_args", "_parse_args",
 #: The sanctioned owners of digest recipes. A new primitive ``hashlib`` or
 #: sorted-JSON site inside one of these files is expected -- that is where
 #: consolidation moves sites to -- so only sites OUTSIDE them are ratcheted.
+# The hash-checked stdlib core is shared byte-identically across four repos.
+# Its helper names cannot depend on PQ owners. Structure and digest scanning
+# still cover this exact file; adjacent adapters retain every check.
+STANDALONE_HELPER_NAMESPACES = frozenset({'tools/ci/graph_impact.py'})
 DIGEST_OWNERS = frozenset({"prismaquant/digests.py", "prismaquant/tensor_digests.py"})
 
 
@@ -237,7 +241,7 @@ def _scan_paths(root: Path, paths: list[Path], *, include_same_file: bool) -> di
         tree = ast.parse(path.read_text(encoding="utf-8"))
         sites.update(_digest_sites(rel, tree))
         for top in tree.body:
-            if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef)) and not top.name.startswith("__") and top.name not in ENTRY_POINTS:
+            if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef)) and not top.name.startswith("__") and top.name not in ENTRY_POINTS and rel not in STANDALONE_HELPER_NAMESPACES:
                 names[top.name].add(rel)
 
         def walk(node, scope):
