@@ -79,12 +79,12 @@ def test_the_shared_pin_and_the_consumer_pin_move_together():
 #: Each suite on the shared generation, and the name its pin path has there.
 CONSUMER_PIN_NAMES = {
     "fullstack_pb_generation": "PIN_PATH",
-    "test_stage_a_produced_boundary_chain": "PIN_PATH",
-    "test_band_serial_handoff_produced": "ORIGIN_PIN",
-    "test_band_serial_handoff_spool_real_pb": "ORIGIN_PIN",
-    "test_produced_output_spool_real_pb": "PIN_PATH",
-    "test_stage_a_retirement_pb_1073": "PIN_PATH",
-    "test_stage_b_prep_produced_1070": "PIN_PATH",
+    "own_process.test_stage_a_produced_boundary_chain": "PIN_PATH",
+    "own_process.test_band_serial_handoff_produced": "ORIGIN_PIN",
+    "own_process.test_band_serial_handoff_spool_real_pb": "ORIGIN_PIN",
+    "own_process.test_produced_output_spool_real_pb": "PIN_PATH",
+    "own_process.test_stage_a_retirement_pb_1073": "PIN_PATH",
+    "own_process.test_stage_b_prep_produced_1070": "PIN_PATH",
 }
 
 
@@ -95,7 +95,7 @@ def test_every_generation_suite_reads_the_shared_pin():
         sys.path.insert(0, str(TESTS))
     pin = json.loads(SHARED.read_text())
     assert sorted(pin["consumers"]) == sorted(
-        f"tests/{name}.py" for name in CONSUMER_PIN_NAMES)
+        f"tests/{name.replace('.', '/')}.py" for name in CONSUMER_PIN_NAMES)
     for name, attribute in CONSUMER_PIN_NAMES.items():
         module = importlib.import_module(name)
         assert Path(getattr(module, attribute)).resolve() == SHARED, name

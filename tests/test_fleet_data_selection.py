@@ -77,13 +77,13 @@ MARKED_FILES = {
         "test_glm53_probe_expands_onto_the_census_roster"},
     "test_glm_joint_data_manifest_at_submit_fleet_data.py": {
         "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases"},
-    "test_dispatch_shared_tag_placement_fleet_data.py": {
+    "own_process/test_dispatch_shared_tag_placement_fleet_data.py": {
         "test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet"},
 }
 
 #: The hermetic halves the reads were split out of: they mark nothing.
 SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",
-              "test_dispatch_shared_tag_placement.py")
+              "own_process/test_dispatch_shared_tag_placement.py")
 
 
 def _marked_tests(name):
