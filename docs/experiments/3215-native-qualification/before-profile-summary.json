@@ -1,0 +1,351 @@
+{
+  "exitstatus": 0,
+  "phase_seconds": {
+    "setup": 10.96379949600005,
+    "call": 730.7189098899997,
+    "teardown": 0.0647334409998308
+  },
+  "total_phase_seconds": 741.7474428269996,
+  "slowest_tests": [
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_main_prints_the_counts_and_the_audit_verdict",
+      "phases": {
+        "setup": 0.001276937000000089,
+        "call": 124.576186931,
+        "teardown": 0.0013203319999774976
+      },
+      "seconds": 124.57878419999997
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_every_candidate_carries_its_own_table_width",
+      "phases": {
+        "setup": 0.0005688030000072786,
+        "call": 123.10040873199999,
+        "teardown": 0.001405070000004116
+      },
+      "seconds": 123.102382605
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control",
+      "phases": {
+        "setup": 0.0010295350000149028,
+        "call": 85.00093290800001,
+        "teardown": 0.0015144829999940157
+      },
+      "seconds": 85.00347692600002
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_the_inventory_carries_its_drift_report",
+      "phases": {
+        "setup": 0.0009700959999463521,
+        "call": 61.163728823999975,
+        "teardown": 0.0013068719999864697
+      },
+      "seconds": 61.16600579199991
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal",
+      "phases": {
+        "setup": 0.0010844480000287149,
+        "call": 49.93916783999998,
+        "teardown": 0.0014209240000013779
+      },
+      "seconds": 49.94167321200001
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E2M1_K2-896-tcq-lut16]",
+      "phases": {
+        "setup": 0.0018724810000776415,
+        "call": 45.25916115799998,
+        "teardown": 0.0015568170000506143
+      },
+      "seconds": 45.26259045600011
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_E4M3_K1-1024-window-channel]",
+      "phases": {
+        "setup": 0.0018362770000521778,
+        "call": 44.32954779299996,
+        "teardown": 0.0015547739999419719
+      },
+      "seconds": 44.332938843999955
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_recipe_labels_come_through_the_canonicalisers[TESSERA_BF16_K1-4096-window-channel]",
+      "phases": {
+        "setup": 0.0013118289999738408,
+        "call": 44.27572420599995,
+        "teardown": 0.0015775179999764077
+      },
+      "seconds": 44.2786135529999
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_native_qualification_is_exactly_the_reviewed_primary_cells",
+      "phases": {
+        "setup": 0.001103656999987379,
+        "call": 42.052897511000026,
+        "teardown": 0.0013388099999929182
+      },
+      "seconds": 42.055339978000006
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_the_native_set_does_not_shrink_the_legal_domain",
+      "phases": {
+        "setup": 0.001153723000015816,
+        "call": 41.482714808000026,
+        "teardown": 0.0012476540000534442
+      },
+      "seconds": 41.485116185000095
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_provider_returns_the_full_sorted_unique_domain[TESSERA_BF16_K1-3841]",
+      "phases": {
+        "setup": 0.0016601430000946493,
+        "call": 27.204179615000044,
+        "teardown": 0.001552171000071212
+      },
+      "seconds": 27.20739192900021
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_a_transition_names_the_first_rate_of_the_new_regime",
+      "phases": {
+        "setup": 0.0010885739999366706,
+        "call": 13.445939173999932,
+        "teardown": 0.0014745729999958712
+      },
+      "seconds": 13.448502320999864
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_provider_returns_the_full_sorted_unique_domain[TESSERA_E4M3_K1-1793]",
+      "phases": {
+        "setup": 0.0012992309999617646,
+        "call": 12.420994033999932,
+        "teardown": 0.0015124809999633726
+      },
+      "seconds": 12.423805745999857
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_legal_rate_count_is_the_audited_count[TESSERA_E4M3_K1-1793]",
+      "phases": {
+        "setup": 10.887839694000007,
+        "call": 0.00029472200000668636,
+        "teardown": 0.0005797099999966804
+      },
+      "seconds": 10.88871412600001
+    },
+    {
+      "node": "tests/test_tessera_legal_domain.py::test_the_two_pins_produce_the_same_wire_for_the_primary_families",
+      "phases": {
+        "setup": 0.0013318199999048375,
+        "call": 9.452264213000035,
+        "teardown": 0.0014174980000234427
+      },
+      "seconds": 9.455013530999963
+    }
+  ],
+  "samples": 97182,
+  "top_leaf": [
+    [
+      "/usr/lib/python3.12/pathlib.py:1017:read_bytes",
+      69302
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/grammar.py:333:bresenham_rate_schedule",
+      11366
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1007:open",
+      9298
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1024:read_text",
+      4977
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1164:schedule_signature",
+      663
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1183:get_data",
+      210
+    ],
+    [
+      "<frozen importlib._bootstrap>:645:parent",
+      167
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:140:_path_stat",
+      95
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:186:__new__",
+      87
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/transformers/utils/import_utils.py:2958:create_import_structure_from_path",
+      82
+    ],
+    [
+      "<string>:2:__init__",
+      60
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:837:stat",
+      48
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/grammar.py:256:_check_rate",
+      44
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/capture.py:589:snap",
+      43
+    ],
+    [
+      "/usr/lib/python3.12/enum.py:726:__call__",
+      32
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:317:_from_coprime_ints",
+      27
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:812:_residencies_from_flags",
+      26
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:185:scale_plane_name",
+      25
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:841:attested_cells",
+      24
+    ],
+    [
+      "/usr/lib/python3.12/copy.py:118:deepcopy",
+      23
+    ]
+  ],
+  "top_inclusive": [
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+      96514
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+      96512
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+      96506
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+      95499
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+      95488
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+      95469
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_runtime_contract.py:2654:installed_runtime_snapshot",
+      78415
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1017:read_bytes",
+      78400
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_runtime_contract.py:2649:read_runtime_snapshot",
+      78399
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:894:native_qualification_set",
+      62708
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:632:route_admission",
+      62639
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:625:_admission_runtime",
+      62608
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1318:support_facts",
+      56009
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1557:build_inventory",
+      42585
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:716:test_recipe_labels_come_through_the_canonicalisers",
+      18232
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:521:test_main_prints_the_counts_and_the_audit_verdict",
+      17967
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1781:main",
+      17966
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:153:test_every_candidate_carries_its_own_table_width",
+      16221
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:538:_inventory",
+      16220
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:385:live_pins",
+      15810
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_serving_runtime_pin.py:921:installed_tessera_contract_sha256",
+      15809
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1143:column_schedule",
+      11657
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/tessera/grammar.py:333:bresenham_rate_schedule",
+      11510
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:241:test_producer_legal_and_reader_supported_genuinely_diverge_on_the_control",
+      11111
+    ],
+    [
+      "/usr/lib/python3.12/pathlib.py:1007:open",
+      9301
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:503:test_the_inventory_carries_its_drift_report",
+      8402
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1274:legal_rates",
+      7293
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:1274:tessera_shape_legal",
+      7278
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_legal_domain.py:330:test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal",
+      6315
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_legal_domain.py:1196:resolver_transitions",
+      6203
+    ]
+  ]
+}
