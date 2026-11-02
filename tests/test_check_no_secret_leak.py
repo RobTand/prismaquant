@@ -16,13 +16,14 @@ SCANNER = ROOT / 'tools/ci/check_no_secret_leak.py'
 SECRET = 'fake-token/+ with?punctuation=42'
 
 
-def scan(*paths, variables=('SCAN_FAKE_SECRET',), values=None):
+def scan(*paths, variables=('SCAN_FAKE_SECRET',), required=(), values=None):
     # Never inherit credentials from the pytest worker.
     env = {'PATH': os.defpath, 'SCAN_FAKE_SECRET': SECRET}
     env.update(values or {})
     return subprocess.run(
         [sys.executable, str(SCANNER),
          *(argument for name in variables for argument in ('--env', name)),
+         *(argument for name in required for argument in ('--require', name)),
          *(str(path) for path in paths)],
         env=env, capture_output=True, text=True, check=False,
     )
@@ -75,6 +76,40 @@ def test_missing_path_is_infrastructure_failure(tmp_path):
     result = scan(tmp_path / 'missing')
     assert result.returncode == 75
     assert 'not scanned' in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('values,planted,expected', [
+    ({}, False, 75),
+    ({'REQUIRED_FAKE': ''}, False, 75),
+    ({'REQUIRED_FAKE': SECRET}, False, 0),
+    ({'REQUIRED_FAKE': SECRET}, True, 1),
+])
+@pytest.mark.parametrize('variables', [(), ('REQUIRED_FAKE', 'OPTIONAL_FAKE')])
+def test_required_secret_availability_and_detection(tmp_path, values, planted, expected, variables):
+    artifact = tmp_path / 'artifact'
+    artifact.write_text(SECRET if planted else 'clean')
+    result = scan(artifact, variables=variables, required=('REQUIRED_FAKE',), values=values)
+    output = result.stdout + result.stderr
+    assert SECRET not in output
+    assert result.returncode == expected, output
+    if expected == 75:
+        assert 'REQUIRED_FAKE: required but not available' in output
+        assert 'REQUIRED_FAKE: not available, not scanned' not in output
+    elif planted:
+        assert 'REQUIRED_FAKE: secret detected' in output
+    if 'OPTIONAL_FAKE' in variables:
+        assert 'OPTIONAL_FAKE: not available, not scanned' in output
+
+
+def test_repeated_requirements_and_missing_secret_override_detection(tmp_path):
+    artifact = tmp_path / 'artifact'
+    artifact.write_text(SECRET)
+    result = scan(artifact, variables=(), required=('SCAN_FAKE_SECRET', 'ABSENT_FAKE'))
+    output = result.stdout + result.stderr
+    assert SECRET not in output
+    assert result.returncode == 75, output
+    assert 'SCAN_FAKE_SECRET: secret detected' in output
+    assert 'ABSENT_FAKE: required but not available' in output
 
 
 def load_scanner():
