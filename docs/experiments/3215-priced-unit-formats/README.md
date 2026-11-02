@@ -131,3 +131,17 @@ python docs/experiments/3215-priced-unit-formats/audit_membership.py \
   docs/experiments/3215-priced-unit-formats/assertions-after.json.gz \
   /tmp/priced-unit-membership-audit.json
 ```
+
+## Delivery dependency
+
+This PR is stacked on #3255, whose existing immutable-verdict-copy fix also
+accelerates research-menu queries. The initial hosted gate passed all tests
+but rejected the unrelated loader-axis node
+`test_with_no_contract_pinned_the_axis_leg_adds_no_refusal` at 30.909 seconds
+against its 30-second budget. That node builds a full research menu before
+removing the installed contract. It therefore exercises #3255's already fixed
+copy path. No loader-axis test or budget changes here.
+
+The cold figures above isolate the parser-memo change against main. Combined
+source verification and the final gate are recorded in the PR validation
+section. Each stack layer retains one changed test file in its own diff.
