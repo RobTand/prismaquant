@@ -1966,14 +1966,19 @@ def solve_with_promotion(
             else:
                 hi = mid
 
-    if best_assign is None:
-        # Failure path only: the binned search found no feasible iterate. Bin
-        # rounding charges every positive upgrade at least one bin, so even
-        # the floor solve can buy an upgrade whose real bytes overshoot while
-        # the per-unit minimum-byte assignment (the menu floor) still fits.
-        # Consider that exact assignment, promoted with the same legal
-        # formats, before declaring the rung infeasible. The caller still
-        # exact-prices it. Ties on bytes keep the lower predicted Δloss.
+    # solve_allocation's documented worst-case overshoot from bin rounding:
+    # n/2 bins of per-unit slack plus 1.5 bins of DP capacity slack.
+    rounding_bound = float(bit_precision) * (len(names) + 3) / 2.0
+    if best_assign is None and target - min_bits <= rounding_bound:
+        # Failure path only: the binned search found no feasible iterate and
+        # the target sits within bin-rounding reach of the format floor, so
+        # the miss can be a rounding artifact. Bin rounding charges every
+        # positive upgrade at least one bin, so even the floor solve can buy
+        # an upgrade whose real bytes overshoot while the per-unit
+        # minimum-byte assignment (the menu floor) still fits. Consider that
+        # exact assignment, promoted with the same legal formats, before
+        # declaring the rung infeasible. The caller still exact-prices it.
+        # Ties on bytes keep the lower predicted Δloss.
         min_byte_choices = {
             name: min(options, key=lambda c: (
                 c.memory_bytes, c.predicted_dloss, c.fmt))
@@ -1997,6 +2002,7 @@ def solve_with_promotion(
                         min_byte_endpoint_selected=True)
             return min_byte_assignment, min_byte_achieved
         diag["min_byte_endpoint_selected"] = False
+    if best_assign is None:
         if _SOLVER_TRACE:
             print(f"[solver] target={target:.4f} INFEASIBLE after "
                   f"{diag['evals']} evals: floor={min_bits:.4f} "
