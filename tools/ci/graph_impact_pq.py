@@ -86,8 +86,8 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
     tests = {}
     for test in population:
         mask = 0
-        for root in [test, *graph.conftests_for(test), *evidence.test_modules(test)]:
-            mask |= masks[root]
+        for start_node in [test, *graph.conftests_for(test), *evidence.test_modules(test)]:
+            mask |= masks[start_node]
         for leaf in evidence.test_data(test, graph.edges[test]):
             mask |= bit.get(leaf, 0)
         reached = set()
@@ -99,7 +99,7 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
     edges = {(source, target) for source, targets in graph.edges.items() for target in targets}
     path_edges = {(source, target) for source, targets in combined.items() for target in targets}
     for test in population:
-        path_edges.update((test, root) for root in [*graph.conftests_for(test), *evidence.test_modules(test)])
+        path_edges.update((test, start_node) for start_node in [*graph.conftests_for(test), *evidence.test_modules(test)])
     loc = {path: len((root / path).read_text(errors='replace').splitlines()) for path in sources}
     live = core.measure(tests, edges, loc)
     live['path_edges'] = [list(edge) for edge in sorted(path_edges)]
