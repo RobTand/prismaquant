@@ -32,9 +32,9 @@ def scan(*paths, variables=('SCAN_FAKE_SECRET',), values=None):
     SECRET.encode(), base64.b64encode(SECRET.encode()),
     base64.urlsafe_b64encode(SECRET.encode()),
     quote(SECRET, safe='').encode(), quote(SECRET).encode(), quote_plus(SECRET).encode(),
-    gzip.compress(SECRET.encode()),
-    gzip.compress(b'clean') + gzip.compress(SECRET.encode()),
-    gzip.compress(gzip.compress(SECRET.encode())),
+    gzip.compress(SECRET.encode(), mtime=0),
+    gzip.compress(b'clean', mtime=0) + gzip.compress(SECRET.encode(), mtime=0),
+    gzip.compress(gzip.compress(SECRET.encode(), mtime=0), mtime=0),
 ])
 def test_secret_forms_in_nested_directory_are_refused(tmp_path, payload):
     nested = tmp_path / 'nested'
