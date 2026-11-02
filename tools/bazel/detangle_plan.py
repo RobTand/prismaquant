@@ -32,6 +32,7 @@ import sys
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.bazel.build_files import strongly_connected
+from tools.bazel.detangle_repo import import_symbols
 
 
 @dataclass(frozen=True)
@@ -164,7 +165,7 @@ class Candidate:
     symbols: tuple[dict, ...]
 
 
-def delta(selection, replay, weights, candidate, config):
+def projected_savings(selection, replay, weights, candidate, config):
     before = costs(selection.masks(), replay, weights, config)['mean_seconds']
     after = costs(selection.without(set(candidate.edges)).masks(), replay, weights, config)['mean_seconds']
     return before - after
@@ -368,11 +369,6 @@ def replay_merges(root, revision, count=100):
     return rows
 
 
-# Re-export the symbol reader for callers using the original single-tool API.
-def import_symbols(source, source_path, target_path):
-    from tools.bazel.detangle_repo import import_symbols as read
-    return read(source, source_path, target_path)
-
 
 def main(argv=None):
     from tools.bazel import detangle_repo
@@ -406,7 +402,7 @@ def main(argv=None):
     longest = sum(max((weights[t] for i, t in enumerate(sorted(weights)) if row['mask'] & (1 << i)), default=0)
                   for row in dynamic['merges']) / len(replay)
     floor = overhead + longest if overhead is not None else None
-    initial_best = max((delta(selection, replay, weights, c, config) for c in candidates), default=0)
+    initial_best = max((projected_savings(selection, replay, weights, c, config) for c in candidates), default=0)
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
     coverage_valid = not failures
@@ -450,15 +446,15 @@ def markdown(result):
              f"Fallback floor {s['fallback_seconds']:.2f} s, {100 * result['floor_share']:.1f}% of static; {s['fallback_merges']}/{s['merge_count']} merges.",
              f"Graph-only static {s['graph_only_mean_seconds']:.2f} s; dynamic {d['graph_only_mean_seconds']:.2f} s.",
              f"Coverage provisional: {result['coverage']['provisional']}; failed files: {len(result['coverage']['failed_tests'])}; data reads traced: {result['coverage']['data_reads']}.",
-             f"Stopping conditions: {json.dumps(result['stopping'], sort_keys=True)}", '',
+             f"Stopping conditions: {json.dumps(result['stopping'])}", '',
              '| Rank | Cut | Delta seconds | Estimated lines | Symbols and files |',
              '| --- | --- | ---: | ---: | --- |']
     for i, cut in enumerate(result['candidates'], 1):
         symbols = '; '.join(f"{s['source']} → {s['target']}: {', '.join(s.get('symbols', []))}" for s in cut['symbols'])
         lines.append(f"| {i} | {cut['kind']} | {cut['delta_seconds']:.2f} | {cut['effort_lines']} | {symbols.replace('|', '/')} |")
-    lines += ['', 'Wall floor: ' + json.dumps(result['wall_floor'], sort_keys=True), '',
-              'Remaining causes: ' + json.dumps(result['causes'], sort_keys=True), '',
-              'Coverage source: ' + json.dumps(result['coverage'], sort_keys=True), '']
+    lines += ['', 'Wall floor: ' + json.dumps(result['wall_floor']), '',
+              'Remaining causes: ' + json.dumps(result['causes']), '',
+              'Coverage source: ' + json.dumps(result['coverage']), '']
     return '\n'.join(lines)
 
 

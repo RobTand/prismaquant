@@ -42,7 +42,7 @@ def test_bitset_delta_counts_shared_paths_once_and_keeps_data():
     cut = plan.Candidate('move these symbols down', (('hub', 'unused', 'import'),), 10,
                          ({'source': 'hub', 'target': 'unused', 'symbols': ['unused_name']},))
     replay = [{'sha': 'a', 'changed': ['unused']}, {'sha': 'b', 'changed': ['data.json']}]
-    assert plan.delta(selection, replay, {'fast': 1, 'slow': 60}, cut, plan.Config()) == .5
+    assert plan.projected_savings(selection, replay, {'fast': 1, 'slow': 60}, cut, plan.Config()) == .5
     assert selection.selected(['unused']) == {'fast'}
 
 
@@ -62,9 +62,9 @@ def test_cycle_group_has_gain_when_each_edge_alone_has_none():
                                roots={'t': {'t'}})
     replay = [{'sha': 'm', 'changed': ['x']}]
     cuts = [plan.Candidate('move these symbols down', ((s, 'x', 'import'),), 1, ()) for s in ('a', 'b')]
-    assert all(plan.delta(selection, replay, {'t': 9}, cut, plan.Config()) == 0 for cut in cuts)
+    assert all(plan.projected_savings(selection, replay, {'t': 9}, cut, plan.Config()) == 0 for cut in cuts)
     group = plan.Candidate('SCC sub-cut', tuple(edge for cut in cuts for edge in cut.edges), 2, ())
-    assert plan.delta(selection, replay, {'t': 9}, group, plan.Config()) == 9
+    assert plan.projected_savings(selection, replay, {'t': 9}, group, plan.Config()) == 9
 
 
 def test_feedback_arc_set_breaks_a_cycle_deterministically():
