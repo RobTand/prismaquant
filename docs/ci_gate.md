@@ -14,9 +14,6 @@ After that date in UTC, the live check fails until you set `"test_to_test": "str
 in `tests/fixtures/graph_impact_baseline.json` and fix or allowlist any new
 test→test edges. Injected dates cover before, on, and after the deadline, and the
 live check also asserts the real UTC date. The shared core remains unchanged.
-The discarded count target was 956 entries in PrismaBuild's
-`tests/fixtures/import_fanout_baseline.json` at origin/main
-`071094caa54922143398eb0397acb61bf3fed9f9`, already above PQ's 875.
 
 TODO after PR A: switch the graph job from the Python-import bridge to Bazel's
 `deps.json` plus the source-label query fallback described in [bazel.md](bazel.md).
