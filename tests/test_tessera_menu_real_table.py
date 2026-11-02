@@ -668,3 +668,39 @@ def test_readability_does_not_depend_on_the_serving_scope(installed_contract):
     assert tm.route_admission(
         "TESSERA_E4M3_K1_R896", serving_context=routed).attested
     assert not tm.route_admission("TESSERA_E4M3_K1_R896").attested
+
+
+# Captured from the original priced research menu at f1335b03 on (2048, 1024).
+# BuildBuddy invocation 2ce103e5-804d-4807-8b95-904e1ea12988 records the full
+# format roster; the existing independent reader-range assertions passed there.
+@pytest.mark.parametrize("family,count,digest", [
+    ("TESSERA_BF16_K1", 3841,
+     "4cb0c36e6728d0adc345c7fa3fd30f8e03f7668e23d7779c8a57ad5e4b5a5746"),
+    ("TESSERA_E2M1_K1", 513,
+     "bb770d48cfe6c1b8f7878d2fc6c5ed73d7b1dacf8a66e2638ae358f81e14cd03"),
+    ("TESSERA_E2M1_K2", 769,
+     "e221484f0c4d0641943a1b6a5ed6c97886b78572536ba8d418089fcfe0ddc775"),
+    ("TESSERA_E4M3_K1", 1793,
+     "839e16b035a628dbd323ccb02729990da04c6d5f5443c8e70ef2f015eaa64546"),
+])
+def test_readability_walk_matches_the_original_priced_menu(family, count, digest):
+    from prismaquant.tessera_formats import get_tessera_family
+
+    seen = _readable_by_family(families=[get_tessera_family(family)])
+    assert set(seen) == {family}
+    rates = sorted(seen[family].items())
+    assert len(rates) == count
+    encoded = json.dumps(rates, separators=(",", ":")).encode()
+    assert hashlib.sha256(encoded).hexdigest() == digest
+
+
+def test_readability_walk_does_not_price_payloads(monkeypatch):
+    from prismaquant import tessera_footprint
+
+    def refuse_price(*args, **kwargs):
+        raise AssertionError("a readability assertion requested payload pricing")
+
+    monkeypatch.setattr(tessera_footprint, "tessera_exact_bits_for_shape", refuse_price)
+    seen = _readable_by_family()
+    _assert_the_published_reader_ranges(seen)
+    assert len(seen[UNPUBLISHED_FAMILY]) > 50
