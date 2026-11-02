@@ -27,8 +27,18 @@ def policy(root, seconds=20, slow=None, file_seconds=None):
 
 def budget_run(tmp_path, xml, *, base=None, pytest_code=0):
     plan = {'selected': [{'path': 'tests/test_sample.py'}], 'deselect': [], 'base_sha': base}
-    def execute(*args, **kwargs):
-        (tmp_path / 'junit.xml').write_text(xml)
+    def execute(command, **kwargs):
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        if '::' in command[-1]:
+            tree = ET.fromstring(xml)
+            target = command[-1].removeprefix(str(tmp_path) + '/')
+            for suite in tree.iter('testsuite'):
+                for item in list(suite.findall('testcase')):
+                    if runner.gate_junit_identity(item)[1] != target:
+                        suite.remove(item)
+            report.write_text(ET.tostring(tree, encoding='unicode'))
+        else:
+            report.write_text(xml)
         return SimpleNamespace(returncode=pytest_code)
     code = runner.run_plan(plan, root=tmp_path, output=tmp_path / 'result.json',
                            junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
@@ -293,3 +303,199 @@ def test_invalid_file_budget_is_a_policy_failure(tmp_path, file_seconds):
     policy(tmp_path, file_seconds=file_seconds)
     code, result = budget_run(tmp_path, case('1'))
     assert code == 1 and result['budget']['status'] == 'fail'
+
+
+@pytest.mark.parametrize('first_seconds,first_code,first_failure,again_seconds,again_code,again_failure,expected,outcome', [
+    (31, 0, None, 12, 0, None, 0, 'pass'),
+    (31, 0, None, 31, 0, None, 1, 'fail'),
+    (31, 0, None, 12, 1, 'failure', 1, 'fail'),
+    (31, 0, None, 12, 3, None, 75, 'no_verdict'),
+    (31, 0, None, None, -9, None, 75, 'no_verdict'),
+    (1, 1, 'failure', None, None, None, 1, None),
+    (31, 1, 'failure', None, None, None, 1, None),
+    (31, 0, 'error', None, None, None, 1, None),
+    (31, 3, None, None, None, None, 75, None),
+    (25, 0, None, None, None, None, 0, None),
+])
+def test_budget_only_rerun_verdicts(tmp_path, monkeypatch, first_seconds, first_code,
+                                   first_failure, again_seconds, again_code,
+                                   again_failure, expected, outcome):
+    policy(tmp_path)
+    summary = tmp_path / 'summary.md'
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    allocations = iter([2, 1])
+    monkeypatch.setattr(runner, 'worker_count', lambda *args, **kwargs: next(allocations))
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append((command, {key: kwargs['env'][key] for key in
+                               ('GATE_DESELECT_NODEIDS', 'OMP_NUM_THREADS')}))
+        seconds, code, failure = ((first_seconds, first_code, first_failure) if len(calls) == 1
+                                  else (again_seconds, again_code, again_failure))
+        if seconds is not None:
+            report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+            xml = case(str(seconds))
+            if failure:
+                xml = xml.replace('/></testsuite>', f'><{failure}>defect</{failure}></testcase></testsuite>')
+            report.write_text(xml)
+        return SimpleNamespace(returncode=code)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}],
+                            'deselect': ['tests/test_sample.py::test_quarantined']},
+                           root=tmp_path, output=tmp_path / 'result.json',
+                           junit=tmp_path / 'junit.xml', execute=execute, affinity={1, 2}, workers=2)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == expected
+    if outcome is None:
+        assert len(calls) == 1
+        assert result.get('budget_reruns', []) == []
+        return
+    assert len(calls) == 2
+    assert result['verdict'] == {'pass': 'pass', 'fail': 'fail', 'no_verdict': None}[outcome]
+    rerun_record = dict(result['budget_reruns'][0])
+    if outcome == 'no_verdict':
+        assert rerun_record.pop('infrastructure_reason')
+    assert [rerun_record] == [{
+        'nodeid': 'tests/test_sample.py::test_cost', 'first_seconds': 31.0,
+        'rerun_seconds': again_seconds, 'limit': 30.0, 'outcome': outcome}]
+    command, environment = calls[1]
+    assert command[-1] == str(tmp_path / 'tests/test_sample.py') + '::test_cost'
+    assert command[command.index('-n') + 1] == '2'
+    assert environment['GATE_DESELECT_NODEIDS'] == calls[0][1]['GATE_DESELECT_NODEIDS']
+    assert environment['OMP_NUM_THREADS'] == '1'
+    assert 'tests/test_sample.py::test_cost' in summary.read_text()
+    assert outcome in summary.read_text()
+    # The first report remains the evidence for exact-once shard coverage.
+    assert next(ET.parse(tmp_path / 'junit.xml').iter('testcase')).get('time') == '31'
+
+
+def test_file_budget_reruns_the_complete_file(tmp_path):
+    policy(tmp_path, file_seconds={'tests/test_sample.py': 20})
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        report.write_text(case('16' if len(calls) == 1 else '5').replace(
+            '</testsuite>', '<testcase file="tests/test_sample.py" classname="tests.test_sample" '
+            'name="test_other" time="16"/></testsuite>'))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+                           root=tmp_path, output=tmp_path / 'result.json',
+                           junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0
+    assert len(calls) == 2 and calls[1][-1] == str(tmp_path / 'tests/test_sample.py')
+    assert result['budget_reruns'] == [{'nodeid': 'tests/test_sample.py', 'first_seconds': 32.0,
+                                      'rerun_seconds': 21.0, 'limit': 30.0, 'outcome': 'pass'}]
+
+
+def test_split_file_node_budget_rerun_uses_node_collection_coverage(tmp_path):
+    policy(tmp_path)
+    node = 'tests/test_sample.py::test_cost'
+    other = 'tests/test_sample.py::test_other'
+    partition = {'index': 0, 'count': 2,
+                 'owners': {'tests/test_sample.py': {node: 0, other: 1}}}
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command[-1])
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        rerun = '::' in command[-1]
+        report.write_text(case('22.076' if rerun else '30.819'))
+        # Explicit node selection emits no module collectreport. GateCollection
+        # still records the node in collected/selected during modifyitems.
+        Path(kwargs['env']['GATE_COLLECTION_REPORT']).write_text(json.dumps({
+            'seen': [] if rerun else ['tests/test_sample.py'],
+            'collected': [node] if rerun else [node, other], 'selected': [node],
+            'split_collected': {} if rerun else {'tests/test_sample.py': [node, other]},
+            'own_cgroup_files': [], 'collection_failed': False, 'exitstatus': 0}))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        assignment={'index': 0, 'files': ['tests/test_sample.py'], 'node_partition': partition},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0, result
+    assert result['verdict'] == 'pass'
+    assert result['budget_reruns'] == [{'nodeid': node, 'first_seconds': 30.819,
+        'rerun_seconds': 22.076, 'limit': 30.0, 'outcome': 'pass'}]
+    assert result['node_coverage']['executed'] == [node]
+    assert result['execution_coverage'] == {'selected': [node], 'executed': [node]}
+    assert calls == [str(tmp_path), str(tmp_path / node)]
+
+
+@pytest.mark.parametrize('scoped', [False, True])
+def test_real_split_node_rerun_keeps_target_and_collection_evidence(tmp_path, scoped, record_property):
+    policy(tmp_path)
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\nmarkers = own_cgroup\n')
+    (tmp_path / 'tests/test_sample.py').write_text(
+        'import pytest\n' + ('@pytest.mark.own_cgroup\n' if scoped else '') +
+        'def test_cost(): pass\ndef test_other(): raise AssertionError("foreign node ran")\n')
+    node = 'tests/test_sample.py::test_cost'
+    other = 'tests/test_sample.py::test_other'
+    partition = {'index': 0, 'count': 2,
+                 'owners': {'tests/test_sample.py': {node: 0, other: 1}}}
+
+    def execute(command, **kwargs):
+        if command[0] == 'sudo':
+            command = command[command.index('env') + 1:]
+            environment = dict(kwargs['env'])
+            while '=' in command[0]:
+                key, value = command.pop(0).split('=', 1)
+                environment[key] = value
+            kwargs['env'] = environment
+        result = subprocess.run(command, **kwargs)
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        if 'budget-rerun' not in report.name:
+            # Inject only the first timing; execution and collection stay real.
+            tree = ET.parse(report)
+            for item in tree.iter('testcase'):
+                if item.get('name') == 'test_cost':
+                    item.set('time', '30.819')
+            tree.write(report)
+        return result
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        assignment={'index': 0, 'files': ['tests/test_sample.py'], 'node_partition': partition},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0, result
+    assert result['verdict'] == 'pass'
+    assert result['budget_reruns'][0]['outcome'] == 'pass'
+    nested = json.loads((tmp_path / 'junit.budget-rerun-0.result.json').read_text())
+    assert nested['verdict'] == 'pass'
+    assert nested['collection']['collected'] == [node]
+    assert nested['collection']['seen'] == []
+    record_property('budget_rerun_evidence', json.dumps({
+        **result['budget_reruns'][0], 'scoped': scoped,
+        'nested_verdict': nested['verdict'], 'collection': nested['collection']}))
+    assert [runner.gate_junit_identity(item)[1] for item in
+            ET.parse(tmp_path / 'junit.budget-rerun-0.xml').iter('testcase')] == [node]
+    assert result['node_coverage']['executed'] == [node]
+
+
+def test_budget_rerun_prints_nested_infrastructure_reason(tmp_path, capsys):
+    policy(tmp_path)
+
+    def execute(command, **kwargs):
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        if 'budget-rerun' in report.name:
+            raise OSError('nested executor unavailable')
+        report.write_text(case('31'))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    assert code == 75
+    nested = json.loads((tmp_path / 'junit.budget-rerun-0.result.json').read_text())
+    assert nested['infrastructure_reason'] == 'nested executor unavailable'
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert result['budget_reruns'][0]['infrastructure_reason'] == 'nested executor unavailable'
+    line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith('BUDGET_RERUN:'))
+    assert 'no_verdict' in line and 'nested executor unavailable' in line
