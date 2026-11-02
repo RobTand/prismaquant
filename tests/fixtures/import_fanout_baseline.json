@@ -1,23 +1,10 @@
 {
   "evidence": "imports",
-  "median_selected_pct": 100.0,
-  "p90_selected_pct": 100.0,
-  "modules_over_half": 280,
-  "conftest_source_modules": 280,
-  "conftest_source_imports": [
-    "tests/conftest.py -> prismaquant/__init__.py",
-    "tests/conftest.py -> prismaquant/lane_eligibility.py",
-    "tests/conftest.py -> prismaquant/model_profiles/__init__.py",
-    "tests/conftest.py -> prismaquant/model_profiles/registry.py",
-    "tests/conftest.py -> prismaquant/nvfp4_activation_contract.py",
-    "tests/conftest.py -> prismaquant/staged_lease.py",
-    "tests/conftest.py -> prismaquant/staged_tier_policy.py",
-    "tests/conftest.py -> prismaquant/tessera_calibration_cache.py",
-    "tests/conftest.py -> prismaquant/tessera_joint_aura.py",
-    "tests/conftest.py -> prismaquant/tessera_lane.py",
-    "tests/conftest.py -> prismaquant/tessera_runtime_contract.py",
-    "tests/conftest.py -> prismaquant/vendored/__init__.py"
-  ],
+  "median_selected_pct": 17.0,
+  "p90_selected_pct": 88.3,
+  "modules_over_half": 268,
+  "conftest_source_modules": 0,
+  "conftest_source_imports": [],
   "test_to_test_imports": [
     "tests/bench_stage_a_forward_split.py -> tests/test_joint_cost_quantum_runtime.py",
     "tests/bench_stage_a_forward_split.py -> tests/test_stage_a_chain_resume.py",
