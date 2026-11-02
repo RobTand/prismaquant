@@ -110,6 +110,9 @@ _NO_DEBT = {"pending": {}, "abandoned": {}, "unclassified": {},
 # -- pinned candidate resolution -------------------------------------------
 
 def _pin_roots(pin: dict) -> list[Path]:
+    from fleet_sdk import PB_SOURCE_BUNDLE_ENV
+    if override := os.environ.get(PB_SOURCE_BUNDLE_ENV):
+        return [Path(override)]
     roots: list[Path] = []
     for entry in pin["search_paths"]:
         if "env" in entry:
@@ -160,7 +163,13 @@ def _pb_source() -> tuple[Path, Path]:
         except OSError:
             return False
 
-    roots = [root for root in _pin_roots(pin) if _digest_ok(root)]
+    roots = []
+    for root in _pin_roots(pin):
+        if not root.exists():
+            continue
+        assert root.name == pin["runtime_generation"], f"wrong PB generation: {root}"
+        assert _digest_ok(root), f"PB source bundle differs from pinned digests: {root}"
+        roots.append(root)
     already = sys.modules.get("prismabuild")
     if already is not None and roots:
         resolved = Path(already.__file__).resolve().parent
@@ -2498,3 +2507,24 @@ def test_published_output_queue_wins_over_a_foreign_residency_hint(tmp_path):
         assert rebound.queue.root == queue.root
         assert rebound.instance == publication.instance
 
+def test_explicit_bundle_never_falls_back_to_the_fleet_mount(tmp_path, monkeypatch):
+    import fleet_sdk
+
+    root = tmp_path / "missing"
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
+    pin = json.loads(PIN_PATH.read_text())
+    assert fleet_sdk.pb_source_bundle_root(pin) == root
+    assert _pin_roots(pin) == [root]
+    with pytest.raises(pytest.skip.Exception, match="no PrismaBuild produced-output candidate"):
+        _pb_source()
+
+
+def test_produced_candidate_with_wrong_bytes_fails_instead_of_skipping(tmp_path, monkeypatch):
+    import fleet_sdk
+
+    pin = json.loads(PIN_PATH.read_text())
+    root = tmp_path / pin["runtime_generation"]
+    root.mkdir()
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
+    with pytest.raises(AssertionError, match="differs from pinned digests"):
+        _pb_source()

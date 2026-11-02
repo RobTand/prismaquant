@@ -16,6 +16,10 @@ snapshot (worktree HEAD, required clean). An unavailable pinned commit or
 a verification mismatch is :class:`NonQualified` machine
 output -- never a green row, never a silent substitution.
 
+Hosted and hermetic tests supply ``PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR``.
+That explicit object store suppresses fleet lookup and network fallback while
+retaining the same historical commit and full-tree verification.
+
 The fallback fetches the declared SHA into a separate bare mirror. It does
 not change the pinned checkout or substitute a mutable branch tip.
 """
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -159,12 +164,17 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     - every file under the reused prefixes hash-matches its blob.
     """
     git_dir = None
-    for candidate in (PB_PINNED_CHECKOUT, PB_PINNED_CHECKOUT_LEGACY):
-        try:
-            git_dir = _git_dir_of(candidate)
-            break
-        except NonQualified:
-            continue
+    if explicit := os.environ.get("PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR"):
+        # Hosted setup stages this historical pin before offline tests begin.
+        # An explicit store never falls back to fleet paths or a network fetch.
+        git_dir = _git_dir_of(Path(explicit))
+    else:
+        for candidate in (PB_PINNED_CHECKOUT, PB_PINNED_CHECKOUT_LEGACY):
+            try:
+                git_dir = _git_dir_of(candidate)
+                break
+            except NonQualified:
+                continue
     network = git_dir is None
     if network:
         mirror = _resolve_via_network(dest, timeout_s=timeout_s)

@@ -26,12 +26,12 @@ PIN_PATH = chain.PB_GENERATION_PIN
 
 
 def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_path, monkeypatch):
-    from fleet_sdk import require_prismabuild_sdk
+    from fleet_sdk import pb_source_bundle_root, require_pb_source_bundle, require_prismabuild_sdk
     require_prismabuild_sdk()
     pin_path = PIN_PATH
     pin = json.loads(pin_path.read_text())
-    root = Path(pin["bundle_root"])
-    assert root.is_dir(), "the qualified PB source bundle must be provisioned"
+    root = pb_source_bundle_root(pin)
+    require_pb_source_bundle(root)
     for name, digest in pin["files"].items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest, name
     monkeypatch.setattr(chain, "PIN_PATH", pin_path)

@@ -37,6 +37,7 @@
     "tests/test_pq1588_predispatch_packet.py::test_packet_cell_state_matches_the_pinned_contract": 175,
     "tests/test_pq1588_predispatch_packet.py::test_packet_rungs_are_producer_legal_without_holes": 281,
     "tests/test_prismabuild_boundary.py::test_prismabuild_references_equal_the_frozen_allowlist": 63,
+    "tests/test_prismabuild_import_leak_1281.py::test_source_consumers_restore_the_public_plugin_import_graph": 232,
     "tests/test_production_cache_render_identity.py::test_resume_refuses_different_hooked_enumeration": 41,
     "tests/test_production_weight_cache.py::test_render_score_clips_nvfp4_but_not_dynamic_mxfp8": 43,
     "tests/test_resident_packed_stripe_scope_audit.py::test_resident_format_menu_include_selects_one_packed_projection[False]": 43,
@@ -344,6 +345,13 @@
       "attempt": 1,
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/1/junit.xml"
+    },
+    "tests/test_prismabuild_import_leak_1281.py::test_source_consumers_restore_the_public_plugin_import_graph": {
+      "seconds": 115.91,
+      "run": 41487683378,
+      "attempt": 1,
+      "runner": "ubuntu-24.04",
+      "artifact": "gate-pr-final-1/effective/9/junit.xml"
     },
     "tests/test_production_cache_render_identity.py::test_resume_refuses_different_hooked_enumeration": {
       "seconds": 20.229,

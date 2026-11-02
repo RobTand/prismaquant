@@ -71,10 +71,10 @@ jobs:
       run: |
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: planning infrastructure failed"; exit 75' ERR
-        mkdir -p gate-artifacts
+        mkdir -p ${{ runner.temp }}/gate-artifacts
         if python tools/ci/gate_select.py --base "$GATE_BASE" --head "$GATE_HEAD" \
-          --mode "$GATE_MODE" --output gate-artifacts/plan.json \
-          --files-output gate-artifacts/population.txt --summary "$GITHUB_STEP_SUMMARY"; then
+          --mode "$GATE_MODE" --output ${{ runner.temp }}/gate-artifacts/plan.json \
+          --files-output ${{ runner.temp }}/gate-artifacts/population.txt --summary "$GITHUB_STEP_SUMMARY"; then
           echo 'policy_exit=0' >> "$GITHUB_OUTPUT"
         else
           code=$?
@@ -93,16 +93,16 @@ jobs:
         if [ "$GATE_MODE" = selection ]; then
           selection=(--single-shard-seconds "$GATE_PR_SINGLE_SECONDS" --workers 4)
         fi
-        python tools/ci/gate_partition.py matrix --files-from gate-artifacts/population.txt \
+        python tools/ci/gate_partition.py matrix --files-from ${{ runner.temp }}/gate-artifacts/population.txt \
           --durations tools/ci/gate_durations.json --shards "$GATE_SHARDS" \
-          --runners "$runners" "${selection[@]}" --output gate-artifacts/matrix.json
+          --runners "$runners" "${selection[@]}" --output ${{ runner.temp }}/gate-artifacts/matrix.json
         python - <<'PYTHON'
         import json, math, os
         from pathlib import Path
-        matrix = json.loads(Path('gate-artifacts/matrix.json').read_text())
+        matrix = json.loads(Path('${{ runner.temp }}/gate-artifacts/matrix.json').read_text())
         for row in matrix['include']:
             row['timeout_minutes'] = max(15, math.ceil(row['estimated_seconds'] * 1.5 / 4 / 60) + 10)
-        Path('gate-artifacts/job-matrix.json').write_text(json.dumps(matrix) + '\n')
+        Path('${{ runner.temp }}/gate-artifacts/job-matrix.json').write_text(json.dumps(matrix) + '\n')
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
             output.write('matrix=' + json.dumps({'include': matrix['include']}, separators=(',', ':')) + '\n')
             output.write('shards=' + str(matrix['shards']) + '\n')
@@ -113,12 +113,12 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: ${{ !cancelled() && steps.scan-artifacts-1.outcome == 'success' }}
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
         retention-days: 7
     - name: Scan artifact paths for secrets
       id: scan-artifacts-2
@@ -126,12 +126,12 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts/plan.json
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts/plan.json"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: ${{ !cancelled() && steps.scan-artifacts-2.outcome == 'success' }}
       with:
         name: gate-shadow-selection-${{ github.run_attempt }}
-        path: gate-artifacts/plan.json
+        path: ${{ runner.temp }}/gate-artifacts/plan.json
         retention-days: 7
   shards:
     name: shard-${{ matrix.index }}-a1
@@ -156,13 +156,13 @@ jobs:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
     - name: Compute assignment before setup
       shell: bash
       run: |
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
+        python3 tools/ci/gate_partition.py shard --files-from ${{ runner.temp }}/gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix ${{ runner.temp }}/gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files ${{ runner.temp }}/gate-artifacts/assigned.txt --output-assignment ${{ runner.temp }}/gate-artifacts/assignment.json
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
@@ -183,6 +183,27 @@ jobs:
         ref: ${{ steps.tessera-pin.outputs.commit }}
         persist-credentials: false
         path: .ci/tessera
+    - name: Resolve PrismaBuild source pin
+      id: prismabuild-pin
+      run: |
+        printf 'commit=%s\n' "$(python tools/resolve_prismabuild_dev_pin.py)" >> "$GITHUB_OUTPUT"
+    - name: Check out pinned PrismaBuild source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: RobTand/prismabuild
+        ref: ${{ steps.prismabuild-pin.outputs.commit }}
+        persist-credentials: false
+        path: .ci/prismabuild
+    - name: Build sealed PrismaBuild test source bundle
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
+        printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+        acceptance_pin="$(python -c 'from pathlib import Path; import runpy; print(runpy.run_path("tools/resolve_tessera_dev_pin.py")["resolve_literal_pin"](Path("tests/fleet_acceptance_pins.py"), "PB_CANDIDATE_REV"))')"
+        git -C .ci/prismabuild fetch --no-tags --depth=1 origin "$acceptance_pin"
+        mv .ci/prismabuild/.git "$RUNNER_TEMP/pb-acceptance.git"
+        printf 'PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR=%s\n' "$RUNNER_TEMP/pb-acceptance.git" >> "$GITHUB_ENV"
     - name: Install CPU test environment
       shell: bash
       run: |
@@ -191,7 +212,10 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+        # Provenance checks must name only the executed PQ tree.
+        rm -rf .ci/tessera .ci/prismabuild
+        rmdir .ci
         python --version
         python -m pip --version
     - name: Run assigned gate tests
@@ -200,8 +224,8 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
         printf '## Shard %s, attempt 1\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
-        wc -l gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
-        if python tools/ci/gate_run.py --plan gate-artifacts/plan.json             --assignment gate-artifacts/assignment.json --workers 4             --result gate-artifacts/result.json --junitxml gate-artifacts/junit.xml; then
+        wc -l ${{ runner.temp }}/gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
+        if python tools/ci/gate_run.py --plan ${{ runner.temp }}/gate-artifacts/plan.json             --assignment ${{ runner.temp }}/gate-artifacts/assignment.json --workers 4             --result ${{ runner.temp }}/gate-artifacts/result.json --junitxml ${{ runner.temp }}/gate-artifacts/junit.xml; then
           code=0
         else
           code=$?
@@ -219,13 +243,13 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && steps.scan-artifacts-3.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a1-${{ matrix.index }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
         if-no-files-found: warn
         retention-days: 7
   retry-plan:
@@ -251,7 +275,7 @@ jobs:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
     - name: Download first attempt verdicts
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -264,7 +288,7 @@ jobs:
       run: |
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: retry planning infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_actions.py retries --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/retry-matrix.json             >> "$GITHUB_OUTPUT"
+        python3 tools/ci/gate_actions.py retries --plan ${{ runner.temp }}/gate-artifacts/plan.json             --matrix ${{ runner.temp }}/gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output ${{ runner.temp }}/gate-artifacts/retry-matrix.json             >> "$GITHUB_OUTPUT"
   retry-shards:
     name: shard-${{ matrix.index }}-a2
     if: ${{ !cancelled() && needs.retry-plan.result == 'success' && needs.retry-plan.outputs.retry == 'true' }}
@@ -290,13 +314,13 @@ jobs:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
     - name: Compute assignment before setup
       shell: bash
       run: |
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_partition.py shard --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
+        python3 tools/ci/gate_partition.py shard --files-from ${{ runner.temp }}/gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix ${{ runner.temp }}/gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files ${{ runner.temp }}/gate-artifacts/assigned.txt --output-assignment ${{ runner.temp }}/gate-artifacts/assignment.json
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
       with:
         python-version: '3.12'
@@ -317,6 +341,27 @@ jobs:
         ref: ${{ steps.tessera-pin.outputs.commit }}
         persist-credentials: false
         path: .ci/tessera
+    - name: Resolve PrismaBuild source pin
+      id: prismabuild-pin
+      run: |
+        printf 'commit=%s\n' "$(python tools/resolve_prismabuild_dev_pin.py)" >> "$GITHUB_OUTPUT"
+    - name: Check out pinned PrismaBuild source
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: RobTand/prismabuild
+        ref: ${{ steps.prismabuild-pin.outputs.commit }}
+        persist-credentials: false
+        path: .ci/prismabuild
+    - name: Build sealed PrismaBuild test source bundle
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
+        printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+        acceptance_pin="$(python -c 'from pathlib import Path; import runpy; print(runpy.run_path("tools/resolve_tessera_dev_pin.py")["resolve_literal_pin"](Path("tests/fleet_acceptance_pins.py"), "PB_CANDIDATE_REV"))')"
+        git -C .ci/prismabuild fetch --no-tags --depth=1 origin "$acceptance_pin"
+        mv .ci/prismabuild/.git "$RUNNER_TEMP/pb-acceptance.git"
+        printf 'PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR=%s\n' "$RUNNER_TEMP/pb-acceptance.git" >> "$GITHUB_ENV"
     - name: Install CPU test environment
       shell: bash
       run: |
@@ -325,7 +370,10 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+        # Provenance checks must name only the executed PQ tree.
+        rm -rf .ci/tessera .ci/prismabuild
+        rmdir .ci
         python --version
         python -m pip --version
     - name: Run assigned gate tests
@@ -334,8 +382,8 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
         printf '## Shard %s, attempt 2\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
-        wc -l gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
-        if python tools/ci/gate_run.py --plan gate-artifacts/plan.json             --assignment gate-artifacts/assignment.json --workers 4             --result gate-artifacts/result.json --junitxml gate-artifacts/junit.xml; then
+        wc -l ${{ runner.temp }}/gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
+        if python tools/ci/gate_run.py --plan ${{ runner.temp }}/gate-artifacts/plan.json             --assignment ${{ runner.temp }}/gate-artifacts/assignment.json --workers 4             --result ${{ runner.temp }}/gate-artifacts/result.json --junitxml ${{ runner.temp }}/gate-artifacts/junit.xml; then
           code=0
         else
           code=$?
@@ -353,13 +401,13 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && steps.scan-artifacts-4.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a2-${{ matrix.index }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
         if-no-files-found: warn
         retention-days: 7
   pr-gate:
@@ -402,7 +450,7 @@ jobs:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
     - name: Download attempt verdicts
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -411,19 +459,19 @@ jobs:
         path: verdicts
     - name: Aggregate complete coverage and final verdicts
       run: |
-        python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
+        python3 tools/ci/gate_actions.py finish --plan ${{ runner.temp }}/gate-artifacts/plan.json             --matrix ${{ runner.temp }}/gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output ${{ runner.temp }}/gate-artifacts/final.json             --effective-output ${{ runner.temp }}/gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-5
       if: ${{ !cancelled() }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - if: ${{ !cancelled() && steps.scan-artifacts-5.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-pr-final-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
         if-no-files-found: warn
         retention-days: 7
   gate:
@@ -466,7 +514,7 @@ jobs:
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
     - name: Download attempt verdicts
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -475,18 +523,18 @@ jobs:
         path: verdicts
     - name: Aggregate complete coverage and final verdicts
       run: |
-        python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
+        python3 tools/ci/gate_actions.py finish --plan ${{ runner.temp }}/gate-artifacts/plan.json             --matrix ${{ runner.temp }}/gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output ${{ runner.temp }}/gate-artifacts/final.json             --effective-output ${{ runner.temp }}/gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-6
       if: ${{ !cancelled() }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - if: ${{ !cancelled() && steps.scan-artifacts-6.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-final-${{ github.run_attempt }}
-        path: gate-artifacts
+        path: ${{ runner.temp }}/gate-artifacts
         if-no-files-found: warn
         retention-days: 7

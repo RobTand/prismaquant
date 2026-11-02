@@ -110,6 +110,27 @@ jobs:
           persist-credentials: false
           path: .ci/tessera
 
+      - name: Resolve PrismaBuild source pin
+        id: prismabuild-pin
+        run: |
+          printf 'commit=%s\n' "$(python tools/resolve_prismabuild_dev_pin.py)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned PrismaBuild source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: RobTand/prismabuild
+          ref: ${{ steps.prismabuild-pin.outputs.commit }}
+          persist-credentials: false
+          path: .ci/prismabuild
+      - name: Build sealed PrismaBuild test source bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
+          printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+          acceptance_pin="$(python -c 'from pathlib import Path; import runpy; print(runpy.run_path("tools/resolve_tessera_dev_pin.py")["resolve_literal_pin"](Path("tests/fleet_acceptance_pins.py"), "PB_CANDIDATE_REV"))')"
+          git -C .ci/prismabuild fetch --no-tags --depth=1 origin "$acceptance_pin"
+          mv .ci/prismabuild/.git "$RUNNER_TEMP/pb-acceptance.git"
+          printf 'PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR=%s\n' "$RUNNER_TEMP/pb-acceptance.git" >> "$GITHUB_ENV"
       - name: Install pinned Tessera
         run: python -m pip install --no-deps .ci/tessera
 
@@ -124,7 +145,14 @@ jobs:
 
       - name: Install prismaquant + test extras
         # The constraints pin what CI tests to what the campaign runs (#1419).
-        run: python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        # The pbsdk group is the reviewed PrismaBuild SDK the PB-driving tests
+        # need (#3216); its commit is staged_lease.PB_READER_LEASE_PIN_COMMIT.
+        run: python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+
+      - name: Remove installed dependency source checkouts
+        run: |
+          rm -rf .ci/tessera .ci/prismabuild
+          rmdir .ci
 
       - name: Exclude owned hosted quarantine entries
         run: |

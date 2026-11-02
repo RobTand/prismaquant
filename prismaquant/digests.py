@@ -47,6 +47,8 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
 
 - ``git_blob_sha1hex``: native Git blob SHA1 over its ASCII type/length/NUL
   header and exact owned payload, for independently published auxiliary IDs.
+- ``git_tree_sha1hex``: native Git tree SHA1 over its type/length/NUL header
+  and caller-ordered mode/name/object-ID records.
 - ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
   ``memoryview``).
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
@@ -516,6 +518,13 @@ def git_blob_sha1hex(data: bytes | bytearray | memoryview) -> str:
     caller supplies its already-owned contiguous bytes; no file is opened.
     """
     digest = hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\0')
+    digest.update(data)
+    return digest.hexdigest()
+
+
+def git_tree_sha1hex(data: bytes | bytearray | memoryview) -> str:
+    """Native Git tree ID; the caller owns the ordered binary entry records."""
+    digest = hashlib.sha1(b'tree ' + str(len(data)).encode('ascii') + b'\0')
     digest.update(data)
     return digest.hexdigest()
 

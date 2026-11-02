@@ -38,11 +38,11 @@ pytestmark = pytest.mark.own_process
 
 def test_the_handoff_exports_through_the_spool_before_its_record(
         tmp_path, monkeypatch):
-    from fleet_sdk import require_prismabuild_sdk
+    from fleet_sdk import pb_source_bundle_root, require_pb_source_bundle, require_prismabuild_sdk
     require_prismabuild_sdk()
     pin = json.loads(ORIGIN_PIN.read_text())
-    root = Path(pin["bundle_root"])
-    assert root.is_dir(), "the pinned PB generation must be provisioned"
+    root = pb_source_bundle_root(pin)
+    require_pb_source_bundle(root)
     for name, digest in pin["files"].items():
         assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest, name
     _src, pb_repo = pb_source(monkeypatch)

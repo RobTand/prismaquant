@@ -1,4 +1,4 @@
-"""The fleet-only SDK guard decides the same way on both boxes (PQ #886).
+"""The SDK guard decides the same way on every box (PQ #886, PQ #3216).
 
 FAILING-BEFORE: with the runner's answer in front of it, the strict
 reader's ``_pb()`` raised ``RuntimeError`` and the GitHub job stayed red for
@@ -12,14 +12,17 @@ import importlib.metadata as metadata
 
 import pytest
 
+import fleet_sdk
 from fleet_sdk import (
-    LEASE_HELPER_SKIP_REASON, SKIP_REASON, prismabuild_sdk_installed,
-    require_lease_helper, require_prismabuild_sdk)
+    LEASE_HELPER_SKIP_REASON, PB_SOURCE_BUNDLE_SKIP_REASON, SKIP_REASON,
+    prismabuild_sdk_installed, require_lease_helper, require_pb_source_bundle,
+    require_prismabuild_sdk, require_shared_mount)
 
 
-def test_the_reason_names_the_fleet_and_the_tool_that_runs_these():
+def test_the_reason_names_the_dependency_group_that_provides_the_sdk():
+    """The SDK is a test dependency now, not a fleet-only one (PQ #3216)."""
     assert SKIP_REASON == (
-        "prismabuild SDK absent: fleet-only, runs under pbtest")
+        "prismabuild SDK absent: install the pbsdk dependency group")
 
 
 def test_no_installed_distribution_skips_with_that_reason(monkeypatch):
@@ -102,3 +105,57 @@ def test_a_divergent_lease_helper_fails_loudly_instead_of_skipping(monkeypatch):
     monkeypatch.setattr(staged_lease, "sdk_submodule", divergent)
     with pytest.raises(staged_lease.LeaseRefused, match="lease-helper-divergent"):
         require_lease_helper()
+
+
+# -- the PB source bundle and the shared mount (PQ #3216) --------------------
+#
+# With the SDK installed on hosted runners, tests that also need PB's sealed
+# source bundle (PB tools/, which no distribution installs) or the fleet's
+# shared mount used to fail on an assertion. Absence is a skip naming what is
+# missing; a present bundle with wrong bytes still fails at its digest check.
+
+def test_an_absent_source_bundle_skips_naming_it(tmp_path):
+    missing = tmp_path / "no-bundle"
+    with pytest.raises(pytest.skip.Exception) as caught:
+        require_pb_source_bundle(missing)
+    assert str(caught.value) == f"{PB_SOURCE_BUNDLE_SKIP_REASON} ({missing})"
+
+
+def test_a_present_source_bundle_runs_the_test(tmp_path):
+    require_pb_source_bundle(tmp_path)  # does not skip
+
+
+def test_an_absent_shared_mount_skips_naming_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(fleet_sdk, "SHARED_MOUNT", tmp_path / "shared")
+    with pytest.raises(pytest.skip.Exception) as caught:
+        require_shared_mount()
+    assert str(caught.value) == f"{tmp_path / 'shared'} absent: fleet-only, runs under pbtest"
+
+
+def test_a_present_shared_mount_runs_the_test(tmp_path, monkeypatch):
+    monkeypatch.setattr(fleet_sdk, "SHARED_MOUNT", tmp_path)
+    require_shared_mount()  # does not skip
+
+
+def test_a_wrong_byte_bundle_still_fails_its_digest_check(tmp_path, monkeypatch):
+    """Only absence skips: a mounted bundle whose bytes differ from the pin
+    is a defect on a box that is supposed to have it."""
+    import json
+    import fullstack_pb_generation as published
+
+    pin = json.loads(published.PIN_PATH.read_text())
+    root = tmp_path / pin["runtime_generation"]
+    root.mkdir()
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
+    pin["bundle_root"] = str(root)
+    pin["files"] = {"src/prismabuild/core.py": "0" * 64}
+    (root / "src" / "prismabuild").mkdir(parents=True)
+    (root / "src" / "prismabuild" / "core.py").write_text("")
+    path = tmp_path / "pin.json"
+    path.write_text(json.dumps(pin))
+    monkeypatch.setattr(published, "PIN_PATH", path)
+    monkeypatch.setattr(published, "_ROOT", None)
+    monkeypatch.setattr(metadata, "packages_distributions",
+                        lambda: {"prismabuild": ["prismabuild"]})
+    with pytest.raises(AssertionError, match="src/prismabuild/core.py"):
+        published._resolve_once()

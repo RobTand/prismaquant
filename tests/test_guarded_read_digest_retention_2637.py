@@ -54,9 +54,10 @@ CURRENT_SOURCE_BLOBS = {
         "b8158910df6d22720611dd9b8588bf51777170c4",
         "c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1",
     ),
+    # #3216: additive native Git-tree identity; retained read recipes unchanged.
     "prismaquant/digests.py": (
-        "65c98d3bdeb16035ef4b104dc159e986e2279897",
-        "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18",
+        "89e4806e531b86659a247dfb61ada580e96268be",
+        "32630a85701a519c90af24983e1c819024ec68fb03c88ca50b0b806375da3f8b",
     ),
 }
 

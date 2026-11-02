@@ -432,8 +432,35 @@ def _charged(publication):
         publication.queue.root, publication.instance))["batches"])
 
 
+@pytest.fixture
+def retirable_owner_scope(tmp_path, monkeypatch):
+    """Give retiring owners real broker tokens with test-owned cgroup state."""
+    from fleet_acceptance_runner import (
+        World, _candidate_modules, _load_broker, _open_scope, _record_scope)
+
+    src, root = pb_source(monkeypatch)
+    modules = _candidate_modules(src, root)
+    scope_module = modules["scope_mod"]
+    incoming_socket = scope_module.BROKER_SOCKET
+    world = World(tmp_path / "broker", root, modules, _load_broker(root))
+
+    def owner_control(queue, owner):
+        _scope, control = _open_scope(world, key=owner, nonce="e" * 32)
+        world.queue = queue
+        pool = modules["pool"]
+        claim = pool._read_json(queue.item_path(pool.CLAIMED, owner))
+        return _record_scope(world, owner, control, claim=claim)
+
+    monkeypatch.setattr(chain, "_broker_control", owner_control)
+    try:
+        yield world
+    finally:
+        world.close()
+        scope_module.BROKER_SOCKET = incoming_socket
+
+
 def test_prismabuild_retires_the_handoff_once_its_consumer_succeeds(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, retirable_owner_scope):
     """Acceptance 2 (PQ #1075): PB #914's tick retires the committed handoff.
 
     Until a consumer declares the batches (the ``--after`` edge, PB #946),
@@ -456,6 +483,7 @@ def test_prismabuild_retires_the_handoff_once_its_consumer_succeeds(
     owner = publication.instance["owner_action_key"]
     q.finish(owner, status="executed")
     assert q.item_path(pool.DONE, owner).exists()
+    assert retirable_owner_scope.backend.groups == {}, "owner scope was not released"
     assert _charged(publication)["payload"] == sum(p.stat().st_size for p in paths)
 
     # No consumer has declared the handoff: a succeeded producer's batches
@@ -498,7 +526,7 @@ def test_prismabuild_retires_the_handoff_once_its_consumer_succeeds(
     assert po.origin_retirement_tick(q) == []
 
 
-def test_a_failed_producers_handoff_is_swept(tmp_path, monkeypatch):
+def test_a_failed_producers_handoff_is_swept(tmp_path, monkeypatch, retirable_owner_scope):
     """No consumer declared it and its producer attempt failed: an orphan.
 
     A failed producer is never handed to a consumer, so PrismaBuild's sweep
@@ -518,6 +546,7 @@ def test_a_failed_producers_handoff_is_swept(tmp_path, monkeypatch):
     assert po.origin_retirement_tick(q) == [], "the live attempt keeps it"
 
     q.finish(publication.instance["owner_action_key"], status="failed")
+    assert retirable_owner_scope.backend.groups == {}, "owner scope was not released"
     events = po.origin_retirement_tick(q)
 
     assert sorted(event["ref"]["batch_id"] for event in events) == sorted(
