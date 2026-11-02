@@ -110,9 +110,10 @@ def test_secret_in_filename_is_redacted(tmp_path):
 
 
 def test_argument_errors_do_not_echo_secret_values():
-    result = scan('--' + SECRET)
+    secret = 'fake-option-token'
+    result = scan(SCANNER, '--' + secret, values={'SCAN_FAKE_SECRET': secret})
+    assert secret not in result.stdout + result.stderr
     assert result.returncode == 75
-    assert SECRET not in result.stdout + result.stderr
 
 
 def test_corrupt_gzip_is_not_silently_passed(tmp_path):
