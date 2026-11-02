@@ -109,6 +109,12 @@ def test_secret_in_filename_is_redacted(tmp_path):
     assert secret not in result.stdout + result.stderr
 
 
+def test_argument_errors_do_not_echo_secret_values():
+    result = scan('--' + SECRET)
+    assert result.returncode == 75
+    assert SECRET not in result.stdout + result.stderr
+
+
 def test_corrupt_gzip_is_not_silently_passed(tmp_path):
     artifact = tmp_path / 'broken.gz'
     artifact.write_bytes(b'\x1f\x8b\x08broken')
