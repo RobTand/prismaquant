@@ -150,3 +150,61 @@ def test_both_shard_attempts_upload_nested_budget_evidence():
                          'gate-artifacts/junit.budget-rerun-0.collection.json'):
             assert any(fnmatch(filename, pattern) or filename.startswith(pattern.rstrip('/') + '/')
                        for pattern in patterns), (job, filename)
+
+
+def test_graph_check_is_a_required_parallel_job_with_full_history():
+    jobs = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())['jobs']
+    job = jobs['graph-impact']
+    assert not set(job.get('needs', [])) & {'shards', 'retry-shards'}
+    checkout = next(s for s in job['steps'] if s.get('uses', '').startswith('actions/checkout@'))
+    assert checkout['with']['fetch-depth'] == 0
+    assert checkout['with']['ref'] == '${{ github.event.pull_request.head.sha }}'
+    run = next(s for s in job['steps'] if s.get('id') == 'check')
+    assert 'tests/test_graph_impact.py::test_graph_impact_gate' in run['run']
+    assert '--noconftest' in run['run']
+    assert 'gate_run.py' not in run['run']
+    assert job['outputs']['verdict'] == '${{ steps.check.outputs.verdict }}'
+    for name in ('pr-gate', 'gate'):
+        assert 'graph-impact' in jobs[name]['needs']
+    for name in ('plan', 'shards', 'retry-shards'):
+        command = next(step['run'] for step in jobs[name]['steps']
+                       if any('gate_partition.py ' + command in step.get('run', '')
+                              for command in ('matrix', 'shard')))
+        assert '--plan gate-artifacts/plan.json' in command
+
+
+@pytest.mark.parametrize('result,verdict,passes', [
+    ('success', 'pass', True), ('success', '', False), ('failure', 'pass', False),
+    ('skipped', '', False), ('cancelled', '', False), ('', '', False),
+])
+def test_graph_aggregate_refuses_failed_or_missing_verdict(result, verdict, passes, tmp_path):
+    import subprocess
+    jobs = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())['jobs']
+    for name in ('pr-gate', 'gate'):
+        step = next(s for s in jobs[name]['steps'] if s.get('name') == 'Require graph impact verdict')
+        assert step['env']['GRAPH_RESULT'] == '${{ needs.graph-impact.result }}'
+        assert step['env']['GRAPH_VERDICT'] == '${{ needs.graph-impact.outputs.verdict }}'
+        run = subprocess.run(['bash', '-e', '-c', step['run']], capture_output=True, text=True,
+            env={**os.environ, 'GRAPH_RESULT': result, 'GRAPH_VERDICT': verdict}, cwd=tmp_path)
+        assert (run.returncode == 0) is passes, run.stdout + run.stderr
+
+
+@pytest.mark.parametrize('cases,passes', [
+    ('<testcase name="test_graph_impact_gate"/>', True), ('', False),
+    ('<testcase name="other"/>', False),
+    ('<testcase name="test_graph_impact_gate"><skipped/></testcase>', False), ('<testcase name="test_graph_impact_gate"><failure/></testcase>', False),
+    ('<testcase name="test_graph_impact_gate"><error/></testcase>', False), ('<testcase/><testcase/>', False),
+])
+def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
+    import subprocess
+    import sys
+    jobs = yaml.safe_load((ROOT / '.github/workflows/gate.yml').read_text())['jobs']
+    command = next(s['run'] for s in jobs['graph-impact']['steps'] if s.get('id') == 'check')
+    script = command.split("python - <<'GRAPH_VERDICT'\n", 1)[1].split('\nGRAPH_VERDICT', 1)[0]
+    (tmp_path / 'graph-impact').mkdir()
+    (tmp_path / 'graph-impact/junit.xml').write_text('<testsuites><testsuite>' + cases + '</testsuite></testsuites>')
+    output = tmp_path / 'output'
+    run = subprocess.run([sys.executable, '-c', script], cwd=tmp_path, capture_output=True, text=True,
+                          env={**os.environ, 'GITHUB_OUTPUT': str(output)})
+    assert (run.returncode == 0) is passes, run.stdout + run.stderr
+    assert (output.read_text() if output.exists() else '') == ('verdict=pass\n' if passes else '')
