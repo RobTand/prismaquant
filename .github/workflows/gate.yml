@@ -113,7 +113,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: ${{ !cancelled() && steps.scan-artifacts-1.outcome == 'success' }}
       with:
@@ -126,7 +126,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts/plan.json
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts/plan.json"
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: ${{ !cancelled() && steps.scan-artifacts-2.outcome == 'success' }}
       with:
@@ -243,7 +243,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && steps.scan-artifacts-3.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -401,7 +401,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && steps.scan-artifacts-4.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -466,7 +466,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - if: ${{ !cancelled() && steps.scan-artifacts-5.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
@@ -530,7 +530,7 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN ${{ runner.temp }}/gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN "${{ runner.temp }}/gate-artifacts"
     - if: ${{ !cancelled() && steps.scan-artifacts-6.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
