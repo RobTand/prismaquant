@@ -75,12 +75,14 @@ def build_bundle(source: Path, destination: Path, pin: dict) -> Path:
             raise ValueError("source tree changed while copying")
         (staged / ".pinned-source.json").write_text(json.dumps({
             "commit": commit, "git_archive_sha256": pin["git_archive_sha256"]}) + "\n")
-        for path in sorted(staged.rglob("*"), reverse=True) + [staged]:
+        for path in sorted(staged.rglob("*"), reverse=True):
             mode = path.lstat().st_mode
             if not stat.S_ISLNK(mode):
                 path.chmod(0o555 if stat.S_ISDIR(mode) or mode & 0o111 else 0o444)
             os.utime(path, (pin["source_timestamp"],) * 2, follow_symlinks=False)
         staged.rename(output)
+        output.chmod(0o555)
+        os.utime(output, (pin["source_timestamp"],) * 2)
     return output
 
 
