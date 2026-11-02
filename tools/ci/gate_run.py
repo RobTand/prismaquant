@@ -212,7 +212,8 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                            CUDA_VISIBLE_DEVICES='')
         # setup-python exports loader overrides; proof capture must see the actual
         # installed interpreter rather than an ambient dynamic-loader override.
-        environment = {name: value for name, value in environment.items() if not name.startswith('LD_')}
+        environment = {name: value for name, value in environment.items()
+                       if not name.startswith('LD_') and name not in {'BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'}}
         collection_path = junit.with_suffix('.collection.json')
         collection_path.unlink(missing_ok=True)
         environment['GATE_COLLECTION_REPORT'] = str(collection_path.resolve())
