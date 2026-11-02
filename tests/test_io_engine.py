@@ -88,7 +88,8 @@ def test_write_sealed_buffer_exposes_readonly_mapped_bytes():
                 with pytest.raises(TypeError):
                     mapped[0] = 0
             assert view.read(2) == payload[:2]
-            assert view.seek(0) == 0
+            view.seek(0)
+            assert view.tell() == 0
             # The mapping owns its pages after the buffer drops its descriptor.
             buffer.close()
             assert view.read() == payload
