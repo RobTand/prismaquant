@@ -67,7 +67,7 @@ def _fold_own_process_reports(records, *, log):
 
 
 def _own_process_measure_args(config, root, key):
-    launcher = ["-m", "tests._own_process_profile", str(root / f"{key}.pstats")]
+    launcher = ["-m", "tests.own_process._own_process_profile", str(root / f"{key}.pstats")]
     argv, env = [], {}
     sources = getattr(config.option, "cov_source", [])
     if sources != [] and not getattr(config.option, "no_cov", False):
