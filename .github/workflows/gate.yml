@@ -222,15 +222,13 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-3.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a1-${{ matrix.index }}
-        path: |
-          gate-artifacts/result.json
-          gate-artifacts/junit.xml
+        path: gate-artifacts
         if-no-files-found: warn
         retention-days: 7
   retry-plan:
@@ -358,15 +356,13 @@ jobs:
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts
     - name: Upload verdict and JUnit
       if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-4.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a2-${{ matrix.index }}
-        path: |
-          gate-artifacts/result.json
-          gate-artifacts/junit.xml
+        path: gate-artifacts
         if-no-files-found: warn
         retention-days: 7
   pr-gate:

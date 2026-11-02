@@ -896,19 +896,27 @@ def native_qualification_set(payload: "Mapping[str, object] | None" = None
     """The ``(family, rate_q256, structure)`` triples a runtime qualifies.
 
     Confirmed against the seam rather than read off the JSON alone:
-    ``tessera_menu.route_admission`` is asked with each cell's own derived
+    ``tessera_menu``'s route admission is asked with each cell's own derived
     serving context, and a triple enters only when that seam calls it attested.
     A cell whose scope the seam refuses is therefore absent here, which is the
     fail-closed direction.
     """
-    from .tessera_menu import route_admission
+    from .tessera_menu import _admission_runtime, _route_admission
+
+    cells = attested_cells(payload)
+    if not cells:
+        return frozenset()
+    try:
+        runtime = _admission_runtime()
+    except Exception:
+        return frozenset()
 
     triples: set[tuple[str, int, str]] = set()
-    for cell in attested_cells(payload):
+    for cell in cells:
         name = f"{cell.family}_R{cell.rate_q256}"
         try:
-            admission = route_admission(
-                name, serving_context=cell.serving_context())
+            admission = _route_admission(
+                name, runtime, serving_context=cell.serving_context())
         except Exception:
             continue
         if admission.attested:

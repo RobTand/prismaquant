@@ -83,7 +83,26 @@ worker crash reports, remain final failures. There is no automatic test retry.
 ## Time budgets and quarantine
 
 `tools/ci/gate_budget.json` defines the default and exact-node exceptions.
-A test above its limit warns through 1.5 times that limit and fails above it.
+A test above its limit warns through 1.5 times that limit. Above that threshold,
+an otherwise passing shard reruns exactly the overrun nodes once, each in a
+fresh pytest process with the same environment, deselects, quarantine and worker
+settings. A `file_seconds` overrun reruns the complete file. The first JUnit
+report remains the shard's coverage evidence; separate reports retain rerun
+verdicts. `result.json` records `budget_reruns` with the node or file ID,
+`first_seconds`, `rerun_seconds`, enforced `limit`, and `outcome`; the job summary
+lists the reruns too. Both shard attempts upload the nested
+`junit.budget-rerun-*.result.json`, JUnit and collection reports with the shard
+artifacts. A `no_verdict` row includes the nested `infrastructure_reason` in
+`result.json` and its `BUDGET_RERUN` log line.
+
+A second overrun or a rerun assertion failure exits 1, `GATE_TEST_FAILURE`.
+A rerun without a verdict exits 75, `NO_VERDICT`, for the existing infrastructure
+path. A shard with any assertion failure, error or incomplete pytest verdict
+does not get a budget rerun, even if it also overruns. Warnings never cause a
+rerun. The coordinator decided this written, recorded budget-only rule on
+2026-11-02, matching TrustLadder III #364 and PrismaBuild #2637. It is part of
+the gate's budget measurement policy; AGENTS.md's ban on retrying to obtain a
+pass still applies to workflow and job reruns and every other test failure.
 Four files have measured `file_seconds` exceptions: the duplication baseline,
 `tessera_legal_domain`, `quality_prefill_dry_run`, and `tessera_campaign`. Their module fixtures or
 cached derivations charge setup to whichever test runs first on a worker. Each
