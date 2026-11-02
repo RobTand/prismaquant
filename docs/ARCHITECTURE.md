@@ -1,5 +1,11 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-02, read-ahead growth reserve, PQ #2602 (child of #1347).
+`GuardReadBudget` subtracts a per-window growth reserve derived from the
+stream's measured evictions; the derivation and its CPU-proven bounds are in
+the render-stream section. No pipeline default, stage, format, lane or gate
+changes.
+
 As of: 2026-11-01, integration 3 refresh after integration 2, PQ #3180.
 Source parents: integration 3 `e852147953db361a4b01e962f3cdb5f08e3da399` and
 main `5e240896bf96c970ab513a04e9f2fb9ad7d7cb2b`.
@@ -6005,6 +6011,37 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   `floor_bytes`: the guard's live headroom less what the render stream's next
   group will still hold (`ReadStream.unread_bytes`, `io_engine.py:760`), and
   never less than the two chunk buffers the replay phase reserves.
+- **Read-ahead depth follows measured consumer growth (PQ #2602, child of
+  #1347).** As of: 2026-11-02. A reading of the process does not see the
+  growth of the window the consumer is about to work, so read-ahead admitted
+  against all of the live headroom is reclaimed, and read again, when that
+  growth lands. `GuardReadBudget` (`joint_statistics_replay.py:239`) now
+  takes a per-window growth reserve off the live reading, from the stream it
+  budgets (`ReadStream` binds itself with `bind_growth_source`;
+  `ReadStream.window_growth_bytes`, `io_engine.py`):
+
+  ```
+  reserve  = min(ceil(evicted_bytes / max(1, groups taken)), peak_held_bytes)
+             (0 when nothing was evicted, or no group is left to take)
+  headroom = max(live - yield_unread - reserve, floor - held)
+  ```
+
+  An eviction (`ReadStream.reclaim`) happens only when the guard's headroom
+  fell below the read-ahead held, so `evicted_bytes` is the consumer growth
+  measured in charged bytes; over the groups taken it is the mean growth per
+  window, and `peak_held_bytes` caps it at the deepest read-ahead the stream
+  ever held. CPU-proven bounds (`tests/test_io_engine.py`,
+  `test_guard_read_budget_growth_reserve_*`, a stub guard and range entries,
+  no timing): with no eviction or no bound stream the headroom is the one
+  before; the reserve and the fall in headroom rise with the evicted bytes by
+  exactly the derived amount; read-ahead admitted never lets held plus
+  unreleased bytes plus the reserve exceed the guard's headroom, while a
+  demanded group is still read; a release stops charging the taken group; and
+  a shortfall reclaims only non-demanded read-ahead and is recorded in
+  `evictions` and `evicted_bytes`. Cost rows, formats, lanes, gates and
+  `QUANTUM_RECORD_MAX_BYTES` are unchanged. These are bounds on the
+  accounting, not measurements of a GB10 run, and no hardware figure is
+  claimed here.
 - **One pool, one reclaim order, and each step read (PQ #1383).** On a GB10
   the host and the device share one pool, so a shortfall can have several
   reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:389`,
