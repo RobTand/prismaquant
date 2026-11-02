@@ -15,6 +15,11 @@ class _CaptureBoundaryReached(Exception):
 
 @pytest.mark.parametrize("custom_pin", [False, True])
 def test_main_excludes_exactly_the_existing_profile_pins(monkeypatch, tmp_path, custom_pin):
+    # ``tessera_campaign.main`` imports ``format_registry`` (compressed_tensors,
+    # which needs the real ``transformers``) on first use.  Load it before the
+    # fake ``transformers`` below replaces the real module, so this file does
+    # not depend on an earlier test having imported it.
+    from prismaquant import format_registry  # noqa: F401
     from prismaquant import model_profiles, tessera_campaign, tessera_render
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
 

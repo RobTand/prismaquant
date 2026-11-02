@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -75,7 +76,12 @@ def test_input_hash_is_reused_only_for_unchanged_verified_files(tmp_path, monkey
     monkeypatch.setattr(model, 'digest_file', digest)
     model.verified_inputs(source, identity, cache)
     assert calls == []
+    # Same size on purpose: the stamp then differs only by time.  Rewriting
+    # within one filesystem timestamp tick would leave it unchanged, so the new
+    # mtime is set explicitly instead of left to the clock.
+    before = (source / 'weights').stat()
     (source / 'weights').write_bytes(b'modified')
+    os.utime(source / 'weights', ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
     with pytest.raises(ValueError, match='source changed'):
         model.verified_inputs(source, identity, cache)
 

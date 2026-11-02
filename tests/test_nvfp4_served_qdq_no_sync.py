@@ -22,7 +22,8 @@ import pytest
 import torch
 
 from nvfp4_served_qdq_fixtures import (
-    FakeCudaActivation, activation, cpu_kernels, real_operator_registered,
+    FakeCudaActivation, activation, cpu_kernels, cpu_positive_table,
+    real_operator_registered,
     stand_in_operator)
 from prismaquant import nvfp4_activation_contract as owner
 
@@ -42,6 +43,7 @@ def test_the_operator_reads_g_from_one_cached_device_scalar(monkeypatch):
     # ``raising=False``: a tree without the fused kernels has nothing to stub,
     # and the test must then fail on its assertion, not on the stub.
     monkeypatch.setattr(owner, "_served_dequant_kernels", cpu_kernels, raising=False)
+    monkeypatch.setattr(owner, "_e2m1_positive_table", cpu_positive_table)
     monkeypatch.setattr(owner, "_SERVED_GLOBAL_SCALES", {}, raising=False)
 
     g = 3.5720930099487305
