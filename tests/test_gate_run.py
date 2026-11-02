@@ -30,7 +30,10 @@ def fixture_junit(tmp_path):
 
 
 @pytest.mark.parametrize('code,verdict', [(0, 'pass'), (1, 'fail')])
-def test_completed_pytest_writes_a_final_verdict(tmp_path, code, verdict):
+def test_completed_pytest_writes_a_final_verdict(tmp_path, monkeypatch, code, verdict):
+    worker_count = runner.worker_count
+    monkeypatch.setattr(runner, 'worker_count', lambda requested, **kwargs:
+                        worker_count(requested, **kwargs, available_bytes=16 * 1024**3))
     calls = []
     def execute(command, **kwargs):
         calls.append((command, kwargs))
