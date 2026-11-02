@@ -1,0 +1,95 @@
+"""Bazel workspace contracts: pinned toolchains and images, BuildBuddy flags, no secrets (#3216)."""
+from __future__ import annotations
+
+from pathlib import Path
+import re
+
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = (ROOT / '.bazelrc').read_text().splitlines()
+MODULE = (ROOT / 'MODULE.bazel').read_text()
+PLATFORMS = (ROOT / 'tools/bazel/BUILD.bazel').read_text()
+
+
+def test_bzlmod_python_and_the_gate_requirements_drive_the_build():
+    for required in ['bazel_dep(name = "rules_python"', 'python_version = "3.12"', 'pip.parse(',
+                     '"//tools/bazel:requirements_linux_x86_64.txt": "linux_x86_64"',
+                     '"//tools/bazel:requirements_linux_aarch64.txt": "linux_aarch64"',
+                     'hub_name = "pq_pip"', 'explicit_init_py(default = True)']:
+        assert required in MODULE
+    assert re.fullmatch(r'\d+\.\d+\.\d+\n', (ROOT / '.bazelversion').read_text())
+    assert (ROOT / 'MODULE.bazel.lock').is_file()
+
+
+def test_both_architectures_have_a_registered_cc_toolchain():
+    # Without one, an arm64 run resolves no test target at all.
+    assert 'bazel_dep(name = "toolchains_buildbuddy", version = "0.0.4")' in MODULE
+    for toolchain in ['"@buildbuddy_toolchain//:ubuntu_cc_toolchain"',
+                      '"@buildbuddy_toolchain//:ubuntu_cc_toolchain_arm64"']:
+        assert toolchain in MODULE
+    assert PLATFORMS.count('"@bazel_tools//tools/cpp:gcc"') == 2
+
+
+def test_both_executor_platforms_pin_an_ubuntu24_image_by_digest_without_network():
+    images = re.findall(r'"container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:[0-9a-f]{64}"',
+                        PLATFORMS)
+    assert len(images) == 2
+    assert PLATFORMS.count('"dockerNetwork": "off"') == 2
+    assert PLATFORMS.count('"dockerUser": "1000:1000"') == 2
+
+
+def test_buildbuddy_suggested_flags_apply_to_every_command():
+    for flag in ['--remote_cache_compression', '--experimental_remote_cache_chunking',
+                 '--remote_grpc_log=bazel-remote-grpc.log',
+                 '--execution_log_compact_file=execution_log.binpb.zst']:
+        assert f'common {flag}' in CONFIG
+    for flag in ['--noslim_profile', '--experimental_profile_include_target_label',
+                 '--experimental_profile_include_primary_output']:
+        assert f'build {flag}' in CONFIG
+
+
+def test_remote_configs_execute_everything_remotely_and_leave_room_for_other_gates():
+    for mode in ['remote', 'remote-arm64']:
+        for flag in ['--remote_download_minimal', '--remote_cache=grpcs://remote.buildbuddy.io',
+                     '--remote_executor=grpcs://remote.buildbuddy.io',
+                     '--bes_backend=grpcs://remote.buildbuddy.io', '--remote_local_fallback=false',
+                     '--nobuild_runfile_links']:
+            assert f'build:{mode} {flag}' in CONFIG
+        # BuildBuddy's free plan is shared with TL3's and PrismaBuild's gates.
+        assert f'build:{mode} --jobs=40' in CONFIG
+    assert 'build:remote --platforms=//tools/bazel:linux_amd64' in CONFIG
+    for flag in ['--platforms', '--extra_execution_platforms', '--host_platform']:
+        assert f'build:remote-arm64 {flag}=//tools/bazel:linux_arm64' in CONFIG
+    assert not [line for line in CONFIG if line.startswith('build --jobs')]
+
+
+def test_ci_refuses_a_stale_module_lockfile_and_keeps_receipts():
+    assert 'common:ci --lockfile_mode=error' in CONFIG
+    assert 'build:ci --remote_download_regex=.*/test\\.outputs/.*' in CONFIG
+    assert 'build:ci --build_metadata=REPO_URL=https://github.com/RobTand/prismaquant' in CONFIG
+
+
+def test_no_key_is_committed_and_outputs_are_ignored():
+    assert not [line for line in CONFIG if 'x-buildbuddy-api-key' in line]
+    ignored = (ROOT / '.gitignore').read_text().splitlines()
+    for pattern in ['/bazel-*', '/*bazel-remote-grpc.log', '/*execution_log.binpb.zst']:
+        assert pattern in ignored
+
+
+def test_tests_run_with_native_threads_bounded_like_the_hosted_gate():
+    for name in ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS',
+                 'TORCHINDUCTOR_COMPILE_THREADS', 'MAX_JOBS']:
+        assert f'test --test_env={name}=1' in CONFIG
+
+
+def test_special_tests_carry_a_reason_and_a_known_lane():
+    table = (ROOT / 'tools/bazel/nonhermetic.bzl').read_text()
+    entries = re.findall(r'"(//[^"]+)": struct\(\n        tags = \[([^\]]*)\],\n        reason = "([^"]+)",', table)
+    assert entries and len(entries) == table.count('struct(')
+    for label, tags, reason in entries:
+        assert set(re.findall(r'"([^"]+)"', tags)) <= {'gpu', 'runner', 'hosted', 'requires-network'}, label
+        assert len(reason) > 20 and 'TBD' not in reason, label
+
+
+def test_every_extra_test_input_carries_a_reason():
+    table = (ROOT / 'tools/bazel/test_inputs.bzl').read_text()
+    assert table.count('struct(') == len(re.findall(r'\n        reason = "[^"]{20,}",', table))
