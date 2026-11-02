@@ -146,6 +146,7 @@ def test_a_wrong_byte_bundle_still_fails_its_digest_check(tmp_path, monkeypatch)
     pin = json.loads(published.PIN_PATH.read_text())
     root = tmp_path / pin["runtime_generation"]
     root.mkdir()
+    monkeypatch.setenv(fleet_sdk.PB_SOURCE_BUNDLE_ENV, str(root))
     pin["bundle_root"] = str(root)
     pin["files"] = {"src/prismabuild/core.py": "0" * 64}
     (root / "src" / "prismabuild").mkdir(parents=True)
