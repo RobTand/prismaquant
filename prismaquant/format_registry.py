@@ -31,7 +31,7 @@ from typing import Callable, Iterable
 import torch
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
 
-from .retired_formats import (
+from .schemas import (
     RETIRED_CODEBOOK_ARCHIVE,  # noqa: F401 -- compatibility re-export
     RETIRED_CODEBOOK_FORMAT_RE,
     RetiredFormatError,  # noqa: F401 -- compatibility re-export
