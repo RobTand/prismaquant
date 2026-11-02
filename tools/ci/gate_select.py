@@ -380,6 +380,8 @@ def create_plan(root: Path, changed: list[str], *, durations: dict, quarantine: 
         if why:
             reasons[name] = why
             explained.update(imported | referenced)
+    if 'tests/test_graph_impact.py' in population:
+        reasons.setdefault('tests/test_graph_impact.py', []).append('required graph impact check')
     reverse = helper_importers(index, changed, existing=helper_graph)
     pending = sorted(set(reasons) |
                      {path for path in changed if path.startswith('tests/')})

@@ -1,45 +1,8 @@
 #!/usr/bin/env python3
-"""How many gate tests a change to one source module selects (#3216, #3215).
+"""Legacy import evidence retained by graph_impact_pq's unified baseline.
 
-Bazel, and the gate's own selector, run a test again when anything in its
-static dependency closure changes. A test's closure starts from the test file
-and every ``conftest.py`` that applies to it: a root one, if any, and each one
-from ``tests/`` down to the test's directory. It then follows module
-dependencies transitively, through every scanned tree (``experiments/`` and
-``scripts/`` modules import ``prismaquant`` too). A source module is a Python
-file under ``prismaquant/`` or ``tools/``. For each source module this counts
-the gate tests whose closure contains it, as a fraction of the gate
-population that ``tools/ci/gate_select.py`` defines. A module that half the
-gate depends on selects half the gate whenever it changes, and invalidates
-the cached results of all those tests.
-
-Two kinds of evidence are available:
-
-- ``imports`` is the default. It counts import statements anywhere in a file,
-  including function-local imports and imports in embedded Python snippets.
-  It also counts literal ``import_module`` and ``__import__`` names, the
-  modules ``pytest_plugins`` names, and string literals that name a ``.py``
-  file. A ``.py`` literal matches every module path that ends with it. A
-  matched source module is followed like an import, because a test that runs
-  a tool by path needs the tool's own imports. Any other matched file is a
-  leaf: a test file named by path is read or matched by name, not run. Names
-  resolve the way the gate's selector resolves them
-  (``gate_select.module_names``), plus each file's dotted path from the
-  repository root (``pytest.ini`` puts it on ``sys.path``).
-- ``gate`` is the selector's own ``gate_select.dependencies``. It adds module
-  names written as strings and every path reference, including a
-  whole-repository ``**``. It is reported, not ratcheted.
-
-``tools/bazel/build_files.py`` holds the full Bazel graph (launches, data,
-lazy exports, sys.path roots); this is the cheap metric the untangling work
-(#3215) moves.
-
-``tests/test_import_fanout.py`` holds the live result against
-``tests/fixtures/import_fanout_baseline.json``. A new test-to-test import, a
-new source import in a conftest, or a summary figure worse than the baseline
-by more than its tolerance fails. So does a baseline that no longer records
-the current state: a gain beyond a tolerance, or an entry that has gone.
-``--write-baseline`` records the gain and refuses to record a loss.
+The full check and CLI live in graph_impact_pq; this parser preserves the
+previous metric's meaning while the full Bazel graph adds reach, U and SCCs.
 """
 from __future__ import annotations
 
@@ -56,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = ('prismaquant/', 'tools/')
 SCANNED_ROOTS = ('tests', 'prismaquant', 'tools', 'experiments', 'scripts', 'pqtel')
 
-BASELINE = ROOT / 'tests/fixtures/import_fanout_baseline.json'
+BASELINE = ROOT / 'tests/fixtures/graph_impact_baseline.json'
 #: How far a summary figure may move without a baseline change. Adding an
 #: ordinary test shifts the fractions by about 0.1 percentage points, so this
 #: absorbs routine work while a structural regression still fails.
@@ -331,82 +294,11 @@ def measure_fanout(root: Path = ROOT, evidence: str = 'imports', population: lis
     }
 
 
-RATCHETED_LISTS = ('conftest_source_imports', 'test_to_test_imports')
-RATCHETED_FIGURES = {'median_selected_pct': PERCENT_TOLERANCE, 'p90_selected_pct': PERCENT_TOLERANCE,
-                     'modules_over_half': MODULE_TOLERANCE, 'conftest_source_modules': 0}
-
-
-def regressions(live: dict, baseline: dict) -> list[str]:
-    """What the live graph adds to the baseline. Each one fails the ratchet."""
-    found = []
-    for key in RATCHETED_LISTS:
-        for entry in sorted(set(live[key]).difference(baseline[key])):
-            found.append(f'new {key} entry: {entry}')
-    for key, tolerance in RATCHETED_FIGURES.items():
-        if live[key] > baseline[key] + tolerance:
-            found.append(f'{key} rose from {baseline[key]} to {live[key]} (tolerance {tolerance})')
-    return found
-
-
-def stale_entries(live: dict, baseline: dict) -> list[str]:
-    """Gains the baseline does not record yet. Each one must shrink it in the same change."""
-    found = []
-    for key in RATCHETED_LISTS:
-        for entry in sorted(set(baseline[key]).difference(live[key])):
-            found.append(f'{key} entry is gone: {entry}')
-    for key, tolerance in RATCHETED_FIGURES.items():
-        if live[key] < baseline[key] - tolerance:
-            found.append(f'{key} fell from {baseline[key]} to {live[key]}')
-    return found
-
-
-def baseline_record(live: dict, baseline: dict | None = None) -> dict:
-    """The figures to commit. With a baseline, each figure keeps the lower value, so the record only tightens."""
-    record = {key: live[key] for key in ('evidence', *RATCHETED_FIGURES, *RATCHETED_LISTS)}
-    if baseline is not None:
-        for key in RATCHETED_FIGURES:
-            record[key] = min(live[key], baseline[key])
-    return record
-
-
-def fanout_summary(live: dict, top: int) -> str:
-    lines = [f"evidence {live['evidence']}: {live['tests']} gate tests, {live['source_modules']} source modules",
-             f"single-module change selects: median {live['median_selected_pct']}%, "
-             f"p90 {live['p90_selected_pct']}%; {live['modules_over_half']} modules select over half",
-             f"conftest chain reaches {live['conftest_source_modules']} source modules "
-             f"({len(live['conftest_source_imports'])} direct imports)",
-             f"test-to-test imports: {len(live['test_to_test_imports'])}"]
-    for path, count in list(live['dependents'].items())[:top]:
-        lines.append(f'  {count:5d}  {100 * count / max(live["tests"], 1):5.1f}%  {path}')
-    return '\n'.join(lines)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split('\n\n', 1)[0])
-    parser.add_argument('--root', type=Path, default=ROOT)
-    parser.add_argument('--evidence', choices=('imports', 'gate'), default='imports')
-    parser.add_argument('--top', type=int, default=0, help='also list the N modules with the most dependents')
-    parser.add_argument('--json', type=Path, help='write the full measurement here')
-    parser.add_argument('--write-baseline', action='store_true',
-                        help='record a gain in the committed baseline; refuses a regression')
-    args = parser.parse_args(argv)
-    live = measure_fanout(args.root, args.evidence)
-    print(fanout_summary(live, args.top))
-    if args.json:
-        args.json.write_text(json.dumps(live, indent=2) + '\n', encoding='utf-8')
-    if args.write_baseline:
-        if args.evidence != 'imports':
-            parser.error('the baseline holds the imports evidence')
-        path = args.root / BASELINE.relative_to(ROOT)
-        recorded = json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
-        if recorded is not None:
-            worse = regressions(live, recorded)
-            if worse:
-                print('refusing to record a regression:\n  ' + '\n  '.join(worse), file=sys.stderr)
-                return 1
-        path.write_text(json.dumps(baseline_record(live, recorded), indent=2) + '\n', encoding='utf-8')
-    return 0
+def main(argv=None):
+    from tools.ci.graph_impact_pq import main as check
+    return check(argv)
 
 
 if __name__ == '__main__':
+    sys.path.insert(0, str(ROOT))
     sys.exit(main())

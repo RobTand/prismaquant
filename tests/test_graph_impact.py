@@ -249,3 +249,153 @@ def test_gate_always_selects_graph_impact():
                                          'tests/test_unrelated.py': (set(), set())},
                                   durations={'files': {}}, quarantine={})
     assert 'tests/test_graph_impact.py' in {row['path'] for row in plan['selected']}
+
+
+from tools.ci import import_fanout as fanout
+
+
+def write_tree(root: Path, sources: dict[str, str]) -> Path:
+    for name, content in sources.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding='utf-8')
+    return root
+
+
+def test_every_spelling_of_an_import_is_found():
+    source = (
+        'from prismaquant import (  # a comment with a ) in it\n'
+        '    allocator,\n'
+        '    digests as owner,\n'
+        ')\n'
+        'from prismaquant.model_profiles import \\\n'
+        '    registry\n'
+        'def later():\n'
+        '    import g3_lib\n'
+        'CODE = "import sys; from prismaquant import shipcard"\n'
+        'loaded = importlib.import_module("tessera_campaign_container")\n'
+        'pytest_plugins = ("prismaquant.test_bound",)\n'
+        '"""\n'
+        'import the data, then read it.\n'
+        '"""\n'
+    )
+    names = fanout.imported_names(source, 'tests/test_x.py')
+    assert {'prismaquant', 'prismaquant.allocator', 'prismaquant.digests', 'prismaquant.model_profiles',
+            'prismaquant.model_profiles.registry', 'g3_lib', 'sys', 'prismaquant.shipcard',
+            'tessera_campaign_container', 'prismaquant.test_bound'} <= names
+    assert 'the' not in names
+
+
+def test_a_relative_import_resolves_inside_its_package():
+    assert 'prismaquant.digests' in fanout.imported_names('from .digests import x\n', 'prismaquant/allocator.py')
+    assert 'prismaquant' in fanout.imported_names('from . import digests\n', 'prismaquant/allocator.py')
+    assert 'prismaquant.model_profiles.base' in fanout.imported_names(
+        'from .base import ModelProfile\n', 'prismaquant/model_profiles/qwen3.py')
+
+
+def test_a_conftest_selects_every_test_beneath_it(tmp_path):
+    root = write_tree(tmp_path, {
+        'tests/conftest.py': 'def fixture():\n    from prismaquant import core\n',
+        'tests/test_a.py': 'def test_a(): pass\n',
+        'tests/test_b.py': 'from prismaquant import pool\n',
+        'tests/g3job/conftest.py': 'import prismaquant.lease\n',
+        'tests/g3job/test_c.py': 'def test_c(): pass\n',
+        'prismaquant/__init__.py': '',
+        'prismaquant/core.py': '',
+        'prismaquant/pool.py': 'from prismaquant import core\n',
+        'prismaquant/lease.py': '',
+    })
+    live = fanout.measure_fanout(root, population=['tests/test_a.py', 'tests/test_b.py', 'tests/g3job/test_c.py'])
+    assert live['dependents']['prismaquant/core.py'] == 3
+    assert live['dependents']['prismaquant/pool.py'] == 1
+    assert live['dependents']['prismaquant/lease.py'] == 1
+    assert live['conftest_source_modules'] == 3
+    assert live['conftest_source_imports'] == [
+        'tests/conftest.py -> prismaquant/__init__.py',
+        'tests/conftest.py -> prismaquant/core.py',
+        'tests/g3job/conftest.py -> prismaquant/__init__.py',
+        'tests/g3job/conftest.py -> prismaquant/lease.py',
+    ]
+    # four modules: core 3/3, the package 3/3, pool 1/3 and lease 1/3
+    assert (live['median_selected_pct'], live['p90_selected_pct'], live['modules_over_half']) == (33.3, 100.0, 2)
+
+
+def test_a_tool_named_by_path_brings_its_imports_and_a_named_test_does_not(tmp_path):
+    root = write_tree(tmp_path, {
+        'tests/test_runs_a_tool.py': 'TOOL = ROOT / "tools/fleet/runner.py"\n',
+        'tests/test_names_a_test.py': 'MATCHED = item.path.name == "test_cycle.py"\n',
+        'tests/test_cycle.py': 'import alpha\n',
+        'tools/fleet/runner.py': 'import heavy\n',
+        'tools/heavy.py': '',
+        'tools/alpha.py': 'import beta\n',
+        'tools/beta.py': 'import alpha\n',
+    })
+    live = fanout.measure_fanout(root, population=['tests/test_runs_a_tool.py', 'tests/test_names_a_test.py',
+                                            'tests/test_cycle.py'])
+    # the alpha/beta cycle terminates, and the named test file's import of alpha is not followed
+    assert live['dependents'] == {'tools/alpha.py': 1, 'tools/beta.py': 1,
+                                  'tools/fleet/runner.py': 1, 'tools/heavy.py': 1}
+
+
+def test_imports_through_experiments_are_followed_to_source_modules(tmp_path):
+    root = write_tree(tmp_path, {
+        'tests/test_exp.py': 'from experiments.sweep import runner\n',
+        'experiments/sweep/runner.py': 'from prismaquant import allocator\n',
+        'prismaquant/allocator.py': '',
+    })
+    live = fanout.measure_fanout(root, population=['tests/test_exp.py'])
+    assert live['dependents'] == {'prismaquant/allocator.py': 1}
+
+
+def test_only_imports_of_test_modules_are_test_to_test(tmp_path):
+    root = write_tree(tmp_path, {
+        'tests/test_a.py': 'from test_b import HELPER\nimport fleet_fixture\n',
+        'tests/test_b.py': 'HELPER = 1\n',
+        'tests/fleet_fixture.py': 'from test_b import HELPER\n',
+    })
+    live = fanout.measure_fanout(root, population=['tests/test_a.py', 'tests/test_b.py'])
+    assert live['test_to_test_imports'] == ['tests/fleet_fixture.py -> tests/test_b.py',
+                                            'tests/test_a.py -> tests/test_b.py']
+
+
+def test_the_population_is_the_gates_own(tmp_path):
+    root = write_tree(tmp_path, {
+        'tools/ci/gate_durations.json': json.dumps({'files': {}}),
+        'tools/ci/gate_quarantine.json': json.dumps({'cost_exclusions': [
+            {'target': 'tests/test_costly.py', 'issue': 7, 'reason': 'slow'}]}),
+        'tests/test_plain.py': '', 'tests/test_costly.py': '', 'tests/helper.py': '',
+    })
+    assert fanout.gate_population(root) == ['tests/test_plain.py']
+
+
+
+def test_pq_git_snapshot_identifies_changed_test_bodies(tmp_path, monkeypatch):
+    import subprocess
+    from tools.ci import graph_impact_pq as pq
+    write_tree(tmp_path, {'tests/test_a.py': 'x = 1\n',
+                          'tools/ci/gate_durations.json': '{"files": {}}',
+                          'tools/ci/gate_quarantine.json': '{}'})
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=tmp_path, text=True).strip()
+    git('init', '-q'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test')
+    git('add', '.'); git('commit', '-qm', 'base')
+    sha = git('rev-parse', 'HEAD')
+    monkeypatch.setenv('GATE_BASE', sha)
+    assert pq.base_revision(tmp_path) == sha
+    (tmp_path / 'tests/test_a.py').write_text('x = 2\n')
+    before = pq.snapshot_at(tmp_path, sha)
+    after = pq.load_snapshot(tmp_path)
+    assert before['contents']['tests/test_a.py'] != after['contents']['tests/test_a.py']
+
+
+def test_bazel_adapter_uses_query_when_v42_omits_source_edges(tmp_path):
+    from tools.ci import graph_impact_bazel as bazel
+    (tmp_path / 'deps').write_text('{"//t:test": []}')
+    (tmp_path / 'tests').write_text('//t:test\n')
+    (tmp_path / 'hashes').write_text('{"//s:lib.rs": "SourceFile#abc"}')
+    (tmp_path / 'query').write_text('\n'.join(json.dumps(row) for row in [
+        {'rule': {'name': '//t:test', 'ruleClass': 'rust_test', 'ruleInput': ['//s:lib.rs']}},
+        {'sourceFile': {'name': '//s:lib.rs'}}]))
+    live = bazel.load(tmp_path / 'deps', tmp_path / 'tests', hashes=tmp_path / 'hashes', query=tmp_path / 'query')
+    assert live['reach'] == {'//t:test': ['//s:lib.rs']}
+    assert 'omits source-file labels' in live['graph_source']
