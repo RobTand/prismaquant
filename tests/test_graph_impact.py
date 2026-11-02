@@ -169,9 +169,10 @@ def test_vendored_core_hash():
     assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
-def test_graph_impact_gate():
+def test_graph_impact_gate(capsys):
     from tools.ci import graph_impact_pq
-    assert graph_impact_pq.main([]) == 0
+    with capsys.disabled():
+        assert graph_impact_pq.main([]) == 0
 
 
 def test_bazel_diff_reader_keeps_source_labels_and_excludes_manual(tmp_path):
@@ -399,3 +400,17 @@ def test_bazel_adapter_uses_query_when_v42_omits_source_edges(tmp_path):
     live = bazel.load(tmp_path / 'deps', tmp_path / 'tests', hashes=tmp_path / 'hashes', query=tmp_path / 'query')
     assert live['reach'] == {'//t:test': ['//s:lib.rs']}
     assert 'omits source-file labels' in live['graph_source']
+
+
+def test_native_blame_is_requested_for_source_only_regressions(tmp_path, capsys):
+    before = measure({'test': {'a'}}, {('test', 'a')}, {'a': 1, 'b': 1})
+    after = measure({'test': {'a', 'b'}}, {('test', 'a'), ('a', 'b')}, {'a': 1, 'b': 1})
+    path = tmp_path / 'baseline.json'
+    path.write_text(json.dumps(baseline(before, reach_budget=10)))
+    explained = []
+    def explain(test):
+        explained.append(test)
+        return 'graph TD; test-->a; a-->b'
+    assert impact.check(before, after, path, explain=explain) == 1
+    assert explained == ['test']
+    assert '```mermaid' in capsys.readouterr().err
