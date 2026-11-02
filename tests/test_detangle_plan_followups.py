@@ -114,3 +114,27 @@ def test_dynamic_gate_inputs_do_not_copy_unobserved_static_data(tmp_path):
     _,observed,_=add_gate_inputs(selection,{'t':['t']},tmp_path,[],'')
     assert 'unexecuted.json' not in observed['t']
     assert observed['t']=={'t','pytest.ini','pyproject.toml'}
+
+
+def test_cli_reports_mixed_source_provenance_and_runtime_fixes(tmp_path,monkeypatch):
+    import json
+    from tools.bazel import detangle_repo
+    selection=plan.Selection({'t':{'x'},'x':set()},{'t':{'t'}})
+    monkeypatch.setattr(detangle_repo,'adapt',lambda *args:(selection,[],{'t':100},{}))
+    monkeypatch.setattr(plan.subprocess,'check_output',lambda *args,**kwargs:'a'*40+'\n')
+    monkeypatch.setattr(plan,'replay_merges',lambda *args:[{'sha':'m','changed':['x']}])
+    coverage=tmp_path/'coverage.json'
+    coverage.write_text(json.dumps({'sha':'a'*40,'data_reads':True,'tests':{'t':{'files':['t','x'],'exit':0}},
+                                    'recovery':{'sha':'b'*40,'files':['t'],'invocation':'https://example.invalid/recovery'}}))
+    fixes=tmp_path/'fixes.json';fixes.write_text(json.dumps({'measured':{'t':20},'effort':{'t':2}}))
+    plan.main(['--root',str(tmp_path),'--dynamic',str(coverage),'--runtime-fixes',str(fixes),'--out',str(tmp_path/'report')])
+    result=json.loads((tmp_path/'report.json').read_text())
+    assert result['fallback_comparison']['old']['static_seconds']==100
+    assert result['fallback_comparison']['narrowed']['dynamic_seconds']==100
+    assert result['test_costs'][0]['static_seconds_per_merge']==100
+    assert result['candidates'][0]['delta_seconds']==80
+    assert result['coverage']['recovery']['sha']=='b'*40
+    assert result['coverage']['provisional']
+    assert not result['stopping']['coverage_complete_and_passing']
+    assert not result['stopping']['gap_below_ten_percent']
+    assert 'make test cheaper' in (tmp_path/'report.md').read_text()
