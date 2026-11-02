@@ -102,6 +102,16 @@ def gate_junit_identity(case, files=None):
     return filename, nodeid
 
 
+def _collection_files(collection, target=None):
+    files = set(collection['seen'])
+    if target and '::' in target:
+        # Pytest does not emit module collectreports for explicit node targets.
+        # modifyitems still records their collection identities, including nodes
+        # deselected from the parallel phase for own_cgroup execution.
+        files.update(node.split('::', 1)[0] for node in collection['collected'])
+    return files
+
+
 def _budget_timings(junit, files, config, collected_files=None):
     observed, seconds, file_seconds = set(), {}, {}
     for case in ET.parse(junit).iter('testcase'):
@@ -161,6 +171,8 @@ def _write_budget_warnings(junit, warnings):
 def _write_budget_reruns(reruns):
     messages = [f"BUDGET_RERUN: {row['nodeid']}: first {row['first_seconds']:.3f}s, "
                 f"rerun {row['rerun_seconds']}s, limit {row['limit']:.3f}s: {row['outcome']}"
+                + (f"; infrastructure_reason: {row['infrastructure_reason']}"
+                   if row.get('infrastructure_reason') else '')
                 for row in reruns]
     print('\n'.join(messages))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
@@ -277,7 +289,7 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                 result = type('Exit', (), {'returncode': 1 if 1 in (result.returncode, scoped.returncode) else 75})()
             if scoped.returncode == 5:
                 coverage = json.loads(scoped_collection.read_text())
-                if coverage['collection_failed'] or set(coverage['seen']) != set(own_files):
+                if coverage['collection_failed'] or _collection_files(coverage, _budget_target) != set(own_files):
                     raise RuntimeError('isolated cgroup phase did not collect its complete assignment')
             if scoped_junit.exists():
                 tree = ET.parse(junit)
@@ -288,7 +300,7 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                 raise RuntimeError('isolated cgroup phase has no JUnit verdict')
         print('GATE_PYTEST_END', flush=True)
         collection = json.loads(collection_path.read_text()) if collection_path.exists() else None
-        collected_files = collection['seen'] if collection else None
+        collected_files = _collection_files(collection, _budget_target) if collection else None
         record['collection'] = collection
         pytest_code = result.returncode
         # A module-level skip or complete deselection legitimately has no tests.
@@ -311,6 +323,13 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                 raise RuntimeError(f'pytest exited {result.returncode}, without a complete test verdict')
             record['verdict'] = 'pass'
         try:
+            if _budget_target and '::' in _budget_target:
+                if collection and collection['collection_failed']:
+                    raise ValueError('budget rerun collection is incomplete')
+                executed = [gate_junit_identity(case, files)[1]
+                            for case in ET.parse(junit).iter('testcase')]
+                if executed != [_budget_target]:
+                    raise ValueError('budget rerun target did not execute exactly once')
             costs = _budget_timings(junit, files, config, collected_files)
             if partition:
                 if not collection or collection['collection_failed']:
@@ -360,6 +379,8 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                     rerun_code = run_plan(plan, root=root, output=rerun_output, junit=rerun_junit,
                         files=[nodeid.split('::', 1)[0]], workers=workers, execute=execute,
                         affinity=affinity, _budget_target=nodeid)
+                    nested = json.loads(rerun_output.read_text())
+                    reason = nested.get('infrastructure_reason')
                     elapsed = None
                     try:
                         timings = [(gate_junit_identity(case), float(case.attrib['time']))
@@ -373,13 +394,16 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
                             owned = set(record['node_coverage']['executed'])
                             record['budget']['file_totals'][nodeid] = sum(
                                 seconds for (path, node), seconds in timings if node in owned)
-                    except (OSError, ValueError, KeyError, ET.ParseError):
+                    except (OSError, ValueError, KeyError, ET.ParseError) as error:
                         if rerun_code != 1:
                             rerun_code = NO_VERDICT
+                            reason = reason or str(error)
                     record['budget_reruns'].append({
                         'nodeid': nodeid, 'first_seconds': row['seconds'], 'rerun_seconds': elapsed,
                         'limit': row['budget_seconds'] * BUDGET_ENFORCEMENT_TOLERANCE,
                         'outcome': {0: 'pass', 1: 'fail', NO_VERDICT: 'no_verdict'}[rerun_code]})
+                    if rerun_code == NO_VERDICT:
+                        record['budget_reruns'][-1]['infrastructure_reason'] = reason or 'budget rerun has no verdict'
                     rerun_codes.append(rerun_code)
                     if rerun_code != 0:
                         remaining.append(row)

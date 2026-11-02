@@ -205,6 +205,7 @@ jobs:
         path: |
           gate-artifacts/result.json
           gate-artifacts/junit.xml
+          gate-artifacts/junit.budget-rerun-*
         if-no-files-found: warn
         retention-days: 7
   retry-plan:
@@ -334,6 +335,7 @@ jobs:
         path: |
           gate-artifacts/result.json
           gate-artifacts/junit.xml
+          gate-artifacts/junit.budget-rerun-*
         if-no-files-found: warn
         retention-days: 7
   pr-gate:
