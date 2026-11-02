@@ -76,7 +76,10 @@ settings. A `file_seconds` overrun reruns the complete file. The first JUnit
 report remains the shard's coverage evidence; separate reports retain rerun
 verdicts. `result.json` records `budget_reruns` with the node or file ID,
 `first_seconds`, `rerun_seconds`, enforced `limit`, and `outcome`; the job summary
-lists the reruns too.
+lists the reruns too. Both shard attempts upload the nested
+`junit.budget-rerun-*.result.json`, JUnit and collection reports with the shard
+artifacts. A `no_verdict` row includes the nested `infrastructure_reason` in
+`result.json` and its `BUDGET_RERUN` log line.
 
 A second overrun or a rerun assertion failure exits 1, `GATE_TEST_FAILURE`.
 A rerun without a verdict exits 75, `NO_VERDICT`, for the existing infrastructure
