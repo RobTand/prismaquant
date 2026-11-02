@@ -132,7 +132,7 @@ def main(argv=None):
     if args.dry_run:
         if args.resume or args.source is None or args.plan is None:
             parser.error('--dry-run requires --source and --plan, without --resume')
-        from prismaquant.tessera_export_lane import export_setup
+        from prismaquant.tessera_export_setup import export_setup
         setup = export_setup(args.source, model.read_json(args.plan))
         spec = {'cpus': args.cpus, 'mem_gb': args.mem_gb,
                 'assembly_mem_gb': args.assembly_mem_gb, 'tags': args.tags or ['gb10']}

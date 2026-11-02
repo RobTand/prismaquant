@@ -614,7 +614,7 @@ def allocation_selection_request_path(args):
 def write_allocation_selection_request(path, *, layer_config, assignment,
                                        cost_path, cost_payload, output_path) -> None:
     """Write the non-exportable selected-wire request instead of a layer config."""
-    from .tessera_materialization import write_selection_request
+    from .tessera_selection_request import write_selection_request
 
     write_selection_request(path,
         layer_config=layer_config, assignment=assignment,
