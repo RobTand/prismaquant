@@ -72,6 +72,39 @@ consumer result, then update shared census and baseline records serially.
 Do not treat an expression match or an absent primitive as that evidence.
 The independent #2544 audit must verify complete coverage before #1301 closes.
 
+## Gold client digest owner (#2629)
+
+Leaf of #2543. `tools/measure_served_gold.py`, the torch-free HTTP gold client,
+runs in a layout with no `prismaquant` package. It therefore loads
+`prismaquant/digests.py` by file path (`importlib.util.spec_from_file_location`,
+registered in `sys.modules` under the private name
+`_measure_served_gold_digests` before `exec_module`, and popped on failure).
+A missing owner file is refused explicitly with no `hashlib` fallback. The
+module-level `prismaquant` import and the `activate_prismaquant_source`
+bootstrap call are gone; the client has no other use for them.
+
+Routing, all through that loaded owner:
+
+- `_sha256_file` uses `file_sha256hex` with the same 8 MiB block size. The digest
+  is plain SHA-256 of the file bytes, so this is not an identity migration.
+- `_canonical_sha256` uses the `DIRECT_ASCII_STRICT` profile (compact separators,
+  sorted keys, `ensure_ascii=True`, `allow_nan=False`). It is not
+  `DIRECT_UTF8_STRICT`: the original `json.dumps` had no `ensure_ascii=False`,
+  and a UTF-8 profile would change digests for non-ASCII payloads.
+- `calib_ids_sha256` uses `text_sha256hex` on the client's own comma join.
+  `bytes_sha256hex` serves the teacher dump digest in `kl`.
+
+Census rows for the three `hashlib` sites and the `sorted-json` site carry
+`migrated-by-pq2629-2026-11-02` with `migrated_calls`. The baseline drops its
+four `primitive_digest_sites` entries because the scanner finds no raw
+`hashlib` or `sort_keys` call left in the client. The `same_name_helpers`
+entries stay because the thin wrappers remain. The `refresh_2540` snapshot is
+historical and unchanged. The `_GOLD_PRODUCER` file lists, rosters, pins and
+qualified source bytes are unchanged, and `digests.py` gains no export. Other
+census sites in that tool family (`dsv4_wikitext_inputs`,
+`prepare_dsv4_wikitext_inputs`, `full_kl_teacher_payload` and others) remain
+for a later #1301 leaf.
+
 ## Retained source observations and validation
 
 The 2026-10-27 UTC fleet run observed 378 primitive calls in 294 scopes,

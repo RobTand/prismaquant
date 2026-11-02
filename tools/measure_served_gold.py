@@ -62,22 +62,54 @@ token at each position, which is exactly the teacher-forced NLL.
 from __future__ import annotations
 
 import argparse
-import hashlib
+import importlib.util
 import json
 import math
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Mapping
 
 import requests
 
 _TOOLS_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_TOOLS_ROOT))
-from prismaquant_source_bootstrap import activate_prismaquant_source
 
-activate_prismaquant_source()
+#: Private module name for the file-path-loaded digest owner (#2629). It is
+#: never ``prismaquant.digests``: this client runs where the package is absent.
+_DIGEST_OWNER_MODULE = "_measure_served_gold_digests"
 
-from prismaquant.digests import bytes_sha256hex
+
+def _load_digest_owner(owner: Path) -> ModuleType:
+    """Load the stdlib digest owner from its source file, or refuse.
+
+    The served gold client runs from a source layout with no installed
+    ``prismaquant`` package, so the owner is loaded by path rather than
+    imported. A missing owner is refused; there is no local hashlib copy.
+    """
+    loaded = sys.modules.get(_DIGEST_OWNER_MODULE)
+    if (loaded is not None and owner.is_file()
+            and Path(loaded.__file__).resolve() == owner.resolve()):
+        return loaded
+    if not owner.is_file():
+        raise RuntimeError(
+            f"REFUSING: the digest owner {owner} is missing; "
+            "measure_served_gold needs prismaquant/digests.py beside tools/")
+    spec = importlib.util.spec_from_file_location(_DIGEST_OWNER_MODULE, owner)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"REFUSING: cannot load the digest owner {owner}")
+    module = importlib.util.module_from_spec(spec)
+    # The owner's dataclasses resolve their module through sys.modules.
+    sys.modules[_DIGEST_OWNER_MODULE] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(_DIGEST_OWNER_MODULE, None)
+        raise
+    return module
+
+
+_DIGESTS = _load_digest_owner(_TOOLS_ROOT.parent / "prismaquant" / "digests.py")
 
 try:  # package mode (`python -m tools.measure_served_gold`)
     from .serve_fingerprint import gold_producer_identity
@@ -105,17 +137,13 @@ DEFAULT_MAX_TOKENS = 8192
 # Identity
 # ---------------------------------------------------------------------------
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return _DIGESTS.file_sha256hex(path, block_size=8 * 1024 * 1024)
 
 
 def _canonical_sha256(payload: object) -> str:
-    return hashlib.sha256(json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), allow_nan=False,
-    ).encode("utf-8")).hexdigest()
+    # Compact, sorted keys, ASCII-escaped, nonfinite refused: the owner's
+    # DIRECT_ASCII_STRICT profile, not the UTF-8 twin.
+    return _DIGESTS.DIRECT_ASCII_STRICT.sha256(payload)
 
 
 def _load_serve_manifest(artifact_dir: Path) -> dict[str, Any]:
@@ -228,9 +256,9 @@ def _calibration_contract(
         "seqlen": seqlen,
         "n_windows": len(starts),
         "window_overlap": 0,
-        "calib_ids_sha256": hashlib.sha256(
-            ",".join(str(i) for i in token_ids).encode("utf-8")
-        ).hexdigest(),
+        "calib_ids_sha256": _DIGESTS.text_sha256hex(
+            ",".join(str(i) for i in token_ids)
+        ),
     }
 
 
@@ -471,7 +499,7 @@ def _stored_dump_population(
 
 def _cmd_kl(args: argparse.Namespace) -> int:
     teacher_raw = Path(args.teacher).read_bytes()
-    teacher_sha256 = bytes_sha256hex(teacher_raw)
+    teacher_sha256 = _DIGESTS.bytes_sha256hex(teacher_raw)
     teacher_payload = json.loads(teacher_raw)
     del teacher_raw
     student_payload = json.loads(Path(args.student).read_text(encoding="utf-8"))

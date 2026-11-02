@@ -200,6 +200,85 @@ def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> N
     assert "CRI-DUP-OK" in out
 
 
+#: The served gold client's container layout (#2629): the client, the two
+#: sibling tools it imports in script mode, the pin data file the fingerprint
+#: module reads at import, and the digest owner it loads by file path.
+_GOLD_TOOL = "tools/measure_served_gold.py"
+_GOLD_SIBLINGS = ("tools/serve_fingerprint.py", "tools/spec_decode_guard.py")
+_DIGEST_OWNER = "prismaquant/digests.py"
+_GOLD_OWNER_MODULE = "_measure_served_gold_digests"
+
+_GOLD_ACCEPT = (
+    "import hashlib, json\n"
+    "p = Path(payload)\n"
+    "assert mod._sha256_file(p) == hashlib.sha256(p.read_bytes()).hexdigest()\n"
+    "v = {'k': 'h\\u00e9llo\\u2713', 'astral': '\\U0001F600', 'n': {3: [1, 2.5, None], 1: 2}}\n"
+    "want = hashlib.sha256(json.dumps(v, sort_keys=True, separators=(',', ':'),\n"
+    "                                 allow_nan=False).encode('utf-8')).hexdigest()\n"
+    "assert mod._canonical_sha256(v) == want\n"
+    "try:\n"
+    "    mod._canonical_sha256({'x': float('nan')})\n"
+    "except ValueError:\n"
+    "    pass\n"
+    "else:\n"
+    "    raise SystemExit('nonfinite canonical JSON accepted')\n"
+    "c = mod._calibration_contract(p, p.parent, [1, -2, 3], seqlen=2,\n"
+    "                              n_tokens_requested=3)\n"
+    "assert c['calib_ids_sha256'] == hashlib.sha256(b'1,-2,3').hexdigest(), c\n"
+    "assert c['corpus_sha256'] == hashlib.sha256(p.read_bytes()).hexdigest(), c\n"
+    "owner = Path(mod._DIGESTS.__file__).resolve()\n"
+    "assert owner == (Path.cwd() / 'prismaquant' / 'digests.py').resolve(), owner\n"
+    "loaded = [n for n in sys.modules if n == 'prismaquant' or n.startswith('prismaquant.')]\n"
+    "assert not loaded, loaded\n"
+    "assert 'torch' not in sys.modules\n"
+    "print('GOLD-OK')\n"
+)
+
+
+def _stage_gold(workdir: Path, *, with_owner: bool) -> Path:
+    """Stage the gold client's deployed layout; optionally omit the owner."""
+    root = _stage(workdir, _GOLD_TOOL, with_pin=True)
+    for name in _GOLD_SIBLINGS + ((_DIGEST_OWNER,) if with_owner else ()):
+        destination = root / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / name, destination)
+    return root
+
+
+def test_served_gold_digest_loader_runs_without_the_package(tmp_path: Path) -> None:
+    root = _stage_gold(tmp_path, with_owner=True)
+    corpus = root / "corpus.txt"
+    corpus.write_bytes("h\u00e9llo \u2713 \U0001F600\x00tail\n".encode("utf-8"))
+    out = _run_isolated(root, _GOLD_TOOL, _GOLD_ACCEPT, corpus)
+    assert "GOLD-OK" in out
+
+
+def test_served_gold_refuses_a_missing_digest_owner(tmp_path: Path) -> None:
+    root = _stage_gold(tmp_path, with_owner=False)
+    assert not (root / _DIGEST_OWNER).exists()
+    load = "spec.loader.exec_module(mod)\n"
+    assert load in _CHILD
+    child = _CHILD.replace(load, (
+        "try:\n"
+        "    spec.loader.exec_module(mod)\n"
+        "except RuntimeError as exc:\n"
+        "    assert 'digests.py' in str(exc), exc\n"
+        "    assert 'REFUSING' in str(exc), exc\n"
+        f"    assert {_GOLD_OWNER_MODULE!r} not in sys.modules\n"
+        "    print('GOLD-OWNER-REFUSED')\n"
+        "else:\n"
+        "    raise SystemExit('loaded without its digest owner')\n"
+    ))
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    proc = subprocess.run(
+        [sys.executable, "-c", child.format(stmt="", before=""),
+         str(REPO), str(root / _GOLD_TOOL), str(root / "unused")],
+        cwd=root, capture_output=True, text=True, env=env, timeout=120)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "GOLD-OWNER-REFUSED" in proc.stdout
+
+
 @pytest.mark.parametrize("script,option", [
     ("stageb_a4_quantizer_launch.py", "--group-policy-sha256"),
     ("glm_native_moe_launch.py", "--spec-sha256"),

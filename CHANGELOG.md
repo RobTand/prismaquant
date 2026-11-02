@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Served gold client digest owner (#2629, #2543, #1301)
+
+- Route the three raw-`hashlib` digest sites in `tools/measure_served_gold.py`
+  (`_sha256_file`, `_canonical_sha256`, `calib_ids_sha256`) and the teacher dump
+  digest to `prismaquant/digests.py`, which the torch-free client loads by file
+  path (`spec_from_file_location`) because its layout has no `prismaquant` package.
+  The module-level package import and source bootstrap are removed; a missing
+  owner file is refused with no `hashlib` fallback.
+- `_canonical_sha256` uses `DIRECT_ASCII_STRICT` (ASCII-escaped), not
+  `DIRECT_UTF8_STRICT`, so existing digests of non-ASCII payloads are unchanged.
+  The client keeps its own join, key order and record spellings. Rosters,
+  `_GOLD_PRODUCER` file lists, pins and qualified source bytes are unchanged and
+  `digests.py` gains no export.
+- Move the four census rows to `migrated-by-pq2629-2026-11-02` and drop the four
+  baseline `primitive_digest_sites` entries; the layout decision is recorded in
+  `docs/audits/digest_reconciliation_1301.md`.
+
 ### Token digest owner integration (#2638/#3012)
 
 - Add exactly one tensor-owner recipe, `token_ids_int32_sha256`, and route

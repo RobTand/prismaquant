@@ -2643,7 +2643,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2629-2026-11-02",
    "family": "hashlib",
    "file": "tools/measure_served_gold.py",
    "linenos": [
@@ -2653,35 +2653,66 @@
    "route_verdict": "text_sha256hex",
    "scope": "_calibration_contract",
    "site": "hashlib:tools/measure_served_gold.py::_calibration_contract",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "text_sha256hex",
+     "base_line": 214,
+     "original_expression": "hashlib.sha256(\",\".join(str(i) for i in token_ids).encode(\"utf-8\")).hexdigest()",
+     "routed_expression": "_DIGESTS.text_sha256hex(\",\".join(str(i) for i in token_ids))",
+     "owner": "prismaquant.digests.text_sha256hex"
+    }
+   ],
+   "note": "#2629: the served gold client loads prismaquant/digests.py by file path (importlib spec_from_file_location under a private module name) because it runs in a layout with no prismaquant package. calib_ids_sha256 now calls text_sha256hex on the client's own comma join; the join, key order and record spelling are unchanged. Rosters, _GOLD_PRODUCER file lists, pins and qualified source bytes are unchanged. Seal proof: tests/test_measure_served_gold.py, tests/test_stdlib_tools_no_package_1605.py."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools",
+   "disposition": "migrated-by-pq2629-2026-11-02",
    "family": "hashlib",
    "file": "tools/measure_served_gold.py",
    "linenos": [
     114
    ],
    "n_calls": 1,
-   "route_verdict": "text_sha256hex",
+   "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "_canonical_sha256",
    "site": "hashlib:tools/measure_served_gold.py::_canonical_sha256",
-   "usage": "arg:hexdigest"
+   "usage": "arg:hexdigest",
+   "migrated_calls": [
+    {
+     "method": "DIRECT_ASCII_STRICT.sha256",
+     "base_line": 114,
+     "original_expression": "hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(\",\", \":\"), allow_nan=False).encode(\"utf-8\")).hexdigest()",
+     "routed_expression": "_DIGESTS.DIRECT_ASCII_STRICT.sha256(payload)",
+     "owner": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "#2629: routed through the DIRECT_ASCII_STRICT profile (compact separators, sorted keys, ensure_ascii=True, allow_nan=False), not DIRECT_UTF8_STRICT: the original json.dumps had no ensure_ascii=False, so a UTF-8 profile would change digests for non-ASCII payloads. The owner is loaded by file path (no prismaquant package in the client layout). Rosters, _GOLD_PRODUCER file lists, pins and qualified source bytes are unchanged."
   },
   {
    "classification": "load-bearing",
-   "disposition": "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration",
+   "disposition": "migrated-by-pq2629-2026-11-02",
    "family": "hashlib",
    "file": "tools/measure_served_gold.py",
    "linenos": [
     106
    ],
    "n_calls": 1,
-   "route_verdict": "distinct:non-hexdigest-shape",
+   "route_verdict": "file_sha256hex",
    "scope": "_sha256_file",
    "site": "hashlib:tools/measure_served_gold.py::_sha256_file",
-   "usage": "arg:hexdigest;persist"
+   "usage": "arg:hexdigest;persist",
+   "migrated_calls": [
+    {
+     "method": "file_sha256hex",
+     "base_line": 106,
+     "original_expression": "hashlib.sha256() updated over 8 MiB blocks of path.open(\"rb\")",
+     "routed_expression": "_DIGESTS.file_sha256hex(path, block_size=8 * 1024 * 1024)",
+     "owner": "prismaquant.digests.file_sha256hex"
+    }
+   ],
+   "note": "#2629: plain SHA-256 of the file bytes, equal to file_sha256hex (block size never changes the digest), so no identity migration occurs; a missing path or directory raises what open raises. The owner is loaded by file path (no prismaquant package in the client layout). Rosters, _GOLD_PRODUCER file lists, pins and qualified source bytes are unchanged."
   },
   {
    "classification": "load-bearing",
@@ -7324,7 +7355,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2629-2026-11-02",
    "family": "sorted-json",
    "file": "tools/measure_served_gold.py",
    "linenos": [
@@ -7334,7 +7365,18 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "_canonical_sha256",
    "site": "sorted-json:tools/measure_served_gold.py::_canonical_sha256",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "DIRECT_ASCII_STRICT.sha256",
+     "base_line": 114,
+     "original_expression": "json.dumps(payload, sort_keys=True, separators=(\",\", \":\"), allow_nan=False)",
+     "routed_expression": "_DIGESTS.DIRECT_ASCII_STRICT.sha256(payload)",
+     "owner": "prismaquant.digests.DIRECT_ASCII_STRICT.sha256",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "#2629: the json.dumps half of _canonical_sha256 left the client with the hashlib half; both are the owner's DIRECT_ASCII_STRICT profile, loaded by file path. The scanner finds no sorted-json site in the client after routing, so the baseline drops it. Rosters, _GOLD_PRODUCER file lists, pins and qualified source bytes are unchanged."
   },
   {
    "classification": "load-bearing",
