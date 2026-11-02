@@ -134,6 +134,15 @@ or rerunning a failed job. First fix the expensive test or fixture and remeasure
 If a verified runner or dependency change invalidates the baseline, the readiness
 lead must review an explicit policy migration in tooling plus a new hosted
 baseline and final-head qualification. The current runner offers no override.
+`tools/ci/gate_budget_migrations.json` is that migration record. Each migration
+names the Git blob of the base `gate_budget.json` it was measured against
+(`base_policy`), the base commit, the reason, and per node hosted evidence from
+both `ubuntu-24.04` and `ubuntu-24.04-arm`. Its limit must equal
+`ceil(2 * largest hosted time)`. `gate_run` accepts a new or larger node exception
+only for a listed node, only up to that limit, and only while the PR base carries
+that exact policy blob, so a merged migration grants nothing to a later PR. The
+default, file budgets and every unlisted node stay shrink-only. A malformed record
+fails closed. The first migration (#3223) covers installing the PrismaBuild SDK.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
 The legacy file at main `8d72e303e2f070925077ce9e072b254df3856909` had 54 active
