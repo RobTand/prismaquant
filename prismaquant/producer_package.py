@@ -9,4 +9,3 @@ def producer_package_sha256() -> str:
     )
 
     return _production_cache_source_sha256()
-

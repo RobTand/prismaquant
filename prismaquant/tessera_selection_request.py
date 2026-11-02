@@ -2,20 +2,15 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
-from .digests import file_sha256hex
+from .digests import file_sha256hex, indent2_json_file_bytes
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 _sha = file_sha256hex
 
-
-def _json(path, value):
-    atomic_write_bytes(Path(path), (json.dumps(value, indent=2, sort_keys=True,
-                                             allow_nan=False) + '\n').encode())
 
 
 def write_selection_request(path, *, layer_config, assignment, cost_path,
@@ -33,6 +28,5 @@ def write_selection_request(path, *, layer_config, assignment, cost_path,
                    layer_config=config, assignment=dict(assignment),
                    cost_path=str(Path(cost_path).resolve()), cost_sha256=_sha(cost_path),
                    output_path=str(Path(output_path).resolve()))
-    _json(path, request)
+    atomic_write_bytes(Path(path), indent2_json_file_bytes(request))
     return request
-

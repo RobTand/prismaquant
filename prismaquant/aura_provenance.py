@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .producer_package import producer_package_sha256
 
+
 def producer_git_commit() -> str | None:
     """Best-effort commit of the prismaquant tree this cost was computed by."""
     override = str(os.environ.get(

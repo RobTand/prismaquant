@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
-from .tessera_selection_request import REQUEST_SCHEMA, _json, write_selection_request
+from .tessera_selection_request import REQUEST_SCHEMA, write_selection_request
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
 from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
 
@@ -31,6 +31,11 @@ STAGE = "tessera_selected_wire"
 
 
 _sha = file_sha256hex
+
+
+def _json(path, value):
+    atomic_write_bytes(Path(path), (json.dumps(value, indent=2, sort_keys=True,
+                                             allow_nan=False) + '\n').encode())
 
 
 def _request(path):

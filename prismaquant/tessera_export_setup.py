@@ -88,4 +88,3 @@ def export_setup(model_path: str | Path, plan: Mapping[str, Any]) -> dict:
                 "argv": ["python3", "tools/tessera_construction_census.py", str(source),
                          "construction-census.json", "--device", "meta"]},
             "runtime_qualification": "not_run"}
-

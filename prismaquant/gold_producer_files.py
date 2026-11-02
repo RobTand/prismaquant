@@ -48,4 +48,3 @@ _GOLD_PRODUCER_TOOL_FILES = {
         "tools/measure_served_gold.py",
     ),
 }
-
