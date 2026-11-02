@@ -31,3 +31,16 @@ def test_edge_oracle_counts_nested_and_package_imports(tmp_path):
     path.write_text('def call():\n    from . import upstream\n')
     modules = {'package.caller': path, 'package.upstream': tmp_path / 'upstream.py'}
     assert 'package.upstream' in _targets('package.caller', path, modules, {})
+
+
+def test_gold_source_roster_still_accepts_published_producer_identities():
+    from tools.serve_fingerprint import _GOLD_PRODUCER_COMMON_FILES
+
+    assert _GOLD_PRODUCER_COMMON_FILES == (
+        'prismaquant/tessera_runtime/tessera_serving_runtime_pin.json',
+        'tools/dsv4_wikitext_inputs.py',
+        'tools/prepare_dsv4_wikitext_inputs.py',
+        'tools/prismaquant_source_bootstrap.py',
+        'tools/serve_fingerprint.py',
+        'tools/spec_decode_guard.py',
+    )
