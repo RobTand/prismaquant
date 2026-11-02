@@ -31,7 +31,7 @@ def mapped_changes(merge, map_lock):
     if map_lock and 'uv.lock' in changed:
         if 'changed_wheels' not in merge:
             raise ValueError('uv.lock replay requires changed_wheels from its historical diff')
-        changed.remove('uv.lock')
+        # Preserve direct lock-file readers alongside distribution dependents.
         changed.update('wheel:' + wheel_name(name) for name in merge['changed_wheels'])
     return changed
 
@@ -50,7 +50,11 @@ def wheel_graph(root, files, lock_text):
     Import roots are conservative. Lock dependencies include all versions and
     markers. Pytest plugins run for every test, regardless of direct imports.
     """
-    locked = packages(lock_text)
+    locked = {name: [record for record in records
+                     if record.get('source', {}).get('editable') != '.'
+                     and record.get('source', {}).get('virtual') != '.']
+              for name, records in packages(lock_text).items()}
+    locked = {name: records for name, records in locked.items() if records}
     imports = defaultdict(set)
     edges = defaultdict(set)
     for name, records in locked.items():

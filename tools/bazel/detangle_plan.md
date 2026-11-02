@@ -17,11 +17,13 @@ file edges select their readers. An input with no reader selects no tests.
 For each historical `uv.lock` edit, the planner compares the full package
 records before and after the merge. Changes include removed distributions,
 wheel hashes, sources, versions, and dependency metadata. The resulting
-`wheel:<normalized-name>` nodes select their graph dependents. Lockfile
-metadata changes that alter no package record select no tests. Missing lock
+`wheel:<normalized-name>` nodes select their graph dependents. Explicit
+readers of the raw lockfile remain selected through file edges. Lockfile
+metadata changes that alter no package record select only explicit lockfile readers. Missing lock
 diff metadata fails closed. The wheel graph unions dependency markers and
 versions from the analyzed source tree's lockfile. Distribution import aliases
-are explicit in `IMPORT_NAMES`.
+are explicit in `IMPORT_NAMES`. The repository's root editable distribution
+is excluded from wheel imports; its source-module edges remain authoritative.
 
 `pytest.ini` configures every pytest invocation. The gate installs the
 editable project with `pyproject.toml` and `.github/ci-constraints.txt` in
