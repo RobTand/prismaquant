@@ -87,7 +87,7 @@ def test_special_tests_carry_a_reason_and_a_known_lane():
     entries = re.findall(r'"(//[^"]+)": struct\(\n        tags = \[([^\]]*)\],\n        reason = "([^"]+)",', table)
     assert entries and len(entries) == table.count('struct(')
     for label, tags, reason in entries:
-        assert set(re.findall(r'"([^"]+)"', tags)) <= {'gpu', 'runner', 'hosted', 'requires-network'}, label
+        assert set(re.findall(r'"([^"]+)"', tags)) <= {'gpu', 'runner', 'hosted', 'hosted-arm64', 'requires-network'}, label
         assert len(reason) > 20 and 'TBD' not in reason, label
 
 
