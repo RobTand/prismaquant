@@ -43,7 +43,8 @@ def test_empty_graph_and_zero_loc_are_defined():
 def test_changed_test_budget_prints_shortest_path_to_farthest_hub():
     edges = {('test', 'fixture'), ('fixture', 'pkg/a'), ('pkg/a', 'pkg/hub')}
     snapshot = measure({'test': {'pkg/a', 'pkg/hub'}}, edges, {'pkg/a': 1, 'pkg/hub': 1})
-    errors = impact.compare(snapshot, snapshot, baseline(snapshot, reach_budget=1), changed_tests={'test'})
+    before = measure({'test': {'pkg/a'}}, edges - {('pkg/a', 'pkg/hub')}, {'pkg/a': 1, 'pkg/hub': 1})
+    errors = impact.compare(before, snapshot, baseline(before, reach_budget=1), changed_tests={'test'})
     assert any('reach 2 exceeds budget 1' in error and 'test → fixture → pkg/a → pkg/hub' in error for error in errors)
     assert not impact.compare(snapshot, snapshot, baseline(snapshot, reach_budget=2))
 
@@ -74,7 +75,7 @@ def test_uniform_regression_attributes_edges_and_fanout_growth():
     before = measure({'t': {'a'}}, {('t', 'a')}, {'a': 1, 'b': 1})
     after = measure({'t': {'a', 'b'}}, {('t', 'a'), ('a', 'b')}, {'a': 1, 'b': 1})
     errors = impact.compare(before, after, baseline(before, reach_budget=10))
-    assert any('u_pct rose' in error and 'a -> b' in error and 'b +1' in error for error in errors)
+    assert any('existing source fanout grew' in error and 'a -> b' in error and 'b +1' in error for error in errors)
 
 
 def test_tolerated_noise_does_not_loosen_the_minimum():
@@ -94,7 +95,10 @@ def test_every_scc_growth_or_merge_is_attributed(old_edges, added):
     before = measure(edges=old_edges)
     after = measure(edges=old_edges | {added})
     errors = impact.compare(before, after, baseline(before))
-    assert any('SCC grew or merged' in error and f'{added[0]} -> {added[1]}' in error for error in errors)
+    if after['scc_max'] > before['scc_max']:
+        assert any('SCC grew or merged' in error and f'{added[0]} -> {added[1]}' in error for error in errors)
+    else:
+        assert not errors
 
 
 def test_unrelated_added_edge_is_not_blamed_for_cycle_growth():
@@ -108,7 +112,7 @@ def test_missing_gain_fails_and_recording_tightens_budget():
     before = measure({'t': {'a', 'b'}}, {('a', 'b'), ('b', 'a')}, {'a': 1, 'b': 1})
     after = measure({'t': {'a'}}, loc={'a': 1, 'b': 1})
     previous = baseline(before)
-    assert any('u_pct fell' in error for error in impact.stale_entries(after, previous))
+    assert any('scc_max fell' in error for error in impact.stale_entries(after, previous))
     record = impact.baseline_record(after, previous)
     assert record['figures']['u_pct'] == 50
     assert record['figures']['scc_max'] == 1
@@ -481,8 +485,22 @@ def test_uniform_figures_never_fail_and_writer_keeps_the_minimum():
 
 def test_package_mapping_overrides_label_inference():
     before = impact.measure({'old_binary': {'a', 'b'}}, {('old_binary', 'a'), ('old_binary', 'b')},
-                            {'a': 1, 'b': 1}, package={'old_binary': 'controller'})
+                            {'a': 1, 'b': 1}, test_packages={'old_binary': 'controller'})
     after = impact.measure({'old_binary': {'a', 'b'}, 'new_binary': {'a', 'b'}},
                            {('old_binary', 'a'), ('old_binary', 'b'), ('new_binary', 'a'), ('new_binary', 'b')},
-                           before['loc'], package={'old_binary': 'controller', 'new_binary': 'controller'})
+                           before['loc'], test_packages={'old_binary': 'controller', 'new_binary': 'controller'})
     assert not impact.compare(before, after, baseline(before, reach_budget=1))
+
+
+def test_exact_coordinator_input_contract_is_accepted():
+    before = impact.measure({'old': {'source'}}, {('old', 'source')}, {'source': 1},
+                            test_packages={'old': 'crate'})
+    typed_diff = {'added': {'rule_to_rule': [], 'rule_to_source': [('new', 'source')]},
+                  'removed': {'rule_to_rule': [], 'rule_to_source': []}}
+    after = impact.measure({'old': {'source'}, 'new': {'source'}},
+                           {('old', 'source'), ('new', 'source')}, {'source': 1},
+                           test_packages={'old': 'crate', 'new': 'crate'},
+                           base_package_max_reach={'crate': 1}, edge_diff=typed_diff)
+    assert impact.compare(before, after, baseline(before, reach_budget=0),
+                          test_packages={'old': 'crate', 'new': 'crate'},
+                          base_package_max_reach={'crate': 1}, edge_diff=typed_diff) == []

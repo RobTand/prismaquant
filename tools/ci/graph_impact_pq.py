@@ -101,7 +101,7 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
     for test in population:
         path_edges.update((test, start_node) for start_node in [*graph.conftests_for(test), *evidence.test_modules(test)])
     loc = {path: len((root / path).read_text(errors='replace').splitlines()) for path in sources}
-    live = core.measure(tests, edges, loc)
+    live = core.measure(tests, edges, loc, test_packages={test: str(Path(test).parent) for test in tests})
     live['path_edges'] = [list(edge) for edge in sorted(path_edges)]
     live['contents'] = {test: hashlib.sha256((root / test).read_bytes()).hexdigest() for test in population}
     live['edge_groups'] = {
@@ -202,7 +202,9 @@ def main(argv=None):
                           changed_tests=changed,
                           base_allowlist=before['recorded_allowlist'] if before else None,
                           previous_baseline=before['recorded_baseline'] if before else None,
-                          write_baseline=args.write_baseline)
+                          write_baseline=args.write_baseline, test_packages=after['test_packages'],
+                          base_package_max_reach=core.package_max_reach(before) if before else {},
+                          edge_diff=core.diff_edges(before, after) if before else None)
     finally:
         print(f'graph impact {time.perf_counter() - started:.3f}s; '
               f'LOC-weighted U {after["loc_u_pct"]:.1f}%; '

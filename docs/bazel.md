@@ -7,11 +7,15 @@ selects the gate base; local runs use `git merge-base origin/main HEAD`.
 The check reports the expected fraction of tests selected by a uniformly
 chosen source-file change, U, and a LOC-weighted U. It also reports source
 fanout, the largest SCC and its members, and median/p90/maximum test reach.
-A changed or new test must fit the recorded reach budget. New test-to-test
-edges, new source imports in conftests, a material rise in U, and any growing
-or merging SCC fail. The diagnostic attributes added edges and fanout growth.
+A new or changed test uses the maximum base reach in its package. An edited
+test can retain its own base reach; a new package uses the recorded global
+budget. New edges that expand existing-source fanout among existing tests,
+or deepen existing-test reach, fail. New test-to-test edges and conftest source
+imports retain their existing restrictions. The SCC maximum can only shrink.
+U and LOC-weighted U are reported trends and never fail a PR. Baseline writes
+keep their minimum. The diagnostic attributes structural growth to added edges.
 
-The initial budget is the ceiling of the current p90 source reach. Existing
+The global fallback budget is the ceiling of the initial p90 source reach. Existing
 tests above that budget are listed with reasons in
 `tests/fixtures/graph_impact_allowlist.json`. Those exceptions and their
 reasons can only be removed. The graph check itself has a reasoned exception
@@ -21,8 +25,10 @@ because it inventories the whole graph. New tests do not inherit exceptions.
 
 `tools/ci/graph_impact.py` is the stdlib-only core shared byte-identically by
 PrismaQuant, PrismaBuild, Tessera and TrustLadder. Its inputs are opaque test
-IDs mapped to sets of source files, a set of directed edges, and optional
-source line counts. No Python naming convention or git operation lives in
+IDs mapped to sets of source files, directed edges, optional source line
+counts, and the exact adapter metadata `test_packages`,
+`base_package_max_reach`, and `edge_diff`. The typed diff contains `added` and
+`removed`, each split into `rule_to_rule` and `rule_to_source` pairs. No Python naming convention or git operation lives in
 this file. `measure` produces JSON-safe metrics; `compare` applies policy;
 `check` reads caller-supplied baseline and allowlist paths and prints the
 summary on both pass and failure. Adapters supply changed test IDs when a
@@ -81,8 +87,11 @@ The bridge prints the shortest path through conftests to the farthest hub.
 The old `import_fanout` CLI forwards to this check. Its original evidence
 parser supplies the migrated figures in the same baseline, preserving each
 recorded minimum. There is one baseline and one test file. Writing the
-baseline refuses losses and keeps the minimum of every numeric figure.
-Material gains must be recorded in the same PR. A committed baseline holds
+baseline refuses structural losses and keeps every recorded numeric minimum.
+SCC and forbidden-edge gains must be recorded in the same PR; U gains are
+recorded on explicit baseline writes. New source files inherit a package when
+their existing-test consumers fit an existing peer's base consumers; that
+ordinary package growth is reported in the summary instead of failed. A committed baseline holds
 only limits, the reach budget, and existing forbidden-edge exceptions, so
 ordinary concurrent PRs do not update a full edge snapshot.
 

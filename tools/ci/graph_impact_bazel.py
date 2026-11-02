@@ -55,7 +55,7 @@ def load(deps, tests, *, hashes=None, sources=None, query=None, loc=None):
             raise
         inputs = core.read_query(query, test_targets=population, loc=loc)
         source = 'Bazel streamed_jsonproto query (deps.json omits source-file labels)'
-    result = core.measure(*inputs)
+    result = core.measure(*inputs, test_packages={test: test.rsplit(':', 1)[0] for test in population})
     result['graph_source'] = source
     return result
 
@@ -108,7 +108,9 @@ def main(argv=None):
     print('graph source: ' + after['graph_source'])
     return core.check(before, after, args.baseline, args.allowlist, changed_tests=changed,
                       base_allowlist=read(args.base_allowlist), previous_baseline=read(args.base_baseline),
-                      write_baseline=args.write_baseline, explain=blame)
+                      write_baseline=args.write_baseline, explain=blame, test_packages=after['test_packages'],
+                      base_package_max_reach=core.package_max_reach(before) if before else {},
+                      edge_diff=core.diff_edges(before, after) if before else None)
 
 
 if __name__ == '__main__':
