@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from test_import_cycle_wave1_3215 import _modules, _targets, _lazy_exports
+from import_graph_support import _modules, _targets, _lazy_exports
 
 ROOT = Path(__file__).resolve().parents[1]
 CUTS = [
