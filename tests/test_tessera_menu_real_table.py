@@ -538,20 +538,35 @@ READER_RANGES = {
 UNPUBLISHED_FAMILY = "TESSERA_E2M1_K1"
 
 
-def _readable_by_family(*, families=None):
-    """``{family: {rate: readable}}`` over every legal rung of every family.
+def _research_admissions(*, families=None, serving_context=None):
+    """Shape-legal research admissions at the readability tests' fixed shape.
 
-    Walks the RESEARCH menu, which is the whole shape-legal set, so the
-    "exactly" in the acceptance criterion is a statement about every rung the
-    producer can write and not about a list somebody typed.
+    Readability and containment need the shape and route predicates, not the
+    payload sizes or price ordering that ``expand_tessera_menu`` also builds.
+    The golden roster below pins this projection of the original priced menu.
     """
+    structure = serving_context.structure if serving_context is not None else None
+    for spec in tm.menu_families() if families is None else families:
+        lo, hi = spec.mathematical_q256_bounds
+        for rate in range(lo, hi + 1):
+            admission = tm.route_admission(
+                spec.format_name(rate), serving_context=serving_context)
+            if not admission.admits(tm.MENU_RESEARCH):
+                continue
+            legal, _ = tm.tessera_shape_legal(
+                spec, rate, (2048, 1024), structure=structure)
+            if not legal:
+                continue
+            if admission.act_bits is not None and rate > admission.act_bits * 256:
+                continue
+            yield spec.name, rate, admission
+
+
+def _readable_by_family(*, families=None):
+    """``{family: {rate: readable}}`` over every shape-legal research rung."""
     out: dict[str, dict[int, bool]] = {}
-    for rung in tm.expand_tessera_menu(
-        (2048, 1024), mode=tm.MENU_RESEARCH,
-        **({"families": families} if families is not None else {}),
-    ):
-        out.setdefault(rung.family, {})[rung.body_rate_q256] = (
-            rung.admission.readable)
+    for family, rate, admission in _research_admissions(families=families):
+        out.setdefault(family, {})[rate] = admission.readable
     return out
 
 
@@ -625,15 +640,15 @@ def test_attested_is_contained_in_readable_is_contained_in_research(
     # context-free walk would count zero attested rungs and the containment
     # would hold by being empty on one side.
     attested_seen = readable_seen = 0
-    for rung in tm.expand_tessera_menu(
-        (2048, 1024), mode=tm.MENU_RESEARCH, serving_context=context,
+    for family, rate, admission in _research_admissions(
+        serving_context=context,
     ):
-        admission = rung.admission
-        assert admission.admits(tm.MENU_RESEARCH), rung.format_name
+        name = f"{family}_R{rate}"
+        assert admission.admits(tm.MENU_RESEARCH), name
         if admission.admits(tm.MENU_ATTESTED):
             attested_seen += 1
             assert admission.admits(tm.MENU_READABLE), (
-                f"{rung.format_name} is attested by a cell the contract "
+                f"{name} is attested by a cell the contract "
                 "publishes and yet its own decoder is said to refuse the rate")
         if admission.admits(tm.MENU_READABLE):
             readable_seen += 1
@@ -668,3 +683,51 @@ def test_readability_does_not_depend_on_the_serving_scope(installed_contract):
     assert tm.route_admission(
         "TESSERA_E4M3_K1_R896", serving_context=routed).attested
     assert not tm.route_admission("TESSERA_E4M3_K1_R896").attested
+
+
+# Captured from the original priced research menu at f1335b03 on (2048, 1024).
+# BuildBuddy invocation 2ce103e5-804d-4807-8b95-904e1ea12988 records the full
+# format roster; the existing independent reader-range assertions passed there.
+@pytest.mark.parametrize("family,count,digest", [
+    ("TESSERA_BF16_K1", 3841,
+     "4cb0c36e6728d0adc345c7fa3fd30f8e03f7668e23d7779c8a57ad5e4b5a5746"),
+    ("TESSERA_E2M1_K1", 513,
+     "bb770d48cfe6c1b8f7878d2fc6c5ed73d7b1dacf8a66e2638ae358f81e14cd03"),
+    ("TESSERA_E2M1_K2", 769,
+     "e221484f0c4d0641943a1b6a5ed6c97886b78572536ba8d418089fcfe0ddc775"),
+    ("TESSERA_E4M3_K1", 1793,
+     "839e16b035a628dbd323ccb02729990da04c6d5f5443c8e70ef2f015eaa64546"),
+])
+def test_readability_walk_matches_the_original_priced_menu(family, count, digest):
+    from prismaquant.tessera_formats import get_tessera_family
+
+    seen = _readable_by_family(families=[get_tessera_family(family)])
+    assert set(seen) == {family}
+    rates = sorted(seen[family].items())
+    assert len(rates) == count
+    encoded = json.dumps(rates, separators=(",", ":")).encode()
+    assert hashlib.sha256(encoded).hexdigest() == digest
+
+
+def test_readability_walk_does_not_price_payloads(monkeypatch):
+    from prismaquant import tessera_footprint
+
+    def refuse_price(*args, **kwargs):
+        raise AssertionError("a readability assertion requested payload pricing")
+
+    monkeypatch.setattr(tessera_footprint, "tessera_exact_bits_for_shape", refuse_price)
+    seen = _readable_by_family()
+    _assert_the_published_reader_ranges(seen)
+    assert len(seen[UNPUBLISHED_FAMILY]) > 50
+
+
+def test_admission_walk_matches_priced_menu_at_integer_code_rates(installed_contract):
+    projected = {}
+    for family, rate, admission in _research_admissions():
+        lo = tm.get_tessera_family(family).mathematical_q256_bounds[0]
+        if (rate - lo) % 256 == 0:
+            projected[f"{family}_R{rate}"] = admission
+    priced = tm.expand_tessera_menu(
+        (2048, 1024), mode=tm.MENU_RESEARCH, step_q256=256)
+    assert {rung.format_name: rung.admission for rung in priced} == projected
+    assert projected
