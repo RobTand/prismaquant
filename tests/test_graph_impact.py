@@ -504,3 +504,47 @@ def test_exact_coordinator_input_contract_is_accepted():
     assert impact.compare(before, after, baseline(before, reach_budget=0),
                           test_packages={'old': 'crate', 'new': 'crate'},
                           base_package_max_reach={'crate': 1}, edge_diff=typed_diff) == []
+
+
+def masked_cycle_graph(extra=()):
+    big = {(f'big/{i}', f'big/{(i + 1) % 20}') for i in range(20)}
+    small = {('small/a', 'small/b'), ('small/b', 'small/c'), ('small/c', 'small/a')}
+    edges = big | small | set(extra)
+    return measure(edges=edges)
+
+
+@pytest.mark.parametrize('base_extra, added, members', [
+    ({('small/c', 'small/d')}, {('small/d', 'small/a')}, {'small/a', 'small/b', 'small/c', 'small/d'}),
+    ({('small/c', 'other/a'), ('other/a', 'other/b'), ('other/b', 'other/a')},
+     {('other/b', 'small/a')}, {'small/a', 'small/b', 'small/c', 'other/a', 'other/b'}),
+])
+def test_masked_scc_membership_growth_and_merger_fail(base_extra, added, members):
+    before = masked_cycle_graph(base_extra)
+    after = masked_cycle_graph(base_extra | added)
+    assert before['scc_max'] == after['scc_max'] == 20
+    errors = impact.compare(before, after, baseline(before))
+    message = next(e for e in errors if 'SCC grew or merged' in e)
+    assert all(member in message for member in members)
+    assert all(f'{a} -> {b}' in message for a, b in added)
+    assert 'big/0' not in message
+
+
+def test_scc_merger_into_the_largest_cycle_is_attributed():
+    before = masked_cycle_graph({('big/0', 'small/a')})
+    after = masked_cycle_graph({('big/0', 'small/a'), ('small/c', 'big/0')})
+    assert after['scc_max'] == 23
+    errors = impact.compare(before, after, baseline(before))
+    assert any('SCC grew or merged' in e and 'small/c -> big/0' in e and 'big/19' in e for e in errors)
+
+
+def test_scc_shrink_and_an_inherited_new_file_do_not_fail():
+    before = masked_cycle_graph()
+    after = measure(edges=set(map(tuple, before['edges'])) - {('small/c', 'small/a')})
+    assert not impact.compare(before, after, baseline(before), record_gains=True)
+    before = measure({'test': {'pkg/a', 'pkg/b'}},
+                     {('test', 'pkg/a'), ('pkg/a', 'pkg/b'), ('pkg/b', 'pkg/a')},
+                     {'pkg/a': 1, 'pkg/b': 1})
+    after = measure({'test': {'pkg/a', 'pkg/b', 'pkg/new'}},
+                    set(map(tuple, before['edges'])) | {('pkg/a', 'pkg/new')},
+                    {**before['loc'], 'pkg/new': 1})
+    assert not impact.compare(before, after, baseline(before))
