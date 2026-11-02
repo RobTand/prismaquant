@@ -33,6 +33,7 @@ if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.bazel.build_files import strongly_connected
 from tools.bazel.detangle_repo import import_symbols
+from tools.bazel.detangle_inputs import changed_wheels, mapped_changes
 
 
 @dataclass(frozen=True)
@@ -45,13 +46,29 @@ class Config:
     fallback_suffixes: tuple[str, ...] = ('.bzl',)
     constraint_fragments: tuple[str, ...] = ('requirements', 'constraints')
 
+    fallback_paths: tuple[str, ...] = ()
+    map_lock: bool = False
+
+    @classmethod
+    def narrowed(cls):
+        return cls(
+            fallback_names=('MODULE.bazel', 'MODULE.bazel.lock', 'WORKSPACE', 'WORKSPACE.bazel',
+                            'BUILD', 'BUILD.bazel', '.bazelrc', '.bazelversion', '.bazelignore'),
+            fallback_prefixes=('tools/bazel/',), fallback_suffixes=('.bzl',), constraint_fragments=(),
+            fallback_paths=('.github/workflows/gate.yml', 'tools/resolve_tessera_dev_pin.py',
+                            *('tools/ci/' + name for name in (
+                                'gate_select.py', 'gate_run.py', 'gate_collect.py', 'gate_partition.py',
+                                'gate_actions.py', 'gate_paths.py', 'gate_budget.json',
+                                'gate_durations.json', 'gate_quarantine.json'))),
+            map_lock=True)
+
     def __post_init__(self):
-        for name in ('fallback_names', 'fallback_prefixes', 'fallback_suffixes', 'constraint_fragments'):
+        for name in ('fallback_names', 'fallback_prefixes', 'fallback_suffixes', 'constraint_fragments', 'fallback_paths'):
             object.__setattr__(self, name, tuple(getattr(self, name)))
 
     def fallback(self, path):
         name = PurePosixPath(path).name
-        return (name in self.fallback_names or path.startswith(self.fallback_prefixes)
+        return (path in self.fallback_paths or name in self.fallback_names or path.startswith(self.fallback_prefixes)
                 or path.endswith(self.fallback_suffixes)
                 or (any(part in name for part in self.constraint_fragments) and not name.endswith('.py')))
 
@@ -147,7 +164,7 @@ def costs(masks, replay, weights, config):
         fallback = sorted(p for p in merge['changed'] if config.fallback(p))
         mask = everything if fallback else 0
         if not fallback:
-            for path in merge['changed']:
+            for path in mapped_changes(merge, config.map_lock):
                 mask |= masks.get(path, 0)
         if mask not in cache:
             cache[mask] = sum(value for i, value in enumerate(values) if mask & (1 << i))
@@ -171,11 +188,14 @@ class Candidate:
     edges: tuple[tuple[str, str, str], ...]
     effort_lines: int
     symbols: tuple[dict, ...]
+    runtime_after: tuple[tuple[str, float], ...] = ()
 
 
 def projected_savings(selection, replay, weights, candidate, config):
     before = costs(selection.masks(), replay, weights, config)['mean_seconds']
-    after = costs(selection.without(set(candidate.edges)).masks(), replay, weights, config)['mean_seconds']
+    updated = dict(weights)
+    updated.update(candidate.runtime_after)
+    after = costs(selection.without(set(candidate.edges)).masks(), replay, updated, config)['mean_seconds']
     return before - after
 
 
@@ -200,7 +220,7 @@ class Scorer:
                 if any(config.fallback(p) for p in merge['changed']):
                     fallbacks += 1
                 else:
-                    for path in merge['changed']:
+                    for path in mapped_changes(merge, config.map_lock):
                         self.changed[path] |= 1 << i
             self.fallback_cost = fallbacks * sum(weights.values())
             self.extra_bits = {}
@@ -333,30 +353,81 @@ class Scorer:
         return self.baseline - saved / self.n
 
 
+def cheaper_tests(cold, warm, *, effort=None, measured=None, estimates=None, default_effort=100):
+    """Price a caller's runtime target, preferring measured fixes to estimates.
+
+    Warm timings estimate a possible saving; they do not establish that a cold
+    test can achieve it. Effort uses the same estimated-line unit as cuts.
+    """
+    effort, measured, estimates = effort or {}, measured or {}, estimates or {}
+    unknown = (warm.keys() | measured.keys() | estimates.keys() | effort.keys()) - cold.keys()
+    if unknown:
+        raise ValueError('runtime inputs contain unknown tests: ' + ', '.join(sorted(unknown)))
+    result = []
+    for test, before in sorted(cold.items()):
+        source = measured if test in measured else estimates if test in estimates else warm
+        if test not in source:
+            continue
+        after = float(source[test])
+        lines = effort.get(test, default_effort)
+        if not math.isfinite(before) or not math.isfinite(after) or before < 0 or not 0 <= after <= before:
+            raise ValueError('runtime targets must be finite and between zero and the current runtime: ' + test)
+        if not isinstance(lines, int) or lines <= 0:
+            raise ValueError('effort must be a positive estimated line count: ' + test)
+        if after == before:
+            continue
+        info = {'source': test, 'target': test, 'symbols': [], 'before_seconds': before,
+                'after_seconds': after, 'measurement': 'measured' if test in measured else
+                    'estimate' if test in estimates else 'cold-minus-warm estimate'}
+        result.append(Candidate('make test cheaper', (), lines, (info,), ((test, after),)))
+    return result
+
+
+def test_costs(static_masks, measured_masks, replay, weights, config):
+    static = costs(static_masks, replay, weights, config)
+    dynamic = costs(measured_masks, replay, weights, config)
+    result = []
+    for i, test in enumerate(sorted(weights)):
+        a = sum(bool(row['mask'] & (1 << i)) for row in static['merges']) / len(replay)
+        b = sum(bool(row['mask'] & (1 << i)) for row in dynamic['merges']) / len(replay)
+        result.append({'path': test, 'runtime_seconds': weights[test],
+                       'static_selection_frequency': a, 'dynamic_selection_frequency': b,
+                       'static_seconds_per_merge': a * weights[test],
+                       'dynamic_seconds_per_merge': b * weights[test]})
+    return sorted(result, key=lambda row: (-row['static_seconds_per_merge'], row['path']))
+
+
 def rank(selection, replay, weights, candidates, config, limit=20):
-    scorer = Scorer(selection, replay, weights, config)
     cuts, result = set(), []
     remaining = list(candidates)
+    current_weights = dict(weights)
     edge_effort = {c.edges[0]: c.effort_lines for c in candidates if len(c.edges) == 1}
-    current = scorer.cost()
-    # An upper bound on later marginal gains is NOT safe across SCC cuts.
-    # Every candidate is therefore rescored after every pick.
+    current = Scorer(selection, replay, current_weights, config).cost()
+    fallback_count = sum(any(config.fallback(p) for p in m['changed']) for m in replay)
+    # Rebuild after each pick so runtime changes also update fallback cost.
     for iteration in range(limit):
-        if cuts:
-            scorer = Scorer(selection.without(cuts), replay, weights, config, _fixed=scorer)
+        scorer = Scorer(selection.without(cuts), replay, current_weights, config)
         best = None
         largest_gain = 0
         for candidate in remaining:
             new = set(candidate.edges) - cuts
-            if not new:
+            if candidate.runtime_after:
+                saved = {t: current_weights[t] - min(current_weights[t], value)
+                         for t, value in candidate.runtime_after}
+                gain = sum((scorer.test_bits[t].bit_count() / scorer.n +
+                            fallback_count / scorer.n)
+                           * value for t, value in saved.items())
+                after = current - gain
+            elif new:
+                after = scorer.cost(new)
+                gain = current - after
+            else:
                 continue
-            after = scorer.cost(new)
-            gain = current - after
             largest_gain = max(largest_gain, gain)
             already = set(candidate.edges) & cuts
             effort = max(1, math.ceil(candidate.effort_lines - sum(
                 edge_effort.get(e, candidate.effort_lines / len(candidate.edges)) for e in already)))
-            key = (gain / effort, gain, -effort, candidate.edges)
+            key = (gain / effort, gain, -effort, candidate.edges, candidate.runtime_after)
             if gain > 1e-9 and (best is None or key > best[0]):
                 best = key, candidate, after, effort
         if best is None:
@@ -366,15 +437,18 @@ def rank(selection, replay, weights, candidates, config, limit=20):
             initial_best = largest_gain
         applied = set(candidate.edges) - cuts
         pairs = {(s, t) for s, t, _ in applied}
-        symbols = [info for info in candidate.symbols
+        symbols = list(candidate.symbols) if candidate.runtime_after else [info for info in candidate.symbols
                    if tuple(info.get('bazel_edge', [info['source'], info['target']])) in pairs]
         result.append({**asdict(candidate), 'edges': [list(e) for e in sorted(applied)],
+                       'runtime_after': [list(pair) for pair in candidate.runtime_after],
                        'effort_lines': effort, 'symbols': symbols,
                        'delta_seconds': current - after,
                        'delta_fraction': (current - after) / current if current else 0,
                        'seconds_per_line': (current - after) / effort,
                        'remaining_seconds': after, 'best_initial_delta_seconds': initial_best})
         cuts.update(candidate.edges)
+        for test, value in candidate.runtime_after:
+            current_weights[test] = min(current_weights[test], value)
         remaining.remove(candidate)
         current = after
     return result
@@ -488,6 +562,12 @@ def replay_merges(root, revision, count=100):
     for sha in git('rev-list', '--first-parent', '--merges', '-n', str(count), revision).split():
         rows.append({'sha': sha, 'title': git('log', '-1', '--format=%s', sha),
                      'changed': git('diff', '--name-only', '--no-renames', f'{sha}^1', sha).splitlines()})
+        if 'uv.lock' in rows[-1]['changed']:
+            def lock(ref):
+                exists = subprocess.run(['git', 'cat-file', '-e', f'{ref}:uv.lock'], cwd=root,
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return git('show', f'{ref}:uv.lock') if exists.returncode == 0 else ''
+            rows[-1]['changed_wheels'] = sorted(changed_wheels(lock(f'{sha}^1'), lock(sha)))
     return rows
 
 
@@ -508,6 +588,9 @@ def main(argv=None):
     parser.add_argument('--query-json', type=Path, help='Shared reader fallback: Bazel streamed_jsonproto')
     parser.add_argument('--config', type=Path, help='JSON overrides for Config fallback fields')
     parser.add_argument('--timings', type=Path)
+    parser.add_argument('--warm-timings', type=Path, help='JSON test-to-seconds estimates from warm runs')
+    parser.add_argument('--runtime-fixes', type=Path, help='JSON with effort, measured and/or estimates by test')
+    parser.add_argument('--fallback-rule', choices=('old', 'narrowed'), default='narrowed')
     parser.add_argument('--dynamic', type=Path, required=True)
     parser.add_argument('--gate-timings', type=Path, help='JSON with fixed_overhead_seconds, gate_seconds, source')
     parser.add_argument('--merges', type=int, default=100)
@@ -515,7 +598,8 @@ def main(argv=None):
     parser.add_argument('--cheap-lines', type=int, default=100, help='Per-candidate effort ceiling for residual-cost classification')
     parser.add_argument('--out', type=Path, required=True, help='Output stem, without .json or .md')
     args = parser.parse_args(argv)
-    config = Config(**json.loads(args.config.read_text())) if args.config else Config()
+    config = Config(**json.loads(args.config.read_text())) if args.config else (
+        Config.narrowed() if args.fallback_rule == 'narrowed' else Config())
     history = args.history_root or args.root
     revision = subprocess.check_output(['git', 'rev-parse', args.revision], cwd=history, text=True).strip()
     source_revision = args.source_revision or revision
@@ -540,7 +624,25 @@ def main(argv=None):
     replay = replay_merges(history, revision, args.merges)
     weights, weight_sources = runtime_weights(selection.tests, args.timings, hosted)
     executed, coverage = load_dynamic(args.dynamic, selection.tests)
-    static = costs(selection.masks(), replay, weights, config)
+    from tools.bazel.detangle_inputs import add_gate_inputs
+    selection, executed, wheel_metadata = add_gate_inputs(
+        selection, executed, args.root, files or subprocess.check_output(
+            ['git', 'ls-files'], cwd=args.root, text=True).splitlines(),
+        (args.root / 'uv.lock').read_text() if (args.root / 'uv.lock').exists() else '')
+    metadata['gate_inputs'] = wheel_metadata
+    fixes = json.loads(args.runtime_fixes.read_text()) if args.runtime_fixes else {}
+    warm = json.loads(args.warm_timings.read_text()) if args.warm_timings else {}
+    candidates += cheaper_tests(weights, warm.get('files', warm), **fixes)
+    static_masks, measured_masks = selection.masks(), dynamic_masks(executed, selection.tests)
+    comparison = {}
+    for name, rule in (('old', Config()), ('narrowed', Config.narrowed())):
+        a, b = costs(static_masks, replay, weights, rule), costs(measured_masks, replay, weights, rule)
+        comparison[name] = {'static_seconds': a['mean_seconds'], 'dynamic_seconds': b['mean_seconds'],
+                            'gap_seconds': a['mean_seconds'] - b['mean_seconds'],
+                            'floor_seconds': a['fallback_seconds'], 'floor_share': a['floor_share'],
+                            'fallback_merges': a['fallback_merges']}
+    heavy = test_costs(static_masks, measured_masks, replay, weights, config)
+    static = costs(static_masks, replay, weights, config)
     dynamic = costs(dynamic_masks(executed, selection.tests), replay, weights, config)
     print(f'Ranking {len(candidates)} candidates over {len(selection.tests)} tests...', file=sys.stderr, flush=True)
     ranked = rank(selection, replay, weights, candidates, config, args.limit)
@@ -554,7 +656,7 @@ def main(argv=None):
     longest = sum(max((weights[t] for i, t in enumerate(sorted(weights)) if row['mask'] & (1 << i)), default=0)
                   for row in dynamic['merges']) / len(replay)
     floor = overhead + longest if overhead is not None else None
-    initial_best = ranked[0]['delta_seconds'] if ranked else 0
+    initial_best = ranked[0]['best_initial_delta_seconds'] if ranked else 0
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
     coverage_valid = not failures and coverage.get('sha', source_revision) == source_revision
@@ -567,6 +669,7 @@ def main(argv=None):
     outside_static = sum((measured_masks.get(p, 0) & ~static_masks.get(p, 0)).bit_count() for p in measured_masks)
     result = {'schema': 'detangle.plan.v1', 'revision': source_revision, 'replay_revision': revision, 'metadata': metadata,
               'config': asdict(config), 'runtime_sources': weight_sources,
+              'fallback_comparison': comparison, 'test_costs': heavy,
               'coverage': {'sha': coverage.get('sha'), 'data_reads': coverage.get('data_reads', False),
                            'subprocess_coverage': coverage.get('subprocess_coverage', False),
                            'failed_tests': failures, 'sdk_group_installed': coverage.get('sdk_group_installed', False),
@@ -585,7 +688,9 @@ def main(argv=None):
                          'cheap_effort_lines_per_candidate': args.cheap_lines,
                          'accidental_after_all_cheap_cuts_seconds': max(0, after_cheap - dynamic['mean_seconds']),
                          'note': 'Accidental cost is an estimate; cuts require semantic review. Data reads are ignored by the floor unless traced.'}}
-    if outside_static:
+    # Installed wheels were not retained by the original coverage sweep.
+    result['coverage']['dynamic_wheels'] = 'estimated from imports of observed repository source files'
+    if outside_static or any('uv.lock' in m['changed'] for m in replay):
         result['stopping']['gap_below_ten_percent'] = False
         result['stopping']['best_below_two_percent_and_gate_near_floor'] = False
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -607,6 +712,18 @@ def markdown(result):
     for i, cut in enumerate(result['candidates'], 1):
         symbols = '; '.join(f"{s['source']} → {s['target']}: {', '.join(s.get('symbols', []))}" for s in cut['symbols'])
         lines.append(f"| {i} | {cut['kind']} | {cut['delta_seconds']:.2f} | {cut['effort_lines']} | {symbols.replace('|', '/')} |")
+    if 'fallback_comparison' in result:
+        lines += ['', 'Fallback comparison, seconds per merge:', '',
+                  '| Rule | Static | Dynamic | Gap | Floor | Floor share |',
+                  '| --- | ---: | ---: | ---: | ---: | ---: |']
+        for name, row in result['fallback_comparison'].items():
+            lines.append(f"| {name} | {row['static_seconds']:.3f} | {row['dynamic_seconds']:.3f} | "
+                         f"{row['gap_seconds']:.3f} | {row['floor_seconds']:.3f} | {100*row['floor_share']:.3f}% |")
+        lines += ['', 'Test cost per merge:', '',
+                  '| Test | Runtime | Static cost | Dynamic cost |', '| --- | ---: | ---: | ---: |']
+        for row in result['test_costs']:
+            lines.append(f"| {row['path']} | {row['runtime_seconds']:.3f} | "
+                         f"{row['static_seconds_per_merge']:.3f} | {row['dynamic_seconds_per_merge']:.3f} |")
     lines += ['', 'Wall floor: ' + json.dumps(result['wall_floor']), '',
               'Remaining causes: ' + json.dumps(result['causes']), '',
               'Coverage source: ' + json.dumps(result['coverage']), '']

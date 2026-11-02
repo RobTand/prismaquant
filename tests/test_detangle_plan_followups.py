@@ -73,3 +73,36 @@ def test_lock_mapping_requires_a_diff_instead_of_silently_ignoring_it():
 @pytest.mark.parametrize('warm',[float('nan'),-1,101])
 def test_invalid_runtime_estimates_fail_closed(warm):
     with pytest.raises(ValueError):plan.cheaper_tests({'a':100},{'a':warm})
+
+
+def test_lock_records_detect_hash_changes_removed_wheels_and_normalized_names():
+    before='[[package]]\nname="My_Wheel"\nversion="1"\nwheels=[{url="a",hash="sha256:old"}]\n'
+    assert plan.changed_wheels(before,before.replace('old','new'))=={'my-wheel'}
+    assert plan.changed_wheels(before,'')=={'my-wheel'}
+
+
+def test_wheel_mapping_uses_transitive_dependencies_and_observed_files(tmp_path):
+    from tools.bazel.detangle_inputs import add_gate_inputs
+    (tmp_path/'t.py').write_text('import core\n')
+    (tmp_path/'core.py').write_text('from PIL import Image\n')
+    (tmp_path/'other.py').write_text('import requests\n')
+    lock='[[package]]\nname="pillow"\nversion="1"\ndependencies=[{name="numpy"}]\n[[package]]\nname="numpy"\nversion="1"\n[[package]]\nname="requests"\nversion="1"\n'
+    original=plan.Selection({'t.py':{'core.py','other.py'},'core.py':set(),'other.py':set()}, {'t.py':{'t.py'}})
+    selection,observed,metadata=add_gate_inputs(original,{'t.py':['t.py','core.py']},tmp_path,
+                                               ['t.py','core.py','other.py'],lock)
+    assert selection.selected(['wheel:numpy'])=={'t.py'}
+    assert selection.selected(['wheel:requests'])=={'t.py'}
+    assert 'wheel:numpy' in observed['t.py']
+    assert 'wheel:requests' not in observed['t.py']
+    assert selection.selected(['pytest.ini'])=={'t.py'}
+    assert 'pyproject.toml' in observed['t.py']
+    assert 'pytest.ini' in observed['t.py']
+
+
+def test_runtime_fix_reduces_the_fallback_floor():
+    selection=plan.Selection({'t':set()},{'t':{'t'}})
+    candidates=plan.cheaper_tests({'t':100},{},measured={'t':25})
+    ranked=plan.rank(selection,[{'sha':'a','changed':['MODULE.bazel']}],{'t':100},candidates,plan.Config())
+    assert ranked[0]['delta_seconds']==75
+    assert ranked[0]['remaining_seconds']==25
+    assert plan.projected_savings(selection,[{'sha':'a','changed':['MODULE.bazel']}],{'t':100},candidates[0],plan.Config())==75
