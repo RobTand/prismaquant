@@ -6,7 +6,7 @@ Arguments: one or more file/directory paths, recursively scanned, and repeated
 no default names. Secret values never belong in command-line arguments.
 
 Exit codes: 0 means no detected value; 1 means a value was detected; 75 means
-an unreadable path/member or excessive nesting prevented a complete scan.
+invalid arguments, an unreadable path/member or excessive nesting prevented a complete scan.
 Incomplete scans take precedence over detections. Unset/empty variables are
 reported as "not available, not scanned" without failing.
 
@@ -33,6 +33,11 @@ try:
     from compression import zstd
 except ImportError:
     zstd = None
+
+
+class SecretScanParser(argparse.ArgumentParser):
+    def error(self, message):
+        self.exit(75, 'Invalid scan arguments; use --help.\n')
 
 
 def secret_byte_forms(value):
@@ -79,7 +84,7 @@ def inspect_secret_members(data, secrets, emit, path, depth=0):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = SecretScanParser(description=__doc__)
     parser.add_argument('--env', action='append', required=True, metavar='NAME',
                         help='name of a secret environment variable; repeat for each variable')
     parser.add_argument('paths', nargs='+', type=Path)
