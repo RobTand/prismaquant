@@ -821,6 +821,11 @@ class ReadStream:
             "consumer_work_s": 0.0, "consumer_steady_wait_s": 0.0,
             "groups_taken": [],
         }
+        # A budget that derives a growth reserve from this stream's measured
+        # consumer growth binds to it here (PQ #2602); the others are not asked.
+        bind = getattr(budget, "bind_growth_source", None)
+        if bind is not None:
+            bind(self)
 
     # -- consumer side ----------------------------------------------------
 
@@ -859,6 +864,39 @@ class ReadStream:
                 elif self._state[i] == _READING:
                     total += entry.raw_bytes + entry.held_bytes
             return total
+
+    def window_growth_bytes(self) -> int:
+        """The charged bytes the consumer's next window is expected to grow by (PQ #2602).
+
+        Derivation (``GuardReadBudget`` subtracts this from the live reading;
+        docs/ARCHITECTURE.md states the same):
+
+        * An eviction happens only when the guard's headroom fell below the
+          read-ahead the stream held, that is, when the consumer grew past
+          what the read-ahead was admitted against. ``evicted_bytes`` is the
+          charged size of what that growth forced out.
+        * A window is a group taken, so the growth per window is the
+          evicted bytes over ``max(1, groups taken)``, rounded up (a mean:
+          it rises as evictions rise and falls as clean windows pass).
+        * It never exceeds ``peak_held_bytes``: one window's reclaim cannot
+          free more than the deepest read-ahead the stream ever held, so a
+          reread-inflated total cannot reserve the stream down to nothing.
+        * Zero with no eviction observed (nothing measured), and zero once
+          no group is left to take or the stream is closed (no next window
+          to grow in). It reads counters under the lock and marks nothing.
+
+        Admission against ``live - growth`` leaves the guard that much room
+        for the next window, so growth up to the measured mean does not
+        push the guard into reclaiming read-ahead already read. The bytes of
+        the group last taken stay charged through ``held_bytes`` plus
+        ``_unreleased`` until :meth:`release`, not through this term.
+        """
+        with self._cond:
+            if self._closed or self._taken >= len(self._groups):
+                return 0
+            windows = max(1, self._taken)
+            per_window = -(-self.counters["evicted_bytes"] // windows)
+            return min(per_window, self.counters["peak_held_bytes"])
 
     def demand(self, group) -> tuple[int, int]:
         """Mark ``group`` as the consumer's next; return what is still unread.
