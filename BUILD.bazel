@@ -5058,6 +5058,62 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "docs/experiments/3215-native-qualification/assertion_probe",
+    srcs = [
+        "docs/experiments/3215-native-qualification/assertion_probe.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-native-qualification/source_preservation",
+    srcs = [
+        "docs/experiments/3215-native-qualification/source_preservation.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-native-qualification/summarize",
+    srcs = [
+        "docs/experiments/3215-native-qualification/summarize.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-native-qualification/timing_probe",
+    srcs = [
+        "docs/experiments/3215-native-qualification/timing_probe.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-tp-exact-pin/assertion_probe",
+    srcs = [
+        "docs/experiments/3215-tp-exact-pin/assertion_probe.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-tp-exact-pin/source_preservation",
+    srcs = [
+        "docs/experiments/3215-tp-exact-pin/source_preservation.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-tp-exact-pin/summarize",
+    srcs = [
+        "docs/experiments/3215-tp-exact-pin/summarize.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-tp-exact-pin/timing_probe",
+    srcs = [
+        "docs/experiments/3215-tp-exact-pin/timing_probe.py",
+    ],
+)
+
+pq_py_library(
     name = "docs/experiments/glm_full_anchor_preparation_20260908/draft_rows",
     srcs = [
         "docs/experiments/glm_full_anchor_preparation_20260908/draft_rows.py",

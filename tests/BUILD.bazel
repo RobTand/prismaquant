@@ -43690,6 +43690,7 @@ pq_py_library(
         "test_gate_budget.py",
     ],
     data = [
+        "//:pytest.ini",
         "//:tools/ci/gate_budget.json",
         "//:tools/ci/gate_run.py",
         ":files",
