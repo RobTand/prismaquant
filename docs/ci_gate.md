@@ -356,3 +356,12 @@ The queue configuration lands in the same PR as this gate. Landing order:
 The post-merge tests job keeps its name and runs on main pushes and manual
 dispatches. PR import and boundary checks remain in `ci.yml`. Only the lead changes
 branch protection or queues this PR. See [the merge queue guide](merge_queue.md).
+
+The eight historical fleet-acceptance scenarios use their own immutable
+`fleet_acceptance_pins.PB_CANDIDATE_REV`, separate from the SDK5 bundle pin.
+Hosted setup fetches that exact commit into the PB checkout's object store,
+then moves the store outside the PQ checkout and exports
+`PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR`. The existing resolver still archives and
+verifies that historical revision. An explicit store suppresses both fleet
+lookup and network fallback; dependency source checkouts and gate reports stay
+outside the clean executed PQ tree before tests start.

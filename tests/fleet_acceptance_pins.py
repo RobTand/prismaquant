@@ -16,6 +16,10 @@ snapshot (worktree HEAD, required clean). An unavailable pinned commit or
 a verification mismatch is :class:`NonQualified` machine
 output -- never a green row, never a silent substitution.
 
+Hosted and hermetic tests supply ``PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR``.
+That explicit object store suppresses fleet lookup and network fallback while
+retaining the same historical commit and full-tree verification.
+
 The fallback fetches the declared SHA into a separate bare mirror. It does
 not change the pinned checkout or substitute a mutable branch tip.
 """
