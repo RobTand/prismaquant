@@ -1,0 +1,32 @@
+{
+  "invocation": "58035f6c-4e14-441d-9acc-026c9588f45c",
+  "commit": "968b5f965aac51e9978746b2933f04ec857e6c12",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "Failed",
+  "artifacts": [
+    {
+      "name": "freeze.txt",
+      "sha256": "5e55a152f5e41fd6c5a0843aa2c5cee85c9d4e48aa90cd03b9c9fefaac4c189a",
+      "bytes": 1303,
+      "verified": true
+    },
+    {
+      "name": "junit.xml.gz",
+      "sha256": "19cab9cce89f08a68d0c1b898326a80f371ab20298df2bc2b6bae3a388bbeb8c",
+      "bytes": 851,
+      "verified": true
+    },
+    {
+      "name": "pytest.log.gz",
+      "sha256": "73f8e24d912ed2ec334b63b92476866ff3de7117791f42abe3f05804e7fd8c4b",
+      "bytes": 876,
+      "verified": true
+    },
+    {
+      "name": "timing.json",
+      "sha256": "4c77450d7d10a4328ff05078555c60be534a6877a9bc74748bfb715ca84409b2",
+      "bytes": 1204595,
+      "verified": true
+    }
+  ]
+}
