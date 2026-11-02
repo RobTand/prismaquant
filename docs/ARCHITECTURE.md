@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-02, hosted CI description corrected, PQ #3216.
+Source: `.github/workflows/gate.yml` and `.github/workflows/ci.yml` at
+`f1335b03`. PRs use hosted `pr-gate`; the post-merge CPU suite remains on
+Python 3.12. This corrects the retired `pb-tests` description below.
+
 As of: 2026-11-02, read-ahead growth reserve, PQ #2602 (child of #1347).
 `GuardReadBudget` subtracts a per-window growth reserve derived from the
 stream's measured evictions; the derivation and its CPU-proven bounds are in
@@ -31909,11 +31914,11 @@ empty so a native-lane assumption cannot silently constrain the Gridbook
 allocation.
 And there is CI to run it — `.github/workflows/ci.yml` executes the full suite
 on main pushes and manual dispatches, on Python 3.12 with CPU torch. PRs keep
-the hosted import/CLI smoke and allowlist checks; the required PrismaBuild
-`pb-tests` check covers the full composed pre-merge candidate (Refs #2015,
-#1929). Its current Python 3.14.4 environment is distinct from the hosted
-3.12 floor. Before PrismaQuant is
-installed, both jobs use the stdlib-only `tools/resolve_tessera_dev_pin.py` to
+the hosted import/CLI smoke and allowlist checks. `.github/workflows/gate.yml`
+runs selected PR coverage through `pr-gate` and full merge-queue coverage through
+`gate`, on hosted ARM and x64 runners using Python 3.12. See
+[the CI gate contract](ci_gate.md). Before PrismaQuant is
+installed, these jobs use the stdlib-only `tools/resolve_tessera_dev_pin.py` to
 derive the exact Tessera checkout from `TESSERA_DEV_PIN_COMMIT`, stop
 without publishing a ref if that resolution fails, and install that checkout
 before exercising the package. Ordinary checkout access is sufficient:

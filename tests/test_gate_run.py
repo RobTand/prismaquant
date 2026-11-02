@@ -145,6 +145,33 @@ def test_ci_python_loader_environment_does_not_leak_into_proof_capture(tmp_path,
     assert observed[0]['GATE_KEEP'] == 'retained'
 
 
+def test_pytest_child_cannot_inherit_workflow_secrets(tmp_path, monkeypatch):
+    import yaml
+    names = {'BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'}
+    for filename in ('gate.yml', 'ci.yml'):
+        workflow = yaml.safe_load((ROOT / '.github/workflows' / filename).read_text())
+        for job in workflow['jobs'].values():
+            for step in job.get('steps', []):
+                names.update(name for name, value in step.get('env', {}).items()
+                             if '${{ secrets.' in str(value))
+    for name in names:
+        monkeypatch.setenv(name, 'fake-child-credential-' + name.lower())
+    monkeypatch.setenv('GATE_KEEP', 'retained')
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'pytest.ini').write_text('[pytest]\n')
+    (tmp_path / 'tests/test_child.py').write_text(
+        'import os\n'
+        'def test_child_environment():\n'
+        f'    present = sorted(set(os.environ).intersection({sorted(names)!r}))\n'
+        '    assert present == []\n'
+        '    assert os.environ.get("GATE_KEEP") == "retained"\n')
+    result = runner.run_plan({'selected': [{'path': 'tests/test_child.py'}], 'deselect': []},
+        workers=1, root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml')
+    assert result == 0
+    report = (tmp_path / 'junit.xml').read_text()
+    assert all('fake-child-credential-' + name.lower() not in report for name in names)
+
+
 @pytest.mark.parametrize('code', [0, 2, 3, -9])
 @pytest.mark.parametrize('outcome', ['failure', 'error'])
 def test_recorded_junit_failure_is_final_despite_pytest_exit(tmp_path, code, outcome):
