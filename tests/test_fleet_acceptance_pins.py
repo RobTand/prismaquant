@@ -68,4 +68,3 @@ def test_generated_fixture_placement_preserves_the_source_cleanliness_guard(
         snapshots = pins.record_snapshots(checkout=checkout)
         assert snapshots["pq_head"] == head
         assert snapshots["pb_rev"] == pins.PB_CANDIDATE_REV
-
