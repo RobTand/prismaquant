@@ -60,6 +60,7 @@ from .joint_adjoint_checkpoints import (
     exact_entry_record,
     normalize_chain_regime,
     reference_from_record,
+    resolve_stride,
     stage_a_run_header,
     stage_a_run_header_sha256,
     stage_a_slice,
@@ -615,8 +616,6 @@ def sealed_chain_state(space, *, plan_sha256: str, prepared_sha256: str,
 
 def band_from_request(request_path, *, boundary: int, request_sha256: str | None = None) -> dict:
     """The band of ``boundary`` for the Stage A run a sealed PB request names."""
-    from .joint_cost_stage_a import resolve_stride
-
     request_path = Path(request_path)
     raw = request_path.read_bytes()
     digest = bytes_sha256hex(raw)

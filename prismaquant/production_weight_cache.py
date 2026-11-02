@@ -93,8 +93,9 @@ from .render_cache_paths import (
 )
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
-from prismaquant.cost_stage_checkpoint import (
-    atomic_write_bytes, publish_new_bytes, unique_temp_suffix,
+from prismaquant.cost_stage_checkpoint import (  # noqa: F401 -- identity helpers re-exported
+    _IDENTITY_MISSING, atomic_write_bytes, first_identity_difference,
+    identity_value_for_error, publish_new_bytes, unique_temp_suffix,
 )
 from prismaquant.digests import (
     DIRECT_ASCII_INDENT2_LAX,
@@ -3360,64 +3361,6 @@ def _source_weight_value_identity(
         )
         del cpu
     return shape, digest.hexdigest()
-
-
-_IDENTITY_MISSING = object()
-
-
-def first_identity_difference(
-    stored: object,
-    expected: object,
-    *,
-    path: str = "",
-) -> tuple[str, object, object] | None:
-    """Return the first canonical-identity difference, including its field.
-
-    Resume gates use this rather than a single aggregate digest so an operator
-    is told *which* value-bearing input changed.  Mapping keys are traversed in
-    sorted order and sequences in index order, making the reported field stable.
-    """
-    if isinstance(stored, Mapping) and isinstance(expected, Mapping):
-        keys = sorted(set(str(key) for key in stored) | set(
-            str(key) for key in expected
-        ))
-        stored_by_name = {str(key): value for key, value in stored.items()}
-        expected_by_name = {str(key): value for key, value in expected.items()}
-        for key in keys:
-            child = f"{path}.{key}" if path else key
-            left = stored_by_name.get(key, _IDENTITY_MISSING)
-            right = expected_by_name.get(key, _IDENTITY_MISSING)
-            if left is _IDENTITY_MISSING or right is _IDENTITY_MISSING:
-                return child, left, right
-            different = first_identity_difference(left, right, path=child)
-            if different is not None:
-                return different
-        return None
-    if (
-        isinstance(stored, Sequence)
-        and not isinstance(stored, (str, bytes, bytearray))
-        and isinstance(expected, Sequence)
-        and not isinstance(expected, (str, bytes, bytearray))
-    ):
-        if len(stored) != len(expected):
-            child = f"{path}.length" if path else "length"
-            return child, len(stored), len(expected)
-        for index, (left, right) in enumerate(zip(stored, expected)):
-            child = f"{path}[{index}]" if path else f"[{index}]"
-            different = first_identity_difference(left, right, path=child)
-            if different is not None:
-                return different
-        return None
-    if type(stored) is not type(expected) or stored != expected:
-        return path or "value", stored, expected
-    return None
-
-
-def identity_value_for_error(value: object) -> str:
-    if value is _IDENTITY_MISSING:
-        return "<missing>"
-    text = repr(value)
-    return text if len(text) <= 240 else text[:237] + "..."
 
 
 def _canonical_json_sha256(value: object, *, where: str) -> str:

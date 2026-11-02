@@ -83,6 +83,7 @@ from .name_projection import (
     strip_weight_leaf,
 )
 from prismaquant.source_read_plan import read_safetensors_header
+from .visual_linears import NVFP4_WEIGHT_ONLY_STATS_KEY
 
 # safetensors header dtype -> bytes per element (header carries the source
 # dtype string; we only need it to derive source-bytes-per-param when the
@@ -854,11 +855,9 @@ def check_floor_non_negative(
         "ship a selection computed from this floor.")
 
 
-# Stats identity used by allocator/validation accounting when the exporter
-# deliberately emits stock NVFP4 as weight-only W4A16. This is an explicit
-# producer contract, not a qname heuristic: callers set it from the resolved
-# model profile's checkpoint-to-live mapping.
-NVFP4_WEIGHT_ONLY_STATS_KEY = "_nvfp4_weight_only"
+# ``NVFP4_WEIGHT_ONLY_STATS_KEY`` (imported above from ``visual_linears``, whose
+# source census stamps it) is the stats identity allocator/validation accounting
+# reads when the exporter emits stock NVFP4 as weight-only W4A16.
 
 # Both sidecars are F32 scalars. A regular W4A4 Linear ships one of each;
 # weight-only visual/audio/MTP targets ship only weight_global_scale.

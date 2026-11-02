@@ -19,6 +19,7 @@ from typing import Any
 from .digests import bytes_sha256hex, file_sha256hex
 from .file_identity import file_stat_signature
 from .schemas import Contract
+from .staged_whole_file import BoundReadLimitExceeded
 
 
 require = Contract(ValueError).require
@@ -76,10 +77,6 @@ _BOUND_BYTES = {}
 #: The reader must enforce an explicit limit before allocation.
 #: Stage B preparation installs its strict staged reader here.
 BOUND_READER = None
-
-
-class BoundReadLimitExceeded(ValueError):
-    """A bound input cannot fit the caller's explicit byte limit."""
 
 
 def read_bound(record, label, *, max_bytes: int | None = None):

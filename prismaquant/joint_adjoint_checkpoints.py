@@ -101,6 +101,25 @@ ADJOINT_CAPTURE_ENTRY_POINT = "prismaquant.joint_adjoint_capture"
 DEFAULT_STRIDE = 8
 
 
+class AdjointIdentityRefused(RuntimeError):
+    """A plan/prepared digest or binding mismatch, before anything runs."""
+
+
+def resolve_stride(config, cli_stride) -> tuple[int, str]:
+    """S comes from the plan's ``distributed_campaign`` block when present
+    (§3.4: a plan knob, not a CLI guess); a CLI value may supply it only for
+    a plan that does not declare the block, and a disagreement refuses."""
+    plan_block = (config.get("distributed_campaign") or {})
+    plan_stride = plan_block.get("cotangent_checkpoint_stride")
+    if plan_stride is not None:
+        if cli_stride is not None and int(cli_stride) != int(plan_stride):
+            raise AdjointIdentityRefused(
+                f"--stride {cli_stride} disagrees with the plan's sealed "
+                f"stride {plan_stride}")
+        return int(plan_stride), "plan"
+    return int(cli_stride if cli_stride is not None else DEFAULT_STRIDE), "cli"
+
+
 def adjoint_space(output_root: str | os.PathLike) -> Path:
     """The distributed campaign's adjoint namespace (§9.1: never the single
     run's ``run/``/``checkpoints/``/``exact-boundaries/``)."""

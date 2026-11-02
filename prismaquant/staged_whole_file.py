@@ -14,6 +14,10 @@ import os
 from pathlib import Path
 
 
+class BoundReadLimitExceeded(ValueError):
+    """A bound input cannot fit the caller's explicit byte limit."""
+
+
 def _verified_source_metadata_bytes(path: Path, *, label: str) -> tuple[bytes, str]:
     """Return staged metadata and its verified declared digest under one lease."""
     from .staged_tier_policy import refuse_pool_bulk_read
@@ -146,8 +150,6 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise refuse_pool_bulk_read(where, "readset-not-staged")
     if max_bytes is not None:
-        from .stage_inputs import BoundReadLimitExceeded
-
         if size > max_bytes:
             raise BoundReadLimitExceeded(f"{label}: staged input exceeds its read bound")
     window, key = acquire_entry_window(resolver, path, staged)
