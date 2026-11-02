@@ -198,7 +198,7 @@ def shortest_hub_path(live, test):
     source has no connecting evidence, say so instead of inventing an edge.
     """
     adjacency = {}
-    for source, target in live['edges']:
+    for source, target in live.get('path_edges', live['edges']):
         adjacency.setdefault(source, set()).add(target)
     parent, depth, pending = {test: None}, {test: 0}, deque([test])
     while pending:
