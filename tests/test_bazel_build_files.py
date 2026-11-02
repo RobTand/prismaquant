@@ -462,3 +462,96 @@ def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
     assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'
     quick = build_files.test_attributes('tests/test_in.py', PLAN, {'tests/test_in.py': 3.0})
     assert 'shard_count' not in quick and quick['timeout'] == 'moderate'
+
+
+def test_a_test_importing_another_test_depends_on_its_library_not_its_test():
+    assert build_files.library_name('tests/test_b.py') == 'test_b_lib'
+    assert build_files.library_name('tests/helper.py') == 'helper'
+    assert build_files.library_name('prismaquant/allocator.py') == 'prismaquant/allocator'
+
+
+def test_whole_directories_compress_to_one_filegroup_and_the_rest_stay_files():
+    files = ['tests/fixtures/a.json', 'tests/fixtures/b.json', 'tests/test_x.py', 'docs/one.md', 'docs/two.md']
+    trees = build_files.Trees(files)
+    labels = trees.labels({'tests/fixtures/a.json', 'tests/fixtures/b.json', 'docs/one.md'}, 'tests')
+    assert labels == ['//:docs/one.md', ':files/fixtures']
+    assert trees.used == {'tests': {'fixtures'}}
+
+
+def test_a_module_depends_on_the_pip_distributions_it_imports(tmp_path):
+    found = evidence(tmp_path, {
+        'tools/bazel/pip_modules.json': json.dumps({'torch': ['torch'], 'yaml': ['pyyaml'], 'PIL': ['pillow']}),
+        'prismaquant/loader.py': 'import yaml\ndef later():\n    import torch.nn\n',
+        'prismaquant/plain.py': 'import json\n',
+        'tests/test_cli.py': 'import subprocess\nsubprocess.run(["python", "-m", "PIL.Image"])\n'})
+    assert found.packages('prismaquant/loader.py') == {'pyyaml', 'torch'}
+    assert found.packages('prismaquant/plain.py') == set()
+    assert found.packages('tests/test_cli.py') == {'pillow'}
+    assert build_files.pip_label('pyyaml') == '@pq_pip//pyyaml'
+    assert build_files.pip_label('tessera-quant') == '@pq_pip//tessera_quant'
+
+
+SMALL = {
+    'pytest.ini': '[pytest]\ntestpaths = tests\n',
+    'tools/ci/gate_durations.json': json.dumps({'files': {'tests/test_slow.py': 100.0}}),
+    'tools/ci/gate_quarantine.json': json.dumps({'entries': [
+        {'target': 'tests/test_held.py', 'issue': 7, 'reason': 'owned elsewhere'},
+        {'target': 'tests/test_slow.py::test_flaky', 'issue': 8, 'reason': 'flaky'}]}),
+    'tools/bazel/pip_modules.json': json.dumps({'yaml': ['pyyaml']}),
+    'tools/bazel/test_inputs.bzl': 'TEST_INPUTS = {}\n',
+    'tests/conftest.py': 'from prismaquant import core\n',
+    'tests/g3job/conftest.py': 'import sys\n',
+    'tests/g3job/test_deep.py': 'def test_deep(): pass\n',
+    'tests/test_slow.py': 'import yaml\nfrom prismaquant import runner\ndef test_flaky(): pass\n',
+    'tests/test_held.py': 'def test_held(): pass\n',
+    'prismaquant/__init__.py': '', 'prismaquant/core.py': '',
+    'prismaquant/runner.py': ("import subprocess, sys\n"
+                              "def run():\n    subprocess.run([sys.executable, '-m', 'prismaquant.child'])\n"),
+    'prismaquant/child.py': 'import yaml\n',
+}
+
+
+def test_generated_packages_hold_libraries_tests_lanes_and_deselects(tmp_path):
+    files = write(tmp_path, SMALL)
+    generated = build_files.generate(tmp_path, files)
+    assert set(generated) == {'', 'tests'}
+    root, tests = generated[''], generated['tests']
+    assert root.startswith(build_files.HEADER) and tests.startswith(build_files.HEADER)
+    assert 'name = "prismaquant/child",' in root and '"@pq_pip//pyyaml"' in root
+    slow = tests[tests.index('name = "test_slow"'):].split('\n)\n', 1)[0]
+    # The conftest above it, the program its closure launches, its deselect, its shards.
+    assert '":conftest"' in slow and '"//:prismaquant/child"' in slow
+    assert '"--deselect=tests/test_slow.py::test_flaky"' in slow
+    assert 'shard_count = 3' in slow
+    deep = tests[tests.index('name = "g3job/test_deep"'):].split('\n)\n', 1)[0]
+    assert '":conftest"' in deep and '":g3job/conftest"' in deep
+    held = tests[tests.index('name = "test_held"'):].split('\n)\n', 1)[0]
+    assert '"gate-issue-7"' in held and '"manual"' in held
+
+
+def test_an_import_cycle_across_packages_refuses_generation(tmp_path):
+    sources = dict(SMALL, **{'prismaquant/core.py': 'import tests.helper\n',
+                             'tests/helper.py': 'from prismaquant import core\n'})
+    with pytest.raises(build_files.GenerationError, match='crosses Bazel packages'):
+        build_files.generate(tmp_path, write(tmp_path, sources))
+
+
+def test_two_targets_with_one_name_refuse_generation():
+    with pytest.raises(build_files.GenerationError, match='x_lib'):
+        build_files.render_package('tests', [('x_lib', 'pq_py_library', {}), ('x_lib', 'pq_py_library', {})])
+
+
+def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
+    monkeypatch.setattr(build_files, 'generate', lambda root: {'tests': 'new\n', '': 'root\n'})
+    with pytest.raises(SystemExit) as stopped:
+        build_files.main(['--check', '--root', str(tmp_path)])
+    assert 'BUILD.bazel' in str(stopped.value) and 'tests/BUILD.bazel' in str(stopped.value)
+    assert 'tools/bazel/generate.sh' in str(stopped.value)
+    assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
+
+
+def test_committed_build_files_carry_the_generated_header():
+    for path in [ROOT / 'BUILD.bazel', ROOT / 'tests/BUILD.bazel']:
+        assert path.read_text().startswith(build_files.HEADER), path
