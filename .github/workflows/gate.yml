@@ -42,6 +42,9 @@ jobs:
       compatible: ${{ steps.head-contract.outputs.compatible }}
       policy_exit: ${{ steps.plan.outputs.policy_exit }}
     steps:
+    - name: Explain skipped fork uploads
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      run: 'echo "artifact uploads skipped: fork PR has no secrets to scan for"'
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
@@ -109,26 +112,26 @@ jobs:
         PYTHON
     - name: Scan artifact paths for secrets
       id: scan-artifacts-1
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      if: ${{ !cancelled() && steps.scan-artifacts-1.outcome == 'success' }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-1.outcome == 'success' }}
       with:
         name: gate-plan-${{ github.run_attempt }}
         path: gate-artifacts
         retention-days: 7
     - name: Scan artifact paths for secrets
       id: scan-artifacts-2
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts/plan.json
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts/plan.json
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      if: ${{ !cancelled() && steps.scan-artifacts-2.outcome == 'success' }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-2.outcome == 'success' }}
       with:
         name: gate-shadow-selection-${{ github.run_attempt }}
         path: gate-artifacts/plan.json
@@ -136,7 +139,7 @@ jobs:
   shards:
     name: shard-${{ matrix.index }}-a1
     needs: plan
-    if: ${{ needs.plan.result == 'success' }}
+    if: ${{ needs.plan.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -215,13 +218,13 @@ jobs:
         exit "$code"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-3
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
     - name: Upload verdict and JUnit
-      if: ${{ !cancelled() && steps.scan-artifacts-3.outcome == 'success' }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-3.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a1-${{ matrix.index }}
@@ -232,7 +235,7 @@ jobs:
         retention-days: 7
   retry-plan:
     name: Plan infrastructure retry
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     needs:
     - plan
     - shards
@@ -351,13 +354,13 @@ jobs:
         exit "$code"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-4
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts/result.json gate-artifacts/junit.xml
     - name: Upload verdict and JUnit
-      if: ${{ !cancelled() && steps.scan-artifacts-4.outcome == 'success' }}
+      if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-4.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-result-${{ github.run_attempt }}-a2-${{ matrix.index }}
@@ -377,6 +380,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+    - name: Explain unavailable fork verdict
+      if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      run: |
+        echo 'artifact uploads skipped: fork PR has no secrets to scan for'
+        echo 'NO_VERDICT: fork PR gate requires plan and shard artifacts; uploads are disabled'
+        exit 75
     - name: Require a complete plan
       env:
         PLAN_RESULT: ${{ needs.plan.result }}
@@ -418,12 +427,12 @@ jobs:
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-5
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - if: ${{ !cancelled() && steps.scan-artifacts-5.outcome == 'success' }}
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts
+    - if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-5.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-pr-final-${{ github.run_attempt }}
@@ -482,12 +491,12 @@ jobs:
         python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
     - name: Scan artifact paths for secrets
       id: scan-artifacts-6
-      if: ${{ !cancelled() }}
+      ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)if:  }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - if: ${{ !cancelled() && steps.scan-artifacts-6.outcome == 'success' }}
+      run: python3 tools/ci/check_no_secret_leak.py --require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN gate-artifacts
+    - if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && steps.scan-artifacts-6.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: gate-final-${{ github.run_attempt }}
