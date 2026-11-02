@@ -236,6 +236,64 @@ def unit_path(root: Path, qname: str) -> Path:
     return root / "units" / f"{text_sha256hex(str(qname))}.pkl"
 
 
+_IDENTITY_MISSING = object()
+
+
+def first_identity_difference(
+    stored: object,
+    expected: object,
+    *,
+    path: str = "",
+) -> tuple[str, object, object] | None:
+    """Return the first canonical-identity difference, including its field.
+
+    Resume gates use this rather than a single aggregate digest so an operator
+    is told *which* value-bearing input changed.  Mapping keys are traversed in
+    sorted order and sequences in index order, making the reported field stable.
+    """
+    if isinstance(stored, Mapping) and isinstance(expected, Mapping):
+        keys = sorted(set(str(key) for key in stored) | set(
+            str(key) for key in expected
+        ))
+        stored_by_name = {str(key): value for key, value in stored.items()}
+        expected_by_name = {str(key): value for key, value in expected.items()}
+        for key in keys:
+            child = f"{path}.{key}" if path else key
+            left = stored_by_name.get(key, _IDENTITY_MISSING)
+            right = expected_by_name.get(key, _IDENTITY_MISSING)
+            if left is _IDENTITY_MISSING or right is _IDENTITY_MISSING:
+                return child, left, right
+            different = first_identity_difference(left, right, path=child)
+            if different is not None:
+                return different
+        return None
+    if (
+        isinstance(stored, Sequence)
+        and not isinstance(stored, (str, bytes, bytearray))
+        and isinstance(expected, Sequence)
+        and not isinstance(expected, (str, bytes, bytearray))
+    ):
+        if len(stored) != len(expected):
+            child = f"{path}.length" if path else "length"
+            return child, len(stored), len(expected)
+        for index, (left, right) in enumerate(zip(stored, expected)):
+            child = f"{path}[{index}]" if path else f"[{index}]"
+            different = first_identity_difference(left, right, path=child)
+            if different is not None:
+                return different
+        return None
+    if type(stored) is not type(expected) or stored != expected:
+        return path or "value", stored, expected
+    return None
+
+
+def identity_value_for_error(value: object) -> str:
+    if value is _IDENTITY_MISSING:
+        return "<missing>"
+    text = repr(value)
+    return text if len(text) <= 240 else text[:237] + "..."
+
+
 def _mismatch(
     stage: str,
     *,
@@ -243,8 +301,6 @@ def _mismatch(
     stored: object,
     expected: object,
 ) -> None:
-    from prismaquant.production_weight_cache import identity_value_for_error
-
     raise RuntimeError(
         f"{stage} checkpoint identity mismatch at {field}: "
         f"stored={identity_value_for_error(stored)} "
@@ -479,8 +535,6 @@ def prepare_journal(
         # pays for the field walk that names where it is.
         if (manifest.get("identity_sha256") != identity_sha256
                 or manifest.get("identity") != canonical_identity):
-            from prismaquant.production_weight_cache import first_identity_difference
-
             stored_identity = manifest.get("identity")
             original_difference = first_identity_difference(stored_identity, canonical_identity)
             if seal_fields and isinstance(stored_identity, Mapping):
@@ -504,7 +558,6 @@ def prepare_journal(
                                    or stored_identity.get(key) != canonical_identity.get(key)))
                 if moved:
                     from .dev_mode import seal_check
-                    from .production_weight_cache import identity_value_for_error
 
                     changes = "; ".join(
                         f"{key}: stored={identity_value_for_error(stored_identity.get(key, '<absent>'))} "

@@ -14,6 +14,9 @@ from .digests import canonical_json_bytes as canonical_bytes
 from .digests import canonical_json_sha256 as canonical_sha256, newline_utf8_sha256, is_sha256hex
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
+#: The schema of the joiner's merged results (``joint_quanta_join``) that the
+#: Tessera joint allocation reads back.
+JOINED_RESULTS_SCHEMA = "prismaquant.joint_layer_quanta.joined_results.v1"
 
 
 class QuantumRecordRefused(ValueError):
