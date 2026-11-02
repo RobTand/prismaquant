@@ -192,8 +192,8 @@ def test_graph_aggregate_refuses_failed_or_missing_verdict(result, verdict, pass
 @pytest.mark.parametrize('cases,passes', [
     ('<testcase name="test_graph_impact_gate"/>', True), ('', False),
     ('<testcase name="other"/>', False),
-    ('<testcase><skipped/></testcase>', False), ('<testcase><failure/></testcase>', False),
-    ('<testcase><error/></testcase>', False), ('<testcase/><testcase/>', False),
+    ('<testcase name="test_graph_impact_gate"><skipped/></testcase>', False), ('<testcase name="test_graph_impact_gate"><failure/></testcase>', False),
+    ('<testcase name="test_graph_impact_gate"><error/></testcase>', False), ('<testcase/><testcase/>', False),
 ])
 def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
     import subprocess
