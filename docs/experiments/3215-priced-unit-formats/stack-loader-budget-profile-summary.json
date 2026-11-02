@@ -1,0 +1,260 @@
+{
+  "main-budget": {
+    "phases": [
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "setup",
+        "seconds": 0.0036134389999915584,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "call",
+        "seconds": 19.632381316000007,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "teardown",
+        "seconds": 0.0022085920000023407,
+        "outcome": "passed"
+      }
+    ],
+    "samples": 2070,
+    "top_inclusive": [
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+        1446
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:390:test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        1421
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:56:_rungs",
+        1421
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:1434:expand_tessera_menu",
+        1421
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:71:_first_rung",
+        1421
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+        1420
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+        1396
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+        1349
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:269:call",
+        1283
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:672:tessera_exact_bits_for_shape",
+        1257
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:644:_exact_bits_for_shape",
+        1253
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:292:tessera_tensor_payload_breakdown",
+        1250
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+        1150
+      ],
+      [
+        "<frozen importlib._bootstrap>:1304:_find_and_load_unlocked",
+        596
+      ],
+      [
+        "<frozen importlib._bootstrap>:1349:_find_and_load",
+        595
+      ],
+      [
+        "<frozen importlib._bootstrap_external>:989:exec_module",
+        589
+      ],
+      [
+        "/tmp/drv/timing_probe.py:20:load",
+        586
+      ],
+      [
+        "<frozen importlib._bootstrap>:480:_call_with_frames_removed",
+        586
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+        578
+      ],
+      [
+        "<frozen importlib._bootstrap>:911:_load_unlocked",
+        571
+      ]
+    ],
+    "copy_frames": [
+      [
+        "/usr/lib/python3.12/copy.py:217:_deepcopy_dict",
+        7
+      ],
+      [
+        "/usr/lib/python3.12/copy.py:118:deepcopy",
+        13
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_runtime_contract.py:2600:native_rung_verdict",
+        22
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3074:native_rung_verdict",
+        8
+      ],
+      [
+        "/usr/lib/python3.12/copy.py:172:_deepcopy_atomic",
+        1
+      ],
+      [
+        "/usr/lib/python3.12/copy.py:200:_deepcopy_tuple",
+        1
+      ]
+    ]
+  },
+  "stack-budget": {
+    "phases": [
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "setup",
+        "seconds": 0.002652687999997738,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "call",
+        "seconds": 19.776962769999997,
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tests/test_tessera_tp_loader_axes.py::test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        "phase": "teardown",
+        "seconds": 0.00270736999999599,
+        "outcome": "passed"
+      }
+    ],
+    "samples": 2053,
+    "top_inclusive": [
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+        1460
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:390:test_with_no_contract_pinned_the_axis_leg_adds_no_refusal",
+        1433
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:56:_rungs",
+        1433
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_menu.py:1434:expand_tessera_menu",
+        1433
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/tests/test_tessera_tp_loader_axes.py:71:_first_rung",
+        1433
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+        1432
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+        1396
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+        1348
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:269:call",
+        1285
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:672:tessera_exact_bits_for_shape",
+        1258
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:644:_exact_bits_for_shape",
+        1252
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_footprint.py:292:tessera_tensor_payload_breakdown",
+        1247
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+        1112
+      ],
+      [
+        "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+        574
+      ],
+      [
+        "<frozen importlib._bootstrap>:480:_call_with_frames_removed",
+        571
+      ],
+      [
+        "<frozen importlib._bootstrap_external>:989:exec_module",
+        565
+      ],
+      [
+        "<frozen importlib._bootstrap>:1304:_find_and_load_unlocked",
+        564
+      ],
+      [
+        "/tmp/drv/timing_probe.py:20:load",
+        563
+      ],
+      [
+        "<frozen importlib._bootstrap>:1349:_find_and_load",
+        562
+      ],
+      [
+        "<frozen importlib._bootstrap>:911:_load_unlocked",
+        534
+      ]
+    ],
+    "copy_frames": [
+      [
+        "/usr/lib/python3.12/copy.py:217:_deepcopy_dict",
+        8
+      ],
+      [
+        "/usr/lib/python3.12/copy.py:118:deepcopy",
+        16
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_runtime_contract.py:2600:native_rung_verdict",
+        23
+      ],
+      [
+        "/usr/lib/python3.12/copy.py:200:_deepcopy_tuple",
+        3
+      ],
+      [
+        "/home/buildbuddy/workspace/repo-root/prismaquant/lane_eligibility.py:3074:native_rung_verdict",
+        5
+      ]
+    ]
+  }
+}
