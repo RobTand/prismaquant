@@ -46,7 +46,7 @@ from prismaquant.joint_quantum_handoff import (
 from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
-from test_quantum_executable_readset import (  # noqa: E402
+from own_process.test_quantum_executable_readset import (  # noqa: E402
     CALIB, N_BATCHES, N_PROBES, RENDER_PREREQ, SESSION, STRIDED,
     _bind_slice, _tiny_records,
 )
@@ -289,7 +289,7 @@ def test_the_band_serial_readset_swaps_the_chain_for_the_handoff(tmp_path):
 
 
 def test_the_band_serial_readset_passes_the_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     bound, _receipt_doc = _campaign(tmp_path)
     published = _emit(bound[3])

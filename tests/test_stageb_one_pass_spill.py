@@ -1280,7 +1280,7 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
     window zero captures under the same phases with no retained window
     open, before the first active window opens (PQ #1172).
     """
-    import test_quantum_executable_readset as phases
+    import own_process.test_quantum_executable_readset as phases
 
     monkeypatch.setattr(phases, "_expert_fixture", _bf16_expert_fixture)
     for name in spill_mod.SPILL_ENV:

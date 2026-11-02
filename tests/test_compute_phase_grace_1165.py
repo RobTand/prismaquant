@@ -358,7 +358,7 @@ def test_the_quantum_commits_nothing_inside_a_pass_and_runs_the_priced_units(
     """The real quantum, spill mode, one chain layer: no report lands between
     the first and last unit of a chain roll or a spill capture, and the units
     it runs under each phase are the units the dispatcher prices for it."""
-    import test_quantum_executable_readset as phases
+    import own_process.test_quantum_executable_readset as phases
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.joint_adjoint_checkpoints as checkpoints
     import prismaquant.joint_replay_spill as spill_mod

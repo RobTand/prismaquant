@@ -195,7 +195,7 @@ def run_in_bounded_capture_child(request, tmp_path):
     output, a skip its reason. The child inherits the parent's per-test bound
     the way an ``own_process`` module's child does.
     """
-    from conftest import _own_process_bound_args
+    from tests.pytest_test_bound import test_bound_args as bound_args
     from prismaquant.autoscale import BOUNDED_CAPTURE_ENV
     config = request.config
     env = {name: value for name, value in os.environ.items()
@@ -208,7 +208,7 @@ def run_in_bounded_capture_child(request, tmp_path):
             '--junitxml', str(junit)]
     if config.inipath is not None:
         argv += ['-c', str(config.inipath)]
-    argv += [*_own_process_bound_args(config), request.node.nodeid]
+    argv += [*bound_args(config), request.node.nodeid]
     completed = subprocess.run(argv, cwd=str(config.rootpath), env=env,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     output = completed.stdout[-20000:]

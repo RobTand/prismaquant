@@ -136,7 +136,7 @@ def _assert_waits_in_phase(log, manifest, layer):
 def test_a_chain_quantum_waits_only_on_ranges_its_phase_stages(
         tmp_path, monkeypatch):
     """Windowed replay, layer 0 with chain [1]."""
-    import test_quantum_executable_readset as harness
+    import own_process.test_quantum_executable_readset as harness
 
     setup = harness._acceptance_setup(tmp_path, monkeypatch)
     record = setup["records"]["layer-000"]
@@ -151,7 +151,7 @@ def test_a_chain_quantum_waits_only_on_ranges_its_phase_stages(
 def test_a_spill_chain_quantum_waits_only_on_ranges_its_phase_stages(
         tmp_path, monkeypatch):
     """The production regime: spill replay, layer 0 with chain [1]."""
-    import test_quantum_executable_readset as harness
+    import own_process.test_quantum_executable_readset as harness
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.joint_replay_spill as spill_mod
 

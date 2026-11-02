@@ -43,7 +43,7 @@ from prismaquant.joint_quantum_handoff import (  # noqa: E402
     HandoffStream,
     handoff_root,
 )
-from test_quantum_executable_readset import (  # noqa: E402
+from own_process.test_quantum_executable_readset import (  # noqa: E402
     N_BATCHES,
     N_PROBES,
     _bind_slice,

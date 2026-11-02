@@ -255,11 +255,13 @@ def exclusion_entries(quarantine: dict) -> list[dict]:
 QUARANTINE_PATH = 'tools/ci/gate_quarantine.json'
 
 
-def quarantine_policy(current: dict, baseline: dict | None, changed: list[str]) -> None:
+def quarantine_policy(current: dict, baseline: dict | None, changed: list[str], *,
+                      renames: dict[str, str] | None = None) -> None:
     entries = exclusion_entries(current)
     if baseline is None:
         return  # Initial policy, like the budget bootstrap, is reviewed with the gate.
-    previous = {row['target']: row for row in exclusion_entries(baseline)}
+    previous = {gate_paths.renamed_target(row['target'], renames or {}): row
+                for row in exclusion_entries(baseline)}
     def covered(row):
         target = row['target']
         old = previous.get(target, previous.get(target.split('::', 1)[0]))
@@ -462,7 +464,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         changed = changed_files(root, args.base, args.head)
         quarantine = load_gate_json(root / QUARANTINE_PATH)
-        quarantine_policy(quarantine, base_quarantine(root, args.base), changed)
+        baseline = base_quarantine(root, args.base)
+        quarantine_policy(quarantine, baseline, changed,
+                          renames=gate_paths.renamed_files(root, args.base, args.head) if baseline is not None else None)
         check_quarantine_owners(exclusion_entries(quarantine))
     except ValueError as error:
         print('GATE_POLICY_FAILURE: ' + str(error), file=sys.stderr)

@@ -32,7 +32,7 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
 from prismaquant.layer_streaming import streaming_source_plan  # noqa: E402
-from test_quantum_executable_readset import (  # noqa: E402
+from own_process.test_quantum_executable_readset import (  # noqa: E402
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bind_slice, _layers,
     _tiny_parent, _tiny_receipt,
 )

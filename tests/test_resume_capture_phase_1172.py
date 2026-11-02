@@ -40,7 +40,7 @@ def _resumed_spill_run(tmp_path, monkeypatch):
     phase reported last before the unit ran: a chain-roll row, a spill
     capture group, or a spill replay of one (window, probe).
     """
-    import test_quantum_executable_readset as phases
+    import own_process.test_quantum_executable_readset as phases
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.joint_adjoint_checkpoints as checkpoints
     import prismaquant.joint_cost_quantum as qc

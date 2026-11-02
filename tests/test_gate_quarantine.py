@@ -123,3 +123,54 @@ def test_owner_lookup_authenticates_with_the_workflow_token(monkeypatch):
 
 def test_owner_lookup_without_a_token_stays_anonymous(monkeypatch):
     assert 'authorization' not in _captured_request(monkeypatch, None)
+
+
+@pytest.mark.parametrize('target,issue,keep_old,allowed', [
+    ('tests/own_process/test_one.py::test_bad', 3201, False, True),
+    ('tests/own_process/test_one.py', 3201, False, False),
+    ('tests/own_process/test_one.py::test_other', 3201, False, False),
+    ('tests/own_process/test_one.py::test_bad', 3202, False, False),
+    ('tests/own_process/test_one.py::test_bad', 3201, True, False),
+])
+def test_directory_move_preserves_only_the_same_quarantined_node(
+        tmp_path, monkeypatch, target, issue, keep_old, allowed):
+    """Exercise Git rename evidence and the real CLI policy without a network lookup."""
+    import json
+    import subprocess
+
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=tmp_path, text=True).strip()
+
+    git('init', '-q')
+    git('config', 'user.name', 'Quarantine regression')
+    git('config', 'user.email', 'quarantine@example.invalid')
+    old = tmp_path / 'tests/test_one.py'
+    old.parent.mkdir()
+    old.write_text('def test_bad():\n    assert False\n\ndef test_good():\n    assert True\n')
+    policy = tmp_path / QUARANTINE
+    policy.parent.mkdir(parents=True)
+    policy.write_text(json.dumps({'entries': [entry()]}))
+    git('add', '.')
+    git('commit', '-qm', 'original quarantined test')
+    base = git('rev-parse', 'HEAD')
+    new = tmp_path / 'tests/own_process/test_one.py'
+    new.parent.mkdir()
+    new.write_text(old.read_text())
+    if not keep_old:
+        old.unlink()
+    policy.write_text(json.dumps({'entries': [entry(target, issue)]}))
+    (policy.parent / 'gate_durations.json').write_text('{"files": {}}')
+    git('add', '.')
+    git('commit', '-qm', 'move the test directory')
+    head = git('rev-parse', 'HEAD')
+    monkeypatch.setattr(select, 'check_quarantine_owners', lambda entries: None)
+    output = tmp_path / 'plan.json'
+    code = select.main(['--root', str(tmp_path), '--base', base, '--head', head,
+                        '--output', str(output)])
+    assert code == (0 if allowed else 1)
+    if allowed:
+        plan = json.loads(output.read_text())
+        assert plan['deselect'] == [target]
+        assert [row['path'] for row in plan['selected']] == ['tests/own_process/test_one.py']
+    else:
+        assert not output.exists()

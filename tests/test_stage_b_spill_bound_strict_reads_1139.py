@@ -36,7 +36,7 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 from prismaquant import stage_b_prep_io as io  # noqa: E402
-from test_quantum_executable_readset import (  # noqa: E402
+from own_process.test_quantum_executable_readset import (  # noqa: E402
     _exec_campaign, _exec_receipt)
 from test_stage_b_prep_io_1070 import (  # noqa: E402
     _recorded_reads, generator_args, write_submission)

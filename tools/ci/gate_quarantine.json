@@ -174,7 +174,7 @@
       }
     },
     {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
+      "target": "tests/own_process/test_layer_streaming_mxfp4_isolation.py::test_full_mxfp4_file_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
       "evidence": {
@@ -183,7 +183,7 @@
       }
     },
     {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_non_expert_fp8_grid_after_native_dsv4_import",
+      "target": "tests/own_process/test_layer_streaming_mxfp4_isolation.py::test_non_expert_fp8_grid_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
       "evidence": {
@@ -192,7 +192,7 @@
       }
     },
     {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_shared_expert_scope_after_native_dsv4_import",
+      "target": "tests/own_process/test_layer_streaming_mxfp4_isolation.py::test_shared_expert_scope_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
       "evidence": {
@@ -201,7 +201,7 @@
       }
     },
     {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_checkpoint_after_native_dsv4_import",
+      "target": "tests/own_process/test_layer_streaming_mxfp4_isolation.py::test_undeclared_checkpoint_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
       "evidence": {
@@ -210,7 +210,7 @@
       }
     },
     {
-      "target": "tests/test_layer_streaming_mxfp4_isolation.py::test_undeclared_int8_group16_after_native_dsv4_import",
+      "target": "tests/own_process/test_layer_streaming_mxfp4_isolation.py::test_undeclared_int8_group16_after_native_dsv4_import",
       "issue": 2807,
       "reason": "AssertionError: (child pytest run failed)",
       "evidence": {
@@ -444,7 +444,7 @@
       }
     },
     {
-      "target": "tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_fresh_root_reaches_only_private_queue_boundary",
+      "target": "tests/own_process/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_fresh_root_reaches_only_private_queue_boundary",
       "issue": 3190,
       "reason": "ModuleNotFoundError: No module named 'prismabuild' (fixture)",
       "evidence": {
@@ -453,7 +453,7 @@
       }
     },
     {
-      "target": "tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_refuses_existing_root_without_deleting_payload",
+      "target": "tests/own_process/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_refuses_existing_root_without_deleting_payload",
       "issue": 3190,
       "reason": "ModuleNotFoundError: No module named 'prismabuild' (fixture)",
       "evidence": {

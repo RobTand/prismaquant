@@ -26,7 +26,7 @@ for _entry in (ROOT, ROOT / "tests", ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 from prismaquant import joint_layer_quanta as jl  # noqa: E402
-from test_quantum_executable_readset import (  # noqa: E402
+from own_process.test_quantum_executable_readset import (  # noqa: E402
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
 )
 from test_stageb_prepared_render_inputs import (  # noqa: E402
@@ -142,7 +142,7 @@ def test_binder_carries_the_mode_and_refuses_the_other(tmp_path):
 
 @pytest.mark.usefixtures("pinned_pb_source")
 def test_spill_manifest_passes_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     manifest = _build(_inputs(tmp_path), replay_mode="spill")
     prefix = str(tmp_path)

@@ -43,7 +43,7 @@ from prismaquant.joint_quantum_handoff import (
     load_quantum_handoff,
 )
 from prismaquant.joint_quantum_row import HANDOFF_LOAD_PHASE
-from test_quantum_executable_readset import N_BATCHES, N_PROBES  # noqa: E402
+from own_process.test_quantum_executable_readset import N_BATCHES, N_PROBES  # noqa: E402
 
 _offline_tier_policy = dispatch_tests._offline_tier_policy
 
@@ -161,7 +161,7 @@ def test_a_windowed_consumer_keeps_its_whole_plane_in_handoff_load(tmp_path):
 
 
 def test_the_streamed_plan_passes_the_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     consumer, checkpoint, handoff, _receipt = _spill_consumer(tmp_path)
     derived = _derived(consumer, handoff, checkpoint)

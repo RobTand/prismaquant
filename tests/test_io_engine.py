@@ -950,7 +950,7 @@ class _Held:
     ``reclaim(need)`` drops whole ``RENDER``-sized values until ``need`` is
     covered and reports them. It lowers the mocked readings named in
     ``lowers`` by what it dropped, the way those bytes do on the GB10
-    (``tests/test_reclaim_readings_gb10.py``), and no other reading.
+    (``tests/own_process/test_reclaim_readings_gb10.py``), and no other reading.
     """
 
     def __init__(self, scope, state, held, lowers):

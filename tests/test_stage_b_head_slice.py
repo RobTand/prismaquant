@@ -320,7 +320,7 @@ def test_head_reports_the_walks_cumulative_units_once(tmp_path, monkeypatch):
 
 
 def _head_binding(record, *, layer=2, prepared_sha256=None):
-    from test_quantum_executable_readset import RENDER_PREREQ
+    from own_process.test_quantum_executable_readset import RENDER_PREREQ
 
     root = "/mnt/shared/run/layer-quanta/head-slices"
     return {"path": f"{root}/layer-{layer:03d}.json", "sha256": "a" * 64,
@@ -335,7 +335,7 @@ def _head_binding(record, *, layer=2, prepared_sha256=None):
 
 
 def _bound_pair(tmp_path):
-    from test_quantum_executable_readset import (
+    from own_process.test_quantum_executable_readset import (
         CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs)
     from prismaquant.joint_layer_quanta import (
         bind_quantum_executable, build_quantum_executable_manifest,
@@ -399,7 +399,7 @@ def test_head_phase_declares_the_slice_and_its_files(tmp_path):
     (lambda head: head.update(schema="other"), "foreign schema"),
 ])
 def test_manifest_refuses_a_foreign_head_binding(tmp_path, mutation, message):
-    from test_quantum_executable_readset import (
+    from own_process.test_quantum_executable_readset import (
         CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs)
     from prismaquant.joint_layer_quanta import build_quantum_executable_manifest
 

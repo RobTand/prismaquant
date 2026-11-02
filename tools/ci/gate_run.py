@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gate_partition import assigned_nodes, validate_node_partition
+from gate_paths import renamed_files, renamed_target
 
 NO_VERDICT = 75
 BUDGET_ENFORCEMENT_TOLERANCE = 1.5
@@ -57,6 +58,10 @@ def _budget_policy(root, base_sha):
             blob = subprocess.run(['git', 'show', f'{base_sha}:{path}'], cwd=root,
                                   text=True, capture_output=True, check=True)
             baseline = _budget_limits(json.loads(blob.stdout))
+        renames = renamed_files(root, base_sha, 'HEAD')
+        baseline = {**baseline, **{kind: {renamed_target(name, renames): limit
+                                        for name, limit in baseline.get(kind, {}).items()}
+                                 for kind in ('slow', 'file_seconds')}}
     if (baseline.get('enforced', True) and not current.get('enforced', True) or
             current['seconds'] > baseline['seconds'] or
             not current['slow'].keys() <= baseline['slow'].keys() or
