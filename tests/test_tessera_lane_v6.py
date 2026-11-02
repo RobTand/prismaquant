@@ -44,7 +44,7 @@ from importlib.resources import as_file
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
-from conftest import down_convert_lane_table
+from lane_table_fixtures import down_convert_lane_table
 from tessera_withdrawn_v38 import (
     ROUTED_RUNG, shipped_routed_smoke_statuses, with_quoted_evidence)
 

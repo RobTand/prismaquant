@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from graph_lane_fixtures import synthetic_graph_lane
 
 pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
 

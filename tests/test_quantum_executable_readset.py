@@ -52,6 +52,7 @@ from prismaquant.joint_quantum_row import (
 )
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
+from fullstack_pb_generation import pinned_pb_source
 
 N_PROBES = 2
 N_BATCHES = 3

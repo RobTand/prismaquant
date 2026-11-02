@@ -53,6 +53,7 @@ from test_model_walk import (
     _meta,
     _toy_inputs,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 FULLY_CLAIMED = [
     ClaimRule("pin", WO_A_PIN_REASON, name_regex=r"^wo_a$"),

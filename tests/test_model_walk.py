@@ -30,6 +30,7 @@ from prismaquant.model_walk import (
     WalkError,
     walk_model,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 WO_A_PIN_REASON = "grouped einsum operand: probe cannot price it yet"
 

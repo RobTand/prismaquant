@@ -48,6 +48,7 @@ from dispatch_stage_a_split import (
     seal_forward_round,
     submit,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 TIER = "prismabuild-stage:fixture"
 BUDGET = 1 << 30

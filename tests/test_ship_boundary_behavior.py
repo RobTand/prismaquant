@@ -23,6 +23,7 @@ import pytest
 pytestmark = pytest.mark.usefixtures("synthetic_graph_lane")
 
 import prismaquant.validate_quantized_model as vqm
+from graph_lane_fixtures import synthetic_graph_lane
 
 _REFUSED_URL = "http://127.0.0.1:1"
 

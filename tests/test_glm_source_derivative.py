@@ -15,6 +15,7 @@ from prismaquant import glm_capture_compatibility as compatibility
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.model_profiles.default import DefaultProfile
+from fleet_sdk import installed_client_sdk
 
 EVIDENCE = Path(__file__).resolve().parents[1] / 'experiments/measurements/glm-derivative-contract-20260908'
 DRIVER = Path(__file__).resolve().parents[1] / 'tools/build_glm_derivative_image.py'

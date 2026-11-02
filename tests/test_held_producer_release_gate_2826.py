@@ -13,6 +13,7 @@ import pytest
 
 import test_held_producer_sdk5_smoke_2152 as smoke
 from prismaquant import source_generation as sg
+from fleet_sdk import installed_client_sdk
 
 
 def test_sdk5_smoke_is_self_contained_and_preserves_the_join_controls(

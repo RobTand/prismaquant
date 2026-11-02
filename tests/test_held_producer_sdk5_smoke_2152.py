@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_sdk import require_prismabuild_sdk
+from fleet_sdk import installed_client_sdk, require_prismabuild_sdk
 from native_carrier_fixture import native_carrier
 from prismaquant import source_generation as sg
 from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION

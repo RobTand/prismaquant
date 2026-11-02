@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_sdk import require_prismabuild_sdk
+from fleet_sdk import installed_client_sdk, require_prismabuild_sdk
 import torch
 from concurrent.futures import ThreadPoolExecutor
 from safetensors.torch import save_file

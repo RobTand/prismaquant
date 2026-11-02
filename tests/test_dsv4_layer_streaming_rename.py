@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
+from fullstack_pb_generation import pinned_pb_source
 
 _profile = DeepseekV4Profile()
 _rename = _profile.checkpoint_to_live_name

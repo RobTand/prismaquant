@@ -16,6 +16,7 @@ from test_publish_artifact import (
     publish_cli,
     publisher,
 )
+from graph_lane_fixtures import synthetic_graph_lane
 
 
 @pytest.mark.parametrize("change", [
