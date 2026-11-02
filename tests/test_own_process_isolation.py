@@ -192,6 +192,14 @@ def test_a_test_that_never_reached_its_call_phase_is_not_a_pass(tmp_path):
 #: ran out the bound on a loaded sparklina, so the bound leaves wide room.
 BOUND_S = 30
 
+#: PrismaBuild's bound arms each phase on its own, so only the first test's
+#: setup (the conftest's first imports) has to fit, never a setup and a call
+#: together. That setup measured 1.05-1.20 s idle and 1.47-1.77 s with four
+#: sessions sharing one CPU (BuildBuddy, PQ #3223). Every test here waits out
+#: the bound once, so a shorter one keeps each inside the gate's 20 s budget
+#: without changing what it asserts.
+PB_BOUND_S = 5
+
 #: Registration and import isolation are asserted from the sample's report.
 #: Its setup allowance is independent of the intentional hanging sample's bound.
 REGISTRATION_BOUND_S = 120
@@ -204,15 +212,15 @@ BOUNDS = {
     "prismabuild": (
         "prismabuild.pytest_test_bound",
         ("-p", "prismabuild.pytest_test_bound"),
-        {"PRISMABUILD_TEST_TIMEOUT_S": str(BOUND_S)},
-        (f"per-test bound of {BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
+        {"PRISMABUILD_TEST_TIMEOUT_S": str(PB_BOUND_S)},
+        (f"per-test bound of {PB_BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
     # The same bound from the variable alone, as a pbtest shard runs: the
     # conftest loads the plugin in the parent and in the child (PQ #1055).
     "prismabuild-env": (
         "prismabuild.pytest_test_bound",
         (),
-        {"PRISMABUILD_TEST_TIMEOUT_S": str(BOUND_S)},
-        (f"per-test bound of {BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
+        {"PRISMABUILD_TEST_TIMEOUT_S": str(PB_BOUND_S)},
+        (f"per-test bound of {PB_BOUND_S}s", "PRISMABUILD_TEST_TIMEOUT_S")),
     # pytest-timeout, which CI runs under ``--timeout=300``.
     "pytest-timeout": (
         "pytest_timeout",
@@ -228,8 +236,8 @@ def test_a_hanging_test_fails_alone_under_the_per_test_bound(tmp_path, bound):
 
     The hang outlasts one bound by itself, so ``test_after`` passes only if
     the module is not bounded as a whole. Each environment runs the bound it
-    has: the PrismaBuild venv has no pytest-timeout, and CI does not install
-    ``prismabuild``.
+    has: the PrismaBuild venv has no pytest-timeout, and CI installs both
+    (``prismabuild`` through the ``pbsdk`` group, PQ #3223).
     """
     module, args, environ, words = BOUNDS[bound]
     pytest.importorskip(module)
@@ -259,7 +267,7 @@ BOUND_ENV = "PRISMABUILD_TEST_TIMEOUT_S"
 def _prismabuild_installed():
     import importlib.util
     if importlib.util.find_spec("prismabuild") is None:
-        pytest.skip("prismabuild is not installed: CI never sets the bound")
+        pytest.skip("prismabuild is not installed: install the pbsdk dependency group")
 
 
 def test_a_hanging_test_in_process_fails_alone_under_the_bound(tmp_path):
@@ -269,12 +277,12 @@ def test_a_hanging_test_in_process_fails_alone_under_the_bound(tmp_path):
     """
     _prismabuild_installed()
     proc, output, outcomes, out = _session(
-        tmp_path, "sample_hangs.py", environ={BOUND_ENV: str(BOUND_S)})
+        tmp_path, "sample_hangs.py", environ={BOUND_ENV: str(PB_BOUND_S)})
     assert proc.returncode == 1, output
     assert set(outcomes) == {"test_before", "test_hangs", "test_after"}, output
     state, message = outcomes["test_hangs"]
     assert state == "failed", output
-    for word in (f"per-test bound of {BOUND_S}s", BOUND_ENV):
+    for word in (f"per-test bound of {PB_BOUND_S}s", BOUND_ENV):
         assert word in message, message
     assert outcomes["test_before"] == outcomes["test_after"] == ("passed", "")
     assert {_pid(out, "before"), _pid(out, "hangs"), _pid(out, "after")} == {
