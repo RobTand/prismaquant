@@ -14,9 +14,9 @@ Example: python -m tools.ci.graph_impact_bazel --deps head-deps.json
 --base-query base-query.json --baseline baseline.json --allowlist exceptions.json
 --bazel-diff 'java -jar /path/bazel-diff.jar'
 
-Mermaid blame calls bazel-diff explain. Released v42 does not implement this
-command; report that limitation explicitly until a supporting release is
-provided. Do not turn a failed explain into fabricated Mermaid evidence.
+Mermaid blame calls bazel-diff explain. Released v70.0.2 supports it; v42
+reports an unavailable-command diagnostic. Query edges supplement the raw
+export for blame without modifying the gate's selection graph.
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import tempfile
 
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -60,11 +61,18 @@ def load(deps, tests, *, hashes=None, sources=None, query=None, loc=None):
     return result
 
 
-def explain(command, base_hashes, head_hashes, deps, target):
+def explain(command, base_hashes, head_hashes, deps, target, *, edges=None):
     try:
-        result = subprocess.run([*shlex.split(command), 'explain', '-sh', str(base_hashes),
-                                 '-fh', str(head_hashes), '-d', str(deps), '--target', target,
-                                 '--format', 'mermaid'], capture_output=True, text=True, timeout=60)
+        with tempfile.TemporaryDirectory(prefix='graph-impact-blame-') as directory:
+            if edges is not None:
+                dependencies = {label: set(targets) for label, targets in json.loads(Path(deps).read_text()).items()}
+                for source, destination in edges:
+                    dependencies.setdefault(source, set()).add(destination)
+                deps = Path(directory) / 'deps.json'
+                deps.write_text(json.dumps({label: sorted(targets) for label, targets in dependencies.items()}))
+            result = subprocess.run([*shlex.split(command), 'explain', '-sh', str(base_hashes),
+                                     '-fh', str(head_hashes), '-d', str(deps), '--target', target,
+                                     '--format', 'mermaid'], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
         print(f'bazel-diff explain unavailable for {target}: {error}', file=sys.stderr)
         return ''
@@ -103,7 +111,8 @@ def main(argv=None):
         before = load(args.base_deps, args.base_tests, hashes=args.base_hashes, sources=args.base_sources,
                       query=args.base_query, loc=read(args.base_loc))
     changed = labels(args.changed_tests) if args.changed_tests else set()
-    blame = (lambda target: explain(args.bazel_diff, args.base_hashes, args.hashes, args.deps, target)) if (
+    blame = (lambda target: explain(args.bazel_diff, args.base_hashes, args.hashes, args.deps, target,
+                                    edges=after['edges'])) if (
         args.base_hashes and args.hashes) else None
     print('graph source: ' + after['graph_source'])
     return core.check(before, after, args.baseline, args.allowlist, changed_tests=changed,

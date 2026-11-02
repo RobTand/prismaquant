@@ -11,7 +11,9 @@ A new or changed test uses the maximum base reach in its package. An edited
 test can retain its own base reach; a new package uses the recorded global
 budget. New edges that expand existing-source fanout among existing tests,
 or deepen existing-test reach, fail. New test-to-test edges and conftest source
-imports retain their existing restrictions. The SCC maximum can only shrink.
+imports retain their existing restrictions. Every SCC is checked for growth
+or mergers, even when an unrelated larger cycle hides the size change. The
+SCC maximum can only shrink.
 U and LOC-weighted U are reported trends and never fail a PR. Baseline writes
 keep their minimum. The diagnostic attributes structural growth to added edges.
 
@@ -46,7 +48,7 @@ base and head `bazel-diff generate-hashes --includeTargetType --depEdgesFile`
 outputs. Pass test labels from
 `tests(//...) except attr(tags, "manual", tests(//...))`.
 
-Released bazel-diff v42 omits source-file edges from `deps.json`, even though
+Released bazel-diff v42 and v70.0.2 omit source-file edges from `deps.json`, even though
 its hashes include `SourceFile` labels. This was verified on a real Bazel
 workspace in BuildBuddy, rather than inferred from synthetic JSON. Supply
 one fallback query per revision:
@@ -64,9 +66,11 @@ otherwise the Bazel source reports unit-weighted U.
 
 On a failure, the adapter invokes
 `bazel-diff explain -sh base.json -fh head.json -d deps.json --target LABEL --format mermaid`.
-A supporting implementation prints its Mermaid output in the diagnostic.
-The released v42 CLI does not implement `explain`; the adapter reports that
-error explicitly. Native Mermaid blame requires a version that supplies it.
+Version v70.0.2 prints its Mermaid output in the diagnostic, verified on a
+real source change in a tiny BuildBuddy workspace. The adapter supplements a
+temporary copy of the raw dependency export with query edges for blame,
+preserving the gate's selection graph. The released v42 CLI does not
+implement `explain`; the adapter reports that error explicitly.
 
 ## Python bridge and baseline maintenance
 
