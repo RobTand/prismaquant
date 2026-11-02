@@ -293,3 +293,34 @@ def test_invalid_file_budget_is_a_policy_failure(tmp_path, file_seconds):
     policy(tmp_path, file_seconds=file_seconds)
     code, result = budget_run(tmp_path, case('1'))
     assert code == 1 and result['budget']['status'] == 'fail'
+
+
+@pytest.mark.parametrize('kind,limit,target,keep_old,allowed', [
+    ('slow', 40, 'tests/own_process/test_one.py::test_bad', False, True),
+    ('slow', 39, 'tests/own_process/test_one.py::test_bad', False, True),
+    ('slow', 41, 'tests/own_process/test_one.py::test_bad', False, False),
+    ('slow', 40, 'tests/own_process/test_one.py::test_other', False, False),
+    ('slow', 40, 'tests/own_process/test_one.py::test_bad', True, False),
+    ('file_seconds', 40, 'tests/own_process/test_one.py', False, True),
+    ('file_seconds', 41, 'tests/own_process/test_one.py', False, False),
+])
+def test_git_proven_test_rename_preserves_but_cannot_increase_budget(
+        tmp_path, kind, limit, target, keep_old, allowed):
+    old = tmp_path / 'tests/test_one.py'
+    old.parent.mkdir()
+    old.write_text('def test_bad():\n    assert False\n\ndef test_good():\n    assert True\n')
+    original = 'tests/test_one.py' + ('::test_bad' if kind == 'slow' else '')
+    policy(tmp_path, **{kind: {original: 40}})
+    base = commit_target(tmp_path)
+    new = tmp_path / 'tests/own_process/test_one.py'
+    new.parent.mkdir()
+    new.write_text(old.read_text())
+    if not keep_old:
+        old.unlink()
+    policy(tmp_path, **{kind: {target: limit}})
+    commit_target(tmp_path)
+    if allowed:
+        assert runner._budget_policy(tmp_path, base)[kind] == {target: limit}
+    else:
+        with pytest.raises(runner.BudgetFailure, match='grow'):
+            runner._budget_policy(tmp_path, base)
