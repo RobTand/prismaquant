@@ -304,22 +304,27 @@ def _source_refusal_representatives(tests_root):
             roots.add(key)
     tests = {key: record for key, record in nodes.items()
              if record[2].name.startswith('test_') and record[0].name.startswith('test_')}
+    # Walk callers once per source family, rather than walking dependencies
+    # again for each of the repository's tests.
+    callers = {key: set() for key in nodes}
+    for caller, dependencies in edges.items():
+        for dependency in dependencies:
+            callers[dependency].add(caller)
     families, unreachable = {}, []
     for family in sorted(roots):
+        queue, distances = deque([(family, 0)]), {}
+        while queue:
+            current, distance = queue.popleft()
+            if current in distances:
+                continue
+            distances[current] = distance
+            queue.extend((caller, distance + 1) for caller in callers[current])
         candidates = []
         for key, record in tests.items():
-            queue, seen = deque([(key, 0)]), set()
-            while queue:
-                current, distance = queue.popleft()
-                if current in seen:
-                    continue
-                seen.add(current)
-                if current == family:
-                    node, module, path, classes = record
-                    target = str(path.relative_to(tests_root.parent)) + '::' + '::'.join((*classes, node.name))
-                    candidates.append((distance, module != nodes[family][1], node.lineno, target))
-                    break
-                queue.extend((dependency, distance + 1) for dependency in edges[current])
+            if key in distances:
+                node, module, path, classes = record
+                target = str(path.relative_to(tests_root.parent)) + '::' + '::'.join((*classes, node.name))
+                candidates.append((distances[key], module != nodes[family][1], node.lineno, target))
         if candidates:
             families[family] = min(candidates)[-1]
         else:
@@ -456,3 +461,24 @@ def test_source_scope_keeps_production_divergent_origin_refusal(
             with pytest.raises(staged_lease.LeaseRefused, match="lease-helper-divergent"):
                 staged_lease.client_sdk()
     assert staged_lease.client_sdk() is installed_client_sdk
+
+
+def test_source_selector_follows_fixture_and_call_edges_with_cycles(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "origin.py").write_text(
+        "def source():\n"
+        "    import prismabuild\n"
+        "    from pathlib import Path\n"
+        "    assert Path(prismabuild.__file__).is_relative_to(Path('/owned'))\n")
+    (tests / "test_consumers.py").write_text(
+        "import pytest\nfrom origin import source\n"
+        "@pytest.fixture\ndef pinned(): source()\n"
+        "def first(): second(); source()\n"
+        "def second(): first()\n"
+        "def test_cycle(): first()\n"
+        "def test_fixture(pinned): pass\n"
+        "def test_direct(): source()\n")
+    families, unreachable = _source_refusal_representatives(tests)
+    assert families == {"origin.source": "tests/test_consumers.py::test_direct"}
+    assert unreachable == []
