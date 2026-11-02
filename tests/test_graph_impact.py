@@ -1,209 +1,174 @@
-"""History-free graph impact, including attribution and the minimum-only baseline."""
+"""Synthetic, language-neutral contracts and the live per-PR graph check."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
-import subprocess
 
 import pytest
 
 from tools.ci import graph_impact as impact
 
-
-def graph(edges=None, roots=None, loc=None, contents=None):
-    return impact.Snapshot(edges or {}, roots or {}, loc or {}, contents or {})
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def base_record(snapshot, **overrides):
-    return {**impact.baseline_record(impact.measure(snapshot)), **overrides}
+def measure(tests=None, edges=(), loc=None):
+    return impact.measure(tests or {}, set(edges), loc)
 
 
-def test_metrics_count_conftests_and_weight_source_lines():
-    snapshot = graph({'t1': {'a'}, 't2': set(), 'conftest.py': {'b'}, 'a': {'b'}, 'b': set(), 'c': set()},
-                     {'t1': {'t1', 'conftest.py'}, 't2': {'t2'}}, {'a': 1, 'b': 3, 'c': 2})
-    live = impact.measure(snapshot)
-    assert live['reach'] == {'t1': ['a', 'b'], 't2': []}
-    assert live['dependents'] == {'a': 1, 'b': 1, 'c': 0}
-    assert live['u_pct'] == pytest.approx(100 / 3)
-    assert live['loc_u_pct'] == pytest.approx(100 / 3)
-    assert live['reach_median'] == 1
-    assert live['reach_p90'] == live['reach_max'] == 2
-    weighted = impact.measure(graph(snapshot.edges, snapshot.roots, {'a': 1, 'b': 5, 'c': 0}))
+def baseline(snapshot, **overrides):
+    return {**impact.baseline_record(snapshot), **overrides}
+
+
+def test_metrics_include_unreached_sources_and_line_weights():
+    snapshot = measure({'t1': {'a', 'b'}, 't2': set()}, {('t1', 'a'), ('a', 'b')}, {'a': 1, 'b': 3, 'c': 2})
+    assert snapshot['reach'] == {'t1': ['a', 'b'], 't2': []}
+    assert snapshot['dependents'] == {'a': 1, 'b': 1, 'c': 0}
+    assert snapshot['u_pct'] == pytest.approx(100 / 3)
+    assert snapshot['loc_u_pct'] == pytest.approx(100 / 3)
+    assert snapshot['reach_median'] == 1
+    assert snapshot['reach_p90'] == snapshot['reach_max'] == 2
+    weighted = measure({'t1': {'a', 'b'}, 't2': set()}, (), {'a': 1, 'b': 5, 'c': 0})
     assert weighted['loc_u_pct'] == 50
 
 
+def test_empty_graph_and_zero_loc_are_defined():
+    empty = measure()
+    assert empty['u_pct'] == empty['loc_u_pct'] == empty['scc_max'] == empty['reach_max'] == 0
+    assert measure({'t': {'empty'}}, loc={'empty': 0})['loc_u_pct'] == 0
+    with pytest.raises(ValueError, match='LOC'):
+        measure({'t': {'a'}}, loc={'a': -1})
+
+
 def test_changed_test_budget_prints_shortest_path_to_farthest_hub():
-    edges = {'tests/test_x.py': set(), 'tests/conftest.py': {'pkg/a.py'},
-             'pkg/a.py': {'pkg/hub.py'}, 'pkg/hub.py': set()}
-    roots = {'tests/test_x.py': {'tests/test_x.py', 'tests/conftest.py'}}
-    before = graph(edges, roots, {'pkg/a.py': 1, 'pkg/hub.py': 1}, {'tests/test_x.py': 'old'})
-    after = graph(edges, roots, before.loc, {'tests/test_x.py': 'changed'})
-    errors = impact.compare(before, after, base_record(before, reach_budget=1))
-    assert any('reach 2 exceeds budget 1' in error and
-               'tests/test_x.py → tests/conftest.py → pkg/a.py → pkg/hub.py' in error for error in errors)
-    assert not impact.compare(before, before, base_record(before, reach_budget=1))
+    edges = {('test', 'fixture'), ('fixture', 'pkg/a'), ('pkg/a', 'pkg/hub')}
+    snapshot = measure({'test': {'pkg/a', 'pkg/hub'}}, edges, {'pkg/a': 1, 'pkg/hub': 1})
+    errors = impact.compare(snapshot, snapshot, baseline(snapshot, reach_budget=1), changed_tests={'test'})
+    assert any('reach 2 exceeds budget 1' in error and 'test → fixture → pkg/a → pkg/hub' in error for error in errors)
+    assert not impact.compare(snapshot, snapshot, baseline(snapshot, reach_budget=2))
 
 
-def test_new_test_above_budget_fails_even_without_history():
-    snapshot = graph({'tests/test_new.py': {'a'}, 'a': set()}, {'tests/test_new.py': {'tests/test_new.py'}}, {'a': 1})
-    errors = impact.compare(None, snapshot, base_record(snapshot, reach_budget=0))
-    assert any('reach 1 exceeds budget 0' in error for error in errors)
+def test_new_test_budget_and_no_history_absolute_check():
+    before = measure({}, loc={'a': 1})
+    after = measure({'new_test': {'a'}}, {('new_test', 'a')}, {'a': 1})
+    for base in (None, before):
+        errors = impact.compare(base, after, baseline(after, reach_budget=0))
+        assert any('reach 1 exceeds budget 0' in error for error in errors)
 
 
-@pytest.mark.parametrize('edge, message', [
-    (('tests/test_a.py', 'tests/test_b.py'), 'test_to_test_imports'),
-    (('tests/conftest.py', 'pkg/a.py'), 'conftest_source_imports'),
-])
-def test_new_forbidden_edge_fails(edge, message):
-    before = graph({edge[0]: set(), edge[1]: set()}, {}, {'pkg/a.py': 1})
-    after = graph({edge[0]: {edge[1]}, edge[1]: set()}, {}, before.loc)
-    errors = impact.compare(before, after, base_record(before))
-    assert any(message in error and f'{edge[0]} -> {edge[1]}' in error for error in errors)
+@pytest.mark.parametrize('group,edge', [('test_to_test', 't1 -> t2'), ('conftest_source_imports', 'fixture -> a')])
+def test_new_forbidden_edge_fails(group, edge):
+    before = measure()
+    before['edge_groups'][group] = []
+    after = measure()
+    after['edge_groups'][group] = [edge]
+    assert any(f'new {group} edge: {edge}' in error for error in impact.compare(before, after, baseline(before)))
+
+
+def test_test_to_test_edges_are_discovered_without_language_assumptions():
+    after = measure({'//rust:a_test': set(), '//rust:b_test': set()}, {('//rust:a_test', '//rust:b_test')})
+    assert after['edge_groups']['test_to_test'] == ['//rust:a_test -> //rust:b_test']
 
 
 def test_uniform_regression_attributes_edges_and_fanout_growth():
-    before = graph({'tests/test_a.py': {'a'}, 'a': set(), 'b': set()},
-                   {'tests/test_a.py': {'tests/test_a.py'}}, {'a': 1, 'b': 1})
-    after = graph({**before.edges, 'a': {'b'}}, before.roots, before.loc)
-    errors = impact.compare(before, after, base_record(before, reach_budget=10))
+    before = measure({'t': {'a'}}, {('t', 'a')}, {'a': 1, 'b': 1})
+    after = measure({'t': {'a', 'b'}}, {('t', 'a'), ('a', 'b')}, {'a': 1, 'b': 1})
+    errors = impact.compare(before, after, baseline(before, reach_budget=10))
     assert any('u_pct rose' in error and 'a -> b' in error and 'b +1' in error for error in errors)
 
 
-def test_uniform_tolerance_does_not_loosen_recorded_minimum():
-    live = {'u_pct': 20.5, 'loc_u_pct': 30.5, 'scc_max': 2, 'reach_p90': 4,
-            'conftest_source_imports': [], 'test_to_test_imports': []}
-    baseline = impact.baseline_record(live)
-    baseline.update(u_pct=20, loc_u_pct=30)
-    assert not impact.regressions(live, baseline)
-    assert impact.baseline_record(live, baseline)['u_pct'] == 20
+def test_tolerated_noise_does_not_loosen_the_minimum():
+    snapshot = measure({'t': {'a'}}, loc={'a': 1})
+    previous = baseline(snapshot)
+    previous['figures']['u_pct'] = 99.5
+    assert not impact.regressions(snapshot, previous)
+    assert impact.baseline_record(snapshot, previous)['figures']['u_pct'] == 99.5
 
 
-@pytest.mark.parametrize('old_edges,new_edge', [
-    ({'a': {'b'}, 'b': {'a', 'c'}, 'c': set()}, ('c', 'a')),
-    ({'a': {'b'}, 'b': {'a', 'c'}, 'c': {'d'}, 'd': {'c'}}, ('d', 'a')),
-    # A smaller SCC grows while the largest component remains unchanged.
-    ({'a': {'b'}, 'b': set(), 'x': {'y'}, 'y': {'z'}, 'z': {'x'}}, ('b', 'a')),
+@pytest.mark.parametrize('old_edges,added', [
+    ({('a', 'b'), ('b', 'a'), ('b', 'c')}, ('c', 'a')),
+    ({('a', 'b'), ('b', 'a'), ('b', 'c'), ('c', 'd'), ('d', 'c')}, ('d', 'a')),
+    ({('a', 'b'), ('x', 'y'), ('y', 'z'), ('z', 'x')}, ('b', 'a')),
 ])
-def test_every_scc_growth_or_merge_is_attributed(old_edges, new_edge):
-    before = graph(old_edges)
-    after = graph({**old_edges, new_edge[0]: old_edges[new_edge[0]] | {new_edge[1]}})
-    errors = impact.compare(before, after, base_record(before))
-    assert any('SCC grew or merged' in error and f'{new_edge[0]} -> {new_edge[1]}' in error for error in errors)
+def test_every_scc_growth_or_merge_is_attributed(old_edges, added):
+    before = measure(edges=old_edges)
+    after = measure(edges=old_edges | {added})
+    errors = impact.compare(before, after, baseline(before))
+    assert any('SCC grew or merged' in error and f'{added[0]} -> {added[1]}' in error for error in errors)
 
 
-def test_an_unrelated_added_edge_is_not_blamed_for_cycle_growth():
-    before = graph({'a': {'b'}, 'b': set(), 'x': set(), 'y': set()})
-    after = graph({'a': {'b'}, 'b': {'a'}, 'x': {'y'}, 'y': set()})
-    error = next(e for e in impact.compare(before, after, base_record(before)) if 'SCC grew' in e)
-    assert 'b -> a' in error
-    assert 'x -> y' not in error
+def test_unrelated_added_edge_is_not_blamed_for_cycle_growth():
+    before = measure(edges={('a', 'b')})
+    after = measure(edges={('a', 'b'), ('b', 'a'), ('x', 'y')})
+    error = next(e for e in impact.compare(before, after, baseline(before)) if 'SCC grew' in e)
+    assert 'b -> a' in error and 'x -> y' not in error
 
 
-def test_missing_recorded_gain_fails_and_recording_only_tightens():
-    old = {'u_pct': 40, 'loc_u_pct': 50, 'scc_max': 4, 'reach_p90': 10,
-           'conftest_source_imports': ['conftest.py -> a'], 'test_to_test_imports': []}
-    baseline = impact.baseline_record(old)
-    live = {**old, 'u_pct': 30, 'scc_max': 2, 'reach_p90': 8, 'conftest_source_imports': []}
-    assert any('u_pct fell' in error for error in impact.stale_entries(live, baseline))
-    record = impact.baseline_record(live, baseline)
-    assert record['u_pct'] == 30
-    assert record['reach_budget'] == 8
-    assert record['conftest_source_imports'] == []
+def test_missing_gain_fails_and_recording_tightens_budget():
+    before = measure({'t': {'a', 'b'}}, {('a', 'b'), ('b', 'a')}, {'a': 1, 'b': 1})
+    after = measure({'t': {'a'}}, loc={'a': 1, 'b': 1})
+    previous = baseline(before)
+    assert any('u_pct fell' in error for error in impact.stale_entries(after, previous))
+    record = impact.baseline_record(after, previous)
+    assert record['figures']['u_pct'] == 50
+    assert record['figures']['scc_max'] == 1
+    assert record['reach_budget'] == 1
 
 
-def test_allowlist_requires_reason_and_only_shrinks():
-    assert impact.allowlist_errors({'reach:tests/test_a.py': 'integration contract'}, {})
-    assert impact.allowlist_errors({'reach:tests/test_a.py': ''}, {'reach:tests/test_a.py': ''})
-    assert impact.allowlist_errors({'reach:tests/test_a.py': 'new reason'}, {'reach:tests/test_a.py': 'old reason'})
-    assert impact.allowlist_errors({}, {'reach:tests/test_a.py': 'integration contract'}) == []
+def test_baseline_and_allowlist_only_shrink():
+    previous = baseline(measure())
+    current = {**previous, 'reach_budget': 10}
+    assert 'reach budget may only shrink' in impact.baseline_errors(current, previous)
+    exception = {'reach:integration': 'integration contract'}
+    assert impact.allowlist_errors(exception, {})
+    assert impact.allowlist_errors({'reach:integration': ''}, exception)
+    assert impact.allowlist_errors({'reach:integration': 'changed reason'}, exception)
+    assert impact.allowlist_errors({}, exception) == []
 
 
-def test_existing_reasoned_exception_applies_only_to_its_test():
-    snapshot = graph({'tests/test_a.py': {'a'}, 'tests/test_b.py': {'a'}, 'a': set()},
-                     {'tests/test_a.py': {'tests/test_a.py'}, 'tests/test_b.py': {'tests/test_b.py'}}, {'a': 1})
-    errors = impact.compare(None, snapshot, base_record(snapshot, reach_budget=0),
-                            allowlist={'reach:tests/test_a.py': 'integration contract'})
-    assert not any('tests/test_a.py reach' in error for error in errors)
-    assert any('tests/test_b.py reach' in error for error in errors)
+def test_reasoned_exception_is_scoped_to_one_test():
+    snapshot = measure({'a_test': {'a'}, 'b_test': {'a'}}, loc={'a': 1})
+    errors = impact.compare(None, snapshot, baseline(snapshot, reach_budget=0),
+                            allowlist={'reach:a_test': 'integration contract'})
+    assert not any('a_test reach' in error for error in errors)
+    assert any('b_test reach' in error for error in errors)
 
 
 def test_summary_format_on_pass_and_failure():
-    before = graph({'tests/test_a.py': {'a'}, 'a': set()}, {'tests/test_a.py': {'tests/test_a.py'}}, {'a': 1})
-    after = graph({**before.edges, 'tests/test_b.py': set()},
-                  {**before.roots, 'tests/test_b.py': {'tests/test_b.py'}}, before.loc)
+    before = measure({'t1': {'a'}}, {('t1', 'a')}, {'a': 1})
+    after = measure({'t1': {'a'}, 't2': set()}, {('t1', 'a')}, {'a': 1})
     assert impact.summary(before, after, 1) == (
         'U 100.0% → 50.0%, SCC max 1 → 1, new tests 1 (reach 0 ≤ budget 1), new edges 0, none to a hub')
     assert 'no base available' in impact.summary(None, after, 0)
-    assert 'budget 0' in impact.summary(before, after, 0)
+    assert 'reach 1, 0 > budget 0' in impact.summary(None, after, 0)
 
 
-def write_tree(root, files):
-    for name, text in files.items():
-        path = root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-    return root
-
-
-def test_generator_adapter_follows_launches_and_scoped_conftests(tmp_path):
-    write_tree(tmp_path, {'tests/test_a.py': 'import subprocess\nsubprocess.run(["python", "tools/run.py"])\n',
-                          'tests/sub/test_b.py': '', 'tests/sub/conftest.py': 'import pkg.hub\n',
-                          'tools/run.py': 'import pkg.hub\n', 'pkg/hub.py': 'x = 1\n'})
-    snapshot = impact.load_snapshot(tmp_path, population=['tests/test_a.py', 'tests/sub/test_b.py'],
-                                    source_roots=('pkg/', 'tools/'))
-    assert impact.measure(snapshot)['reach'] == {
-        'tests/sub/test_b.py': ['pkg/hub.py'], 'tests/test_a.py': ['pkg/hub.py', 'tools/run.py']}
-
-
-def test_no_git_still_enforces_absolute_figures_and_prints_summary(tmp_path, capsys):
-    write_tree(tmp_path, {'tests/test_a.py': 'import tools.hub\n', 'tools/hub.py': 'x = 1\n',
-                          'tools/ci/gate_durations.json': '{"files": {}}',
-                          'tools/ci/gate_quarantine.json': '{}', 'tests/fixtures/graph_impact_allowlist.json': '{}'})
-    baseline = tmp_path / 'tests/fixtures/graph_impact_baseline.json'
-    baseline.write_text(json.dumps(base_record(impact.load_snapshot(tmp_path), reach_budget=0)))
-    assert impact.main(['--root', str(tmp_path)]) == 1
+def test_check_prints_summary_on_failure_and_preserves_baseline(tmp_path, capsys):
+    snapshot = measure({'test': {'a'}}, {('test', 'a')}, {'a': 1})
+    path = tmp_path / 'baseline.json'
+    path.write_text(json.dumps(baseline(snapshot, reach_budget=0)))
+    old = path.read_bytes()
+    assert impact.check(None, snapshot, path, write_baseline=True) == 1
+    assert path.read_bytes() == old
     output = capsys.readouterr()
-    assert 'U ' in output.out and 'no base available' in output.out
-    assert 'reach 1 exceeds budget 0' in output.err
+    assert 'U no base available' in output.out
+    assert 'refusing to record' in output.err and 'reach 1 exceeds budget 0' in output.err
 
 
-def test_baseline_writer_refuses_losses(tmp_path, capsys):
-    write_tree(tmp_path, {'tests/test_a.py': 'import tools.hub\n', 'tools/hub.py': '',
-                          'tools/ci/gate_durations.json': '{"files": {}}', 'tools/ci/gate_quarantine.json': '{}',
-                          'tests/fixtures/graph_impact_allowlist.json': '{}'})
-    snapshot = impact.load_snapshot(tmp_path)
-    baseline = tmp_path / 'tests/fixtures/graph_impact_baseline.json'
-    baseline.write_text(json.dumps(base_record(snapshot, u_pct=0)))
-    old = baseline.read_bytes()
-    assert impact.main(['--root', str(tmp_path), '--write-baseline']) == 1
-    assert baseline.read_bytes() == old
-    assert 'refusing to record' in capsys.readouterr().err
+def test_bazel_mermaid_blame_is_printed_on_failure(tmp_path, capsys):
+    snapshot = measure({'test': {'a'}}, {('test', 'a')}, {'a': 1})
+    path = tmp_path / 'baseline.json'
+    path.write_text(json.dumps(baseline(snapshot, reach_budget=0)))
+    assert impact.check(None, snapshot, path, explain=lambda test: 'graph TD; test-->a') == 1
+    assert '```mermaid\ngraph TD; test-->a\n```' in capsys.readouterr().err
 
 
-def test_git_base_uses_merge_base_and_detects_changed_test(tmp_path):
-    write_tree(tmp_path, {'tests/test_a.py': 'x = 1\n', 'tools/ci/gate_durations.json': '{"files": {}}',
-                          'tools/ci/gate_quarantine.json': '{}'})
-    def git(*args):
-        return subprocess.check_output(['git', *args], cwd=tmp_path, text=True).strip()
-    git('init', '-q'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test')
-    git('add', '.'); git('commit', '-qm', 'base')
-    sha = git('rev-parse', 'HEAD')
-    (tmp_path / 'tests/test_a.py').write_text('x = 2\n')
-    baseline_snapshot = impact.snapshot_at(tmp_path, sha)
-    current = impact.load_snapshot(tmp_path)
-    assert baseline_snapshot.contents['tests/test_a.py'] != current.contents['tests/test_a.py']
+def test_vendored_core_hash():
+    actual = hashlib.sha256((ROOT / 'tools/ci/graph_impact.py').read_bytes()).hexdigest()
+    recorded = (ROOT / 'tools/ci/graph_impact.sha256').read_text().split()[0]
+    assert actual == recorded, 'Update the recorded hash only when the core changes in all four repos'
 
 
-def test_gate_always_selects_graph_impact_for_ordinary_python_change():
-    from tools.ci import gate_select
-    root = Path(__file__).resolve().parents[1]
-    selected = gate_select.create_plan(root, ['prismaquant/allocator.py'],
-                                       index={'tests/test_graph_impact.py': (set(), set()),
-                                              'tests/test_unrelated.py': (set(), set())},
-                                       durations={'files': {}}, quarantine={})
-    assert 'tests/test_graph_impact.py' in {row['path'] for row in selected['selected']}
-
-
-def test_graph_impact_gate(capsys):
-    assert impact.main([]) == 0
-    assert 'U ' in capsys.readouterr().out
+def test_graph_impact_gate():
+    from tools.ci import graph_impact_pq
+    assert graph_impact_pq.main([]) == 0
