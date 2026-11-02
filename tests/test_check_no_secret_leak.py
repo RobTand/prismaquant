@@ -116,6 +116,15 @@ def test_argument_errors_do_not_echo_secret_values():
     assert result.returncode == 75
 
 
+def test_path_redaction_cannot_reassemble_a_secret(tmp_path):
+    secret = 'fake-filename-token'
+    artifact = tmp_path / (secret[:5] + secret + secret[5:])
+    artifact.write_text(secret)
+    result = scan(artifact, values={'SCAN_FAKE_SECRET': secret})
+    assert result.returncode == 1
+    assert secret not in result.stdout + result.stderr
+
+
 def test_corrupt_gzip_is_not_silently_passed(tmp_path):
     artifact = tmp_path / 'broken.gz'
     artifact.write_bytes(b'\x1f\x8b\x08broken')
