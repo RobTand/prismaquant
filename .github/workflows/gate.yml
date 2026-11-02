@@ -191,7 +191,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
         python --version
         python -m pip --version
     - name: Run assigned gate tests
@@ -325,7 +325,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install --no-deps .ci/tessera
         python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]'
+        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
         python --version
         python -m pip --version
     - name: Run assigned gate tests

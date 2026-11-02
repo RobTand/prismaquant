@@ -1,14 +1,15 @@
 """One skip for the tests that need a PrismaBuild SDK (PQ #886).
 
-These suites run on the fleet, where the pbtest pin guard proves the
-interpreter carries a single non-editable install of the reviewed
-``prismabuild`` distribution before pytest starts. The hosted GitHub runner
-installs no such distribution, so 65 tests failed and 29 errored there on
-every push -- a check that is always red cannot show a regression.
+The reviewed ``prismabuild`` distribution is a test dependency: the ``pbsdk``
+dependency group in ``pyproject.toml`` installs it as a non-editable Git
+install at ``staged_lease.PB_READER_LEASE_PIN_COMMIT`` (PQ #3216). The hosted
+gate, the post-merge suite and the fleet's pbtest shards all provide it; on
+the fleet the pbtest pin guard also proves it before pytest starts. Before
+PQ #3216 no hosted job installed it, and these tests skipped there.
 
 The predicate is deliberately exactly "no installed distribution owns
-``prismabuild``", which is the condition the runner is in. It is NOT "the
-import failed": an SDK that is installed but shadowed, editable, or at the
+``prismabuild``", which is the condition an environment without the group is
+in. It is NOT "the import failed": an SDK that is installed but shadowed, editable, or at the
 wrong commit is a real defect on a box that is supposed to have it, and
 ``staged_lease.inject_installed_sdk_for_tests`` must keep failing loudly for
 it. Nothing here changes that contract; this only decides whether a test
@@ -48,12 +49,44 @@ from pathlib import Path
 import pytest
 
 #: The single reason every skip in this lane carries.
-SKIP_REASON = "prismabuild SDK absent: fleet-only, runs under pbtest"
+SKIP_REASON = "prismabuild SDK absent: install the pbsdk dependency group"
 
 #: The reason a lease-helper skip carries; the refusal's own reason (e.g.
 #: "lease-helper-unavailable") and the env var name are appended at call time
 #: so a developer knows exactly what to set to run the lane locally.
 LEASE_HELPER_SKIP_REASON = "prismabuild lease helper absent: fleet-only, runs under pbtest"
+
+
+#: The reason a test that needs PB's sealed source bundle skips where the
+#: bundle is not mounted. The bundle is a git archive of PrismaBuild at the
+#: reviewed commit (``tests/pb_runtime_generation_pin.json``); unlike the
+#: installed SDK it carries PB's ``tools/`` (``tools/fleet/*.py``,
+#: ``tools/prismabuild_worker.py``), which no ``prismabuild`` distribution
+#: installs. Only the fleet's shared mount provides it.
+PB_SOURCE_BUNDLE_SKIP_REASON = (
+    "PrismaBuild source bundle absent: fleet-only, runs under pbtest")
+
+#: The fleet's shared mount, which the bundle and shared fixtures live on.
+SHARED_MOUNT = Path("/mnt/shared")
+
+
+def require_pb_source_bundle(root: Path) -> None:
+    """Skip, naming the bundle, where its root is not mounted (PQ #3216).
+
+    Absence is the only skip. A root that exists with the wrong bytes is a
+    defect on a box that is supposed to have it; callers keep failing on
+    their digest checks.
+    """
+
+    if not Path(root).is_dir():
+        pytest.skip(f"{PB_SOURCE_BUNDLE_SKIP_REASON} ({root})")
+
+
+def require_shared_mount() -> None:
+    """Skip, naming the mount, where the fleet's ``/mnt/shared`` is absent."""
+
+    if not SHARED_MOUNT.is_dir():
+        pytest.skip(f"{SHARED_MOUNT} absent: fleet-only, runs under pbtest")
 
 
 def prismabuild_sdk_installed() -> bool:
@@ -103,8 +136,9 @@ def installed_client_bound(monkeypatch):
     (PB #1254), which resolves the generation PB injected before anything
     else. Inside a pbtest shard that is the fleet's live generation, not the
     reviewed pin this tree is tested against, so the injected root is
-    removed first and the installed distribution is bound explicitly. On a
-    box with no installed distribution the test skips, naming the fleet.
+    removed first and the installed distribution is bound explicitly. In an
+    environment with no installed distribution the test skips, naming the
+    dependency group.
     """
 
     require_prismabuild_sdk()
