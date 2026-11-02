@@ -61,10 +61,14 @@ def test_tracked_files_do_not_transport_buildbuddy_secrets():
 @pytest.mark.parametrize('text', [
     'bazel --remote_header=x-buildbuddy-api-key=fake',
     'bazel --remote_header "x-buildbuddy-api-key=$TOKEN"',
+    '["--remote_header", "Authorization=$API_KEY"]',
     'x-buildbuddy-api-key=fake',
     *[f'bazel --{flag}={name}' for flag in
       ('test_env', 'action_env', 'repo_env', 'host_action_env')
       for name in ('BUILDBUDDY_API_KEY', 'OTHER_API_KEY')],
+    '["--test_env", "BUILDBUDDY_API_KEY"]',
+    '--action_env=\\"BUILDBUDDY_API_KEY\\"',
+    '--repo_env \\\n+        BUILDBUDDY_API_KEY',
     'echo "${{ secrets.BUILDBUDDY_API_KEY }}"',
 ])
 def test_forbidden_transports_are_recognized(text):
