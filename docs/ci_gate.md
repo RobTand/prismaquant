@@ -2,7 +2,10 @@
 
 Every PR push runs `pr-gate`. Its required `Graph impact` job runs
 `tests/test_graph_impact.py::test_graph_impact_gate` in parallel with the shards,
-with full git history and the event's PR base. It needs only pytest. A failed,
+with full git history and the event's base commit. Ordinary PRs use the merge
+base; authenticated Mergify drafts use the actual draft base. Same-basename
+Git renames align base paths before edge comparison. The graph baseline stores
+numeric limits and policy, with no edge lists. The job needs only pytest. A failed,
 skipped, cancelled, or missing graph verdict fails the aggregate. Its JUnit must
 contain exactly one passing graph test. The live test is excluded from shard
 execution and duration placement; its synthetic unit tests remain in the normal

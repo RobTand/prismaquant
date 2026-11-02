@@ -111,49 +111,115 @@ def load_snapshot(root, *, files=None, population=None, source_roots=SOURCE_ROOT
     if legacy:
         old = legacy_fanout.measure_fanout(root, population=population)
         live.update({key: old[key] for key in LEGACY_TOLERANCES})
-        # Keep a single forbidden-edge set, with both the former and current
-        # generator evidence. Existing exceptions can only be removed.
+        # Both evidence sources describe this revision, never a stored list.
         for key in live['edge_groups']:
             live['edge_groups'][key] = sorted(set(live['edge_groups'][key]) | set(old[key]))
     return live
 
 
+def numeric_baseline(value):
+    return {key: item for key, item in value.items() if key != 'edge_groups'}
+
+
 def record(live, previous=None):
-    return core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES)
+    previous = numeric_baseline(previous) if previous is not None else None
+    if previous is not None and 'test_to_test_count' not in previous:
+        previous = {**previous, 'test_to_test_count': len(core.test_to_test_edges(live))}
+    return numeric_baseline(core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES))
 
 
-def migrate(live, old):
-    """Preserve every previous numeric minimum and forbidden-edge exception."""
-    result = record(live)
-    for key in LEGACY_TOLERANCES:
-        result['figures'][key] = min(old[key], live[key])
-    for key in ('test_to_test_imports', 'conftest_source_imports'):
-        additions = set(live['edge_groups'][key]) - set(old[key])
-        if additions:
-            # Full generator evidence can see pre-existing paths the cheap
-            # import parser could not. Do not grandfather those as new imports
-            # unless they were already present at the merge base.
-            raise ValueError(f'migration found previously unrecorded {key}: {sorted(additions)}')
-        result['edge_groups'][key] = sorted(set(live['edge_groups'][key]) & set(old[key]))
-    return result
+def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), write_baseline=False):
+    baseline = numeric_baseline(json.loads(baseline_path.read_text()))
+    allowlist = json.loads(allowlist_path.read_text())
+    previous = before.get('recorded_baseline') if before else None
+    previous = numeric_baseline(previous) if previous is not None else None
+    base_allowlist = before.get('recorded_allowlist') if before else None
+    mode = core.policy_mode(baseline)
+    print(core.summary(before, after, baseline['reach_budget'], test_to_test=mode), flush=True)
+    for reminder in core.policy_reminders(after, baseline):
+        print(reminder, flush=True)
+    errors = core.baseline_errors(baseline, previous)
+    errors += core.allowlist_errors(allowlist, base_allowlist if base_allowlist is not None else allowlist)
+    # Frozen core 75aff74a accepts edge groups in its policy input. Supply only
+    # live history, and keep its stored-gain check restricted to numeric limits.
+    policy = {**baseline, 'edge_groups': (before if before is not None else after)['edge_groups']}
+    errors += core.compare(before, after, policy, changed_tests=changed_tests, allowlist=allowlist,
+                           record_gains=True, test_packages=after['test_packages'],
+                           base_package_max_reach=core.package_max_reach(before) if before else {},
+                           edge_diff=core.diff_edges(before, after) if before else None)
+    if not write_baseline:
+        errors += core.stale_entries(after, baseline)
+    if errors:
+        if write_baseline:
+            print('refusing to record a loss:', file=sys.stderr)
+        print('\n'.join(errors), file=sys.stderr)
+        return 1
+    if write_baseline:
+        baseline_path.write_text(json.dumps(record(after, baseline), indent=2) + '\n')
+    return 0
 
 
 def git(root, *args):
     return subprocess.run(['git', *args], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def base_revision(root, explicit=None):
+def base_revision(root, explicit=None, *, head='HEAD'):
     try:
         target = explicit or os.environ.get('GATE_BASE') or 'origin/main'
-        return git(root, 'merge-base', target, 'HEAD')
+        if os.environ.get('GATE_GRAPH_BASE_MODE', 'pr') == 'batch':
+            return git(root, 'rev-parse', target + '^{commit}')
+        return git(root, 'merge-base', target, head)
     except subprocess.CalledProcessError as error:
-        # A no-history executor is supported, but an invalid explicit gate
-        # base must not silently downgrade a git checkout's check.
         if explicit or os.environ.get('GATE_BASE'):
             probe = subprocess.run(['git', 'rev-parse', '--git-dir'], cwd=root, capture_output=True)
             if probe.returncode == 0:
                 raise ValueError(f'cannot resolve requested base {target}') from error
         return None
+
+
+def rename_paths(root, base, head='HEAD'):
+    fields = subprocess.check_output(['git', 'diff', '-M', '--name-status', '-z', base, head], cwd=root).split(b'\0')
+    pairs = []
+    index = 0
+    while index < len(fields) - 1:
+        status, source = fields[index:index + 2]
+        index += 2
+        if status.startswith(b'R'):
+            destination = fields[index]
+            index += 1
+            source, destination = os.fsdecode(source), os.fsdecode(destination)
+            if Path(source).name == Path(destination).name:
+                pairs.append((source, destination))
+    sources, destinations = {}, {}
+    for source, destination in pairs:
+        sources[source] = sources.get(source, 0) + 1
+        destinations[destination] = destinations.get(destination, 0) + 1
+    return {source: destination for source, destination in pairs
+            if sources[source] == destinations[destination] == 1}
+
+
+def align_base(before, renames):
+    if not renames:
+        return before
+    nodes = set(before['loc']) | set(before['reach']) | {node for edge in before['edges'] for node in edge}
+    renames = {source: target for source, target in renames.items()
+               if target not in nodes or target in renames}
+    def path(value):
+        return renames.get(value, value)
+    result = core.measure({path(test): {path(source) for source in sources}
+                           for test, sources in before['reach'].items()},
+                          {(path(source), path(target)) for source, target in before['edges']},
+                          {path(source): lines for source, lines in before['loc'].items()},
+                          test_packages={path(test): str(Path(path(test)).parent) for test in before['reach']})
+    result.update({key: before[key] for key in LEGACY_TOLERANCES if key in before})
+    result['contents'] = {path(test): digest for test, digest in before['contents'].items()}
+    result['path_edges'] = [[path(a), path(b)] for a, b in before.get('path_edges', before['edges'])]
+    result['edge_groups'] = {group: sorted(f'{path(a)} -> {path(b)}' for a, b in
+                                         (edge.split(' -> ', 1) for edge in edges))
+                             for group, edges in before['edge_groups'].items()}
+    for key in ('recorded_baseline', 'recorded_allowlist'):
+        result[key] = before.get(key)
+    return result
 
 
 def snapshot_at(root, revision, *, temp_dir=None, legacy=True):
@@ -190,21 +256,19 @@ def main(argv=None):
     parser.add_argument('--json', type=Path)
     args = parser.parse_args(argv)
     started = time.perf_counter()
-    base_sha = base_revision(args.root, args.base)
+    head_sha = args.head or 'HEAD'
+    base_sha = base_revision(args.root, args.base, head=head_sha)
     before = snapshot_at(args.root, base_sha, temp_dir=args.temp_dir) if base_sha else None
     after = snapshot_at(args.root, args.head, temp_dir=args.temp_dir) if args.head else load_snapshot(args.root)
+    if before is not None:
+        before = align_base(before, rename_paths(args.root, base_sha, head_sha))
     changed = {test for test, digest in after['contents'].items()
                if before is None or before['contents'].get(test) != digest}
     if args.json:
         args.json.write_text(json.dumps(after, indent=2) + '\n')
     try:
-        code = core.check(before, after, args.root / BASELINE, args.root / ALLOWLIST,
-                          changed_tests=changed,
-                          base_allowlist=before['recorded_allowlist'] if before else None,
-                          previous_baseline=before['recorded_baseline'] if before else None,
-                          write_baseline=args.write_baseline, test_packages=after['test_packages'],
-                          base_package_max_reach=core.package_max_reach(before) if before else {},
-                          edge_diff=core.diff_edges(before, after) if before else None)
+        code = check(before, after, args.root / BASELINE, args.root / ALLOWLIST,
+                     changed_tests=changed, write_baseline=args.write_baseline)
     finally:
         print(f'graph impact {time.perf_counter() - started:.3f}s; '
               f'LOC-weighted U {after["loc_u_pct"]:.1f}%; '

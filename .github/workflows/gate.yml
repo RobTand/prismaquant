@@ -30,6 +30,7 @@ env:
   GIT_COMMITTER_EMAIL: ci@example.invalid
   GATE_BASE: ${{ github.event.pull_request.base.sha }}
   GATE_HEAD: ${{ github.event.pull_request.head.sha }}
+  GATE_GRAPH_BASE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162 && 'batch' || 'pr' }}
   GATE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) && 'full' || 'selection' }}
 jobs:
   plan:

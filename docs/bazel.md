@@ -3,7 +3,12 @@
 `tests/test_graph_impact.py::test_graph_impact_gate` runs in its own required
 hosted job, in parallel with the gate shards. It checks the graph
 at the merge base against the PR head, without using run history. `GATE_BASE`
-selects the gate base; local runs use `git merge-base origin/main HEAD`.
+is the event's base commit. Ordinary PRs compare from its merge base with the
+head; authenticated Mergify batch drafts compare from that actual base commit.
+`GATE_GRAPH_BASE_MODE` distinguishes those cases; a full canary is still a PR.
+Local runs use `git merge-base origin/main HEAD`. Before diffing, Git's `-M`
+rename records align base paths for unambiguous same-basename moves, including
+moves with content edits. A basename change remains a deletion and addition.
 
 The check reports the expected fraction of tests selected by a uniformly
 chosen source-file change, U, and a LOC-weighted U. It also reports source
@@ -98,14 +103,18 @@ The old `import_fanout` CLI forwards to this check. Its original evidence
 parser supplies the migrated figures in the same baseline, preserving each
 recorded minimum. There is one baseline and one test file. Writing the
 baseline refuses structural losses and keeps every recorded numeric minimum.
-SCC and forbidden-edge gains must be recorded in the same PR; U gains are
-recorded on explicit baseline writes. New source files inherit a package when
+SCC gains must be recorded in the same PR; U and edge-count gains are
+recorded on explicit baseline writes. New-edge checks use only the aligned
+base graph and the head graph. No stored edge list judges whether an edge is new. New source files inherit a package when
 their existing-test consumers fit an existing peer's base consumers; that
 ordinary package growth is reported in the summary instead of failed. A committed baseline holds
-only limits, the reach budget, and existing forbidden-edge exceptions, so
-ordinary concurrent PRs do not update a full edge snapshot.
+`schema`, `figures`, `tolerances`, `reach_budget`, `test_to_test`,
+`test_to_test_count`, and `test_to_test_strict_by`. Reasoned exceptions remain
+in the separate allowlist. Neither baseline reads nor writes retain edge identities;
+`import_fanout_baseline.json` is removed. The frozen core receives transient
+edge groups from the live base graph through the PQ adapter.
 
 The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
-still checks absolute figures, forbidden edges and every test's reach budget.
+still checks absolute figures, the count limit and every test's reach budget.
 The shrink-only exceptions preserve existing broad tests in that lane.
