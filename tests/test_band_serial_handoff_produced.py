@@ -448,7 +448,9 @@ def retirable_owner_scope(tmp_path, monkeypatch):
         import secrets
         _scope, control = _open_scope(world, key=owner, nonce=secrets.token_hex(16))
         world.queue = queue
-        return _record_scope(world, owner, control)
+        pool = modules["pool"]
+        claim = pool._read_json(queue.item_path(pool.CLAIMED, owner))
+        return _record_scope(world, owner, control, claim=claim)
 
     monkeypatch.setattr(chain, "_broker_control", owner_control)
     try:
