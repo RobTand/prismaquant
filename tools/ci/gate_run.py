@@ -220,7 +220,8 @@ def run_plan(plan: dict, *, root: Path, output: Path, junit: Path,
         record['files'] = files
         config = _budget_policy(root, plan.get('base_sha'))
         record['budget'] = {'status': 'pending', 'baseline_sha': plan.get('base_sha')}
-        workers = worker_count(workers, affinity=affinity)
+        if _budget_target is None:
+            workers = worker_count(workers, affinity=affinity)
         record['workers'] = workers
         environment = dict(os.environ, OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
                            NUMEXPR_NUM_THREADS='1', TORCHINDUCTOR_COMPILE_THREADS='1', MAX_JOBS='1',
