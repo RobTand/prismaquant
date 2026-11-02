@@ -9,8 +9,16 @@ adds an entry says why the test can't use a declared input instead.
 
 NONHERMETIC = {
     "//tests:test_band_serial_batched_regime": struct(
-        tags = ["gpu"],
-        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+        tags = ["gpu", "hosted-arm64"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_band_serial_scratch_plane": struct(
+        tags = ["hosted-arm64"],
+        reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_campaign_recovery_scratch_seam": struct(
+        tags = ["hosted-arm64"],
+        reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
     "//tests:test_canonical_consumer_join": struct(
         tags = ["requires-network"],
@@ -20,21 +28,33 @@ NONHERMETIC = {
         tags = ["requires-network"],
         reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
     ),
+    "//tests:test_capture_layer_chain": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
+    ),
     "//tests:test_capture_layer_chain_glm": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
     "//tests:test_capture_single_pass_source_1896": struct(
-        tags = ["gpu"],
-        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+        tags = ["gpu", "hosted-arm64"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
     "//tests:test_chain_roll_overlap": struct(
         tags = ["gpu"],
         reason = "3 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_checkpoint_staged_readset_1366": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
     "//tests:test_derive_per_expert_routing_1931": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_dispatch_capture_chain": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
     "//tests:test_export_inline_expert_gptq": struct(
         tags = ["gpu"],
@@ -47,6 +67,10 @@ NONHERMETIC = {
     "//tests:test_fp8_dynamic_native_parity": struct(
         tags = ["gpu"],
         reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_glm_attention_census": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
     "//tests:test_glm_full_capture_profile": struct(
         tags = ["gpu"],
@@ -200,29 +224,61 @@ NONHERMETIC = {
         tags = ["requires-network"],
         reason = "it fetches Tessera's rung_allowability.py from GitHub at a declared commit (cannot fetch declared dependency); hosted shards have a network.",
     ),
+    "//tests:test_selected_calibration_capture": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
+    ),
     "//tests:test_spaced_lax_tools_routing_1301": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_spill_readplan_metadata_2115": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
     "//tests:test_stage_b_pass_profile": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_stage_b_streamed_handoff": struct(
+        tags = ["hosted-arm64"],
+        reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
     "//tests:test_stage_b_workspace_profile": struct(
         tags = ["gpu"],
         reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_stageb_checkpoint_incoming_1802": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_stageb_cotangent_scratch": struct(
+        tags = ["hosted-arm64"],
+        reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
     "//tests:test_stageb_host_staging_1246": struct(
-        tags = ["gpu"],
-        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+        tags = ["gpu", "hosted-arm64"],
+        reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
     "//tests:test_stageb_one_pass_spill": struct(
-        tags = ["gpu"],
-        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+        tags = ["gpu", "hosted-arm64"],
+        reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU. Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_stageb_scatter_reads_1794": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
     "//tests:test_stageb_spill_input_digest": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_stageb_spill_integrity_1369": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_stageb_spill_records_1086": struct(
+        tags = ["hosted-arm64"],
+        reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
     "//tests:test_streamed_cost_checkpoints": struct(
         tags = ["runner"],
@@ -243,6 +299,10 @@ NONHERMETIC = {
     "//tests:test_tensor_digests_1384": struct(
         tags = ["gpu"],
         reason = "5 of its test functions (6 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_tessera_calibration_cache": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
     ),
     "//tests:test_tessera_campaign": struct(
         tags = ["gpu"],
@@ -272,6 +332,10 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_verified_capture_load": struct(
+        tags = ["hosted-arm64"],
+        reason = "CaptureWriter free-space check sees 0 bytes on arm64 tmpfs; hosted arm64 has a real disk.",
+    ),
 }
 
 def nonhermetic(name):
@@ -284,6 +348,8 @@ def nonhermetic(name):
     runner: the test runs on the Remote Bazel runner itself, a VM like a hosted
     gate runner (all its CPUs, sudo), with pytest in the runner's git checkout.
     Its result is never cached, because it reads that checkout.
+    hosted-arm64: the arm64 remote population filters this tag; the hosted
+    arm64 post-merge lane runs the file. It still runs on amd64 executors.
     hosted: Bazel never runs the test; the hosted lane runs it with
     tools/ci/gate_run.py whenever Bazel's selection impacts its target.
     """
