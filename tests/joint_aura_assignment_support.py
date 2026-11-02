@@ -12,8 +12,8 @@ from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 
 
 UNIT_A = "model.layers.0.mlp.down_proj"
-
 UNIT_B = "model.layers.7.mlp.down_proj"
+
 
 def _row(name, signed, *, fmt="FP8_E4M3"):
     # The allocator currency fixture runs a model to build rows. These scalar
@@ -56,6 +56,7 @@ def _row(name, signed, *, fmt="FP8_E4M3"):
         signed_components=[dict(weight=float(x), activation=0.0, mixed=0.0,
                                 total=float(x)) for x in signed],
     )
+
 
 def _rebuild(row, *, operator_change=None, probe_change=None):
     """Re-sign changed identities so pairing, not a stale digest, must refuse."""

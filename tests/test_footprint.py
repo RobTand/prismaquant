@@ -18,6 +18,8 @@ from prismaquant.model_profiles.base import ModelProfile
 from prismaquant.model_profiles.qwen3 import Qwen3Profile
 
 from tests.safetensors_support import _write_safetensors
+
+
 def test_source_checkpoint_bytes_reads_spans(tmp_path):
     _write_safetensors(tmp_path / "model-00001.safetensors", {
         "embed.weight": ("BF16", (100, 8)),      # 100*8*2 = 1600

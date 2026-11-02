@@ -8,8 +8,8 @@ from prismaquant import tessera_expert_projection as tep
 
 
 STACK = "model.layers.2.feed_forward.experts"
-
 SHARD = "model.safetensors"
+
 
 def _unit(expert: int, role: str, rows: int, cols: int, **overrides) -> dict:
     """A record shaped like ``export_tessera_serving.plan_expert_stack`` writes."""
@@ -25,6 +25,7 @@ def _unit(expert: int, role: str, rows: int, cols: int, **overrides) -> dict:
     }
     record.update(overrides)
     return record
+
 
 def _projection(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
     tensors = {}
@@ -50,6 +51,7 @@ def _projection(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
         },
     }
 
+
 def _declared(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
     return {
         stack: {
@@ -59,6 +61,7 @@ def _declared(experts=(0, 1), *, stacks=(STACK,), n=8, k=4) -> dict:
         }
         for stack in stacks
     }
+
 
 def _record(tmp_path: Path, name: str, unit: dict, *, q256=1024, grid="E4M3") -> dict:
     blob = hashlib.sha256(name.encode()).digest() * 3
