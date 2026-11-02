@@ -236,6 +236,10 @@ NONHERMETIC = {
         tags = ["hosted-arm64"],
         reason = "Stage B spill requires local ext4/xfs/btrfs; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
     ),
+    "//tests:test_stage_a_plane_window_1121": struct(
+        tags = ["hosted-arm64"],
+        reason = "The produced-output two-plane window reads statvfs free space; arm64 tmpfs reports 0 bytes. The forced-zero probe reproduced ProducedWindowRefused at its real bind.",
+    ),
     "//tests:test_stage_b_pass_profile": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
@@ -243,6 +247,10 @@ NONHERMETIC = {
     "//tests:test_stage_b_streamed_handoff": struct(
         tags = ["hosted-arm64"],
         reason = "Cotangent scratch requires local disk; arm64 executors use tmpfs with 0 free bytes, so hosted arm64 runs this file.",
+    ),
+    "//tests:test_stage_b_streamed_incoming_1143": struct(
+        tags = ["hosted-arm64"],
+        reason = "With the reviewed PrismaBuild SDK installed, its staging tests construct ExactCotangentScratch on tmp_path; that real disk guard refuses arm64 tmpfs. Static audit; fresh runtime validation pending.",
     ),
     "//tests:test_stage_b_workspace_profile": struct(
         tags = ["gpu"],
@@ -291,6 +299,10 @@ NONHERMETIC = {
     "//tests:test_streaming_static_activations": struct(
         tags = ["gpu", "runner"],
         reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git; 1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
+    ),
+    "//tests:test_strict_reader_tier_enforcement": struct(
+        tags = ["hosted-arm64"],
+        reason = "With the reviewed PrismaBuild SDK installed, the local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
     ),
     "//tests:test_tensor_digest_owner_recipes_2638": struct(
         tags = ["gpu"],
