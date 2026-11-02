@@ -8323,8 +8323,7 @@ pq_py_library(
         "//:MODULE.bazel",
         "//:MODULE.bazel.lock",
         "//tools/bazel:BUILD.bazel",
-        "//tools/bazel:nonhermetic.bzl",
-        "//tools/bazel:test_inputs.bzl",
+        "//tools/bazel:files",
         "test_bazel_workspace.py",
     ],
 )

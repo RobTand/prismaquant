@@ -39,7 +39,9 @@ pip.parse(
         "//tools/bazel:requirements_linux_aarch64.txt": "linux_aarch64",
         "//tools/bazel:requirements_linux_x86_64.txt": "linux_x86_64",
     },
-    extra_pip_args = ["--extra-index-url", "https://download.pytorch.org/whl/cpu"],
+    # torch comes only from the CPU index, per platform, by the Bazel downloader:
+    # pip on the amd64 runner would install an x86 torch for arm64 executors.
+    experimental_index_url_overrides = {"torch": "https://download.pytorch.org/whl/cpu"},
     target_platforms = ["linux_x86_64", "linux_aarch64"],
 )
 use_repo(pip, "pq_pip")
