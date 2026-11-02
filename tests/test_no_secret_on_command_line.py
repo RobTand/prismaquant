@@ -112,11 +112,16 @@ def test_every_upload_is_immediately_guarded_with_step_scoped_secrets():
                     'BUILDBUDDY_API_KEY': '${{ secrets.BUILDBUDDY_API_KEY }}',
                     'MERGIFY_TOKEN': '${{ secrets.MERGIFY_TOKEN }}',
                 }
-                assert guard.get('if') == '${{ !cancelled() }}'
+                source = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+                assert guard.get('if') == '${{ !cancelled() && ' + source + ' }}'
                 assert upload.get('if') == (
-                    "${{ !cancelled() && steps." + guard['id'] + ".outcome == 'success' }}")
+                    '${{ !cancelled() && ' + source + ' && steps.'
+                    + guard['id'] + ".outcome == 'success' }}")
                 assert not guard.get('continue-on-error', False)
                 assert upload.get('if', '') != 'always()'
                 for path in upload['with']['path'].splitlines():
                     assert path in arguments
-                assert arguments.count('--env') == 2
+                assert arguments.count('--require') == 2
+                for name in ('BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'):
+                    assert any(arguments[i:i + 2] == ['--require', name]
+                               for i in range(len(arguments) - 1))
