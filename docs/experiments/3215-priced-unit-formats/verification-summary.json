@@ -1,0 +1,77 @@
+{
+  "invocation": "c19e81f5-e517-4bc6-a4f3-61030b9f7b29",
+  "commit": "963debc5570e1216faf6da5be4f0edc668396964",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "OK",
+  "junit": [
+    {
+      "artifact": "equivalence-963debc5570e1216faf6da5be4f0edc668396964.xml.gz",
+      "suites": [
+        {
+          "tests": "26",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "21.017"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "equivalence-9c8beebde2266c78ea5910bc83b30e90cb669d74.xml.gz",
+      "suites": [
+        {
+          "tests": "25",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "time": "109.600"
+        }
+      ],
+      "skips": [],
+      "failures": []
+    },
+    {
+      "artifact": "related.xml.gz",
+      "suites": [
+        {
+          "tests": "83",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "4",
+          "time": "12.377"
+        }
+      ],
+      "skips": [
+        {
+          "test": "test_projection_request_uses_real_public_producer_and_keeps_request[env]",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_uses_real_public_producer_and_keeps_request[explicit]",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_passes_the_default_digest_cache",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        },
+        {
+          "test": "test_projection_request_reuses_recorded_digests_until_bytes_change",
+          "message": "missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10",
+          "reason": "/home/buildbuddy/workspace/repo-root/tests/projection_producer_fixture.py:54: missing declared projection producer interpreter /home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python; required on dl380g10"
+        }
+      ],
+      "failures": []
+    }
+  ],
+  "equivalence": {
+    "original_nodes": 25,
+    "assertion_operands": 228,
+    "evaluations": 45324,
+    "unchanged": true
+  }
+}

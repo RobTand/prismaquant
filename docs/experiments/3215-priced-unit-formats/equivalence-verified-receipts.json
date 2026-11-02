@@ -1,0 +1,74 @@
+{
+  "invocation": "c19e81f5-e517-4bc6-a4f3-61030b9f7b29",
+  "commit": "963debc5570e1216faf6da5be4f0edc668396964",
+  "terminal": "COMPLETE_INVOCATION_STATUS",
+  "verdict": "OK",
+  "artifacts": [
+    {
+      "name": "assertions-963debc5570e1216faf6da5be4f0edc668396964.json",
+      "sha256": "8d441178e1b6133a131fb4ae16a9a363ebf4249079bada2e1536201d2b10d9b3",
+      "bytes": 787880,
+      "verified": true
+    },
+    {
+      "name": "assertions-963debc5570e1216faf6da5be4f0edc668396964.json.source.json",
+      "sha256": "e78ccc5d51eb835d77d9ef238619672e0d76b22ee5b111e1282e9af3e0737256",
+      "bytes": 28308,
+      "verified": true
+    },
+    {
+      "name": "assertions-9c8beebde2266c78ea5910bc83b30e90cb669d74.json",
+      "sha256": "cd2b1c85c4ccf2d4bb8d34674f1ac815c2eccc0bef9b517d68178632fa954d4e",
+      "bytes": 783013,
+      "verified": true
+    },
+    {
+      "name": "assertions-9c8beebde2266c78ea5910bc83b30e90cb669d74.json.source.json",
+      "sha256": "adbd125159f9c4116ebf2bb1dfa4447b01d4b4736385b5af5321b034d6694ce2",
+      "bytes": 27397,
+      "verified": true
+    },
+    {
+      "name": "equivalence-963debc5570e1216faf6da5be4f0edc668396964.log.gz",
+      "sha256": "b4d4911c3a6351ed47902df1cd97c5ebd1889e1b37cdd1861ab425b6e462d58b",
+      "bytes": 218,
+      "verified": true
+    },
+    {
+      "name": "equivalence-963debc5570e1216faf6da5be4f0edc668396964.xml.gz",
+      "sha256": "4ec3ac02958a32ac1aba5d367cffc13ff0e36636164531dc07936c6d457db174",
+      "bytes": 1032,
+      "verified": true
+    },
+    {
+      "name": "equivalence-9c8beebde2266c78ea5910bc83b30e90cb669d74.log.gz",
+      "sha256": "d0af5e7433bbab453d2e5015f42b69f150c57f96588c23bf21ca6a4ad01cbabc",
+      "bytes": 228,
+      "verified": true
+    },
+    {
+      "name": "equivalence-9c8beebde2266c78ea5910bc83b30e90cb669d74.xml.gz",
+      "sha256": "43a3309d407446f4fb0e9e33e43ed450f86d21418a1bdcf766152303cd5fec5a",
+      "bytes": 1014,
+      "verified": true
+    },
+    {
+      "name": "equivalence-summary.json",
+      "sha256": "4efeef6a2a351502eeab08a669a064a30616efcb0a5b0376917620aba53522ae",
+      "bytes": 101,
+      "verified": true
+    },
+    {
+      "name": "related.log.gz",
+      "sha256": "1edaeb0b07a82e5bc7f4f1950af2245aee6958b4ff0ee108828cfade3453a764",
+      "bytes": 194,
+      "verified": true
+    },
+    {
+      "name": "related.xml.gz",
+      "sha256": "13fa4d7c5e8ca6a9cb20598775e7b1266fb794ba8b1394639353f0ea5593be37",
+      "bytes": 2206,
+      "verified": true
+    }
+  ]
+}
