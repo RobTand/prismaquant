@@ -1912,7 +1912,7 @@ def main(argv: list[str] | None = None) -> int:
         args.model, trust_remote_code=args.trust_remote_code)
     load_kwargs: dict = {"trust_remote_code": args.trust_remote_code}
     if args.materialize:
-        from .calibration_data import _dtype_from_name
+        from .model_dtypes import _dtype_from_name
 
         try:
             load_kwargs["dtype"] = _dtype_from_name(args.dtype)

@@ -44,7 +44,7 @@ pytest.importorskip(
 from safetensors.torch import save_file  # noqa: E402
 
 from prismaquant import genuine_weight_initialization  # noqa: E402
-from prismaquant import glm_mtp, glm_mtp_capture  # noqa: E402
+from prismaquant import glm_mtp, glm_mtp_loading, glm_mtp_capture  # noqa: E402
 from prismaquant import tessera_hessian as th  # noqa: E402
 from prismaquant.export_native_compressed import _split_packed_expert_tensor  # noqa: E402
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
@@ -98,7 +98,7 @@ def test_wrapper_declares_the_layer_like_a_body_moe_layer(layer):
     projections = profile_declared_packed_expert_projections(wrapper, PROFILE)
     assert {member.qname for member in projections} == _routed_names()
 
-    units = glm_mtp.mtp_priced_units(wrapper, PROFILE)
+    units = glm_mtp_loading.mtp_priced_units(wrapper, PROFILE)
     hidden, inter = layer.config.hidden_size, layer.config.moe_intermediate_size
     assert set(units) == _routed_names() | _shared_names()
     for name, shape in units.items():
@@ -142,7 +142,7 @@ def _write_checkpoint(directory, state):
 def test_loader_reads_the_layer_and_packs_its_experts(layer, tmp_path):
     _write_checkpoint(tmp_path, _per_expert_checkpoint(layer))
 
-    loaded, receipt = glm_mtp.load_mtp_layer(
+    loaded, receipt = glm_mtp_loading.load_mtp_layer(
         tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
         experts_implementation="eager")
 
@@ -167,7 +167,7 @@ def test_loader_reads_the_layer_and_packs_its_experts(layer, tmp_path):
 
 def test_loader_keeps_the_router_bias_in_fp32(layer, tmp_path):
     _write_checkpoint(tmp_path, _per_expert_checkpoint(layer))
-    loaded, _ = glm_mtp.load_mtp_layer(
+    loaded, _ = glm_mtp_loading.load_mtp_layer(
         tmp_path, _text_config(), profile=PROFILE, dtype=torch.bfloat16,
         experts_implementation="eager")
     for name, tensor in loaded.state_dict().items():
@@ -181,7 +181,7 @@ def test_loader_refuses_a_missing_expert(layer, tmp_path):
     del state[f"{PREFIX}mlp.experts.3.up_proj.weight"]
     _write_checkpoint(tmp_path, state)
     with pytest.raises(ValueError, match="missing expert"):
-        glm_mtp.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
+        glm_mtp_loading.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
                                experts_implementation="eager")
 
 
@@ -190,7 +190,7 @@ def test_loader_refuses_a_tensor_the_layer_does_not_have(layer, tmp_path):
     state[f"{PREFIX}mlp.gate.bias"] = torch.zeros(EXPERTS)
     _write_checkpoint(tmp_path, state)
     with pytest.raises(RuntimeError, match="unexpected"):
-        glm_mtp.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
+        glm_mtp_loading.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
                                experts_implementation="eager")
 
 
@@ -317,15 +317,15 @@ def test_loader_binds_the_named_experts_dispatch(layer, tmp_path):
     """A default dispatch is whatever Transformers falls back to; the capture
     must run the dispatch the body recorded, so the loader takes it by name."""
     _write_checkpoint(tmp_path, _per_expert_checkpoint(layer))
-    loaded, receipt = glm_mtp.load_mtp_layer(
+    loaded, receipt = glm_mtp_loading.load_mtp_layer(
         tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
         experts_implementation="batched_mm")
     assert loaded.mlp.experts.config._experts_implementation == "batched_mm"
     assert receipt["experts_implementation"] == "batched_mm"
     with pytest.raises(TypeError):
-        glm_mtp.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32)
+        glm_mtp_loading.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32)
     with pytest.raises(ValueError, match="must be named"):
-        glm_mtp.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
+        glm_mtp_loading.load_mtp_layer(tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
                                experts_implementation="")
 
 
@@ -342,22 +342,23 @@ def test_load_contract_binds_every_tensor_and_the_input(layer, tmp_path):
     from prismaquant.streaming_initialization import validate_mtp_layer_initialization_contract
 
     _write_checkpoint(tmp_path, _per_expert_checkpoint(layer))
-    loaded, receipt = glm_mtp.load_mtp_layer(
+    loaded, receipt = glm_mtp_loading.load_mtp_layer(
         tmp_path, _text_config(), profile=PROFILE, dtype=torch.float32,
         experts_implementation="eager")
-    contract = glm_mtp.mtp_layer_initialization_contract(loaded, receipt, input_manifest=_input_ref())
+    contract = glm_mtp_loading.mtp_layer_initialization_contract(loaded, receipt, input_manifest=_input_ref())
     assert contract["schema"] == "prismaquant.mtp_layer_initialization.v1"
+    assert contract["model_class"] == "prismaquant.glm_mtp.Glm5NextMtpLayer"
     assert contract["layer_prefix"] == PREFIX
     assert contract["checkpoint_tensors"] == receipt["tensors"]
     assert contract["experts_implementation"] == "eager"
     assert set(contract["state"]) == set(loaded.state_dict())
     assert validate_source_initialization_contract(contract) == contract
-    assert glm_mtp.mtp_layer_initialization_contract(
+    assert glm_mtp_loading.mtp_layer_initialization_contract(
         loaded, receipt, input_manifest=_input_ref()) == contract
 
     with torch.no_grad():
         loaded.mlp.experts.down_proj[1, 2, 3] += 1.0
-    changed = glm_mtp.mtp_layer_initialization_contract(loaded, receipt, input_manifest=_input_ref())
+    changed = glm_mtp_loading.mtp_layer_initialization_contract(loaded, receipt, input_manifest=_input_ref())
     assert changed["state_sha256"] != contract["state_sha256"]
     assert changed["state"]["mlp.experts.down_proj"] != contract["state"]["mlp.experts.down_proj"]
 
@@ -683,16 +684,16 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
         assert all(0.0 <= row["top1"] <= 1.0 for row in final_manifest["head_check"])
 
         # Phase 2, through the same source owner.
-        layer, receipt = glm_mtp.load_mtp_layer(
+        layer, receipt = glm_mtp_loading.load_mtp_layer(
             env.source, env.text_config, profile=PROFILE, dtype=torch.float32,
             experts_implementation="eager", source_authentication=owner)
         embed_weight, embed_shard = glm_mtp.read_checkpoint_tensor(
             env.source, "model.language_model.embed_tokens.weight", source_authentication=owner)
         assert embed_shard == "model.safetensors"
         embed = torch.nn.Embedding.from_pretrained(embed_weight.to(torch.float32))
-        contract = glm_mtp.mtp_layer_initialization_contract(layer, receipt, input_manifest=final_ref)
+        contract = glm_mtp_loading.mtp_layer_initialization_contract(layer, receipt, input_manifest=final_ref)
         wrapper = glm_mtp.MtpCheckpointModel(layer)
-        units = glm_mtp.mtp_priced_units(wrapper, PROFILE)
+        units = glm_mtp_loading.mtp_priced_units(wrapper, PROFILE)
         # The producer's projection of the MTP stack, asked once on the meta
         # layer, then checked byte for byte against the loaded one.
         carried = glm_mtp_capture.mtp_expert_projection(
@@ -734,7 +735,7 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
             source_authentication=owner, calibration=env.canonical["calibration"],
             max_act_rows=MAX_ROWS, rows=rows, hessians=hessians, counts=counts,
             max_abs=maxima,
-            completed_contract=glm_mtp.mtp_layer_initialization_contract(
+            completed_contract=glm_mtp_loading.mtp_layer_initialization_contract(
                 layer, receipt, input_manifest=final_ref))
         authentication = owner.receipt()
         assert census_path.read_bytes() == (json.dumps(census, indent=2, sort_keys=True,
@@ -838,7 +839,7 @@ def test_projection_check_refuses_a_layer_the_producer_did_not_read(mtp_source):
     carried = glm_mtp_capture.mtp_expert_projection(
         str(env.source), _meta_wrapper(env.text_config), PROFILE, base_census=env.census,
         out_path=env.root / "answer.json")
-    layer, _ = glm_mtp.load_mtp_layer(env.source, env.text_config, profile=PROFILE,
+    layer, _ = glm_mtp_loading.load_mtp_layer(env.source, env.text_config, profile=PROFILE,
                                       dtype=torch.float32, experts_implementation="eager")
     wrapper = glm_mtp.MtpCheckpointModel(layer)
     assert set(glm_mtp_capture.check_mtp_expert_projection(

@@ -36,7 +36,7 @@ from typing import Callable, Mapping
 
 import torch
 
-from . import glm_mtp
+from . import glm_mtp, glm_mtp_loading
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 SCOPE = "mtp"
@@ -121,7 +121,7 @@ def mtp_priced_modules(model, profile) -> dict:
     """
     from .routed_experts import profile_declared_packed_expert_projections
 
-    units = glm_mtp.mtp_priced_units(model, profile)
+    units = glm_mtp_loading.mtp_priced_units(model, profile)
     layer = model.layer
     prefix = glm_mtp.mtp_checkpoint_prefix(layer.layer_idx)
     modules = {member.qname: member

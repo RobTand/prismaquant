@@ -31,7 +31,7 @@ pytest.importorskip(
 
 from safetensors.torch import save_file  # noqa: E402
 
-from prismaquant import glm_mtp  # noqa: E402
+from prismaquant import glm_mtp, glm_mtp_loading  # noqa: E402
 from tests.test_glm5_next_streamed_forward_parity import _torch_only_causal_conv1d  # noqa: E402,F401
 from tests.test_glm_mtp_capture import (  # noqa: E402,F401
     BACKBONE, CALIBRATION_TEXT, LAST, MAX_ROWS, N_SEQUENCES, PREFIX, PROFILE, SEQ_LEN,
@@ -143,13 +143,13 @@ def _loaded_mtp_weights(env, dtype):
     """Every priced MTP unit's weight, from the MTP layer's own loader."""
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
 
-    layer, _ = glm_mtp.load_mtp_layer(env.source, env.text_config, profile=PROFILE, dtype=dtype,
+    layer, _ = glm_mtp_loading.load_mtp_layer(env.source, env.text_config, profile=PROFILE, dtype=dtype,
                                       experts_implementation="eager")
     wrapper = glm_mtp.MtpCheckpointModel(layer)
     modules = dict(wrapper.named_modules())
     weights = {member.qname: member.weight.detach().clone()
                for member in profile_declared_packed_expert_projections(wrapper, PROFILE)}
-    for name in glm_mtp.mtp_priced_units(wrapper, PROFILE):
+    for name in glm_mtp_loading.mtp_priced_units(wrapper, PROFILE):
         if name not in weights:
             weights[name] = modules[name].weight.detach().clone()
     return weights

@@ -240,7 +240,7 @@ def projection_phase(args):
 def capture_phase(args):
     import torch
 
-    from prismaquant import glm_mtp, glm_mtp_capture as cap
+    from prismaquant import glm_mtp, glm_mtp_loading, glm_mtp_capture as cap
     from prismaquant.model_profiles import detect_profile
 
     started = time.monotonic()
@@ -266,7 +266,7 @@ def capture_phase(args):
         text_config = _text_config(plan["model"])
         profile = detect_profile(plan["model"])
         device = torch.device(args.device)
-        layer, receipt = glm_mtp.load_mtp_layer(
+        layer, receipt = glm_mtp_loading.load_mtp_layer(
             plan["model"], text_config, profile=profile, dtype=torch.bfloat16, device=device,
             experts_implementation=dispatch, source_authentication=owner)
         weight, _shard = glm_mtp.read_checkpoint_tensor(
@@ -278,10 +278,10 @@ def capture_phase(args):
         loaded = time.monotonic()
         print(f"[mtp-capture] layer {layer.layer_idx} loaded in {loaded - started:.0f} s",
               flush=True)
-        contract = glm_mtp.mtp_layer_initialization_contract(layer, receipt,
+        contract = glm_mtp_loading.mtp_layer_initialization_contract(layer, receipt,
                                                              input_manifest=final_ref)
         wrapper = glm_mtp.MtpCheckpointModel(layer)
-        units = glm_mtp.mtp_priced_units(wrapper, profile)
+        units = glm_mtp_loading.mtp_priced_units(wrapper, profile)
         checked = cap.check_mtp_expert_projection(
             projection, wrapper, profile, model_path=plan["model"],
             source_authentication=owner, layer_stride=int(base["layer_stride"]))
@@ -314,7 +314,7 @@ def capture_phase(args):
             calibration=manifest["identity"]["calibration"],
             max_act_rows=manifest["identity"]["max_act_rows"], rows=rows, hessians=hessians,
             counts=counts, max_abs=maxima,
-            completed_contract=glm_mtp.mtp_layer_initialization_contract(
+            completed_contract=glm_mtp_loading.mtp_layer_initialization_contract(
                 layer, receipt, input_manifest=final_ref))
         authentication = owner.receipt()
         print(f"[mtp-capture] published in {time.monotonic() - captured:.0f} s", flush=True)
