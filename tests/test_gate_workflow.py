@@ -168,7 +168,8 @@ def test_graph_check_is_a_required_parallel_job_with_full_history():
         assert 'graph-impact' in jobs[name]['needs']
     for name in ('plan', 'shards', 'retry-shards'):
         command = next(step['run'] for step in jobs[name]['steps']
-                       if 'gate_partition.py' in step.get('run', ''))
+                       if any('gate_partition.py ' + command in step.get('run', '')
+                              for command in ('matrix', 'shard')))
         assert '--plan gate-artifacts/plan.json' in command
 
 
