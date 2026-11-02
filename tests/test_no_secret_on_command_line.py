@@ -35,9 +35,11 @@ def violations(path, text):
                     continue
                 for step in steps.value:
                     env = mapping(step, 'env')
-                    if isinstance(env, yaml.MappingNode):
+                    if (isinstance(env, yaml.MappingNode)
+                            and step.start_mark.index <= env.start_mark.index < step.end_mark.index):
                         allowed.extend((value.start_mark.index, value.end_mark.index)
-                                       for _, value in env.value if isinstance(value, yaml.ScalarNode))
+                                       for _, value in env.value if isinstance(value, yaml.ScalarNode)
+                                       and env.start_mark.index <= value.start_mark.index < env.end_mark.index)
     errors = [match.start() for pattern in FORBIDDEN for match in pattern.finditer(text)]
     errors.extend(match.start() for match in SECRET_REFERENCE.finditer(text)
                   if not any(start <= match.start() < end for start, end in allowed))
@@ -106,7 +108,9 @@ def test_every_upload_is_immediately_guarded_with_step_scoped_secrets():
                     'BUILDBUDDY_API_KEY': '${{ secrets.BUILDBUDDY_API_KEY }}',
                     'MERGIFY_TOKEN': '${{ secrets.MERGIFY_TOKEN }}',
                 }
-                assert guard.get('if') == upload.get('if')
+                assert guard.get('if') == '${{ !cancelled() }}'
+                assert upload.get('if') == (
+                    "${{ !cancelled() && steps." + guard['id'] + ".outcome == 'success' }}")
                 assert not guard.get('continue-on-error', False)
                 assert upload.get('if', '') != 'always()'
                 for path in upload['with']['path'].splitlines():
