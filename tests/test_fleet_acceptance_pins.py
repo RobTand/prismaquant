@@ -68,3 +68,34 @@ def test_generated_fixture_placement_preserves_the_source_cleanliness_guard(
         snapshots = pins.record_snapshots(checkout=checkout)
         assert snapshots["pq_head"] == head
         assert snapshots["pb_rev"] == pins.PB_CANDIDATE_REV
+
+
+def test_explicit_acceptance_objects_do_not_probe_fleet_or_network(tmp_path, monkeypatch):
+    import fleet_acceptance_pins as pins
+
+    root = tmp_path / "source"
+    root.mkdir()
+    for name in ("src/prismabuild/reader_lease.py", "tools/fleet/resource_broker.py"):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# pinned acceptance fixture\n")
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+    git("init", "-q")
+    git("add", ".")
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "acceptance fixture")
+    revision = git("rev-parse", "HEAD")
+    monkeypatch.setattr(pins, "PB_CANDIDATE_REV", revision)
+    monkeypatch.setenv("PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR", str(root / ".git"))
+    class FleetProbeForbidden:
+        def __truediv__(self, name):
+            raise AssertionError("explicit objects must suppress fleet lookup")
+    monkeypatch.setattr(pins, "PB_PINNED_CHECKOUT", FleetProbeForbidden())
+    monkeypatch.setattr(pins, "PB_PINNED_CHECKOUT_LEGACY", FleetProbeForbidden())
+    def network_forbidden(*args, **kwargs):
+        raise AssertionError("explicit objects must suppress network fallback")
+    monkeypatch.setattr(pins, "_resolve_via_network", network_forbidden)
+    result = pins.resolve_pb_candidate(tmp_path / "resolved")
+    assert result["rev"] == revision
+    assert (Path(result["tree"]) / "src/prismabuild/reader_lease.py").read_bytes() == b"# pinned acceptance fixture\n"
