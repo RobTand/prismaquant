@@ -162,3 +162,24 @@ def test_image_side_patch_scripts_are_outside_the_scan_and_their_loader_is_not(t
     (tmp_path / "prismaquant" / "serving_runtime_patch_set.py").write_text(raw)
     live = set(inventory.scan(tmp_path)["primitive_digest_sites"])
     assert live == {"hashlib:prismaquant/serving_runtime_patch_set.py::<module>"}
+
+
+def test_shared_stdlib_core_has_an_independent_helper_namespace(tmp_path):
+    body = ('import hashlib\n'
+            'def summary(rows):\n'
+            '    total = 0\n'
+            '    for row in rows:\n'
+            '        if row.ready:\n'
+            '            total += row.size\n'
+            '        else:\n'
+            '            total -= row.size\n'
+            '    return hashlib.sha256(str(total).encode()).hexdigest()\n')
+    paths = ['tools/ci/graph_impact.py', 'tools/ci/graph_impact_pq.py', 'tools/ordinary.py']
+    for name in paths:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+    live = inventory.scan(tmp_path)
+    assert live['same_name_helpers']['summary'] == ['tools/ci/graph_impact_pq.py', 'tools/ordinary.py']
+    assert ['tools/ci/graph_impact.py::summary', 'tools/ordinary.py::summary'] in live['near_duplicates']
+    assert 'hashlib:tools/ci/graph_impact.py::summary' in live['primitive_digest_sites']
