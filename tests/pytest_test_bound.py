@@ -68,5 +68,3 @@ def test_bound_args(config) -> list[str]:
                                         or ()):
         argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
     return argv
-
-

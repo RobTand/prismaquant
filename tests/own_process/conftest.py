@@ -355,5 +355,3 @@ def pytest_collectreport(report):
     """In a child session, hand a failed or skipped collection to the parent."""
     if not report.passed:
         _append_own_process_record(report)
-
-
