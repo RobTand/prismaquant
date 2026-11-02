@@ -29,7 +29,16 @@ def budget_run(tmp_path, xml, *, base=None, pytest_code=0):
     plan = {'selected': [{'path': 'tests/test_sample.py'}], 'deselect': [], 'base_sha': base}
     def execute(command, **kwargs):
         report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
-        report.write_text(xml)
+        if '::' in command[-1]:
+            tree = ET.fromstring(xml)
+            target = command[-1].removeprefix(str(tmp_path) + '/')
+            for suite in tree.iter('testsuite'):
+                for item in list(suite.findall('testcase')):
+                    if runner.gate_junit_identity(item)[1] != target:
+                        suite.remove(item)
+            report.write_text(ET.tostring(tree, encoding='unicode'))
+        else:
+            report.write_text(xml)
         return SimpleNamespace(returncode=pytest_code)
     code = runner.run_plan(plan, root=tmp_path, output=tmp_path / 'result.json',
                            junit=tmp_path / 'junit.xml', execute=execute, affinity={1})
@@ -419,7 +428,7 @@ def test_split_file_node_budget_rerun_uses_node_collection_coverage(tmp_path):
 
 
 @pytest.mark.parametrize('scoped', [False, True])
-def test_real_split_node_rerun_keeps_target_and_collection_evidence(tmp_path, scoped):
+def test_real_split_node_rerun_keeps_target_and_collection_evidence(tmp_path, scoped, record_property):
     policy(tmp_path)
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'pytest.ini').write_text('[pytest]\nmarkers = own_cgroup\n')
@@ -462,6 +471,9 @@ def test_real_split_node_rerun_keeps_target_and_collection_evidence(tmp_path, sc
     assert nested['verdict'] == 'pass'
     assert nested['collection']['collected'] == [node]
     assert nested['collection']['seen'] == []
+    record_property('budget_rerun_evidence', json.dumps({
+        **result['budget_reruns'][0], 'scoped': scoped,
+        'nested_verdict': nested['verdict'], 'collection': nested['collection']}))
     assert [runner.gate_junit_identity(item)[1] for item in
             ET.parse(tmp_path / 'junit.budget-rerun-0.xml').iter('testcase')] == [node]
     assert result['node_coverage']['executed'] == [node]
