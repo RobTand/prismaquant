@@ -20,7 +20,6 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import DIRECT_ASCII_LAX
-from tools.ci.gate_partition import DEDICATED_NODEIDS
 
 
 PATH_SPEC = importlib.util.spec_from_file_location('gate_paths', Path(__file__).with_name('gate_paths.py'))
@@ -28,6 +27,7 @@ gate_paths = importlib.util.module_from_spec(PATH_SPEC)
 PATH_SPEC.loader.exec_module(gate_paths)
 
 POLICY = 'specific-references-runtime-data-full-v5'
+DEDICATED_NODEIDS = frozenset({'tests/test_graph_impact.py::test_graph_impact_gate'})
 
 
 def load_gate_json(path: Path) -> dict:

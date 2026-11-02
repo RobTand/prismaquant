@@ -166,6 +166,10 @@ def test_graph_check_is_a_required_parallel_job_with_full_history():
     assert job['outputs']['verdict'] == '${{ steps.check.outputs.verdict }}'
     for name in ('pr-gate', 'gate'):
         assert 'graph-impact' in jobs[name]['needs']
+    for name in ('plan', 'shards', 'retry-shards'):
+        command = next(step['run'] for step in jobs[name]['steps']
+                       if 'gate_partition.py' in step.get('run', ''))
+        assert '--plan gate-artifacts/plan.json' in command
 
 
 @pytest.mark.parametrize('result,verdict,passes', [

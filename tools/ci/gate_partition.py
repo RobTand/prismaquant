@@ -14,9 +14,6 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import text_sha256hex
 
-DEDICATED_NODEIDS = frozenset({'tests/test_graph_impact.py::test_graph_impact_gate'})
-
-
 def _cost(value: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
         raise ValueError('durations must be finite nonnegative numbers, not booleans')
@@ -39,7 +36,7 @@ def node_owner(nodeid: str, partition: dict) -> int:
 
 def assigned_nodes(collected: Mapping[str, Sequence[str]], partition: dict,
                    excluded: Sequence[str] = ()) -> list[str]:
-    excluded = set(excluded) | DEDICATED_NODEIDS
+    excluded = set(excluded)
     return sorted(node for nodes in collected.values() for node in nodes
                   if node not in excluded and node_owner(node, partition) == partition['index'])
 
@@ -61,7 +58,7 @@ def validate_node_partition(partition: dict, files: Sequence[str]) -> None:
 
 def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
            *, unknown_seconds: float, node_durations: Mapping[str, float] | None = None,
-           runner_factors: Sequence[float] | None = None) -> list[dict]:
+           runner_factors: Sequence[float] | None = None, excluded: Sequence[str] = ()) -> list[dict]:
     """Pack longest units first; split files larger than total/count by live node ID.
 
     Every shard collects split files. Recorded nodes use LPT placement and new
@@ -81,7 +78,8 @@ def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
     nodes = {} if node_durations is None else {node: _cost(value) for node, value in node_durations.items()}
     if any(not isinstance(node, str) or '::' not in node for node in nodes):
         raise ValueError('node durations must name exact pytest node IDs')
-    for node in DEDICATED_NODEIDS:
+    excluded = set(excluded)
+    for node in excluded:
         path = node.split('::', 1)[0]
         if node in nodes and path in costs:
             costs[path] = max(0.0, costs[path] - nodes[node])
@@ -125,14 +123,15 @@ def shards(files: Sequence[str], durations: Mapping[str, float], count: int,
 
 def selection_shard_count(files: Sequence[str], durations: Mapping[str, float], maximum: int,
                           *, workers: int, single_shard_seconds: float,
-                          node_durations: Mapping[str, float] | None = None) -> int:
+                          node_durations: Mapping[str, float] | None = None, excluded: Sequence[str] = ()) -> int:
     """Keep small PRs on one slot; larger selections share the full gate matrix."""
     unknown = default_unknown_seconds(durations)
     # Reuse partition validation so an unknown file or invalid cost cannot be free.
-    packed = shards(files, durations, workers, unknown_seconds=unknown, node_durations=node_durations)
+    packed = shards(files, durations, workers, unknown_seconds=unknown, node_durations=node_durations,
+                    excluded=excluded)
     wall = max(row['estimated_seconds'] for row in packed)
     node_counts = Counter(node.split('::', 1)[0] for node in (node_durations or {})
-                          if node not in DEDICATED_NODEIDS)
+                          if node not in set(excluded))
     useful = sum(max(1, node_counts[path]) for path in files if durations.get(path, unknown) > 0)
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ValueError('workers must be a positive integer')
@@ -146,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--files-from', type=Path, required=True)
     common.add_argument('--durations', type=Path, required=True)
+    common.add_argument('--plan', type=Path, help='exact node exclusions from the gate plan')
     common.add_argument('--shards', type=int, required=True)
     common.add_argument('--unknown-seconds', type=float)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -165,6 +165,9 @@ def main(argv: list[str] | None = None) -> int:
         files = [line.strip() for line in args.files_from.read_text().splitlines() if line.strip()]
         if any(PurePosixPath(path).is_absolute() or '..' in PurePosixPath(path).parts for path in files):
             raise ValueError('files must be repository-relative paths without traversal')
+        excluded = json.loads(args.plan.read_text()).get('deselect', []) if args.plan else []
+        if not isinstance(excluded, list) or any(not isinstance(node, str) for node in excluded):
+            raise ValueError('plan exclusions must be a list of node IDs')
         recorded = json.loads(args.durations.read_text())
         durations = recorded['files']
         if not isinstance(durations, dict):
@@ -173,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == 'matrix' and args.single_shard_seconds is not None:
             args.shards = selection_shard_count(files, durations, args.shards, workers=args.workers,
                                                 single_shard_seconds=args.single_shard_seconds,
-                                                node_durations=recorded.get('nodes'))
+                                                node_durations=recorded.get('nodes'), excluded=excluded)
         if args.command == 'matrix':
             runners = [name.strip() for name in args.runners.split(',')]
             if not all(runners):
@@ -187,7 +190,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError('matrix shard count does not match requested count')
             factors = matrix.get('runner_cost_factors')
         result = shards(files, durations, args.shards, unknown_seconds=unknown,
-                        node_durations=recorded.get('nodes'), runner_factors=factors)
+                        node_durations=recorded.get('nodes'), runner_factors=factors, excluded=excluded)
         if args.command == 'matrix':
             output = {'schema': 'prismaquant.gate_matrix.v1', 'shards': args.shards, 'runner_cost_factors': factors,
                       'total_estimated_seconds': sum(row['estimated_seconds'] for row in result),
