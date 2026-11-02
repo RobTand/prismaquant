@@ -247,11 +247,14 @@ class Scorer:
         if not cuts:
             return self.baseline
         removed = {(s, t) for s, t, kind in cuts if kind == 'import'
-                   and t in self.selection.edges.get(s, ()) and t not in self.selection.launches.get(s, ())}
+                   and t in self.selection.edges.get(s, ()) and t not in self.selection.launches.get(s, ())
+                   and self.bits[self.owner[t]]}
         data_cuts = defaultdict(set)
         for source, target, kind in cuts:
-            if kind == 'data' and source in self.owner:
+            if kind == 'data' and source in self.owner and self.changed[target]:
                 data_cuts[source].add(target)
+        if not removed and not data_cuts:
+            return self.baseline
         internal = {self.owner[s] for s, t in removed if self.owner[s] == self.owner[t]}
         for component in internal:
             nodes = self.components[component]
@@ -304,6 +307,7 @@ def rank(selection, replay, weights, candidates, config, limit=20):
     scorer = Scorer(selection, replay, weights, config)
     cuts, result = set(), []
     remaining = list(candidates)
+    edge_effort = {c.edges[0]: c.effort_lines for c in candidates if len(c.edges) == 1}
     current = scorer.cost()
     # An upper bound on later marginal gains is NOT safe across SCC cuts.
     # Every candidate is therefore rescored after every pick.
@@ -318,19 +322,26 @@ def rank(selection, replay, weights, candidates, config, limit=20):
             after = scorer.cost(new)
             gain = current - after
             largest_gain = max(largest_gain, gain)
-            effort = max(1, candidate.effort_lines)
+            already = set(candidate.edges) & cuts
+            effort = max(1, math.ceil(candidate.effort_lines - sum(
+                edge_effort.get(e, candidate.effort_lines / len(candidate.edges)) for e in already)))
             key = (gain / effort, gain, -effort, candidate.edges)
             if gain > 1e-9 and (best is None or key > best[0]):
-                best = key, candidate, after
+                best = key, candidate, after, effort
         if best is None:
             break
-        _, candidate, after = best
+        _, candidate, after, effort = best
         if iteration == 0:
             initial_best = largest_gain
-        result.append({**asdict(candidate), 'edges': [list(e) for e in candidate.edges],
+        applied = set(candidate.edges) - cuts
+        pairs = {(s, t) for s, t, _ in applied}
+        symbols = [info for info in candidate.symbols
+                   if tuple(info.get('bazel_edge', [info['source'], info['target']])) in pairs]
+        result.append({**asdict(candidate), 'edges': [list(e) for e in sorted(applied)],
+                       'effort_lines': effort, 'symbols': symbols,
                        'delta_seconds': current - after,
                        'delta_fraction': (current - after) / current if current else 0,
-                       'seconds_per_line': (current - after) / max(1, candidate.effort_lines),
+                       'seconds_per_line': (current - after) / effort,
                        'remaining_seconds': after, 'best_initial_delta_seconds': initial_best})
         cuts.update(candidate.edges)
         remaining.remove(candidate)
