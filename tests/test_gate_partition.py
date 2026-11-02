@@ -85,10 +85,31 @@ def test_dedicated_graph_check_has_no_shard_owner_or_cost():
     live = path + '::test_graph_impact_gate'
     unit = path + '::test_vendored_core_hash'
     rows = partition.shards([path], {path: 175}, 2, unknown_seconds=1,
-                            node_durations={live: 170, unit: 5})
+                            node_durations={live: 170, unit: 5}, excluded=[live])
     assert sum(row['estimated_seconds'] for row in rows) == 5
     assert all(live not in row.get('node_partition', {}).get('owners', {}).get(path, {})
                for row in rows)
     collected = {path: [live, unit]}
-    assigned = [node for row in rows for node in partition.assigned_nodes(collected, row['node_partition'])]
+    assigned = [node for row in rows for node in partition.assigned_nodes(collected, row['node_partition'], [live])]
     assert assigned == [unit]
+
+
+def test_matrix_and_shard_use_plan_exclusions_consistently(tmp_path):
+    import json
+    path = 'tests/test_graph_impact.py'
+    live, unit = path + '::test_graph_impact_gate', path + '::test_vendored_core_hash'
+    population = tmp_path / 'files.txt'; population.write_text(path + '\n')
+    durations = tmp_path / 'costs.json'
+    durations.write_text(json.dumps({'files': {path: 175}, 'nodes': {live: 170, unit: 5}}))
+    plan = tmp_path / 'plan.json'; plan.write_text(json.dumps({'deselect': [live]}))
+    common = ['--files-from', str(population), '--durations', str(durations), '--shards', '2',
+              '--plan', str(plan)]
+    matrix = tmp_path / 'matrix.json'
+    assert partition.main(['matrix', *common, '--runners', 'ubuntu-24.04', '--output', str(matrix)]) == 0
+    assert json.loads(matrix.read_text())['total_estimated_seconds'] == 5
+    for index in range(2):
+        output = tmp_path / f'assignment-{index}.json'
+        assert partition.main(['shard', *common, '--matrix', str(matrix), '--index', str(index),
+            '--output-files', str(tmp_path / 'assigned.txt'), '--output-assignment', str(output)]) == 0
+        row = json.loads(output.read_text())
+        assert live not in row.get('node_partition', {}).get('owners', {}).get(path, {})
