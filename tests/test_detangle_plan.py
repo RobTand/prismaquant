@@ -143,6 +143,7 @@ def test_incremental_scorer_handles_data_in_cycles_and_duplicate_launch_edges():
     assert scorer.cost({('a', 'x', 'data')}) == 10
     assert scorer.cost({('a', 'x', 'data'), ('b', 'y', 'data')}) == 0
     assert scorer.cost({('a', 'b', 'import')}) == 10
+    assert scorer.cost({('a', 'b', 'import'), ('a', 'x', 'data')}) == 0
 
 
 def test_incremental_scores_match_direct_replay_after_each_greedy_pick():

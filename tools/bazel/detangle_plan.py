@@ -184,7 +184,7 @@ class Scorer:
     for the many edges whose removal changes no selected tests.
     """
 
-    def __init__(self, selection, replay, weights, config):
+    def __init__(self, selection, replay, weights, config, *, _node_seed=None):
         self.selection, self.replay, self.weights, self.config = selection, replay, weights, config
         self.n = len(replay)
         if not self.n:
@@ -207,11 +207,17 @@ class Scorer:
         self.deps = [set() for _ in range(count)]
         self.origins = defaultdict(set)
         self.seed = [0] * count
+        self.node_seed = {}
         for node in nodes:
             i = self.owner[node]
-            self.seed[i] |= self.changed[node]
-            for path in selection.data.get(node, ()):
-                self.seed[i] |= self.changed[path]
+            if _node_seed is None:
+                seed = self.changed[node]
+                for path in selection.data.get(node, ()):
+                    seed |= self.changed[path]
+            else:
+                seed = _node_seed[node]
+            self.node_seed[node] = seed
+            self.seed[i] |= seed
             for target in self.edges.get(node, ()):
                 j = self.owner[target]
                 if i != j:
@@ -261,7 +267,14 @@ class Scorer:
             node_set = set(nodes)
             subgraph = {s: {t for t in self.edges.get(s, ()) if t in node_set and (s, t) not in removed} for s in nodes}
             if len(strongly_connected(nodes, subgraph)) > 1:
-                return Scorer(self.selection.without(cuts), self.replay, self.weights, self.config).baseline
+                seeds = dict(self.node_seed) if data_cuts else self.node_seed
+                for source, removed_data in data_cuts.items():
+                    seed = self.changed[source]
+                    for path in self.selection.data.get(source, set()) - removed_data:
+                        seed |= self.changed[path]
+                    seeds[source] = seed
+                return Scorer(self.selection.without(cuts), self.replay, self.weights, self.config,
+                              _node_seed=seeds).baseline
         changed_deps, changed_seed = {}, {}
         pairs = {(self.owner[s], self.owner[t]) for s, t in removed if self.owner[s] != self.owner[t]}
         for source, target in pairs:
@@ -273,9 +286,12 @@ class Scorer:
                 continue
             bits = 0
             for node in self.components[component]:
-                bits |= self.changed[node]
-                for path in self.selection.data.get(node, set()) - data_cuts.get(node, set()):
-                    bits |= self.changed[path]
+                if node not in data_cuts:
+                    bits |= self.node_seed[node]
+                else:
+                    bits |= self.changed[node]
+                    for path in self.selection.data.get(node, set()) - data_cuts[node]:
+                        bits |= self.changed[path]
             changed_seed[component] = bits
         updates = {}
         pending = deque(changed_deps.keys() | changed_seed.keys())

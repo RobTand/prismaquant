@@ -186,7 +186,7 @@ def adapt(root, files=None):
             # its own. Only offer exact literal evidence.
             if not matching:
                 continue
-            info = {'source': source, 'target': target, 'symbols': sorted({n.value for n in matching}),
+            info = {'source': source, 'target': target, 'symbols': sorted({target if target in n.value else n.value for n in matching}),
                     'literal_lines': sorted({n.lineno for n in matching})}
             candidates.append(Candidate('drop this path literal', ((source, target, 'data'),),
                                         len(info['literal_lines']) + 1, (info,)))
