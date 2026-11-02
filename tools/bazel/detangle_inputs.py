@@ -98,23 +98,32 @@ def add_gate_inputs(selection, executed, root, files, lock_text):
     wheels, metadata = wheel_graph(root, files, lock_text)
     edges = {source: set(targets) | wheels.get(source, set()) for source, targets in selection.edges.items()}
     for source, targets in wheels.items(): edges.setdefault(source, set()).update(targets)
-    extras = {t: set(selection.extras.get(t, ())) for t in selection.tests}
-    # pytest.ini is the root pytest config. pyproject.toml is read by the
-    # editable installation in every gate shard. Both affect all test files.
     locked = packages(lock_text)
-    for test in extras:
-        extras[test].update(('pytest.ini', 'pyproject.toml'))
-        for name in ('pytest', 'pytest-cov', 'pytest-timeout', 'pytest-xdist'):
-            if wheel_name(name) in locked: extras[test].add('wheel:' + name)
+    gate_inputs = {'pytest.ini', 'pyproject.toml'}
+    if (Path(root) / '.github/ci-constraints.txt').exists():
+        gate_inputs.add('.github/ci-constraints.txt')
+    for name in ('pytest', 'pytest-cov', 'pytest-timeout', 'pytest-xdist'):
+        if wheel_name(name) in locked:
+            gate_inputs.add('wheel:' + name)
+    # pytest.ini configures every invocation. The gate's editable install reads
+    # pyproject.toml and its constraints in every shard.
+    extras = {t: set(selection.extras.get(t, ())) | gate_inputs for t in selection.tests}
     observed = {}
     for test, paths in executed.items():
-        seen = set(paths) | extras[test]
+        seen = set(paths) | gate_inputs
+        visited = set()
         pending = [target for source in paths for target in wheels.get(source, ())]
-        pending.extend(p for p in extras[test] if p.startswith('wheel:'))
+        pending.extend(p for p in gate_inputs if p.startswith('wheel:'))
         while pending:
             node = pending.pop()
-            if node in seen and node not in extras[test]: continue
+            if node in visited:
+                continue
+            visited.add(node)
             seen.add(node)
-            pending.extend(child for child in wheels.get(node, ()) if child not in seen)
+            pending.extend(wheels.get(node, ()))
         observed[test] = seen
+    metadata['gate_input_consumers'] = {
+        'pytest.ini': 'every pytest invocation',
+        'pyproject.toml': 'editable install in every gate shard',
+        '.github/ci-constraints.txt': 'pip constraint input in every gate shard'}
     return Selection(edges, selection.roots, selection.data, extras, selection.launches), observed, metadata
