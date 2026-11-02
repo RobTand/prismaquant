@@ -26,6 +26,7 @@ import types
 
 import torch
 
+from nvfp4_served_qdq_fixtures import cpu_positive_table
 from prismaquant import nvfp4_activation_contract as owner
 
 
@@ -161,6 +162,7 @@ def _cpu_dequant_kernels(monkeypatch):
     ``tests/test_nvfp4_served_dequant_kernel.py``.
     """
     group = owner.FP4_GROUP_SIZE
+    monkeypatch.setattr(owner, "_e2m1_positive_table", cpu_positive_table)
     monkeypatch.setattr(owner, "_served_dequant_kernels", lambda: types.SimpleNamespace(
         group_abs_max=lambda rows: rows.float().reshape(
             rows.shape[0], -1, group).abs().amax(-1),
