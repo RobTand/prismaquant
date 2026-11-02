@@ -343,7 +343,10 @@ def test_budget_only_rerun_verdicts(tmp_path, monkeypatch, first_seconds, first_
         return
     assert len(calls) == 2
     assert result['verdict'] == {'pass': 'pass', 'fail': 'fail', 'no_verdict': None}[outcome]
-    assert result['budget_reruns'] == [{
+    rerun_record = dict(result['budget_reruns'][0])
+    if outcome == 'no_verdict':
+        assert rerun_record.pop('infrastructure_reason')
+    assert [rerun_record] == [{
         'nodeid': 'tests/test_sample.py::test_cost', 'first_seconds': 31.0,
         'rerun_seconds': again_seconds, 'limit': 30.0, 'outcome': outcome}]
     command, environment = calls[1]
