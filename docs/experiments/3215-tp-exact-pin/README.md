@@ -52,10 +52,11 @@ next native E2 R896 query to retain the original list.
 - After profile and full-case comparison, source commit
   `5bd2e0e0d5668a546cc8b4da7a043d25a3d185ad`:
   https://app.buildbuddy.io/invocation/0df60c50-a361-440b-ae9b-a43abbf090c1
-  The cold step passed all 16 cases in 59.68 seconds. The invocation's
-  `timing.json` records every phase and sampled stack. Its terminal verdict,
-  `equivalence-summary.json`, and `related.xml.gz` carry the complete-case
-  comparison and related-test outcomes separately from the cold step.
+  Terminal OK, 15 CAS artifacts verified. Cold: 16 passed in 59.68 seconds,
+  59.645 JUnit seconds. Full-case equivalence: all 14 original cases,
+  65 recorded assertion operands and 5,187 evaluations identical. Related
+  runtime-snapshot, admission, contract, lane and loader-axis tests: 88 passed
+  in 25.373 seconds, zero skips, failures or errors.
 
 The before and red artifact receipts and baseline profile summary are retained
 beside this document. Receipt validation checks each CAS SHA-256 and byte size
