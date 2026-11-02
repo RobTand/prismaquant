@@ -16,13 +16,14 @@ SCANNER = ROOT / 'tools/ci/check_no_secret_leak.py'
 SECRET = 'fake-token/+ with?punctuation=42'
 
 
-def scan(*paths, variables=('SCAN_FAKE_SECRET',), values=None):
+def scan(*paths, variables=('SCAN_FAKE_SECRET',), required=(), values=None):
     # Never inherit credentials from the pytest worker.
     env = {'PATH': os.defpath, 'SCAN_FAKE_SECRET': SECRET}
     env.update(values or {})
     return subprocess.run(
         [sys.executable, str(SCANNER),
          *(argument for name in variables for argument in ('--env', name)),
+         *(argument for name in required for argument in ('--require', name)),
          *(str(path) for path in paths)],
         env=env, capture_output=True, text=True, check=False,
     )
@@ -75,6 +76,40 @@ def test_missing_path_is_infrastructure_failure(tmp_path):
     result = scan(tmp_path / 'missing')
     assert result.returncode == 75
     assert 'not scanned' in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('values,planted,expected', [
+    ({}, False, 75),
+    ({'REQUIRED_FAKE': ''}, False, 75),
+    ({'REQUIRED_FAKE': SECRET}, False, 0),
+    ({'REQUIRED_FAKE': SECRET}, True, 1),
+])
+@pytest.mark.parametrize('variables', [(), ('REQUIRED_FAKE', 'OPTIONAL_FAKE')])
+def test_required_secret_availability_and_detection(tmp_path, values, planted, expected, variables):
+    artifact = tmp_path / 'artifact'
+    artifact.write_text(SECRET if planted else 'clean')
+    result = scan(artifact, variables=variables, required=('REQUIRED_FAKE',), values=values)
+    output = result.stdout + result.stderr
+    assert SECRET not in output
+    assert result.returncode == expected, output
+    if expected == 75:
+        assert 'REQUIRED_FAKE: required but not available' in output
+        assert 'REQUIRED_FAKE: not available, not scanned' not in output
+    elif planted:
+        assert 'REQUIRED_FAKE: secret detected' in output
+    if 'OPTIONAL_FAKE' in variables:
+        assert 'OPTIONAL_FAKE: not available, not scanned' in output
+
+
+def test_repeated_requirements_and_missing_secret_override_detection(tmp_path):
+    artifact = tmp_path / 'artifact'
+    artifact.write_text(SECRET)
+    result = scan(artifact, variables=(), required=('SCAN_FAKE_SECRET', 'ABSENT_FAKE'))
+    output = result.stdout + result.stderr
+    assert SECRET not in output
+    assert result.returncode == 75, output
+    assert 'SCAN_FAKE_SECRET: secret detected' in output
+    assert 'ABSENT_FAKE: required but not available' in output
 
 
 def load_scanner():
@@ -163,6 +198,81 @@ def test_zstd_scanned_or_explicitly_unavailable(tmp_path):
         assert zstd.decompress(frame) == secret.encode()
         assert result.returncode == 1
     assert secret not in result.stdout + result.stderr
+
+
+def zstd_raw_frame(payload):
+    """Build a single-segment frame with one final raw block, without a decoder."""
+    assert len(payload) < 256
+    return (bytes.fromhex('28b52ffd20') + bytes([len(payload)])
+            + ((len(payload) << 3) | 1).to_bytes(3, 'little') + payload)
+
+
+def test_execution_log_zstd_with_stray_gzip_magic_is_clean(tmp_path):
+    # Synthetic length-delimited protobuf record, like a Bazel execution log.
+    # Its raw zstd block deliberately contains gzip magic with no gzip member.
+    record = b'\x0a\x0a/bin/clang\x12\x04\x1f\x8b\x00\xff'
+    frame = zstd_raw_frame(bytes([len(record)]) + record)
+    scanner = load_scanner()
+    if scanner.zstd is not None:
+        assert scanner.zstd.decompress(frame) == bytes([len(record)]) + record
+    artifact = tmp_path / 'execution_log.binpb.zst'
+    artifact.write_bytes(frame)
+    result = scan(artifact)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if scanner.zstd is None:
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+
+
+@pytest.mark.parametrize('planted', [False, True])
+def test_unknown_binary_magic_does_not_prevent_raw_scan(tmp_path, planted):
+    artifact = tmp_path / 'unknown.bin'
+    artifact.write_bytes(b'\x00binary\x1f\x8b\x00\xff\x28\xb5\x2f\xfd\xff'
+                         + (SECRET.encode() if planted else b'clean'))
+    result = scan(artifact)
+    assert result.returncode == (1 if planted else 0), result.stdout + result.stderr
+    assert SECRET not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('wrapper', ['plain', 'embedded', 'gzip', 'zstd'])
+def test_concatenated_zstd_frames_scan_compressed_secret(tmp_path, wrapper):
+    secret = 'Q' * 64
+    # RLE hides the planted value from the raw byte scan.
+    frames = zstd_raw_frame(b'clean\x1f\x8b\x00\xff') + bytes.fromhex('28b52ffd204003020051')
+    if wrapper == 'embedded':
+        frames = b'prefix\x00' + frames
+    elif wrapper == 'gzip':
+        frames = gzip.compress(frames)
+    elif wrapper == 'zstd':
+        frames = zstd_raw_frame(frames)
+    artifact = tmp_path / 'nested.zst'
+    artifact.write_bytes(frames)
+    result = scan(artifact, values={'SCAN_FAKE_SECRET': secret})
+    if load_scanner().zstd is None:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+    assert secret not in result.stdout + result.stderr
+
+
+def test_corrupt_concatenated_gzip_is_not_silently_passed(tmp_path):
+    artifact = tmp_path / 'broken-concatenated.gz'
+    artifact.write_bytes(gzip.compress(b'clean') + b'\x1f\x8b\x08broken')
+    result = scan(artifact)
+    assert result.returncode == 75
+    assert 'gzip member unreadable, not scanned' in result.stdout
+
+
+def test_corrupt_zstd_is_not_silently_passed_when_supported(tmp_path):
+    artifact = tmp_path / 'broken.zst'
+    artifact.write_bytes(bytes.fromhex('28b52ffdff'))
+    result = scan(artifact)
+    if load_scanner().zstd is None:
+        assert result.returncode == 0
+        assert 'zstd: not scanned (compression.zstd unavailable)' in result.stdout
+    else:
+        assert result.returncode == 75
+        assert 'zstd member unreadable, not scanned' in result.stdout
 
 
 def test_portable_core_matches_cross_repo_pin():

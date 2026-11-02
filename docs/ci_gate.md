@@ -10,6 +10,20 @@ the full population even when a test names a same-named temporary fixture.
 Wildcard-only path references explain nothing.
 Documentation changes can select no tests. The plan records every selected file and reason.
 
+Artifact uploads and their scans run only for same-repository PRs or events other
+than `pull_request`. Every upload requires a successful preceding scan with
+`--require BUILDBUDDY_API_KEY --require MERGIFY_TOKEN`, using step-scoped secrets.
+An unset or empty required secret fails the scan with exit 75 and blocks upload.
+`ci.yml` currently has no artifact uploads.
+
+Fork PRs log `artifact uploads skipped: fork PR has no secrets to scan for` and
+skip scans and uploads. They cannot produce a gate verdict: shard assignment,
+retry planning, and the final coverage check require the uploaded plan and shard
+verdicts with JUnit evidence. Fork shard and retry jobs are skipped; `pr-gate`
+reports `NO_VERDICT` with exit 75 before any artifact download. A same-repository
+branch is required for this gate to verify a contribution. Import and boundary
+checks in `ci.yml` still run for forks.
+
 A same-repository Mergify batch draft runs `gate` on its integrated head SHA.
 Its branch starts `mergify/merge-queue/`, and its author must be `mergify[bot]`
 with numeric ID 37929162. A same-repository PR with `gate-canary` also runs the
