@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import mmap
 import os
 import threading
 import time
@@ -70,6 +71,30 @@ def _quiet(stream, timeout=30.0):
             assert remaining > 0, "the stream never went quiet"
             stream._cond.wait(remaining)
         return stream._held_actual, stream.counters["entries_read"]
+
+
+def test_write_sealed_buffer_exposes_readonly_mapped_bytes():
+    payload = b"pq-write-sealed-view" + bytes(range(256))
+    buffer = io_engine.SealedBuffer(len(payload))
+    try:
+        buffer.fill_bytes(payload)
+        assert buffer.seal() == hashlib.sha256(payload).hexdigest()
+        buffer.require_sealed()
+        with buffer.readonly() as view:
+            assert isinstance(view, mmap.mmap)
+            with memoryview(view) as mapped:
+                assert mapped.readonly
+                assert mapped == payload
+                with pytest.raises(TypeError):
+                    mapped[0] = 0
+            assert view.read(2) == payload[:2]
+            assert view.seek(0) == 0
+            # The mapping owns its pages after the buffer drops its descriptor.
+            buffer.close()
+            assert view.read() == payload
+        assert view.closed
+    finally:
+        buffer.close()
 
 
 def test_groups_arrive_whole_in_order_verified_and_decoded(tmp_path):
