@@ -130,14 +130,13 @@ def test_finish_cli_exports_only_effective_results(tmp_path):
     assert json.loads((tmp_path / 'effective/1/result.json').read_text())['files'] == ['b.py']
 
 
-def test_budget_failure_after_pytest_success_is_final_and_never_retried():
+def test_budget_warnings_survive_aggregation_without_retry():
+    warnings = [{'nodeid': 'a.py::test_slow', 'seconds': 120, 'budget_seconds': 20}]
     result = actions.assess_attempts(PLAN, ASSIGNMENTS, {
-        1: {0: record('a.py', 'fail', pytest_exit_code=0,
-                      budget={'status': 'fail', 'reason': 'Per-test time budget exceeded'}),
-            1: record('b.py')}, 2: {0: record('a.py')}})
-    assert result['exit_code'] == 1
-    assert result['retry_indices'] == [] and result['failed_indices'] == [0]
-    assert result['effective_attempts'][0] == 1
+        1: {0: record('a.py', budget_warnings=warnings), 1: record('b.py')}})
+    assert result['exit_code'] == 0
+    assert result['budget_warnings'] == warnings
+    assert result['retry_indices'] == [] and result['failed_indices'] == []
 
 
 def test_policy_failure_before_pytest_is_final_and_never_retried():

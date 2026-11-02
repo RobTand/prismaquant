@@ -93,7 +93,7 @@ def test_live_collection_runs_each_node_once_after_duration_inventory_changes(tm
     assert actions.assess_attempts(plan, rows, {1: records})['exit_code'] == 75
 
 
-def test_shared_file_budget_is_enforced_across_split_shards():
+def test_shared_file_budget_warns_across_split_shards():
     rows = assignments()
     plan = {'mode': 'full', 'head_sha': 'head', 'base_sha': None, 'population': {'version': 'population'},
             'selected': [{'path': FILE}, {'path': 'tests/test_light.py'}], 'deselect': []}
@@ -110,8 +110,9 @@ def test_shared_file_budget_is_enforced_across_split_shards():
             'budget': {'status': 'pass', 'enforced': True, 'file_limits': {FILE: 100},
                        'file_totals': {FILE: 60}}}
     result = actions.assess_attempts(plan, rows, {1: records})
-    assert result['exit_code'] == 1
-    assert result['file_budget_overruns'] == [{'file': FILE, 'seconds': 180, 'budget_seconds': 100}]
+    assert result['exit_code'] == 0
+    assert result['retry_indices'] == []
+    assert result['budget_warnings'] == [{'nodeid': FILE, 'seconds': 180, 'budget_seconds': 100}]
 
 
 def test_new_nodes_without_any_recorded_node_cost_still_have_one_owner():
