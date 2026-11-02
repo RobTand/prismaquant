@@ -424,3 +424,65 @@ def test_native_blame_for_cycle_without_new_reach(tmp_path):
     explained = []
     assert impact.check(before, after, path, explain=lambda test: explained.append(test)) == 1
     assert explained == ['test']
+
+
+def test_package_max_allows_new_test_in_a_hub_package():
+    before = impact.measure({'//small:t': {'a'}, '//hub:old': {'a', 'b'}},
+                            {('//small:t', 'a'), ('//hub:old', 'a'), ('//hub:old', 'b')}, {'a': 1, 'b': 1})
+    after = impact.measure({**{t: set(r) for t, r in before['reach'].items()}, '//hub:new': {'a', 'b'}},
+                           set(map(tuple, before['edges'])) | {('//hub:new', 'a'), ('//hub:new', 'b')}, before['loc'])
+    assert not impact.compare(before, after, baseline(before, reach_budget=1))
+
+
+def test_new_package_uses_global_budget_and_names_extra_sources():
+    before = impact.measure({'//old:t': {'a'}}, {('//old:t', 'a')}, {'a': 1, 'b': 1})
+    after = impact.measure({'//old:t': {'a'}, '//new:t': {'a', 'b'}},
+                           {('//old:t', 'a'), ('//new:t', 'a'), ('a', 'b')}, before['loc'])
+    errors = impact.compare(before, after, baseline(before, reach_budget=1))
+    assert any('//new:t reach 2 exceeds budget 1' in e and 'extra sources:' in e and 'b' in e for e in errors)
+
+
+def test_new_hub_sources_are_reported_without_uniform_failure():
+    before = impact.measure({'//hub:t': {'//hub:a'}, '//other:t': {'//other:b'}},
+                            {('//hub:t', '//hub:a'), ('//other:t', '//other:b')},
+                            {'//hub:a': 1, '//other:b': 1})
+    sources = {'//hub:a', '//hub:new1', '//hub:new2', '//hub:new3'}
+    after = impact.measure({'//hub:t': sources, '//other:t': {'//other:b'}},
+                           {('//hub:t', p) for p in sources} | {('//other:t', '//other:b')},
+                           {p: 1 for p in sources | {'//other:b'}})
+    assert not impact.compare(before, after, baseline(before), changed_tests={'//hub:t'})
+    assert '3 new sources inherit //hub fan-out 50%' in impact.summary(before, after, 1)
+
+
+def test_new_tests_do_not_count_as_existing_source_fanout_growth():
+    before = measure({'pkg/old': {'pkg/a'}}, {('pkg/old', 'pkg/a')}, {'pkg/a': 1})
+    after = measure({'pkg/old': {'pkg/a'}, 'pkg/new': {'pkg/a'}},
+                    {('pkg/old', 'pkg/a'), ('pkg/new', 'pkg/a')}, {'pkg/a': 1})
+    assert not impact.compare(before, after, baseline(before))
+
+
+def test_real_existing_source_expansion_names_added_edges():
+    before = measure({'pkg/t': {'pkg/a'}}, {('pkg/t', 'pkg/a')}, {'pkg/a': 1, 'other/b': 1})
+    after = measure({'pkg/t': {'pkg/a', 'other/b'}}, {('pkg/t', 'pkg/a'), ('pkg/a', 'other/b')}, before['loc'])
+    errors = impact.compare(before, after, baseline(before))
+    assert any('existing source fanout grew' in e and 'pkg/a -> other/b' in e for e in errors)
+    assert any('existing test reach grew' in e and 'pkg/a -> other/b' in e for e in errors)
+    assert not any('u_pct rose' in e for e in errors)
+
+
+def test_uniform_figures_never_fail_and_writer_keeps_the_minimum():
+    before = measure({'test': {'a'}}, loc={'a': 1, 'b': 1})
+    after = measure({'test': {'a', 'b'}}, loc={'a': 1, 'b': 1})
+    record = baseline(before)
+    assert not impact.regressions(after, record)
+    assert impact.baseline_record(after, record)['figures']['u_pct'] == before['u_pct']
+    assert not any('u_pct fell' in e for e in impact.stale_entries(before, baseline(after)))
+
+
+def test_package_mapping_overrides_label_inference():
+    before = impact.measure({'old_binary': {'a', 'b'}}, {('old_binary', 'a'), ('old_binary', 'b')},
+                            {'a': 1, 'b': 1}, package={'old_binary': 'controller'})
+    after = impact.measure({'old_binary': {'a', 'b'}, 'new_binary': {'a', 'b'}},
+                           {('old_binary', 'a'), ('old_binary', 'b'), ('new_binary', 'a'), ('new_binary', 'b')},
+                           before['loc'], package={'old_binary': 'controller', 'new_binary': 'controller'})
+    assert not impact.compare(before, after, baseline(before, reach_budget=1))
