@@ -110,6 +110,23 @@ jobs:
           persist-credentials: false
           path: .ci/tessera
 
+      - name: Resolve PrismaBuild source pin
+        id: prismabuild-pin
+        run: |
+          printf 'commit=%s\n' "$(python tools/resolve_prismabuild_dev_pin.py)" >> "$GITHUB_OUTPUT"
+      - name: Check out pinned PrismaBuild source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: RobTand/prismabuild
+          ref: ${{ steps.prismabuild-pin.outputs.commit }}
+          persist-credentials: false
+          path: .ci/prismabuild
+      - name: Build sealed PrismaBuild test source bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
+          printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
       - name: Install pinned Tessera
         run: python -m pip install --no-deps .ci/tessera
 
