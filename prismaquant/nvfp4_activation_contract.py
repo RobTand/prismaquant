@@ -855,7 +855,7 @@ def load_activation_cache_samples(
 ) -> dict[str, torch.Tensor]:
     """Load only relevant input samples from the existing probe cache."""
 
-    from prismaquant.measure_quant_cost import ActivationIndex
+    from prismaquant.activation_index import ActivationIndex
 
     root = Path(cache_dir)
     if not root.is_dir():

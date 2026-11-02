@@ -5331,7 +5331,7 @@ def _main_impl(argv: Sequence[str] | None = None):
               "Linears. Raw activation cache will not drive body export.",
               flush=True)
     elif args.activation_cache_dir:
-        from .measure_quant_cost import ActivationIndex
+        from .activation_index import ActivationIndex
         cache_dir = Path(args.activation_cache_dir)
         if not cache_dir.exists():
             print(f"[export-stream] WARN activation cache dir {cache_dir} "

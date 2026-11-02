@@ -291,7 +291,7 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
         build_source_model_binding, build_streamed_model_identity,
         resolve_source_checkpoint_path, source_model_decode_contract,
     )
-    from prismaquant.measure_quant_cost import ActivationIndex
+    from prismaquant.activation_index import ActivationIndex
     from prismaquant.model_profiles import detect_profile
     from prismaquant.perturbed_x_cache import calibration_data_hash
     from prismaquant.calibration_data import load_calibration

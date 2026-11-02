@@ -23,8 +23,8 @@ import torch.nn as nn
 from prismaquant import format_registry as fr
 from prismaquant.model_profiles.base import load_complete_mtp_state_dict
 from prismaquant.schemas import refuse_retired_codebook_format
+from prismaquant.activation_index import ActivationIndex
 from prismaquant.measure_quant_cost import (
-    ActivationIndex,
     resolve_cost_target_name,
 )
 from prismaquant.production_weight_cache import (

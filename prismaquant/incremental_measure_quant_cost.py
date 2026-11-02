@@ -55,8 +55,8 @@ from .incremental_probe import (
     build_shard_schedule,
     load_num_hidden_layers,
 )
+from prismaquant.activation_index import ActivationIndex
 from prismaquant.measure_quant_cost import (
-    ActivationIndex,
     HDetailIndex,
     _accumulate_result,
     _expert_cost_sample_split,
