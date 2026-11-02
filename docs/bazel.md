@@ -254,3 +254,6 @@ Use `--population-from tests.txt` to hold the test-file population fixed when
 comparing overlays. New tests on an overlay are then excluded from both costs.
 Record that choice with the report. It avoids assigning invented coverage to
 new files that were not part of the baseline sweep.
+
+Replay requires full Git history. Fetch an initially shallow checkout with
+`git fetch --unshallow` before running the planner.

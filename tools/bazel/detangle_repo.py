@@ -86,7 +86,8 @@ def import_symbols(source, source_path, target_path):
     return {'source': source_path, 'target': target_path, 'symbols': sorted(names),
             'functions': sorted(f for f in functions if f != '<module>'),
             'module_uses': '<module>' in functions,
-            'has_module_import': module_import, 'import_lines': sorted(import_lines)}
+            'has_module_import': module_import, 'import_lines': sorted(import_lines),
+            'has_module_level_import': any(owners[n] == '<module>' for n, _ in imported)}
 
 
 def symbol_lines(tree, names):
@@ -102,6 +103,8 @@ def symbol_lines(tree, names):
                 for name in ast.walk(target):
                     if isinstance(name, ast.Name):
                         definitions[name.id] = node
+    if any(name in {'*', '*module*', '<loader or package side effect>'} for name in names):
+        return max((node.end_lineno for node in tree.body), default=0), sorted(definitions)
     pending, seen, lines = list(names), set(), set()
     while pending:
         name = pending.pop()
@@ -165,7 +168,7 @@ def adapt(root, files=None):
     for (source, target), info in edge_info.items():
         if target.endswith('/__init__.py'):
             kind = 'split this re-export hub'
-        elif len(info['functions']) == 1 and not info['module_uses']:
+        elif len(info['functions']) == 1 and not info['module_uses'] and info['has_module_level_import']:
             kind = 'make this import local to the one function'
         else:
             kind = 'move these symbols down'
