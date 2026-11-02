@@ -80,7 +80,7 @@ MODELS_ENDPOINT_BINDING_SCHEMA = (
 
 # Serving snapshots load this stdlib metadata without importing the package.
 _gold_producer_files = runpy.run_path(str(
-    Path(__file__).resolve().parents[1] / "prismaquant/gold_producer_files.py"))
+    Path(__file__).resolve().with_name("spec_decode_guard.py")))
 _GOLD_PRODUCER_COMMON_FILES = _gold_producer_files["_GOLD_PRODUCER_COMMON_FILES"]
 _GOLD_PRODUCER_TOOL_FILES = _gold_producer_files["_GOLD_PRODUCER_TOOL_FILES"]
 
