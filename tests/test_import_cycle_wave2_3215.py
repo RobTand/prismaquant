@@ -23,3 +23,7 @@ def test_mtp_skeleton_cannot_reach_loading_or_capture(graph, higher):
 
 def test_profiles_still_build_the_original_mtp_skeleton(graph):
     assert "prismaquant.glm_mtp" in graph["prismaquant.model_profiles.glm5_next"]
+
+
+def test_profile_walker_cannot_load_calibration_io(graph):
+    assert "prismaquant.calibration_data" not in _reach(graph, "prismaquant.model_walk")
