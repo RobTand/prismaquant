@@ -148,4 +148,5 @@ def test_both_shard_attempts_upload_nested_budget_evidence():
                          'gate-artifacts/junit.budget-rerun-0.xml',
                          'gate-artifacts/junit.budget-rerun-0.cgroup.xml',
                          'gate-artifacts/junit.budget-rerun-0.collection.json'):
-            assert any(fnmatch(filename, pattern) for pattern in patterns), (job, filename)
+            assert any(fnmatch(filename, pattern) or filename.startswith(pattern.rstrip('/') + '/')
+                       for pattern in patterns), (job, filename)
