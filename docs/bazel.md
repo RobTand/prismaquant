@@ -242,3 +242,10 @@ paths for the replay. Symbol cuts are projected only across single-source
 Python target boundaries. Multi-source targets appear in
 `metadata.coarse_python_targets`; their internal cuts require a target split
 before the planner can price them from a new Bazel graph.
+
+`--source-revision` identifies an exported overlay independently of
+`--revision`, which fixes the replay history. Coverage from another source
+revision makes the dynamic result provisional. `--cheap-lines` sets the
+per-candidate effort ceiling used for the estimate of accidental cost left
+after all cuts below that ceiling. The default is 100 lines. The JSON report
+also retains standalone SCC group scores, including groups outside the top 20.

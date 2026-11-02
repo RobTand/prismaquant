@@ -131,3 +131,34 @@ def test_bazel_adapter_keeps_rule_boundaries_and_repository_source_paths():
     assert selection.selected(['pkg/core.py']) == {'tests/test_x.py'}
     assert selection.without({('//tests:test_x', '//pkg:core', 'import')}).selected(['pkg/core.py']) == set()
     assert selection.selected(['tests/test_x.py']) == {'tests/test_x.py'}
+
+
+def test_incremental_scorer_handles_data_in_cycles_and_duplicate_launch_edges():
+    selection = plan.Selection(edges={'t': {'a'}, 'a': {'b'}, 'b': {'a'}}, roots={'t': {'t'}},
+                               launches={'t': {'a'}}, data={'a': {'x'}, 'b': {'y'}})
+    replay = [{'sha': 'x', 'changed': ['x']}, {'sha': 'y', 'changed': ['y']}]
+    scorer = plan.Scorer(selection, replay, {'t': 20}, plan.Config())
+    assert scorer.cost({('t', 'a', 'import')}) == 20
+    # Both files seed the SCC; deleting one data input preserves the other.
+    assert scorer.cost({('a', 'x', 'data')}) == 10
+    assert scorer.cost({('a', 'x', 'data'), ('b', 'y', 'data')}) == 0
+    assert scorer.cost({('a', 'b', 'import')}) == 10
+
+
+def test_incremental_scores_match_direct_replay_after_each_greedy_pick():
+    selection = plan.Selection(edges={'t': {'a', 'b'}, 'a': {'b', 'x'}, 'b': {'a', 'y'},
+                                      'x': set(), 'y': set()}, roots={'t': {'t'}})
+    replay = [{'sha': 'x', 'changed': ['x']}, {'sha': 'y', 'changed': ['y']},
+              {'sha': 'xy', 'changed': ['x', 'y']}, {'sha': 'lock', 'changed': ['uv.lock']}]
+    cuts = [('a', 'b', 'import'), ('b', 'a', 'import'), ('a', 'x', 'import'), ('b', 'y', 'import')]
+    for subset in range(1 << len(cuts)):
+        chosen = {edge for i, edge in enumerate(cuts) if subset & (1 << i)}
+        direct = plan.costs(selection.without(chosen).masks(), replay, {'t': 20}, plan.Config())
+        assert plan.Scorer(selection, replay, {'t': 20}, plan.Config()).cost(chosen) == direct['mean_seconds']
+
+
+def test_fallback_config_accepts_json_arrays():
+    config = plan.Config(fallback_prefixes=['build/'], fallback_suffixes=['.lock'])
+    assert config.fallback('build/anything')
+    assert config.fallback('deps/custom.lock')
+    assert not config.fallback('pkg/core.py')

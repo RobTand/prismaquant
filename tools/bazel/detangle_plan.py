@@ -455,7 +455,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path.cwd())
     parser.add_argument('--history-root', type=Path)
-    parser.add_argument('--revision', default='HEAD')
+    parser.add_argument('--revision', default='HEAD', help='First-parent replay revision')
+    parser.add_argument('--source-revision', help='Identity of an exported or overlaid source tree')
     parser.add_argument('--files-from', type=Path)
     parser.add_argument('--deps-json', type=Path, help='bazel-diff v42 dependency edges')
     parser.add_argument('--bazel-tests', type=Path, help='JSON mapping test files to non-manual Bazel labels')
@@ -468,11 +469,13 @@ def main(argv=None):
     parser.add_argument('--gate-timings', type=Path, help='JSON with fixed_overhead_seconds, gate_seconds, source')
     parser.add_argument('--merges', type=int, default=100)
     parser.add_argument('--limit', type=int, default=20)
+    parser.add_argument('--cheap-lines', type=int, default=100, help='Per-candidate effort ceiling for residual-cost classification')
     parser.add_argument('--out', type=Path, required=True, help='Output stem, without .json or .md')
     args = parser.parse_args(argv)
     config = Config(**json.loads(args.config.read_text())) if args.config else Config()
     history = args.history_root or args.root
     revision = subprocess.check_output(['git', 'rev-parse', args.revision], cwd=history, text=True).strip()
+    source_revision = args.source_revision or revision
     files = args.files_from.read_text().splitlines() if args.files_from else None
     if args.deps_json:
         if not args.bazel_tests or not args.source_labels:
@@ -489,6 +492,11 @@ def main(argv=None):
     dynamic = costs(dynamic_masks(executed, selection.tests), replay, weights, config)
     print(f'Ranking {len(candidates)} candidates over {len(selection.tests)} tests...', file=sys.stderr, flush=True)
     ranked = rank(selection, replay, weights, candidates, config, args.limit)
+    initial_scorer = Scorer(selection, replay, weights, config)
+    cycle_cuts = [{**asdict(c), 'delta_seconds': static['mean_seconds'] - initial_scorer.cost(set(c.edges))}
+                  for c in candidates if c.kind.startswith('SCC')]
+    cheap_edges = {edge for c in candidates if c.effort_lines <= args.cheap_lines for edge in c.edges}
+    after_cheap = initial_scorer.cost(cheap_edges)
     timing = json.loads(args.gate_timings.read_text()) if args.gate_timings else {}
     overhead = timing.get('fixed_overhead_seconds')
     longest = sum(max((weights[t] for i, t in enumerate(sorted(weights)) if row['mask'] & (1 << i)), default=0)
@@ -497,7 +505,7 @@ def main(argv=None):
     initial_best = ranked[0]['best_initial_delta_seconds'] if ranked else 0
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
-    coverage_valid = not failures and coverage.get('sha', revision) == revision
+    coverage_valid = not failures and coverage.get('sha', source_revision) == source_revision
     if not coverage_valid:
         stop['gap_below_ten_percent'] = False
         stop['best_below_two_percent_and_gate_near_floor'] = False
@@ -505,16 +513,16 @@ def main(argv=None):
     residual = ranked[-1]['remaining_seconds'] if ranked else static['mean_seconds']
     static_masks, measured_masks = selection.masks(), dynamic_masks(executed, selection.tests)
     outside_static = sum((measured_masks.get(p, 0) & ~static_masks.get(p, 0)).bit_count() for p in measured_masks)
-    result = {'schema': 'detangle.plan.v1', 'revision': revision, 'metadata': metadata,
+    result = {'schema': 'detangle.plan.v1', 'revision': source_revision, 'replay_revision': revision, 'metadata': metadata,
               'config': asdict(config), 'runtime_sources': weight_sources,
               'coverage': {'sha': coverage.get('sha'), 'data_reads': coverage.get('data_reads', False),
                            'subprocess_coverage': coverage.get('subprocess_coverage', False),
                            'failed_tests': failures, 'sdk_group_installed': coverage.get('sdk_group_installed', False),
                            'observed_pairs_outside_static': outside_static,
-                           'revision_matches': coverage.get('sha', revision) == revision,
+                           'revision_matches': coverage.get('sha', source_revision) == source_revision,
                            'provisional': not coverage_valid or bool(outside_static)},
               'static': static, 'dynamic': dynamic, 'gap_seconds': static['mean_seconds'] - dynamic['mean_seconds'],
-              'floor_share': static['floor_share'], 'candidates': ranked, 'candidate_count': len(candidates),
+              'floor_share': static['floor_share'], 'candidates': ranked, 'cycle_cuts': cycle_cuts, 'candidate_count': len(candidates),
               'stopping': stop, 'wall_floor': {'cores': 80, 'fixed_overhead_seconds': overhead,
                   'mean_longest_selected_seconds': longest, 'mean_floor_seconds': floor,
                   'gate_seconds': timing.get('gate_seconds'), 'source': timing.get('source', 'unavailable')},
@@ -522,6 +530,8 @@ def main(argv=None):
                          'floor_seconds': static['fallback_seconds'],
                          'accidental_after_ranked_cuts_seconds': max(0, residual - dynamic['mean_seconds']),
                          'ranked_cut_savings_seconds': static['mean_seconds'] - residual,
+                         'cheap_effort_lines_per_candidate': args.cheap_lines,
+                         'accidental_after_all_cheap_cuts_seconds': max(0, after_cheap - dynamic['mean_seconds']),
                          'note': 'Accidental cost is an estimate; cuts require semantic review. Data reads are ignored by the floor unless traced.'}}
     if outside_static:
         result['stopping']['gap_below_ten_percent'] = False
