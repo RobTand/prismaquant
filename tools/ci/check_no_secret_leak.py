@@ -11,8 +11,11 @@ Incomplete scans take precedence over detections. Unset/empty variables are
 reported as "not available, not scanned" without failing.
 
 Checks raw, standard/URL-safe base64, and URL-encoded bytes, including gzip and
-zstd members embedded in files or nested up to 32 levels. Uses only the standard
-library. Zstd uses compression.zstd when available, otherwise members are
+zstd members embedded in files or nested up to 32 levels. Magic at offset zero
+claims a format: that member and its concatenated continuations must decode.
+Embedded magic is tried too, but failed speculative decodes are ignored; all
+bytes are always scanned raw. The same rules apply to each decoded payload.
+Uses only the standard library. Zstd uses compression.zstd when available, otherwise members are
 reported as "zstd: not scanned" without failing. No third-party decoder is used.
 One file and its decompressed members are held in memory at a time.
 
@@ -56,13 +59,16 @@ def inspect_secret_members(data, secrets, emit, path, depth=0):
     incomplete = False
     for magic, kind in ((b'\x1f\x8b', 'gzip'), (b'\x28\xb5\x2f\xfd', 'zstd')):
         cursor = 0
+        required_offset = 0
         while (offset := data.find(magic, cursor)) >= 0:
+            required = offset == required_offset
             if kind == 'zstd' and zstd is None:
                 emit(f'{path}: zstd: not scanned (compression.zstd unavailable)')
                 break
             if depth >= 32:
-                emit(f'{path}: compressed nesting limit, not scanned')
-                incomplete = True
+                if required:
+                    emit(f'{path}: compressed nesting limit, not scanned')
+                    incomplete = True
                 break
             decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if kind == 'gzip' else zstd.ZstdDecompressor()
             errors = (zlib.error, EOFError, ValueError) + ((zstd.ZstdError,) if zstd else ())
@@ -71,11 +77,14 @@ def inspect_secret_members(data, secrets, emit, path, depth=0):
                 if not decoder.eof:
                     raise EOFError
             except errors:
-                emit(f'{path}: {kind} member unreadable, not scanned')
-                incomplete = True
+                if required:
+                    emit(f'{path}: {kind} member unreadable, not scanned')
+                    incomplete = True
                 cursor = offset + len(magic)
                 continue
             cursor = len(data) - len(decoder.unused_data)
+            if required:
+                required_offset = cursor
             nested_found, nested_incomplete = inspect_secret_members(
                 decoded, secrets, emit, path, depth + 1)
             found.update(nested_found)
