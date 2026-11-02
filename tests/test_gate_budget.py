@@ -377,3 +377,39 @@ def test_file_budget_reruns_the_complete_file(tmp_path):
     assert len(calls) == 2 and calls[1][-1] == str(tmp_path / 'tests/test_sample.py')
     assert result['budget_reruns'] == [{'nodeid': 'tests/test_sample.py', 'first_seconds': 32.0,
                                       'rerun_seconds': 21.0, 'limit': 30.0, 'outcome': 'pass'}]
+
+
+def test_split_file_node_budget_rerun_uses_node_collection_coverage(tmp_path):
+    policy(tmp_path)
+    node = 'tests/test_sample.py::test_cost'
+    other = 'tests/test_sample.py::test_other'
+    partition = {'index': 0, 'count': 2,
+                 'owners': {'tests/test_sample.py': {node: 0, other: 1}}}
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command[-1])
+        report = Path(next(arg.split('=', 1)[1] for arg in command if arg.startswith('--junitxml=')))
+        rerun = '::' in command[-1]
+        report.write_text(case('22.076' if rerun else '30.819'))
+        # Explicit node selection emits no module collectreport. GateCollection
+        # still records the node in collected/selected during modifyitems.
+        Path(kwargs['env']['GATE_COLLECTION_REPORT']).write_text(json.dumps({
+            'seen': [] if rerun else ['tests/test_sample.py'],
+            'collected': [node] if rerun else [node, other], 'selected': [node],
+            'split_collected': {} if rerun else {'tests/test_sample.py': [node, other]},
+            'own_cgroup_files': [], 'collection_failed': False, 'exitstatus': 0}))
+        return SimpleNamespace(returncode=0)
+
+    code = runner.run_plan({'selected': [{'path': 'tests/test_sample.py'}], 'deselect': []},
+        assignment={'index': 0, 'files': ['tests/test_sample.py'], 'node_partition': partition},
+        root=tmp_path, output=tmp_path / 'result.json', junit=tmp_path / 'junit.xml',
+        execute=execute, affinity={0}, workers=1)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    assert code == 0, result
+    assert result['verdict'] == 'pass'
+    assert result['budget_reruns'] == [{'nodeid': node, 'first_seconds': 30.819,
+        'rerun_seconds': 22.076, 'limit': 30.0, 'outcome': 'pass'}]
+    assert result['node_coverage']['executed'] == [node]
+    assert result['execution_coverage'] == {'selected': [node], 'executed': [node]}
+    assert calls == [str(tmp_path), str(tmp_path / node)]
