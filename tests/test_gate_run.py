@@ -30,7 +30,17 @@ def fixture_junit(tmp_path):
 
 
 @pytest.mark.parametrize('code,verdict', [(0, 'pass'), (1, 'fail')])
-def test_completed_pytest_writes_a_final_verdict(tmp_path, code, verdict):
+def test_completed_pytest_writes_a_final_verdict(tmp_path, monkeypatch, code, verdict):
+    # This fixture assigns five CPUs; declare memory for them independently of
+    # the runner's actual free memory. No workers are launched by execute().
+    read_text = Path.read_text
+
+    def declared_memory(path, *args, **kwargs):
+        if path == Path('/proc/meminfo'):
+            return 'MemAvailable: 12582912 kB\n'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', declared_memory)
     calls = []
     def execute(command, **kwargs):
         calls.append((command, kwargs))
