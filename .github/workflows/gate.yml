@@ -178,22 +178,12 @@ jobs:
         GRAPH_VERDICT
     - name: Scan graph artifacts before upload
       id: scan
-      if: always()
+      if: ${{ !cancelled() }}
       env:
-        GITHUB_TOKEN: ${{ github.token }}
-      run: |
-        unset BUILDBUDDY_API_KEY
-        python - <<'GRAPH_SCAN'
-        import os
-        from pathlib import Path
-        secrets = [value.encode() for name, value in os.environ.items()
-                   if value and ('TOKEN' in name or 'API_KEY' in name)]
-        for path in Path('graph-impact').rglob('*'):
-            if path.is_file() and any(secret in path.read_bytes() for secret in secrets):
-                path.unlink()
-                raise SystemExit('Credential detected; artifact removed')
-        GRAPH_SCAN
-    - if: ${{ always() && steps.scan.outcome == 'success' }}
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN graph-impact
+    - if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: graph-impact-${{ github.run_attempt }}
