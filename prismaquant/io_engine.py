@@ -290,7 +290,10 @@ class SealedBuffer:
         if not self.size:
             yield io.BytesIO(b"")
             return
-        view = mmap.mmap(self._fd, self.size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ)
+        # Before Linux 6.7, F_SEAL_WRITE rejects shared mappings of an O_RDWR
+        # memfd even with PROT_READ. Private reads still use the memfd's pages;
+        # without writes, they never trigger copy-on-write.
+        view = mmap.mmap(self._fd, self.size, flags=mmap.MAP_PRIVATE, prot=mmap.PROT_READ)
         try:
             yield view
         finally:
