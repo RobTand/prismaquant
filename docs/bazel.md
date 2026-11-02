@@ -249,3 +249,8 @@ revision makes the dynamic result provisional. `--cheap-lines` sets the
 per-candidate effort ceiling used for the estimate of accidental cost left
 after all cuts below that ceiling. The default is 100 lines. The JSON report
 also retains standalone SCC group scores, including groups outside the top 20.
+
+Use `--population-from tests.txt` to hold the test-file population fixed when
+comparing overlays. New tests on an overlay are then excluded from both costs.
+Record that choice with the report. It avoids assigning invented coverage to
+new files that were not part of the baseline sweep.

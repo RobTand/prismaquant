@@ -458,6 +458,7 @@ def main(argv=None):
     parser.add_argument('--revision', default='HEAD', help='First-parent replay revision')
     parser.add_argument('--source-revision', help='Identity of an exported or overlaid source tree')
     parser.add_argument('--files-from', type=Path)
+    parser.add_argument('--population-from', type=Path, help='Fixed test-file population for comparing overlays')
     parser.add_argument('--deps-json', type=Path, help='bazel-diff v42 dependency edges')
     parser.add_argument('--bazel-tests', type=Path, help='JSON mapping test files to non-manual Bazel labels')
     parser.add_argument('--source-labels', type=Path, help='Bazel source-file labels, one per line')
@@ -485,6 +486,15 @@ def main(argv=None):
             args.source_labels.read_text().splitlines(), args.graph_core, args.query_json)
     else:
         selection, candidates, hosted, metadata = detangle_repo.adapt(args.root, files)
+    if args.population_from:
+        population = set(args.population_from.read_text().splitlines())
+        missing = population - selection.roots.keys()
+        if missing:
+            raise ValueError('population tests absent from graph: ' + ', '.join(sorted(missing)))
+        selection = Selection(selection.edges, {t: selection.roots[t] for t in sorted(population)},
+                              selection.data, selection.extras, selection.launches)
+        metadata['population'] = len(population)
+        metadata['fixed_population'] = str(args.population_from)
     replay = replay_merges(history, revision, args.merges)
     weights, weight_sources = runtime_weights(selection.tests, args.timings, hosted)
     executed, coverage = load_dynamic(args.dynamic, selection.tests)
