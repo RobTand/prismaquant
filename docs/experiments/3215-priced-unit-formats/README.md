@@ -132,16 +132,30 @@ python docs/experiments/3215-priced-unit-formats/audit_membership.py \
   /tmp/priced-unit-membership-audit.json
 ```
 
-## Delivery dependency
+## Delivery dependency and loader-axis correction
 
-This PR is stacked on #3255, whose existing immutable-verdict-copy fix also
-accelerates research-menu queries. The initial hosted gate passed all tests
-but rejected the unrelated loader-axis node
-`test_with_no_contract_pinned_the_axis_leg_adds_no_refusal` at 30.909 seconds
-against its 30-second budget. That node builds a full research menu before
-removing the installed contract. It therefore exercises #3255's already fixed
-copy path. No loader-axis test or budget changes here.
+This PR is stacked on #3255. The initial hosted gate passed all tests but
+rejected `test_with_no_contract_pinned_the_axis_leg_adds_no_refusal` at
+30.909 seconds against its 30-second budget. The initial hypothesis was that
+#3255's immutable-verdict-copy fix would reduce that research-menu cost.
 
-The cold figures above isolate the parser-memo change against main. Combined
-source verification and the final gate are recorded in the PR validation
-section. Each stack layer retains one changed test file in its own diff.
+The follow-up measurement does not support that hypothesis. In invocation
+`4e27bb2a-d6a2-435c-8242-9b1ac0db7f66`, the unchanged node took 20.097
+JUnit seconds on main and 20.149 on the combined source. Call phases were
+19.632 and 19.777 seconds; setup was 0.004 and 0.003 seconds. Of 2,070 and
+2,053 sampled stacks, 1,257 and 1,258 included exact footprint calculation;
+only 13 and 16 included `deepcopy`. These samples identify work but are not
+CPU-time percentages. The later green hosted gate does not prove the budget
+flake is fixed. No loader-axis test or budget changes here.
+
+The combined-source full-case proof ended OK: all 25 original cases, all
+114 assertions, 228 asserted operands and 45,324 evaluations match against
+#3255's head. Only unasserted `solver_seconds` container values differ.
+The related files passed 79 tests with the same four missing-interpreter
+skips. All 19 downloaded artifacts match their CAS identities.
+
+The `stack-*` files retain the complete assertion ledgers, membership audit,
+phase and sampling summary, verification summary and CAS receipts. The
+original cold figures above isolate the parser memo against main; do not
+sum overlapping shared-code savings. Each stack layer retains one changed
+test file in its own diff. Final hosted validation is in the PR body.
