@@ -104,7 +104,7 @@ The bridge prints the shortest path through conftests to the farthest hub.
 
 The old `import_fanout` CLI forwards to this check. Its original evidence
 parser supplies the migrated figures in the same baseline, preserving each
-recorded minimum. There is one baseline and one test file. Writing the
+recorded minimum. There is one baseline and one live gate test. Writing the
 baseline refuses structural losses and keeps every recorded numeric minimum.
 SCC gains must be recorded in the same PR; U and edge-count gains are
 recorded on explicit baseline writes. New-edge checks use only the aligned
