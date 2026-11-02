@@ -23,6 +23,7 @@ from prismaquant.residency_map import (
 # run rather than a hand-built namespace, so what they assert is the argv the
 # tool builds.
 from test_glm_joint_data_manifest_at_submit import scratch, shared_mount  # noqa: F401
+from fleet_sdk import installed_client_sdk
 
 #: The resolver validates maps with PrismaBuild's own validator, through the
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

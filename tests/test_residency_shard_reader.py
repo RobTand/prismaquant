@@ -27,6 +27,7 @@ from prismaquant.residency_map import (
     residency_resolver, reset_residency_resolver_for_tests,
 )
 from prismaquant.residency_shard_reader import staged_shard_opener
+from fleet_sdk import installed_client_sdk
 
 #: The resolver validates maps with PrismaBuild's own validator, through the
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

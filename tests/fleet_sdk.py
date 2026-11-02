@@ -31,16 +31,19 @@ missing fleet prerequisite should have been a named SKIP (PQ #1097).
 ``require_lease_helper`` below is that guard: it probes the SDK the lane
 actually calls, not a proxy for it.
 
-``prismabuild_imports_restored`` puts back where ``import prismabuild``
-resolves (PQ #1281); ``tests/conftest.py`` wraps every test, and every test
-module, in it.
+``prismabuild_imports_restored``, which puts back where ``import prismabuild``
+resolves (PQ #1281), lives in ``tests/prismabuild_imports.py``: ``tests/conftest.py``
+wraps every test in it, and it imports nothing from ``prismaquant``.
+
+The ``installed_client_sdk`` and ``installed_helper_sdk`` fixtures are here
+rather than in ``tests/conftest.py`` (#3215): a test that requests one imports
+it from this module, so only those tests depend on ``staged_lease``.
 """
 from __future__ import annotations
 
 import contextlib
 import importlib.metadata as metadata
 from pathlib import Path
-import sys
 
 import pytest
 
@@ -92,127 +95,6 @@ def require_lease_helper() -> None:
         pytest.skip(f"{LEASE_HELPER_SKIP_REASON} (set {HELPER_ROOT_ENV_VAR}: {exc.reason})")
 
 
-def prismabuild_entries() -> dict:
-    """Every ``prismabuild`` entry ``sys.modules`` holds, name to module."""
-
-    from prismaquant.staged_lease import _prismabuild_modules
-
-    return {name: sys.modules[name] for name in _prismabuild_modules()}
-
-
-def _hosts_prismabuild(entry: str) -> bool:
-    try:
-        return (Path(entry or ".") / "prismabuild").is_dir()
-    except OSError:
-        return False
-
-
-@contextlib.contextmanager
-def prismabuild_imports_restored(*, source_root: Path | None = None,
-                               detach: bool = False):
-    """Leave ``import prismabuild`` resolving where it did before (PQ #1281).
-
-    Several tests import PrismaBuild from a sealed generation tree: they
-    put its ``src`` on ``sys.path`` and import ``prismabuild.*`` from it
-    (``test_quantum_executable_readset._pb``, ``staged_lease._sdk_from_tree``
-    under the PB-injected ``PRISMABUILD_READER_HELPER_ROOT``). Nothing took
-    either back out, so every later test in that process imported the
-    generation's ``prismabuild`` in place of the installed one, and
-    ``staged_lease.inject_installed_sdk_for_tests`` bound it as the
-    installed SDK. The generation reads its queue from PB's own
-    ``PRISMABUILD_QUEUE_ROOT``, so each strict-reader fixture's claim was
-    looked for in the live fleet queue: ``lease-context-unavailable:
-    no-claim-context``. The reverse order fails too: an installed module
-    left behind refuses a later sealed-tree resolution as divergent
-    (PQ #963, PQ #1032).
-
-    On exit, the ``prismabuild`` entries of ``sys.modules`` are put back
-    exactly: added ones are dropped, replaced or removed ones restored, and
-    a surviving parent package's attribute for each follows its entry. Each
-    ``sys.path`` entry added inside the block that hosts a ``prismabuild``
-    package is dropped; every other path change stays as the test left it.
-    Restoring is silent and unconditional, like the other restore fixtures
-    in ``tests/conftest.py``: importing from a sealed tree is legitimate,
-    only its escape from the test is the defect.
-
-    ``detach`` gives a fixture ownership of an initially unbound graph. It
-    removes pre-existing package entries without choosing a source or adding
-    a prerequisite. Resolvers still authenticate and refuse origins themselves.
-    The previous graph and parent edges return on exit; without ``source_root``
-    unrelated path changes retain the preservation-only behavior above.
-
-    ``source_root`` is an explicit fixture-owned binding, authenticated by
-    its caller before entry. It detaches the canonical PB graph and sibling
-    fleet tools for this scope, then restores their identities and path order
-    exactly. Callers must finish using its objects and join their work before
-    leaving; production resolution and its divergence refusals are unchanged.
-    """
-
-    from types import ModuleType
-
-    saved_path = list(sys.path)
-    tool_names = set()
-    if source_root is not None:
-        source_root = Path(source_root).resolve(strict=True)
-        fleet = source_root / "tools" / "fleet"
-        tool_names = {path.stem for path in fleet.glob("*.py")}
-    saved_modules = prismabuild_entries()
-    saved_modules.update({name: sys.modules[name] for name in tool_names
-                          if name in sys.modules})
-    missing = object()
-    saved_attributes = {}
-    for name, parent in saved_modules.items():
-        if parent is None or not name.startswith("prismabuild"):
-            continue
-        for leaf, value in vars(parent).items():
-            if isinstance(value, ModuleType) and value.__name__ == f"{name}.{leaf}":
-                saved_attributes[f"{name}.{leaf}"] = (parent, leaf, value)
-    for name in saved_modules:
-        parent_name, _, leaf = name.rpartition(".")
-        parent = saved_modules.get(parent_name)
-        if parent is not None:
-            saved_attributes[name] = (parent, leaf, getattr(parent, leaf, missing))
-    if source_root is not None or detach:
-        for name in saved_modules:
-            sys.modules.pop(name, None)
-    if source_root is not None:
-        sys.path[:0] = [str(source_root / "src"), str(fleet)]
-    try:
-        yield
-    finally:
-        if source_root is not None:
-            sys.path[:] = saved_path
-        else:
-            added_paths = {entry for entry in sys.path if entry not in saved_path}
-            dropped = {entry for entry in added_paths if _hosts_prismabuild(entry)}
-            if dropped:
-                sys.path[:] = [entry for entry in sys.path if entry not in dropped]
-        current = prismabuild_entries()
-        current.update({name: sys.modules[name] for name in tool_names
-                        if name in sys.modules})
-        for name in set(current) | set(saved_modules):
-            if name in saved_modules:
-                sys.modules[name] = saved_modules[name]
-            else:
-                sys.modules.pop(name, None)
-        # A loader or injection can already have removed an entry while its
-        # parent still holds the replacement. Restore those orphan edges too.
-        for name, parent in saved_modules.items():
-            if parent is None or not name.startswith("prismabuild"):
-                continue
-            for leaf, value in tuple(vars(parent).items()):
-                edge = f"{name}.{leaf}"
-                if (isinstance(value, ModuleType) and value.__name__ == edge
-                        and edge not in saved_attributes):
-                    delattr(parent, leaf)
-        for parent, leaf, value in saved_attributes.values():
-            if value is missing:
-                if hasattr(parent, leaf):
-                    delattr(parent, leaf)
-            else:
-                setattr(parent, leaf, value)
-
-
 @contextlib.contextmanager
 def installed_client_bound(monkeypatch):
     """Bind the reviewed installed ``prismabuild.client`` for one test.
@@ -235,3 +117,42 @@ def installed_client_bound(monkeypatch):
         yield module
     finally:
         staged_lease.clear_injected_sdk_for_tests()
+
+
+@pytest.fixture
+def installed_client_sdk(monkeypatch):
+    """The reviewed installed ``prismabuild.client``, bound for this test.
+
+    Not autouse: a test about the unbound state must be able to see it.
+    See ``fleet_sdk.installed_client_bound``.
+    """
+
+    with installed_client_bound(monkeypatch) as module:
+        yield module
+
+
+@pytest.fixture
+def installed_helper_sdk(tmp_path, monkeypatch):
+    """Production resolver over the actual, Git/RECORD-qualified SDK sources.
+
+    The published pbtest guard owns install verification, once per shard and
+    before pytest; this fixture re-reads only the install identity, with the
+    standard library, because the guard's module exists in the shard's main
+    process and not in its xdist workers. This private helper view links those
+    installed bytes, not an SDK4 archive or a copied package; it is a CPU
+    fixture, never a published runtime generation. No test-only SDK injection
+    supplies the production Gateway.
+    """
+    from prismaquant import staged_lease
+
+    require_prismabuild_sdk()
+    dist = staged_lease.reviewed_installed_distribution()
+    package = Path(dist.locate_file("prismabuild")).resolve()
+    helper = tmp_path / "installed-sdk-helper"
+    (helper / "src").mkdir(parents=True)
+    (helper / "src" / "prismabuild").symlink_to(package, target_is_directory=True)
+    assert staged_lease._INJECTED is None
+    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", str(helper))
+    sdk = staged_lease.client_sdk()
+    assert Path(sdk.__file__).resolve() == package / "client.py"
+    yield sdk

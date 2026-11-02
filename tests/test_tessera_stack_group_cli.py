@@ -37,6 +37,7 @@ from test_glm_campaign_streaming import (  # noqa: E402,F401
     _torch_only_causal_conv1d, glm_checkpoint, write_original_layout_checkpoint,
 )
 from test_tessera_stack_sample_cost import _packed_probe_row  # noqa: E402
+from legacy_capture_fixtures import legacy_capture_mechanism
 
 
 def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):

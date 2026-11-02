@@ -11,6 +11,7 @@ from safetensors.torch import save_file
 from prismaquant.shipcard import open_shipcard, compute_model_sha, required_slots, verify, write_shipcard
 from test_shipcard import _fill_all
 from tools.publish_artifact import check_shipcard
+from graph_lane_fixtures import synthetic_graph_lane
 
 
 @pytest.fixture

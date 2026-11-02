@@ -27,6 +27,7 @@ from prismaquant.residency_map import (
 from test_prismabuild_residency_map import (
     MANIFEST, LEAD, _bind, _pool_cache, _stage, _wire_cell,
 )
+from fleet_sdk import installed_client_sdk
 
 #: The resolver validates maps with PrismaBuild's own validator, through the
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

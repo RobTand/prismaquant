@@ -25,6 +25,7 @@ import pytest
 
 import prismaquant.residency_shard_reader as reader
 from prismaquant.residency_map import RANGE_HIT, RANGE_UNCOVERED
+from fleet_sdk import installed_client_sdk
 
 #: The resolver validates maps with PrismaBuild's own validator, through the
 #: client SDK (PB #1254); bind the reviewed installed one for every test.

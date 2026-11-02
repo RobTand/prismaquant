@@ -30,6 +30,7 @@ from tools.build_stagea_seed_package import (
     build,
     peak_consecutive_bytes,
 )
+from fullstack_pb_generation import pinned_pb_source
 
 LAYERS = 5
 PARENT = "d" * 64
