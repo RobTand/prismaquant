@@ -228,3 +228,17 @@ The preferred next source is bazel-diff v42's `deps.json`, generated with
 rather than adding a second parser. Feed its rule edges and source-file labels
 through an adapter that preserves the test-file timing identifiers. Only Bazel
 can establish which target boundary actually disappeared after a refactor.
+
+To use the native source, add `--deps-json deps.json`,
+`--bazel-tests tests.json`, and `--source-labels sources.txt`. `tests.json` maps
+repository test files to the non-manual labels returned by `tests(//...)`.
+`sources.txt` lists labels Bazel identifies as source files. Supply
+`--graph-core /path/to/graph_impact.py` while that shared core is on its own
+branch. `--query-json query.json` uses its streamed-query fallback when
+`deps.json` lacks source-file labels. Both paths call that core's reader.
+
+Native rule edges remain rule edges. Source-file labels become repository
+paths for the replay. Symbol cuts are projected only across single-source
+Python target boundaries. Multi-source targets appear in
+`metadata.coarse_python_targets`; their internal cuts require a target split
+before the planner can price them from a new Bazel graph.

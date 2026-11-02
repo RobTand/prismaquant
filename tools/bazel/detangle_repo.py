@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 from tools.bazel import build_files as build
@@ -18,30 +19,36 @@ def module_name(path):
     return path.removesuffix('.py').removesuffix('/__init__').replace('/', '.')
 
 
+@lru_cache(maxsize=16)
+def _edge_ast(source):
+    """Parse each importer's source once while reading its outgoing edges."""
+    tree = ast.parse(source)
+    nodes, owners, attributes, uses = [], {}, [], defaultdict(set)
+
+    def visit(node, scope):
+        nodes.append(node)
+        owners[node] = '.'.join(scope) or '<module>'
+        if isinstance(node, ast.Attribute):
+            attributes.append((ast.unparse(node), owners[node]))
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            uses[node.id].add(owners[node])
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = [*scope, node.name]
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(tree, [])
+    imports = [n for n in nodes if isinstance(n, (ast.Import, ast.ImportFrom))]
+    return imports, owners, attributes, uses
+
+
 def import_symbols(source, source_path, target_path):
     """Resolve relative imports, aliases, attribute uses, and owning functions."""
-    tree = ast.parse(source)
+    imports, owners, attributes, uses = _edge_ast(source)
     target = module_name(target_path)
     names, functions, import_lines, module_import = set(), set(), set(), False
-    parent = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parent[child] = node
-
-    def function(node):
-        names = []
-        while node in parent:
-            node = parent[node]
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                names.append(node.name)
-        return '.'.join(reversed(names)) or '<module>'
-
-    def uses(binding, scope):
-        return [node for node in ast.walk(scope) if isinstance(node, ast.Name) and node.id == binding
-                and isinstance(node.ctx, ast.Load)]
-
     module_bindings, imported = {}, []
-    for node in ast.walk(tree):
+    for node in imports:
         if isinstance(node, ast.ImportFrom):
             prefix = node.module or ''
             if node.level:
@@ -53,7 +60,7 @@ def import_symbols(source, source_path, target_path):
                     imported.append((node, alias.asname or alias.name))
                 elif prefix + '.' + alias.name == target:
                     module_bindings[alias.asname or alias.name] = (target, node)
-        elif isinstance(node, ast.Import):
+        else:
             for alias in node.names:
                 if alias.name == target:
                     module_bindings[alias.asname or alias.name.split('.')[0]] = (alias.name if alias.asname else '', node)
@@ -61,23 +68,21 @@ def import_symbols(source, source_path, target_path):
         module_import = True
         imported.append((node, binding))
         matched = False
-        for attr in ast.walk(tree):
-            if not isinstance(attr, ast.Attribute):
+        for value, owner in attributes:
+            if value.split('.', 1)[0] != binding:
                 continue
-            value = ast.unparse(attr)
             qualified = prefix + value[len(binding):] if prefix else value
             if qualified.startswith(target + '.'):
                 names.add(qualified[len(target) + 1:].split('.')[0])
-                functions.add(function(attr))
+                functions.add(owner)
                 matched = True
         if not matched:
             names.add('*module*')
     for node, binding in imported:
         import_lines.update(range(node.lineno, node.end_lineno + 1))
-        owner = function(node)
-        if owner != '<module>':
-            functions.add(owner)
-        functions.update(function(use) for use in uses(binding, tree))
+        if owners[node] != '<module>':
+            functions.add(owners[node])
+        functions.update(uses[binding])
     return {'source': source_path, 'target': target_path, 'symbols': sorted(names),
             'functions': sorted(f for f in functions if f != '<module>'),
             'module_uses': '<module>' in functions,
@@ -228,3 +233,80 @@ def adapt(root, files=None):
     return selection, list(unique.values()), hosted, {'population': len(population), 'sccs': sccs,
              'adapter': 'PrismaQuant Evidence/Graph', 'package_roots': list(build.PACKAGES), 'test_roots': ['tests/'],
              'local_import_note': 'Localizing alone does not remove a conservative Bazel edge; scores require a target/symbol boundary cut.'}
+
+
+def bazel_selection(test_labels, edges, sources):
+    """Adapt the shared reader's output without parsing deps.json again.
+
+    Rule nodes retain their labels. Repository source labels become paths, so
+    the same merge replay and per-file runtime weights apply to either source.
+    """
+    from tools.bazel.detangle_plan import Selection
+
+    def node(label):
+        if label in sources and label.startswith('//'):
+            package, name = label[2:].split(':', 1)
+            return '/'.join(part for part in (package, name) if part)
+        return label
+
+    adjacency = defaultdict(set)
+    for source, target in edges:
+        adjacency[node(source)].add(node(target))
+        adjacency.setdefault(node(target), set())
+    roots = {test: {label} for test, label in test_labels.items()}
+    return Selection(dict(adjacency), roots)
+
+
+def adapt_bazel(root, deps, test_labels, sources, core_path=None, query=None):
+    """Use graph_impact.read_deps/read_query as the sole Bazel graph reader.
+
+    test_labels maps test files to labels from tests(//...) minus manual. The
+    source-label list comes from Bazel source-file query output. A missing
+    source label is handled by the core's single streamed-query fallback.
+    Multi-source rules need target-splitting analysis, so they are reported
+    rather than projecting a file-edge cut onto the wrong target boundary.
+    """
+    import importlib.util
+    from tools.bazel.detangle_plan import Candidate
+    root = Path(root)
+    path = Path(core_path) if core_path else root / 'tools/ci/graph_impact.py'
+    if not path.exists():
+        raise ValueError('shared graph-impact reader unavailable; supply --graph-core from prismaquant-3215-graphimpact')
+    spec = importlib.util.spec_from_file_location('detangle_shared_graph_impact', path)
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+    if query:
+        tests, edges, loc = core.read_query(query)
+    else:
+        tests, edges, loc = core.read_deps(deps, set(test_labels.values()), set(sources))
+    missing = set(test_labels.values()) - tests.keys()
+    if missing:
+        raise ValueError('Bazel population missing test labels: ' + ', '.join(sorted(missing)))
+    selection = bazel_selection(test_labels, edges, loc)
+    rule_sources = defaultdict(set)
+    for source, target in edges:
+        if target in loc and target.startswith('//'):
+            package, name = target[2:].split(':', 1)
+            file = '/'.join(p for p in (package, name) if p)
+            if file.endswith('.py'):
+                rule_sources[source].add(file)
+    candidates = []
+    for source, target in sorted(edges):
+        if len(rule_sources[source]) != 1 or len(rule_sources[target]) != 1:
+            continue
+        a, b = next(iter(rule_sources[source])), next(iter(rule_sources[target]))
+        if build.is_test(a) or not (root / a).exists() or not (root / b).exists():
+            continue
+        info = import_symbols((root / a).read_text(errors='replace'), a, b)
+        if not info['symbols']:
+            continue
+        size, closure = symbol_lines(build.parse((root / b).read_text(errors='replace')), info['symbols'])
+        info['moved_symbol_closure'] = closure
+        info['bazel_edge'] = [source, target]
+        candidates.append(Candidate('move these symbols down', ((source, target, 'import'),),
+                                    max(2, size + len(info['import_lines'])), (info,)))
+    hosted = __import__('json').loads((root / 'tools/ci/gate_durations.json').read_text())['files']
+    return selection, candidates, hosted, {'adapter': 'bazel-diff v42 via shared graph-impact reader',
+        'reader': str(path), 'population': len(test_labels), 'source_labels': len(loc),
+        'coarse_python_targets': sorted(label for label, files in rule_sources.items() if len(files) > 1),
+        'candidate_limit': 'File symbol cuts are scored only across single-source Python target boundaries.'}

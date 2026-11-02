@@ -45,6 +45,10 @@ class Config:
     fallback_suffixes: tuple[str, ...] = ('.bzl',)
     constraint_fragments: tuple[str, ...] = ('requirements', 'constraints')
 
+    def __post_init__(self):
+        for name in ('fallback_names', 'fallback_prefixes', 'fallback_suffixes', 'constraint_fragments'):
+            object.__setattr__(self, name, tuple(getattr(self, name)))
+
     def fallback(self, path):
         name = PurePosixPath(path).name
         return (name in self.fallback_names or path.startswith(self.fallback_prefixes)
@@ -172,57 +176,128 @@ def projected_savings(selection, replay, weights, candidate, config):
 
 
 class Scorer:
-    """Propagate 100 merge bits instead of materializing every test's file set."""
+    """Reuse the SCC condensation and propagate only a cut's changed merge bits.
+
+    An inter-component cut cannot change SCC membership. Internal cuts first
+    check just that component. Only a split rebuilds the condensation. This
+    preserves complementary cycle gains without rescanning the entire graph
+    for the many edges whose removal changes no selected tests.
+    """
 
     def __init__(self, selection, replay, weights, config):
-        self.weights, self.selection = weights, selection
+        self.selection, self.replay, self.weights, self.config = selection, replay, weights, config
         self.n = len(replay)
+        if not self.n:
+            raise ValueError('replay must contain at least one merge')
         self.changed = defaultdict(int)
-        self.fallbacks = 0
+        fallbacks = 0
         for i, merge in enumerate(replay):
             if any(config.fallback(p) for p in merge['changed']):
-                self.fallbacks += 1
+                fallbacks += 1
             else:
                 for path in merge['changed']:
                     self.changed[path] |= 1 << i
-
-    def cost(self, cuts=frozenset()):
-        selection = self.selection.without(cuts) if cuts else self.selection
-        edges = selection.combined()
-        nodes = set(edges) | {t for ts in edges.values() for t in ts}
+        self.edges = selection.combined()
+        nodes = set(self.edges) | {t for ts in self.edges.values() for t in ts}
         nodes |= {p for roots in selection.roots.values() for p in roots}
-        components = strongly_connected(nodes, edges)
-        owner = {node: i for i, component in enumerate(components) for node in component}
-        parents = [set() for _ in components]
-        degree = [0] * len(components)
-        bits = [0] * len(components)
+        self.components = strongly_connected(nodes, self.edges)
+        self.owner = {node: i for i, component in enumerate(self.components) for node in component}
+        count = len(self.components)
+        self.parents = [set() for _ in range(count)]
+        self.deps = [set() for _ in range(count)]
+        self.origins = defaultdict(set)
+        self.seed = [0] * count
         for node in nodes:
-            i = owner[node]
-            bits[i] |= self.changed[node]
+            i = self.owner[node]
+            self.seed[i] |= self.changed[node]
             for path in selection.data.get(node, ()):
-                bits[i] |= self.changed[path]
-            for target in edges.get(node, ()):
-                j = owner[target]
-                if i != j and i not in parents[j]:
-                    parents[j].add(i)
-                    degree[i] += 1
+                self.seed[i] |= self.changed[path]
+            for target in self.edges.get(node, ()):
+                j = self.owner[target]
+                if i != j:
+                    self.deps[i].add(j)
+                    self.parents[j].add(i)
+                    self.origins[i, j].add((node, target))
+        degree = [len(deps) for deps in self.deps]
+        self.bits = list(self.seed)
         queue = deque(i for i, value in enumerate(degree) if not value)
         while queue:
             i = queue.popleft()
-            for parent in parents[i]:
-                bits[parent] |= bits[i]
+            for parent in self.parents[i]:
+                self.bits[parent] |= self.bits[i]
                 degree[parent] -= 1
                 if not degree[parent]:
                     queue.append(parent)
-        total = self.fallbacks * sum(self.weights.values())
-        for test, roots in selection.roots.items():
-            selected = self.changed[test]
-            for root in roots:
-                selected |= bits[owner[root]]
+        self.test_roots = {test: {self.owner[root] for root in roots} for test, roots in selection.roots.items()}
+        self.root_tests = defaultdict(set)
+        self.extra_bits, self.test_bits = {}, {}
+        for test, roots in self.test_roots.items():
+            bits = self.changed[test]
             for path in selection.extras.get(test, ()):
-                selected |= self.changed[path]
-            total += selected.bit_count() * self.weights[test]
-        return total / self.n
+                bits |= self.changed[path]
+            self.extra_bits[test] = bits
+            for root in roots:
+                self.root_tests[root].add(test)
+                bits |= self.bits[root]
+            self.test_bits[test] = bits
+        self.baseline = (fallbacks * sum(weights.values()) + sum(
+            bits.bit_count() * weights[test] for test, bits in self.test_bits.items())) / self.n
+
+    def cost(self, cuts=frozenset()):
+        if not cuts:
+            return self.baseline
+        removed = {(s, t) for s, t, kind in cuts if kind == 'import'
+                   and t in self.selection.edges.get(s, ()) and t not in self.selection.launches.get(s, ())}
+        data_cuts = defaultdict(set)
+        for source, target, kind in cuts:
+            if kind == 'data' and source in self.owner:
+                data_cuts[source].add(target)
+        internal = {self.owner[s] for s, t in removed if self.owner[s] == self.owner[t]}
+        for component in internal:
+            nodes = self.components[component]
+            node_set = set(nodes)
+            subgraph = {s: {t for t in self.edges.get(s, ()) if t in node_set and (s, t) not in removed} for s in nodes}
+            if len(strongly_connected(nodes, subgraph)) > 1:
+                return Scorer(self.selection.without(cuts), self.replay, self.weights, self.config).baseline
+        changed_deps, changed_seed = {}, {}
+        pairs = {(self.owner[s], self.owner[t]) for s, t in removed if self.owner[s] != self.owner[t]}
+        for source, target in pairs:
+            if self.origins[source, target] <= removed:
+                changed_deps.setdefault(source, set(self.deps[source])).discard(target)
+        for source in data_cuts:
+            component = self.owner[source]
+            if component in changed_seed:
+                continue
+            bits = 0
+            for node in self.components[component]:
+                bits |= self.changed[node]
+                for path in self.selection.data.get(node, set()) - data_cuts.get(node, set()):
+                    bits |= self.changed[path]
+            changed_seed[component] = bits
+        updates = {}
+        pending = deque(changed_deps.keys() | changed_seed.keys())
+        queued = set(pending)
+        while pending:
+            component = pending.popleft()
+            queued.remove(component)
+            bits = changed_seed.get(component, self.seed[component])
+            for child in changed_deps.get(component, self.deps[component]):
+                bits |= updates.get(child, self.bits[child])
+            if bits == updates.get(component, self.bits[component]):
+                continue
+            updates[component] = bits
+            for parent in self.parents[component]:
+                if parent not in queued:
+                    pending.append(parent)
+                    queued.add(parent)
+        affected = set().union(*(self.root_tests[i] for i in updates)) if updates else set()
+        saved = 0
+        for test in affected:
+            bits = self.extra_bits[test]
+            for root in self.test_roots[test]:
+                bits |= updates.get(root, self.bits[root])
+            saved += (self.test_bits[test].bit_count() - bits.bit_count()) * self.weights[test]
+        return self.baseline - saved / self.n
 
 
 def rank(selection, replay, weights, candidates, config, limit=20):
@@ -232,14 +307,17 @@ def rank(selection, replay, weights, candidates, config, limit=20):
     current = scorer.cost()
     # An upper bound on later marginal gains is NOT safe across SCC cuts.
     # Every candidate is therefore rescored after every pick.
-    for _ in range(limit):
+    for iteration in range(limit):
+        scorer = Scorer(selection.without(cuts), replay, weights, config)
         best = None
+        largest_gain = 0
         for candidate in remaining:
             new = set(candidate.edges) - cuts
             if not new:
                 continue
-            after = scorer.cost(cuts | new)
+            after = scorer.cost(new)
             gain = current - after
+            largest_gain = max(largest_gain, gain)
             effort = max(1, candidate.effort_lines)
             key = (gain / effort, gain, -effort, candidate.edges)
             if gain > 1e-9 and (best is None or key > best[0]):
@@ -247,11 +325,13 @@ def rank(selection, replay, weights, candidates, config, limit=20):
         if best is None:
             break
         _, candidate, after = best
+        if iteration == 0:
+            initial_best = largest_gain
         result.append({**asdict(candidate), 'edges': [list(e) for e in candidate.edges],
                        'delta_seconds': current - after,
                        'delta_fraction': (current - after) / current if current else 0,
                        'seconds_per_line': (current - after) / max(1, candidate.effort_lines),
-                       'remaining_seconds': after})
+                       'remaining_seconds': after, 'best_initial_delta_seconds': initial_best})
         cuts.update(candidate.edges)
         remaining.remove(candidate)
         current = after
@@ -377,6 +457,11 @@ def main(argv=None):
     parser.add_argument('--history-root', type=Path)
     parser.add_argument('--revision', default='HEAD')
     parser.add_argument('--files-from', type=Path)
+    parser.add_argument('--deps-json', type=Path, help='bazel-diff v42 dependency edges')
+    parser.add_argument('--bazel-tests', type=Path, help='JSON mapping test files to non-manual Bazel labels')
+    parser.add_argument('--source-labels', type=Path, help='Bazel source-file labels, one per line')
+    parser.add_argument('--graph-core', type=Path, help='Shared graph-impact module containing read_deps/read_query')
+    parser.add_argument('--query-json', type=Path, help='Shared reader fallback: Bazel streamed_jsonproto')
     parser.add_argument('--config', type=Path, help='JSON overrides for Config fallback fields')
     parser.add_argument('--timings', type=Path)
     parser.add_argument('--dynamic', type=Path, required=True)
@@ -389,7 +474,14 @@ def main(argv=None):
     history = args.history_root or args.root
     revision = subprocess.check_output(['git', 'rev-parse', args.revision], cwd=history, text=True).strip()
     files = args.files_from.read_text().splitlines() if args.files_from else None
-    selection, candidates, hosted, metadata = detangle_repo.adapt(args.root, files)
+    if args.deps_json:
+        if not args.bazel_tests or not args.source_labels:
+            parser.error('--deps-json requires --bazel-tests and --source-labels')
+        selection, candidates, hosted, metadata = detangle_repo.adapt_bazel(
+            args.root, args.deps_json, json.loads(args.bazel_tests.read_text()),
+            args.source_labels.read_text().splitlines(), args.graph_core, args.query_json)
+    else:
+        selection, candidates, hosted, metadata = detangle_repo.adapt(args.root, files)
     replay = replay_merges(history, revision, args.merges)
     weights, weight_sources = runtime_weights(selection.tests, args.timings, hosted)
     executed, coverage = load_dynamic(args.dynamic, selection.tests)
@@ -402,10 +494,10 @@ def main(argv=None):
     longest = sum(max((weights[t] for i, t in enumerate(sorted(weights)) if row['mask'] & (1 << i)), default=0)
                   for row in dynamic['merges']) / len(replay)
     floor = overhead + longest if overhead is not None else None
-    initial_best = max((projected_savings(selection, replay, weights, c, config) for c in candidates), default=0)
+    initial_best = ranked[0]['best_initial_delta_seconds'] if ranked else 0
     stop = stopping(static['mean_seconds'], dynamic['mean_seconds'], initial_best, timing.get('gate_seconds'), floor)
     failures = sorted(p for p in selection.tests if coverage['tests'][p].get('exit', 0) not in (0, 5))
-    coverage_valid = not failures
+    coverage_valid = not failures and coverage.get('sha', revision) == revision
     if not coverage_valid:
         stop['gap_below_ten_percent'] = False
         stop['best_below_two_percent_and_gate_near_floor'] = False
@@ -419,6 +511,7 @@ def main(argv=None):
                            'subprocess_coverage': coverage.get('subprocess_coverage', False),
                            'failed_tests': failures, 'sdk_group_installed': coverage.get('sdk_group_installed', False),
                            'observed_pairs_outside_static': outside_static,
+                           'revision_matches': coverage.get('sha', revision) == revision,
                            'provisional': not coverage_valid or bool(outside_static)},
               'static': static, 'dynamic': dynamic, 'gap_seconds': static['mean_seconds'] - dynamic['mean_seconds'],
               'floor_share': static['floor_share'], 'candidates': ranked, 'candidate_count': len(candidates),
