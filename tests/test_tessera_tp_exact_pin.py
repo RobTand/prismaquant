@@ -194,15 +194,24 @@ def test_unpinned_bytes_publish_no_loader_fact(pinned_payload, monkeypatch):
     assert not attested and reason.startswith("tp_unattested:")
 
 
-def test_native_verdict_does_not_rewalk_immutable_run_tables(pinned_payload, monkeypatch):
+def test_native_verdict_does_not_rewalk_immutable_rate_tuples(pinned_payload, monkeypatch):
     import copy
 
+    family = "TESSERA_BF16_K1"
+    cell = next(row for row in pinned_payload["lane_eligibility"]["cells"]
+                if row["family"] == family and row["structure"] == "dense")
+    context = ServingContext(
+        platform=cell["platform"], structure=cell["structure"],
+        residency="resident", runtime_image=cell["runtime"]["image"],
+        execution_mode="eager")
     captured = runtime.installed_runtime_snapshot()
-    context = _dense_e2m1_context(pinned_payload)
-    witness = captured.native_rung_verdict(f"{E2M1}_R896", serving_context=context)
-    assert witness.admitted and witness.rate_q256 == 896
-    assert all(cell.family == E2M1 for cell in witness.cells)
-    tables = {id(cell.run_tables) for cell in witness.cells if cell.run_tables}
+    witness = captured.native_rung_verdict(f"{family}_R1024", serving_context=context)
+    assert witness.admitted and witness.rate_q256 == 1024
+    assert all(cell.family == family and cell.run_tables for cell in witness.cells)
+    tables = {id(value) for cell in witness.cells for value in (
+        cell.rungs, cell.rungs_q256, cell.covered_rungs_q256, cell.run_tables,
+        cell.launch_rungs_q256, cell.launch_covered_rungs_q256,
+    ) if value}
     assert tables
     walked = []
     copy_tuple = copy._deepcopy_dispatch[tuple]
@@ -213,7 +222,7 @@ def test_native_verdict_does_not_rewalk_immutable_run_tables(pinned_payload, mon
         return copy_tuple(value, memo, deepcopy)
 
     monkeypatch.setitem(copy._deepcopy_dispatch, tuple, counted)
-    observed = captured.native_rung_verdict(f"{E2M1}_R896", serving_context=context)
+    observed = captured.native_rung_verdict(f"{family}_R1024", serving_context=context)
     assert observed == witness
     assert walked == []
 
