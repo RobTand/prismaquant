@@ -314,6 +314,8 @@ def test_budget_only_rerun_verdicts(tmp_path, monkeypatch, first_seconds, first_
     policy(tmp_path)
     summary = tmp_path / 'summary.md'
     monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    allocations = iter([2, 1])
+    monkeypatch.setattr(runner, 'worker_count', lambda *args, **kwargs: next(allocations))
     calls = []
 
     def execute(command, **kwargs):
