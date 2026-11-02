@@ -172,3 +172,39 @@ def test_vendored_core_hash():
 def test_graph_impact_gate():
     from tools.ci import graph_impact_pq
     assert graph_impact_pq.main([]) == 0
+
+
+def test_bazel_diff_reader_keeps_source_labels_and_excludes_manual(tmp_path):
+    path = tmp_path / 'deps.json'
+    path.write_text(json.dumps({'//t:fast': ['//lib:core'], '//t:manual': ['//other:x'],
+                                '//lib:core': ['//lib:core.rs'], '//lib:core.rs': [], '//other:x': []}))
+    tests, edges, loc = impact.read_deps(path, {'//t:fast', '//t:manual'},
+                                        {'//lib:core.rs', '//unused:c.rs'}, manual_tests={'//t:manual'})
+    assert tests == {'//t:fast': {'//lib:core.rs'}}
+    assert ('//t:fast', '//lib:core') in edges
+    assert loc == {'//lib:core.rs': 1, '//unused:c.rs': 1}
+    assert impact.measure(tests, edges, loc)['u_pct'] == 50
+
+
+def test_bazel_diff_reader_rejects_graph_missing_source_labels(tmp_path):
+    path = tmp_path / 'deps.json'
+    path.write_text(json.dumps({'//t:fast': ['//lib:core'], '//lib:core': []}))
+    with pytest.raises(ValueError, match='source.file labels.*query'):
+        impact.read_deps(path, {'//t:fast'}, {'//lib:core.rs'})
+
+
+def test_bazel_query_fallback_reads_source_files_and_manual_tags(tmp_path):
+    path = tmp_path / 'query.json'
+    records = [{'type': 'RULE', 'rule': {'name': '//t:fast', 'ruleClass': 'rust_test',
+                                        'ruleInput': ['//lib:core'], 'attribute': []}},
+               {'type': 'RULE', 'rule': {'name': '//t:manual', 'ruleClass': 'py_test',
+                                        'ruleInput': ['//lib:a.rs'],
+                                        'attribute': [{'name': 'tags', 'stringListValue': ['manual']}]}},
+               {'type': 'RULE', 'rule': {'name': '//lib:core', 'ruleClass': 'rust_library',
+                                        'ruleInput': ['//lib:a.rs']}},
+               {'type': 'SOURCE_FILE', 'sourceFile': {'name': '//lib:a.rs'}}]
+    path.write_text('\n'.join(json.dumps(record) for record in records))
+    tests, edges, loc = impact.read_query(path)
+    assert tests == {'//t:fast': {'//lib:a.rs'}}
+    assert ('//lib:core', '//lib:a.rs') in edges
+    assert loc == {'//lib:a.rs': 1}
