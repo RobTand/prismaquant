@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -159,12 +160,17 @@ def resolve_pb_candidate(dest: Path, *, timeout_s: int = 300) -> dict:
     - every file under the reused prefixes hash-matches its blob.
     """
     git_dir = None
-    for candidate in (PB_PINNED_CHECKOUT, PB_PINNED_CHECKOUT_LEGACY):
-        try:
-            git_dir = _git_dir_of(candidate)
-            break
-        except NonQualified:
-            continue
+    if explicit := os.environ.get("PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR"):
+        # Hosted setup stages this historical pin before offline tests begin.
+        # An explicit store never falls back to fleet paths or a network fetch.
+        git_dir = _git_dir_of(Path(explicit))
+    else:
+        for candidate in (PB_PINNED_CHECKOUT, PB_PINNED_CHECKOUT_LEGACY):
+            try:
+                git_dir = _git_dir_of(candidate)
+                break
+            except NonQualified:
+                continue
     network = git_dir is None
     if network:
         mirror = _resolve_via_network(dest, timeout_s=timeout_s)

@@ -200,6 +200,10 @@ jobs:
         set -Eeuo pipefail
         bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
         printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+        acceptance_pin="$(python -c 'from pathlib import Path; import runpy; print(runpy.run_path("tools/resolve_tessera_dev_pin.py")["resolve_literal_pin"](Path("tests/fleet_acceptance_pins.py"), "PB_CANDIDATE_REV"))')"
+        git -C .ci/prismabuild fetch --no-tags --depth=1 origin "$acceptance_pin"
+        mv .ci/prismabuild/.git "$RUNNER_TEMP/pb-acceptance.git"
+        printf 'PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR=%s\n' "$RUNNER_TEMP/pb-acceptance.git" >> "$GITHUB_ENV"
     - name: Install CPU test environment
       shell: bash
       run: |
@@ -354,6 +358,10 @@ jobs:
         set -Eeuo pipefail
         bundle="$(python tools/build_prismabuild_source_bundle.py --source .ci/prismabuild --output "$RUNNER_TEMP/pb-source")"
         printf 'PRISMAQUANT_PB_SOURCE_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+        acceptance_pin="$(python -c 'from pathlib import Path; import runpy; print(runpy.run_path("tools/resolve_tessera_dev_pin.py")["resolve_literal_pin"](Path("tests/fleet_acceptance_pins.py"), "PB_CANDIDATE_REV"))')"
+        git -C .ci/prismabuild fetch --no-tags --depth=1 origin "$acceptance_pin"
+        mv .ci/prismabuild/.git "$RUNNER_TEMP/pb-acceptance.git"
+        printf 'PRISMAQUANT_PB_ACCEPTANCE_GIT_DIR=%s\n' "$RUNNER_TEMP/pb-acceptance.git" >> "$GITHUB_ENV"
     - name: Install CPU test environment
       shell: bash
       run: |
