@@ -49,6 +49,32 @@ def test_secret_forms_in_nested_directory_are_refused(tmp_path, payload):
         assert value not in output
 
 
+def test_secret_payload_collection_is_independent_of_clock():
+    script = '''
+import gzip
+import sys
+gzip.time.time = lambda: int(sys.argv[1])
+import pytest
+raise SystemExit(pytest.main(sys.argv[2:]))
+'''
+    collections = []
+    for timestamp in (1_700_000_000, 1_800_000_000):
+        result = subprocess.run(
+            [sys.executable, '-c', script, str(timestamp), '--collect-only', '-q',
+             '--noconftest', '-c', str(ROOT / 'pytest.ini'), '--rootdir', str(ROOT),
+             '-o', 'addopts=', str(Path(__file__).resolve()),
+             '-k', 'test_secret_forms_in_nested_directory_are_refused'],
+            cwd=ROOT, env={'PATH': os.defpath, 'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1'},
+            capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        nodes = [line for line in result.stdout.splitlines()
+                 if '::test_secret_forms_in_nested_directory_are_refused[' in line]
+        assert len(nodes) == 9, result.stdout
+        collections.append(nodes)
+    assert collections[0] == collections[1]
+
+
 def test_clean_files_and_multiple_paths_and_variables(tmp_path):
     clean = tmp_path / 'clean.txt'
     clean.write_text('ordinary diagnostic')
