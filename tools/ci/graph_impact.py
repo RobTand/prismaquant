@@ -20,6 +20,13 @@ edge-group exceptions, never a full graph. ``baseline_record`` accepts extra
 figure tolerances for migrating an existing check. ``check`` reads caller-given
 baseline/allowlist paths, always prints the summary, and returns an exit code.
 Adapters own graph discovery, git, source classification, and external blame.
+Baseline option ``test_to_test`` defaults to ``strict``. Transitional ``reach``
+permits a new test edge within its importer's base package reach, while the
+total ``test_to_test_count`` retains its minimum and permits growth of five.
+Such accepted test edges do not also fail generic fanout/reach attribution;
+other added edges, conftest restrictions and all SCC checks still apply.
+``test_to_test_strict_at_count`` and ``test_to_test_strict_by`` trigger reminders,
+never an automatic mode change. Callers may override the mode in compare/check.
 ``explain(test_id)`` may return bazel-diff explain's Mermaid output, which check
 prints on failure. The built-in shortest path supports pre-Bazel bridges.
 
@@ -31,6 +38,7 @@ Update graph_impact.sha256 only when this core changes in all consuming repos.
 from __future__ import annotations
 
 from collections import deque
+from datetime import date
 import json
 import math
 from pathlib import Path
@@ -39,6 +47,34 @@ import sys
 
 SCHEMA = 'graph-impact.v1'
 DEFAULT_TOLERANCES = {'u_pct': 1.0, 'loc_u_pct': 1.0, 'scc_max': 0}
+TEST_EDGE_GROUPS = frozenset({'test_to_test', 'test_to_test_imports'})
+
+
+def test_to_test_edges(graph):
+    """Union canonical and adapter edge groups without counting aliases twice."""
+    return set().union(*(set(graph.get('edge_groups', {}).get(group, ())) for group in TEST_EDGE_GROUPS))
+
+
+def policy_mode(baseline, override=None):
+    mode = override if override is not None else baseline.get('test_to_test', 'strict')
+    if mode not in {'strict', 'reach'}:
+        raise ValueError('test_to_test must be strict or reach')
+    return mode
+
+
+def policy_reminders(live, baseline, *, today=None):
+    """Remind at the count or calendar boundary; switching remains explicit."""
+    if policy_mode(baseline) != 'reach':
+        return []
+    count = len(test_to_test_edges(live))
+    target = baseline.get('test_to_test_strict_at_count')
+    deadline = baseline.get('test_to_test_strict_by')
+    reasons = []
+    if target is not None and count <= target:
+        reasons.append(f'count {count} <= {target}')
+    if deadline and (today or date.today()) >= date.fromisoformat(deadline):
+        reasons.append(f'deadline {deadline} reached')
+    return ['Reminder: switch test_to_test to strict (' + '; '.join(reasons) + ')'] if reasons else []
 
 
 def components(nodes, edges):
@@ -133,20 +169,34 @@ def baseline_record(live, baseline=None, *, tolerances=None):
         groups = {key: sorted(set(groups.get(key, ())) & set(rows))
                   for key, rows in baseline.get('edge_groups', {}).items()} | {
                       key: rows for key, rows in groups.items() if key not in baseline.get('edge_groups', {})}
+    count = len(test_to_test_edges(live))
+    if baseline:
+        count = min(count, baseline.get('test_to_test_count', len(test_to_test_edges(baseline))))
+    policy = {key: value for key, value in (baseline or {}).items()
+              if key in {'test_to_test_strict_at_count', 'test_to_test_strict_by'}}
     return {'schema': SCHEMA, 'figures': figures, 'tolerances': limits,
-            'reach_budget': budget, 'edge_groups': groups}
+            'reach_budget': budget, 'edge_groups': groups,
+            'test_to_test': policy_mode(baseline or {}), 'test_to_test_count': count, **policy}
 
 
 def regressions(live, baseline, allowlist=None):
     """Absolute SCC limit and forbidden edges, also enforced without history."""
     allowlist = allowlist or {}
     errors = []
+    mode = policy_mode(baseline)
+    if mode == 'reach':
+        count = len(test_to_test_edges(live))
+        old_count = baseline.get('test_to_test_count', len(test_to_test_edges(baseline)))
+        if count > old_count + 5:
+            errors.append(f'test_to_test count rose from {old_count} to {count} (maximum growth 5)')
     for key, old in baseline['figures'].items():
         value = live[key]
         tolerance = baseline['tolerances'][key]
         if key == 'scc_max' and value > old + tolerance and f'figure:{key}' not in allowlist:
             errors.append(f'{key} rose from {old:g} to {value:g} (tolerance {tolerance:g})')
     for group, rows in live.get('edge_groups', {}).items():
+        if mode == 'reach' and group in TEST_EDGE_GROUPS:
+            continue
         for edge in sorted(set(rows) - set(baseline.get('edge_groups', {}).get(group, ()))):
             if f'edge:{group}:{edge}' not in allowlist:
                 errors.append(f'new {group} edge: {edge}')
@@ -160,6 +210,8 @@ def stale_entries(live, baseline):
         if key == 'scc_max' and live[key] < old - baseline['tolerances'][key]:
             errors.append(f'{key} fell from {old:g} to {live[key]:g}; record the gain')
     for group, rows in baseline.get('edge_groups', {}).items():
+        if policy_mode(baseline) == 'reach' and group in TEST_EDGE_GROUPS:
+            continue
         for edge in sorted(set(rows) - set(live.get('edge_groups', {}).get(group, ()))):
             errors.append(f'{group} edge is gone: {edge}; record the gain')
     return errors
@@ -170,6 +222,12 @@ def baseline_errors(current, previous):
     errors = []
     if current.get('schema') != SCHEMA:
         errors.append('unsupported baseline schema')
+    policy_mode(current)
+    for key in ('test_to_test_count', 'test_to_test_strict_at_count'):
+        if key in current and (type(current[key]) is not int or current[key] < 0):
+            errors.append(f'{key} must be a nonnegative integer')
+    if 'test_to_test_strict_by' in current:
+        date.fromisoformat(current['test_to_test_strict_by'])
     if previous is None:
         return errors
     if current['tolerances'] != previous['tolerances']:
@@ -179,7 +237,14 @@ def baseline_errors(current, previous):
             errors.append(f'baseline figure {key} may only shrink')
     if current['reach_budget'] > previous['reach_budget']:
         errors.append('reach budget may only shrink')
+    if ('test_to_test_count' in previous and
+            current.get('test_to_test_count', math.inf) > previous['test_to_test_count']):
+        errors.append('test_to_test_count may only shrink')
+    if previous.get('test_to_test') == 'strict' and policy_mode(current) == 'reach':
+        errors.append('test_to_test may only switch from reach to strict')
     for group, rows in current.get('edge_groups', {}).items():
+        if policy_mode(current) == 'reach' and group in TEST_EDGE_GROUPS:
+            continue
         if set(rows) - set(previous.get('edge_groups', {}).get(group, ())):
             errors.append(f'baseline {group} exceptions may only shrink')
     return errors
@@ -304,8 +369,25 @@ def _causing_edges(head, added, targets, tests):
     return sorted((a, b) for a, b in added if a in reached and b in ancestors)
 
 
+def importer_reach(graph, importer):
+    """Adapters may classify non-runnable test helpers in their edge groups."""
+    if importer in graph['reach']:
+        return set(graph['reach'][importer])
+    adjacency = {}
+    for source, target in graph.get('path_edges', graph['edges']):
+        adjacency.setdefault(source, set()).add(target)
+    seen, pending = {importer}, [importer]
+    while pending:
+        for target in adjacency.get(pending.pop(), ()):
+            if target not in seen:
+                seen.add(target)
+                pending.append(target)
+    return seen & graph['loc'].keys()
+
+
 def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_gains=False,
-            test_packages=None, base_package_max_reach=None, edge_diff=None, edge_tolerance=0):
+            test_packages=None, base_package_max_reach=None, edge_diff=None, edge_tolerance=0,
+            test_to_test=None):
     """Package reach and structural growth; U/LOC U never fail a PR.
 
     Adapters supply test_packages, base_package_max_reach, and edge_diff with
@@ -315,14 +397,35 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
     are deterministic, rather than a floating-point trend.
     """
     allowlist = allowlist or {}
-    errors = regressions(head, baseline, allowlist)
+    mode = policy_mode(baseline, test_to_test)
+    policy = {**baseline, 'test_to_test': mode}
+    # With history, strict means newly introduced edges at this PR's base.
+    # This also permits the one-line switch after accepted transition edges.
+    if base is not None:
+        policy['edge_groups'] = {**baseline.get('edge_groups', {}),
+                                 **{group: base.get('edge_groups', {}).get(group, []) for group in TEST_EDGE_GROUPS}}
+    errors = regressions(head, policy, allowlist)
     if not record_gains:
-        errors += stale_entries(head, baseline)
+        errors += stale_entries(head, policy)
     packages = test_packages if test_packages is not None else head.get('test_packages', {})
     maxima = (base_package_max_reach if base_package_max_reach is not None else
               head.get('base_package_max_reach') if head.get('base_package_max_reach') is not None else
               package_max_reach(base) if base else {})
     inherited = inherited_sources(base, head)
+    prior_edges = test_to_test_edges(base if base is not None else baseline)
+    allowed_test_edges = set()
+    if mode == 'reach':
+        for edge in sorted(test_to_test_edges(head) - prior_edges):
+            importer, target = edge.split(' -> ', 1)
+            reached = importer_reach(head, importer)
+            previous = importer_reach(base, importer) if base else set()
+            package = packages.get(importer, package_of(importer))
+            limit = max(maxima.get(package, baseline['reach_budget']), len(previous))
+            if len(reached) > len(previous) and len(reached) > limit:
+                errors.append(f'new test_to_test edge deepens package: {edge}; '
+                              f'reach {len(reached)} exceeds package max {limit}')
+            else:
+                allowed_test_edges.add((importer, target))
     changed = set(head['reach']) - (base['reach'].keys() if base else set())
     changed |= set(changed_tests)
     if base is None:
@@ -345,6 +448,7 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
     changes = edge_diff if edge_diff is not None else head.get('edge_diff') or diff_edges(base, head)
     added = {tuple(edge) for kind in ('rule_to_rule', 'rule_to_source')
              for edge in changes['added'][kind]}
+    structural_added = added - allowed_test_edges
     old_tests = set(base['reach']) & head['reach'].keys()
     fanout_growth = {}
     affected_tests = set()
@@ -354,7 +458,7 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
         if len(current) > len(previous) + edge_tolerance:
             fanout_growth[source] = len(current) - len(previous)
             affected_tests |= current - previous
-    causes = _causing_edges(head, added, fanout_growth, affected_tests) if fanout_growth else []
+    causes = _causing_edges(head, structural_added, fanout_growth, affected_tests) if fanout_growth else []
     if causes:
         files = ', '.join(f'{p} +{n}' for p, n in sorted(fanout_growth.items(), key=lambda row: (-row[1], row[0])))
         errors.append('existing source fanout grew: ' + files + '; added edges: '
@@ -363,7 +467,7 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
     reach_growth = {t: gained for t, gained in reach_growth.items()
                     if len(set(head['reach'][t]) - inherited.keys()) > len(base['reach'][t]) + edge_tolerance}
     gained = set().union(*reach_growth.values()) if reach_growth else set()
-    causes = _causing_edges(head, added, gained, reach_growth) if gained else []
+    causes = _causing_edges(head, structural_added, gained, reach_growth) if gained else []
     if causes:
         errors.append('existing test reach grew: ' + ', '.join(f'{t} +{len(reach_growth[t])}' for t in sorted(reach_growth))
                       + '; added edges: ' + ', '.join(f'{a} -> {b}' for a, b in causes))
@@ -382,6 +486,8 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
             errors.append(f'SCC grew or merged ({len(component)} nodes): {", ".join(component)}'
                           + _attribution(base, head, causes, members=members))
     for group, rows in head.get('edge_groups', {}).items():
+        if mode == 'reach' and group in TEST_EDGE_GROUPS:
+            continue
         for edge in sorted(set(rows) - set(base.get('edge_groups', {}).get(group, ()))):
             message = f'new {group} edge: {edge}'
             if f'edge:{group}:{edge}' not in allowlist and message not in errors:
@@ -389,7 +495,7 @@ def compare(base, head, baseline, *, changed_tests=(), allowlist=None, record_ga
     return errors
 
 
-def summary(base, head, budget):
+def summary(base, head, budget, *, test_to_test='strict'):
     tests = sorted(set(head['reach']) - (base['reach'].keys() if base else set()))
     sizes = ', '.join(str(len(head['reach'][test])) for test in tests) or 'none'
     relation = '≤' if all(len(head['reach'][test]) <= budget for test in tests) else '>'
@@ -412,23 +518,32 @@ def summary(base, head, budget):
         fraction = 100 * statistics.mean(head['dependents'][source] for source in files) / max(head['test_count'], 1)
         additions.append(f'{len(files)} new sources inherit {package} fan-out {fraction:.0f}%')
     suffix = '; ' + '; '.join(additions) if additions else ''
+    if test_to_test == 'reach':
+        old_count = len(test_to_test_edges(base)) if base else 0
+        count = len(test_to_test_edges(head))
+        suffix += f'; test→test edges {old_count} → {count} ({count-old_count:+d}, reach)'
     return (f'U {prior_u} → {head["u_pct"]:.1f}%, SCC max {prior_scc} → {head["scc_max"]}, '
             f'new tests {len(tests)} ({reach_detail}), new edges {len(added)}, {last}{suffix}')
 
 
 def check(base, head, baseline_path, allowlist_path=None, *, changed_tests=(),
           base_allowlist=None, previous_baseline=None, write_baseline=False, explain=None,
-          test_packages=None, base_package_max_reach=None, edge_diff=None, edge_tolerance=0):
+          test_packages=None, base_package_max_reach=None, edge_diff=None, edge_tolerance=0,
+          test_to_test=None):
     """Run the check with caller-owned paths, printing a summary on pass or fail."""
     baseline_path = Path(baseline_path)
     baseline = json.loads(baseline_path.read_text())
+    mode = policy_mode(baseline, test_to_test)
     allowlist = json.loads(Path(allowlist_path).read_text()) if allowlist_path else {}
-    print(summary(base, head, baseline['reach_budget']), flush=True)
+    print(summary(base, head, baseline['reach_budget'], test_to_test=mode), flush=True)
+    for reminder in policy_reminders(head, {**baseline, 'test_to_test': mode}):
+        print(reminder, flush=True)
     errors = allowlist_errors(allowlist, base_allowlist if base_allowlist is not None else allowlist)
     errors += baseline_errors(baseline, previous_baseline)
     errors += compare(base, head, baseline, changed_tests=changed_tests, allowlist=allowlist,
                       record_gains=write_baseline, test_packages=test_packages,
-                      base_package_max_reach=base_package_max_reach, edge_diff=edge_diff, edge_tolerance=edge_tolerance)
+                      base_package_max_reach=base_package_max_reach, edge_diff=edge_diff, edge_tolerance=edge_tolerance,
+                      test_to_test=mode)
     if errors:
         if write_baseline:
             print('refusing to record a loss:', file=sys.stderr)
