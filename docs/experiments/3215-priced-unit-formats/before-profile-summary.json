@@ -1,0 +1,351 @@
+{
+  "exitstatus": 0,
+  "phase_seconds": {
+    "setup": 0.026903011000086963,
+    "call": 125.99605490199991,
+    "teardown": 0.015049633000018048
+  },
+  "total_phase_seconds": 126.03800754600002,
+  "slowest_tests": [
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_fills_188331767_headroom_with_718_priced_upgrades",
+      "phases": {
+        "setup": 0.0030185690000053,
+        "call": 121.64831654899999,
+        "teardown": 0.0007736139999963143
+      },
+      "seconds": 121.65210873199999
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_cli_routed_unit_rates_entrypoint",
+      "phases": {
+        "setup": 0.0010170500000015181,
+        "call": 4.272981118999979,
+        "teardown": 0.0015838629999791465
+      },
+      "seconds": 4.27558203199996
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_routed_unit_rate_final_footprint_overflow_refuses_before_emission",
+      "phases": {
+        "setup": 0.0016836820000207808,
+        "call": 0.04061577599998145,
+        "teardown": 0.00132655500001988
+      },
+      "seconds": 0.04362601300002211
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_selected_census_assignment_checks_the_per_unit_stamp",
+      "phases": {
+        "setup": 0.0009192020000057255,
+        "call": 0.008859384000004411,
+        "teardown": 0.0006275039999934506
+      },
+      "seconds": 0.010406090000003587
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_mixed_allocation_block_emits_per_unit_rungs_and_exact_receipts",
+      "phases": {
+        "setup": 0.0011646620000078656,
+        "call": 0.004944757000004074,
+        "teardown": 0.00047273100000211343
+      },
+      "seconds": 0.006582150000014053
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_packaged_capability_reader_requires_v57_and_the_exact_block",
+      "phases": {
+        "setup": 0.002291005000017776,
+        "call": 0.0027562150000051133,
+        "teardown": 0.0005700970000077632
+      },
+      "seconds": 0.005617317000030653
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_export_lane_mixed_selection_agrees_with_its_per_unit_stamp",
+      "phases": {
+        "setup": 0.002027459000004228,
+        "call": 0.0022130380000078276,
+        "teardown": 0.00044502000000079533
+      },
+      "seconds": 0.004685517000012851
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_refuses_rows_without_exact_price_or_wire_bytes",
+      "phases": {
+        "setup": 0.0007151660000204174,
+        "call": 0.0027839069999799904,
+        "teardown": 0.00044640100000492566
+      },
+      "seconds": 0.0039454740000053334
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_mixed_nvfp4_stack_refuses_by_name",
+      "phases": {
+        "setup": 0.0009789230000194493,
+        "call": 0.0008173200000101133,
+        "teardown": 0.0011812270000177705
+      },
+      "seconds": 0.002977470000047333
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_is_deterministic_across_row_insertion_order",
+      "phases": {
+        "setup": 0.0010961680000036722,
+        "call": 0.0013844519999963723,
+        "teardown": 0.0004962559999910354
+      },
+      "seconds": 0.00297687599999108
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_record_does_not_claim_whole_artifact_compliance",
+      "phases": {
+        "setup": 0.001085753000012346,
+        "call": 0.0008111399999961577,
+        "teardown": 0.0007571579999989808
+      },
+      "seconds": 0.0026540510000074846
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_plan_from_assignment_threads_the_carried_request_baseline",
+      "phases": {
+        "setup": 0.00094921799998815,
+        "call": 0.0012068350000049577,
+        "teardown": 0.0003807520000123077
+      },
+      "seconds": 0.0025368050000054154
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_honors_an_explicit_reserve_off_the_hard_cap",
+      "phases": {
+        "setup": 0.0008735239999850819,
+        "call": 0.0012546380000060253,
+        "teardown": 0.0004078430000049593
+      },
+      "seconds": 0.0025360049999960665
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_uniform_allocation_block_preserves_stack_uniform_metadata",
+      "phases": {
+        "setup": 0.0010908000000142692,
+        "call": 0.0009707600000012917,
+        "teardown": 0.00040190400000028603
+      },
+      "seconds": 0.002463464000015847
+    },
+    {
+      "node": "tests/test_tessera_per_unit_rates.py::test_allocator_recomputes_marginals_after_every_single_upgrade",
+      "phases": {
+        "setup": 0.0009950559999936104,
+        "call": 0.0004170869999882143,
+        "teardown": 0.0008131929999990462
+      },
+      "seconds": 0.002225335999980871
+    }
+  ],
+  "samples": 12613,
+  "top_leaf": [
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1731:parse_tessera_format_name",
+      2114
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:186:__new__",
+      1949
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:812:_grid_rung",
+      1286
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:269:call",
+      1067
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1257:family_q256_bounds",
+      969
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:857:__int__",
+      645
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:757:select_priced_unit_upgrades",
+      588
+    ],
+    [
+      "/usr/lib/python3.12/enum.py:726:__call__",
+      455
+    ],
+    [
+      "<frozen abc>:121:__subclasscheck__",
+      404
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:718:_priced_row",
+      392
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1240:family_rate_cap",
+      348
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1194:__instancecheck__",
+      242
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1272:validate_body_rate_q256",
+      232
+    ],
+    [
+      "/usr/lib/python3.12/enum.py:1129:__new__",
+      201
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:1183:get_data",
+      200
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1028:payload_bits",
+      182
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1222:get_tessera_family",
+      182
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:410:tessera_wire_recipe",
+      160
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:241:_memo",
+      155
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1465:__subclasscheck__",
+      126
+    ]
+  ],
+  "top_inclusive": [
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_execution.py:89:_multicall",
+      11934
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_manager.py:174:_hookexec",
+      11932
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/pluggy/_caller.py:181:__call__",
+      11930
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:160:pytest_pyfunc_call",
+      11866
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/python.py:1705:runtest",
+      11855
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:173:pytest_runtest_call",
+      11853
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/tests/test_tessera_per_unit_rates.py:130:test_allocator_fills_188331767_headroom_with_718_priced_upgrades",
+      11830
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:757:select_priced_unit_upgrades",
+      11816
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:812:_grid_rung",
+      10064
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1731:parse_tessera_format_name",
+      8778
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:250:<lambda>",
+      7038
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1272:validate_body_rate_q256",
+      6064
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:340:from_call",
+      5848
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1257:family_q256_bounds",
+      5788
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:236:call_and_report",
+      4734
+    ],
+    [
+      "/tmp/venv/lib/python3.12/site-packages/_pytest/runner.py:123:runtestprotocol",
+      2481
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:1240:family_rate_cap",
+      2062
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:186:__new__",
+      1949
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:269:call",
+      1242
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_formats.py:410:tessera_wire_recipe",
+      837
+    ],
+    [
+      "/usr/lib/python3.12/typing.py:1194:__instancecheck__",
+      772
+    ],
+    [
+      "/usr/lib/python3.12/enum.py:726:__call__",
+      656
+    ],
+    [
+      "/home/buildbuddy/workspace/repo-root/prismaquant/tessera_expert_projection.py:718:_priced_row",
+      654
+    ],
+    [
+      "<frozen importlib._bootstrap>:1304:_find_and_load_unlocked",
+      651
+    ],
+    [
+      "<frozen importlib._bootstrap>:1349:_find_and_load",
+      649
+    ],
+    [
+      "/usr/lib/python3.12/fractions.py:857:__int__",
+      645
+    ],
+    [
+      "<frozen importlib._bootstrap>:911:_load_unlocked",
+      628
+    ],
+    [
+      "<frozen importlib._bootstrap>:480:_call_with_frames_removed",
+      620
+    ],
+    [
+      "<frozen importlib._bootstrap_external>:989:exec_module",
+      617
+    ],
+    [
+      "/tmp/drv/timing_probe.py:20:load",
+      616
+    ]
+  ]
+}
