@@ -545,3 +545,21 @@ def test_scc_shrink_and_an_inherited_new_file_do_not_fail():
                     set(map(tuple, before['edges'])) | {('pkg/a', 'pkg/new')},
                     {**before['loc'], 'pkg/new': 1})
     assert not impact.compare(before, after, baseline(before))
+
+
+def test_bazel_explain_supplements_missing_source_edges(tmp_path, monkeypatch):
+    from tools.ci import graph_impact_bazel as adapter
+    import subprocess
+    deps = tmp_path / 'deps.json'
+    deps.write_text(json.dumps({'//:test': ['//:lib'], '//:external': ['@repo//:data']}))
+    def run(command, **kwargs):
+        supplemented = json.loads(Path(command[command.index('-d') + 1]).read_text())
+        assert supplemented['//:lib'] == ['//:lib.rs']
+        assert supplemented['//:test'] == ['//:lib']
+        assert supplemented['//:external'] == ['@repo//:data']
+        return subprocess.CompletedProcess(command, 0, 'flowchart TD; source-->test', '')
+    monkeypatch.setattr(adapter.subprocess, 'run', run)
+    diagram = adapter.explain('bazel-diff', 'base.json', 'head.json', deps, '//:test',
+                              edges={('//:test', '//:lib'), ('//:lib', '//:lib.rs')})
+    assert diagram == 'flowchart TD; source-->test'
+    assert json.loads(deps.read_text()) == {'//:test': ['//:lib'], '//:external': ['@repo//:data']}
