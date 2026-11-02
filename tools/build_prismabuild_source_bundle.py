@@ -8,10 +8,10 @@ copying anything. This builds test data, never a deployable PB runtime.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import shutil
 import stat
 import subprocess
@@ -19,9 +19,11 @@ import tempfile
 
 PIN_PATH = Path(__file__).resolve().parents[1] / "tests/pb_runtime_generation_pin.json"
 
-
-def _object_digest(kind: bytes, data: bytes) -> bytes:
-    return hashlib.sha1(kind + b" " + str(len(data)).encode() + b"\0" + data).digest()
+# Load the existing stdlib-only owner before the test environment is installed.
+_digests = runpy.run_path(str(PIN_PATH.parents[1] / "prismaquant/digests.py"))
+git_blob_sha1hex = _digests["git_blob_sha1hex"]
+git_tree_sha1hex = _digests["git_tree_sha1hex"]
+file_sha256hex = _digests["file_sha256hex"]
 
 
 def _tree_digest(root: Path, *, top: bool = True) -> bytes:
@@ -32,17 +34,18 @@ def _tree_digest(root: Path, *, top: bool = True) -> bytes:
         mode = path.lstat().st_mode
         name = os.fsencode(path.name)
         if stat.S_ISLNK(mode):
-            git_mode, digest = b"120000", _object_digest(b"blob", os.fsencode(os.readlink(path)))
+            git_mode = b"120000"
+            digest = bytes.fromhex(git_blob_sha1hex(os.fsencode(os.readlink(path))))
         elif stat.S_ISDIR(mode):
             git_mode, digest = b"40000", _tree_digest(path, top=False)
         elif stat.S_ISREG(mode):
             git_mode = b"100755" if mode & 0o111 else b"100644"
-            digest = _object_digest(b"blob", path.read_bytes())
+            digest = bytes.fromhex(git_blob_sha1hex(path.read_bytes()))
         else:
             raise ValueError(f"unsupported source tree member: {path}")
         entries.append((name + (b"/" if git_mode == b"40000" else b""),
                         git_mode + b" " + name + b"\0" + digest))
-    return _object_digest(b"tree", b"".join(record for _, record in sorted(entries)))
+    return bytes.fromhex(git_tree_sha1hex(b"".join(record for _, record in sorted(entries))))
 
 
 def build_bundle(source: Path, destination: Path, pin: dict) -> Path:
@@ -59,7 +62,7 @@ def build_bundle(source: Path, destination: Path, pin: dict) -> Path:
     if _tree_digest(source).hex() != pin["source_tree"]:
         raise ValueError("source tree differs from the pinned Git tree")
     for name, digest in pin["files"].items():
-        if hashlib.sha256((source / name).read_bytes()).hexdigest() != digest:
+        if file_sha256hex(source / name) != digest:
             raise ValueError(f"source digest differs: {name}")
     destination = Path(destination).resolve()
     if destination.is_relative_to(source):
