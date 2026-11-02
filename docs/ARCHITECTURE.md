@@ -3692,7 +3692,7 @@ selected PB-committed paths join the sealed unlink list; uncommitted copies and
 imported/foreign entries remain untouched. Existing successor, containment,
 path/digest binding and committed-file identity fences apply before any unlink.
 Crash retries use only the prior sealed target list and never add new paths.
-The CPU gate is `tests/test_stage_a_retirement_forward_1088.py`; this is not
+The CPU gate is `tests/own_process/test_stage_a_retirement_forward_1088.py`; this is not
 live cleanup, physical tier egress, GPU/model or performance qualification.
 PB dead-stage-copy acceptance remains independent; the broad parent stays open.
 
@@ -3865,7 +3865,7 @@ These joins refuse in both modes:
 The strict result request still passes `require_native_producer_context=True`.
 The SDK refuses a result without a native producer context in both modes.
 `tests/test_no_new_seals.py` counts the two kinds of join in each function.
-Tests: `tests/test_original_source_admission.py` and
+Tests: `tests/own_process/test_original_source_admission.py` and
 `tests/test_held_producer_sdk5_smoke_2152.py`.
 
 Re-stamped 2026-10-27 (PQ #2826): this release smoke authenticates a private
@@ -6087,7 +6087,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     lower the cgroup's committed bytes. So prof-2 was refused 60 MB over the
     cgroup term after the render cache reported its frees, while gigabytes
     of memfd read-ahead were still held.
-  - `tests/test_reclaim_readings_gb10.py` measures each declaration on the
+  - `tests/own_process/test_reclaim_readings_gb10.py` measures each declaration on the
     GB10.
   - A check that reclaimed records its trail under `reclaims` in its `last`
     record. The guard's snapshot records each reclaimer's cumulative asks,
@@ -6261,7 +6261,7 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   instead grew the mimalloc footprint by about one window per window. The
   sealed memfd returned exactly what it held on every drop (0.938 GiB per
   probe window, no growth over 4 windows).
-  `tests/test_io_engine_sealed_memory.py` holds the row to it: freeing
+  `tests/own_process/test_io_engine_sealed_memory.py` holds the row to it: freeing
   read-ahead renders, by reclaim or by a consumer's release, must drop the
   guard's committed reading by their files' pages, to within the kernel's
   per-CPU accounting batch. *A reclaim frees only what the allocator gives
@@ -6453,7 +6453,7 @@ probe-major with batches ascending, with the same arguments.
   group.
 
 Gates: `tests/test_stage_b_streamed_handoff.py`,
-`tests/test_band_serial_handoff_disposal_real_pb.py` (in its own pytest
+`tests/own_process/test_band_serial_handoff_disposal_real_pb.py` (in its own pytest
 process) and `tests/test_quantum_band_serial.py`. No format, pipeline
 default, record identity or ship gate changes.
 
@@ -7543,7 +7543,7 @@ stride checkpoints split by sample.
   probe x sample plane, and publishes the checkpoint a single owner seals.
 
 See "Stage A chain split (#738)". Gate: `tests/test_stage_a_chain_split.py`,
-`tests/test_stage_a_split_produced_range.py`. No format, pipeline default or
+`tests/own_process/test_stage_a_split_produced_range.py`. No format, pipeline default or
 ship gate changes. A run without the split flags writes the same bytes.
 
 The dispatcher derives Stage B's load-phase grace (2026-09-24,
@@ -8001,7 +8001,7 @@ GPU. On R13's layer-44 roll that was 11.0% of the main thread's samples.
 
 The read, write and unlink rows of #1128 are unchanged; see
 "Same-box readback and write-behind export (#1110)". Gate:
-`tests/test_stage_a_io_overlap_1128.py`. No format, pipeline default, stage,
+`tests/own_process/test_stage_a_io_overlap_1128.py`. No format, pipeline default, stage,
 boundary policy, run identity or ship gate changes.
 
 A schedule now owns a resident layer until its install claims it
@@ -8118,10 +8118,10 @@ local spool, and its exports are write-behind (2026-09-23,
   `release_group` re-checks every landed file.
 
 See "Same-box readback and write-behind export (#1110)". Gates:
-`tests/test_stage_a_same_box_readback.py`,
-`tests/test_produced_output_spool.py`,
-`tests/test_produced_output_spool_real_pb.py`,
-`tests/test_stage_a_produced_lookahead.py`,
+`tests/own_process/test_stage_a_same_box_readback.py`,
+`tests/own_process/test_produced_output_spool.py`,
+`tests/own_process/test_produced_output_spool_real_pb.py`,
+`tests/own_process/test_stage_a_produced_lookahead.py`,
 `tests/test_dispatch_joint_quanta.py`. No format, pipeline default or ship
 gate changes; the Stage A row's sealed spool bound changes.
 
@@ -8263,7 +8263,7 @@ compared the declaration with the reads before the GPU was admitted.
 Gates:
 - `tests/test_readset_coverage_1095.py`;
 - `tests/test_stageb_readset_source_coverage.py`,
-  `tests/test_stagea_readset_source_coverage.py` and
+  `tests/own_process/test_stagea_readset_source_coverage.py` and
   `tests/test_stage_b_prep_io_1070.py` on the loader's plan.
 
 No format, pipeline default or ship gate changes. The dispatcher's
@@ -8361,7 +8361,7 @@ Gates:
   sealed under strict reads over a resolver double (no PrismaBuild), with
   `config.json` read only off the stage; without its header read the run
   refuses;
-- `tests/test_stage_b_fp8_source_strict_reads_1219.py`: a real FP8 source
+- `tests/own_process/test_stage_b_fp8_source_strict_reads_1219.py`: a real FP8 source
   checkpoint (`float8_e4m3fn` weights, `weight_scale_inv`, a declared
   `weight_block_size`). The generator's strict spill run, over a Qwen3 and a
   Qwen3.5-MoE source, opens no source file at its pool path; the FP8 map's
@@ -8468,9 +8468,9 @@ record is gone. Gates:
 - `tests/test_stage_a_retirement_1073.py`;
 - `tests/test_stage_a_retirement_binding_scan_1088.py`: an incomplete binding
   scan refuses before the retirement record or any unlink;
-- `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
+- `tests/own_process/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
   charge drops by exactly the pinned batch's bytes;
-- `tests/test_stage_a_retirement_forward_1088.py`: a private real PB origin
+- `tests/own_process/test_stage_a_retirement_forward_1088.py`: a private real PB origin
   batch from actual controlled Stage A boundary records is selected, its
   durable charge drops exactly, uncommitted copies survive, declared forward
   path bindings refuse, and interrupted unlink reuses the sealed targets.
@@ -8508,7 +8508,7 @@ owns the legacy residency-map path rule. The preparation's reads remain plain
 file reads, so the staged copy is not yet what they read.
 Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
 hook shows every file the generator opens is in its manifest),
-`tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
+`tests/own_process/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
 published generation pinned in `tests/pb_runtime_generation_pin.json`: every file
 under the metadata root is in a committed batch with its digest, and a replay
 commits nothing). A new submission contract for one tool; no format, pipeline
@@ -8669,7 +8669,7 @@ manifest. Every reader parses both schemas through one helper,
 sealed still read. See "Referenced checkpoints (#1036)". Gates:
 `tests/test_referenced_adjoint_checkpoint.py`,
 `tests/test_stage_a_seed_package.py`,
-`tests/test_stage_a_produced_boundary_chain.py`. No format, pipeline
+`tests/own_process/test_stage_a_produced_boundary_chain.py`. No format, pipeline
 default, stage or ship gate changes. A Stage B band slice built from a v2 checkpoint names
 other rows than one built from v1, so its slice digests differ. The tensor
 payloads are identical.
@@ -9082,7 +9082,7 @@ receipt's `run_identity.chain_regime` carries it, so every band and slice
 does, and a quantum's chain rebuild runs the slice's regime. See "The Stage A
 chain regime (#997)" for the contract. Gates:
 `tests/test_stage_a_chain_regime.py`,
-`tests/test_stage_a_produced_fused_windows.py`. No format, pipeline default
+`tests/own_process/test_stage_a_produced_fused_windows.py`. No format, pipeline default
 or ship gate changes.
 
 Stage B reads Stage A by slice and by checkpoint band (2026-09-22,
@@ -9128,7 +9128,7 @@ window reads before that window opened. Each open window of
 (`stage_produced_reads_ahead`), and while that request is outstanding,
 write-time publication leaves it room inside the existing read-ahead share.
 Credit bounds, refusal reasons, the settle at close and the bytes written are
-unchanged. Gate: `tests/test_stage_a_produced_lookahead.py`.
+unchanged. Gate: `tests/own_process/test_stage_a_produced_lookahead.py`.
 
 GLM Stage B runs from main (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`,
 PQ #990). The Stage B commits that lived only on the frozen campaign union
@@ -9972,7 +9972,7 @@ reclaim pass that reads each step** (PQ #1383, P1, a regression from #1348).
 - **The pass.** `_reclaim` asks each reclaimer only for a term that reads
   what its frees lower. It reads the process again after each ask, and stops
   only when no term is exceeded.
-- **Declarations.** Measured on the GB10 (`tests/test_reclaim_readings_gb10.py`):
+- **Declarations.** Measured on the GB10 (`tests/own_process/test_reclaim_readings_gb10.py`):
   the spill replay and the render stream lower committed bytes; the render
   cache lowers the reservation and `MemAvailable`.
 - **Headroom.** `headroom_bytes` and `device_headroom_bytes` read the same
@@ -11064,8 +11064,8 @@ unwired in PrismaQuant. PrismaBuild #946, which added mixed static/produced
 read plans, is closed; selected-runtime support and consumer integration
 remain to be verified. See "Band-serial Stage B quanta (#996)". A changed Stage B
 produced-output contract; no format, pipeline default or ship gate changes.
-Gates: `tests/test_band_serial_handoff_produced.py`,
-`tests/test_band_serial_handoff_spool_real_pb.py`,
+Gates: `tests/own_process/test_band_serial_handoff_produced.py`,
+`tests/own_process/test_band_serial_handoff_spool_real_pb.py`,
 `tests/test_band_serial_dispatch.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`) for **the Stage B
@@ -11095,7 +11095,7 @@ when `PRISMABUILD_TEST_TIMEOUT_S` is set, `tests/conftest.py` registers
 `prismabuild` package, so the bound `pbtest` exports now applies to each test
 on a shard and in an `own_process` child. An `own_process` child is passed
 `-p` only when the parent was. Unset, nothing changes. No format, default,
-stage or ship gate changes. Gate: `tests/test_own_process_isolation.py`.
+stage or ship gate changes. Gate: `tests/own_process/test_own_process_isolation.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1014-real-data-tests`) for **fleet-data tests
 skipped by default** (PQ #1014). Test infrastructure only. A test that reads
@@ -11133,7 +11133,7 @@ every field but the id. The same quantum id under another root, tier or plan
 files its own template instead of being refused, a re-dispatch files the same
 one, and the live pair drops its root-named override; see "Band-serial Stage
 B quanta (#996)". No format, default, stage or ship gate changes. Gate:
-`tests/test_band_serial_handoff_produced.py`.
+`tests/own_process/test_band_serial_handoff_produced.py`.
 
 Re-stamped (2026-09-23, `ws-tq/1036-referenced-checkpoints`) for
 **referenced Stage A checkpoints** (PQ #1036): a v2 checkpoint's cotangent
@@ -11160,7 +11160,7 @@ armed for its first proxy, and runs under the bound the parent runs under
 (`--timeout`, and `prismabuild.pytest_test_bound` when the parent loaded it by
 name), so a hanging test fails alone with the bound named instead of the
 module timing out as one test (`tests/conftest.py`). No format, default,
-stage or ship gate changes. Gate: `tests/test_own_process_isolation.py`.
+stage or ship gate changes. Gate: `tests/own_process/test_own_process_isolation.py`.
 
 Re-stamped (2026-09-23, `ws-sa/seed-through-checkpoint`) for **the seed's
 sealed result and its tools** (PQ #1043): a seed seals its plane at
@@ -11269,8 +11269,8 @@ quanta (#996)". The group still ends as a retained prewrite until PB #912.
 An executed producer and consumer pair (PB `0e748c47c927`,
 `074394f797b8`) shows `L - 1` reading its handoff from PrismaBuild's tiers.
 No format, default, stage or ship gate changes. Gates:
-`tests/test_band_serial_handoff_produced.py`,
-`tests/test_band_serial_handoff_spool_real_pb.py`.
+`tests/own_process/test_band_serial_handoff_produced.py`,
+`tests/own_process/test_band_serial_handoff_spool_real_pb.py`.
 
 Re-stamped (2026-09-23, `ws-br/chain-parity-1008`) for **the chain-mode
 readset check** (PQ #1008): a chain-mode layer quantum now refuses, with exit
@@ -11305,8 +11305,8 @@ quanta** (PQ #996): inside a checkpoint band, quantum `L - 1` reads quantum
 quanta (#996)". Chain mode and every default are unchanged. No format,
 stage or ship gate changes. Gates: `tests/test_quantum_band_serial.py`,
 `tests/test_band_serial_dispatch.py`,
-`tests/test_band_serial_handoff_produced.py`,
-`tests/test_band_serial_handoff_spool_real_pb.py`.
+`tests/own_process/test_band_serial_handoff_produced.py`,
+`tests/own_process/test_band_serial_handoff_spool_real_pb.py`.
 
 Re-stamped (2026-09-23, `ws-br/band-serial-996`) for **the checkpoint
 manifest as a declared read** and the consumers' Stage A header check
@@ -11323,8 +11323,8 @@ Stage A run identity only (`check_adjoint_run_identity`): their stride
 check compared the header's stride with itself. The producer still checks
 the stride against its derivation when it binds a slice, and
 `verify_adjoint_slice` checks where the header's stride places each
-record's layer. Gates: `tests/test_quantum_executable_readset.py`,
-`tests/test_quantum_boundary_readset.py`,
+record's layer. Gates: `tests/own_process/test_quantum_executable_readset.py`,
+`tests/own_process/test_quantum_boundary_readset.py`,
 `tests/test_strict_reader_tier_enforcement.py`,
 `tests/test_dispatch_joint_quanta.py`.
 
@@ -11371,7 +11371,7 @@ window asks for the next window's groups (`stage_produced_reads_ahead`);
 see "The read path's lookahead" and "An optional step never waits on the
 lane" under the produced-boundary owner. No format, default, lane, pin,
 kernel order or ship gate changes; the bytes written are unchanged. Gate:
-`tests/test_stage_a_produced_lookahead.py`. Merged over GLM Stage B from main
+`tests/own_process/test_stage_a_produced_lookahead.py`. Merged over GLM Stage B from main
 (PQ #990), whose entries touch other sections.
 
 Re-stamped (2026-09-22, `ws-sb2/stageb-runnable-990-20260922`) for **GLM Stage B
@@ -11778,7 +11778,7 @@ accept it. **Not changed:** the per-layer slice manifests and the quantum record
 that seal them. They tile the parent byte for byte (§3.1 of the distributed
 campaign contract). Stage B source coverage is completed separately in its
 bound executable readsets (PQ #900, above); slice coverage alone proves no
-reader coverage. Gates: `tests/test_stagea_readset_source_coverage.py`.
+reader coverage. Gates: `tests/own_process/test_stagea_readset_source_coverage.py`.
 
 Re-stamped (2026-09-21, `fix/stagea-readset-898-profiler-899`) for **the
 scope of Stage A's kernel-time profiler** (PQ #899). `run_adjoint_capture`
@@ -11915,7 +11915,7 @@ pinned paths to merged `3641e29332bfd7a091f35b5bd3875b6de294c86e`) and the
 rollover fixture now runs at ONE stage token as well as two, as a
 parameter rather than a restored assumption -- at the superseded candidate
 that one-token run failed 1 in 6, so a single green is evidence and not
-proof. Gates: `tests/test_stage_a_produced_boundary_chain.py`.
+proof. Gates: `tests/own_process/test_stage_a_produced_boundary_chain.py`.
 
 Re-stamped (2026-09-21, `fix/quantum-metadata-generation-20260921`) for
 **the quantum control-metadata generation seam** (PQ #884). No default,
@@ -12127,7 +12127,7 @@ before the chain roll, replay before the boundary prefetch inside the
 already-open retained_window; read transitions change phase with
 unchanged units; chunk names are not staging phases, so durable units
 commit under the read phase in effect).
-Gate: `tests/test_quantum_executable_readset.py` (real tiny-CPU
+Gate: `tests/own_process/test_quantum_executable_readset.py` (real tiny-CPU
 `run_layer_quantum_core` sequencing; a dense single-window case plus an
 expert multi-window case with partial/complete resume; source-file opens
 explicitly unqualified under the fake streaming context and the
@@ -12156,7 +12156,7 @@ publishing manifests before records through the first-writer primitive.
 Receipt identity plus attach is provenance only, never a storage lease --
 the readset is the bindable object a PB output-scope staging contract
 admits. Gate:
-`tests/test_quantum_boundary_readset.py`.
+`tests/own_process/test_quantum_boundary_readset.py`.
 
 Re-stamped (2026-09-20, `container/reader-context-transport-20260920`) for
 **the campaign container forwarding PB's injected reader identity** (PQ
@@ -12250,7 +12250,7 @@ only the nonempty chunk phases in `annotations.phases`. A zero-byte
 `head` has no entry boundary and causes PB to reject the entire phase
 table. Startup/head remains a separately declared payload progress phase;
 it does not create a zero-byte storage phase. The published-PB parser
-interoperability gate is `tests/test_slice_manifest_pb_staging.py`.
+interoperability gate is `tests/own_process/test_slice_manifest_pb_staging.py`.
 
 Re-stamped (2026-09-20, `flash/strict-reader-tier-enforcement-20260920`)
 for **strict staged-tier enforcement on GPU-consumed bulk inputs** (PQ
@@ -12362,7 +12362,7 @@ on the runner's `source_phase` hook through
 shared name helpers, with durable-unit counting untouched. Records, entry
 bytes/digests, and plan/prepared/capture identities unchanged; the live
 `adjoint-manifest.json` regenerates later from this builder. Gate:
-`tests/test_stagea_forward_read_plan.py`.
+`tests/own_process/test_stagea_forward_read_plan.py`.
 
 Re-stamped (2026-09-20, `flash/quantum-launch-contract-20260920`) for **the
 quantum launch contract** (#838). The quanta rows the dispatcher published
@@ -12463,7 +12463,7 @@ never passed to `quantum_argv` — through one validating helper that refuses an
 empty or ill-typed list at dispatch. Stage A keeps its explicit `adjoint.tag`
 pin (one monolithic capture by construction). No pipeline default, stage graph,
 format menu, plugin contract, serving lane, ship gate or published byte
-changes. Gate: `tests/test_dispatch_shared_tag_placement.py`.
+changes. Gate: `tests/own_process/test_dispatch_shared_tag_placement.py`.
 
 Re-stamped (2026-09-20, `flash/dev-progress-stamp-optin`) for **the dev
 progress-stamp opt-out** (§3.4; PQ #826, #828, follow-through on #771). No
@@ -13211,7 +13211,7 @@ says exactly that.
   `BoundaryStagingTimeout` fired; the end-to-end lifecycle is therefore
   proven through publication and funding on the live fleet, and **not**
   through a fleet-executed mover. Gates:
-  `tests/test_stage_a_produced_boundary_chain.py`.
+  `tests/own_process/test_stage_a_produced_boundary_chain.py`.
 
 - **One resolver**, `prismaquant/residency_map.py`. It owns no bytes: it
   answers "where do I open this declared path", and the caller's own digest
@@ -23973,7 +23973,7 @@ and `ModelProfile.rope_axis_for_layer_type` both resolve through;
 every `_call_layer` caller is fixed at once; and the `main` fallback is gone —
 an unresolved layer type now raises. Guarded by
 `tests/test_multilayer_rope_forward.py` and
-`tests/test_deepseek_v4_profile.py::test_rope_axis_mapping_matches_the_vendored_definition`.
+`tests/own_process/test_deepseek_v4_profile.py::test_rope_axis_mapping_matches_the_vendored_definition`.
 See also the teacher forward-fidelity gate (§7.3), which is what makes a
 teacher this broken impossible to ship silently.
 
@@ -31994,7 +31994,7 @@ The walk has one root pair and one output (`WalkResult`, JSON-serializable):
   `execution="real"` runs the same capture over a real CPU forward, the
   fallback for forwards fake tensors cannot execute (measured: DSv4's
   `int(position_ids[0, 0])` raises `DataDependentOutputException`; the ratchet
-  is `tests/test_model_walk.py::test_dsv4_fake_trace_block_is_still_real`).
+  is `tests/own_process/test_model_walk.py::test_dsv4_fake_trace_block_is_still_real`).
   `F.scaled_dot_product_attention` carries no weights and is excluded;
   `F.embedding` produces no edge but its weight still requires a claim.
 
@@ -33977,7 +33977,7 @@ Gates: `tests/test_referenced_adjoint_checkpoint.py` (no copy, pin through
 rollover and close, a control rollover that still unlinks, each identity
 refusal, and v1/v2 payload equality), `tests/test_stage_a_seed_package.py`
 (the seed stages the owner's plane) and
-`tests/test_stage_a_produced_boundary_chain.py` (the consumed-lifetime
+`tests/own_process/test_stage_a_produced_boundary_chain.py` (the consumed-lifetime
 refusal on a real bound instance). The Stage A chain, resume, seed and
 band suites ran on v2 checkpoints end to end until #1037 moved Stage A to
 v3.
@@ -34388,7 +34388,7 @@ single owner's checkpoint, pack members and band, byte for byte, in the
 default regime, a batched, fused one, and R13's shape (several fused
 batches per read window). It chains two rounds through a joined checkpoint, and restores a non-empty shared adjoint. It also covers
 global indices, owner status files, the borrowed range, a retry prep and
-the join's refusals. `tests/test_stage_a_split_produced_range.py` runs the
+the join's refusals. `tests/own_process/test_stage_a_split_produced_range.py` runs the
 range-bound produced-output owner against PrismaBuild.
 
 ### Stage A chain split dispatch (#738)
@@ -34494,8 +34494,8 @@ materialization or CUDA allocation is performed, and the GPU path's existing
 CUDA and staged-tier guards remain unchanged. Source-plan index metadata uses
 the loader's staged metadata owner; bounded safetensors headers retain the
 existing source-header allowance, not a bulk-weight pool fallback.
-Regressions: tests/test_joint_adjoint_cpu_preflight.py and
-tests/test_joint_adjoint_source_schedule.py.
+Regressions: tests/own_process/test_joint_adjoint_cpu_preflight.py and
+tests/own_process/test_joint_adjoint_source_schedule.py.
 
 ### Stage A forward split (#738)
 
@@ -34804,7 +34804,7 @@ the two allowances are equal.
   interpreter carries) nor the runtime generation the produced-output tests
   pin (`tests/pb_runtime_generation_pin.json`, `81d95cba8d91`) carries
   #1035. The PrismaBuild round-trip in
-  `tests/test_export_wait_record_reads_in_prismabuild.py` skips on an
+  `tests/own_process/test_export_wait_record_reads_in_prismabuild.py` skips on an
   interpreter whose `prismabuild` predates #1035, naming the one it found;
   its wire-format tests run everywhere.
 - PrismaBuild charges the spool to a box's `spool_gb` only with
@@ -34813,7 +34813,7 @@ the two allowances are equal.
   since PQ #1364 (before, a quantum row's spool went uncharged at placement).
   The box's offer is measured from its free disk when no action holds
   `spool_gb` there (PrismaBuild `supervise.py` `_spool_budget`).
-- The fixture chain (`tests/test_stage_a_same_box_readback.py`) and the real
+- The fixture chain (`tests/own_process/test_stage_a_same_box_readback.py`) and the real
   PrismaBuild exporter test check behavior, not real-scale time. A
   real-scale profile of one GLM step is owed.
 
@@ -35040,8 +35040,8 @@ not write-only, and a write-only owner refuses a `read_back=True` write, a
 bind without a lifetime and a window request; an owner bound to a read-back
 template refuses `write_produced_files`. A row recorded before #1075 carries
 a read-back handoff template, so its resubmission refuses at the quantum's
-head, before any GPU work. Gates: `tests/test_band_serial_handoff_produced.py`
-and `tests/test_band_serial_handoff_spool_real_pb.py` (each in its own
+head, before any GPU work. Gates: `tests/own_process/test_band_serial_handoff_produced.py`
+and `tests/own_process/test_band_serial_handoff_spool_real_pb.py` (each in its own
 pytest process), against the published PrismaBuild generation
 `tests/pb_runtime_generation_pin.json` names.
 
@@ -35140,7 +35140,7 @@ not the need to verify the selected runtime and connect the consumer plan.
 After integration,
 the consumer will find each row by path under the producer's handoff prefix
 and check its bytes and sha256 against the batch ref before reading it.
-`tests/test_band_serial_handoff_produced.py` drives both halves on a private
+`tests/own_process/test_band_serial_handoff_produced.py` drives both halves on a private
 queue: a declared consumer that executed retires every batch, and a failed
 producer's undeclared batches are swept.
 
@@ -35180,7 +35180,7 @@ under another root, tier or plan files a template of its own, and a
 re-dispatch files the same one again. Before #1054 the id was
 `pq-stageb-handoff-<quantum id>`, so a second root's template for a layer was
 refused. An explicit `template_id` still overrides the derived id; the live
-pair uses the derived one (`tests/test_band_serial_handoff_produced.py`).
+pair uses the derived one (`tests/own_process/test_band_serial_handoff_produced.py`).
 The derived manifest is also checked against PrismaBuild's
 phase planner (`tests/test_band_serial_dispatch.py`).
 

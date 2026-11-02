@@ -33,12 +33,12 @@
   ],
   "consumers": [
     "tests/fullstack_pb_generation.py",
-    "tests/test_band_serial_handoff_produced.py",
-    "tests/test_band_serial_handoff_spool_real_pb.py",
-    "tests/test_produced_output_spool_real_pb.py",
-    "tests/test_stage_a_produced_boundary_chain.py",
-    "tests/test_stage_a_retirement_pb_1073.py",
-    "tests/test_stage_b_prep_produced_1070.py"
+    "tests/own_process/test_band_serial_handoff_produced.py",
+    "tests/own_process/test_band_serial_handoff_spool_real_pb.py",
+    "tests/own_process/test_produced_output_spool_real_pb.py",
+    "tests/own_process/test_stage_a_produced_boundary_chain.py",
+    "tests/own_process/test_stage_a_retirement_pb_1073.py",
+    "tests/own_process/test_stage_b_prep_produced_1070.py"
   ],
   "note": "One shared immutable source pin for connected SDK5 and produced-output CPU fixtures (PQ #1084, #1293, #2152). Current consumers share the complete file union; the historical SDK3 and SDK4 bundles and receipts remain preserved in Git and on the shared mount, and the SDK5 consumer refuses them by version. The pin and staged_lease.PB_READER_LEASE_PIN_COMMIT move together (tests/test_pb_generation_pin_1084.py). Source qualification is independent of live worker activation."
 }

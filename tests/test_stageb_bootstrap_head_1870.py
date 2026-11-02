@@ -11,8 +11,8 @@ import pytest
 
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan
-from test_quantum_executable_readset import _bound_inputs
-from test_stage_b_fp8_source_strict_reads_1219 import (
+from own_process.test_quantum_executable_readset import _bound_inputs
+from own_process.test_stage_b_fp8_source_strict_reads_1219 import (
     FP8_CONFIG, PREFIX, SPILL, _fp8_layout, _unbind_staged_reads,
 )
 from test_stage_b_prep_io_1070 import generator_args

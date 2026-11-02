@@ -46,7 +46,13 @@ JUnit must match each shard's selected nodes exactly once; the aggregate proves
 unique execution across shards too. Collection differences or missing evidence
 produce exit 75. A shared file budget still applies to the sum across shards.
 
-Tests marked `own_cgroup` run after their shard's ordinary tests, without xdist,
+Own-process modules and their child execution hooks live in `tests/own_process/`.
+Bazel attaches its conftest only to that directory; `tests/conftest.py` retains
+the session-wide resets, time-bound registration, environment reporting, explicit
+lane opt-ins, collection-skip exit handling and golden-row checks. The hosted
+selector continues to run the full gate on any conftest change.
+
+Tests marked `own_cgroup` live in `tests/own_process/` and run after their shard's ordinary tests, without xdist,
 in a transient systemd scope containing only that pytest process. Both phases
 contribute JUnit evidence and the shard verdict. JUnit carries the collected
 `gate_nodeid` separately from the defining source location of imported tests.

@@ -10,8 +10,8 @@ import pytest
 import torch
 
 from prismaquant import joint_quantum_row as quantum_row
-import test_quantum_executable_readset as fixture
-from test_quantum_executable_readset import (CALIB, N_PROBES, RENDER_PREREQ, STRIDED,
+import own_process.test_quantum_executable_readset as fixture
+from own_process.test_quantum_executable_readset import (CALIB, N_PROBES, RENDER_PREREQ, STRIDED,
                                            _tiny_records, _tiny_receipt)
 from prismaquant import aura_checkpoint_journal
 from prismaquant import joint_layer_quanta as quanta

@@ -45,7 +45,7 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant import io_engine
 from prismaquant import joint_layer_quanta as jl
-from test_quantum_executable_readset import (
+from own_process.test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
 )
 import test_strict_reader_tier_enforcement as strict
@@ -456,7 +456,7 @@ def test_dispatch_refuses_mover_reference_shaped_contract(
 
 @pytest.mark.usefixtures("pinned_pb_source")
 def test_prepared_manifest_passes_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     record, receipt, parent, _kwargs = _bound_inputs(tmp_path)
     files = _render_files(tmp_path)

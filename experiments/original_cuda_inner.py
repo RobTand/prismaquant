@@ -101,7 +101,7 @@ def main():
     if a.cpu_preflight:
         if torch.cuda.is_available() or os.environ.get('PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST')=='1':
             raise RuntimeError('CPU prerequisite action unexpectedly has CUDA qualification')
-        nodes=['tests/test_capture_original_material.py']
+        nodes=['tests/own_process/test_capture_original_material.py']
         expected=26
     else:
         if not a.node_id.startswith((

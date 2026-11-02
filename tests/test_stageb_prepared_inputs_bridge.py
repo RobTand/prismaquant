@@ -44,7 +44,7 @@ for _entry in (ROOT, ROOT / "tools"):
 from prismaquant import io_engine
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.production_weight_cache import ProductionWeightCache
-from test_quantum_executable_readset import (
+from own_process.test_quantum_executable_readset import (
     N_PROBES, N_BATCHES, STRIDED, _tiny_parent, _tiny_receipt, _write_boundary,
 )
 import test_strict_reader_tier_enforcement as strict
@@ -414,7 +414,7 @@ def test_check_rejects_nonzero_offset(tmp_path):
 
 
 def _tiny_parent_and_bound(tmp_path):
-    from test_quantum_executable_readset import _bound_inputs
+    from own_process.test_quantum_executable_readset import _bound_inputs
     record, receipt, parent, kwargs = _bound_inputs(tmp_path)
     return record, receipt, parent, kwargs
 

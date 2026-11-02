@@ -157,7 +157,7 @@ def test_the_quantum_runs_its_tail_under_the_last_declared_phase(
         tmp_path, monkeypatch):
     """The real quantum, spill mode: the ``payload`` span opens with the
     last declared phase in effect, and nothing commits after it opens."""
-    import test_quantum_executable_readset as phases
+    import own_process.test_quantum_executable_readset as phases
     import test_stageb_one_pass_spill as one_pass
     import prismaquant.io_spans as io_spans
     import prismaquant.joint_cost_quantum as qc

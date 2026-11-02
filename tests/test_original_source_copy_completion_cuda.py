@@ -19,8 +19,8 @@ import pytest
 import torch
 
 from prismaquant import layer_streaming as ls, tessera_calibration_cache as cc
-from test_capture_original_material import material, _owner, _forget_state  # noqa: F401
-from test_original_source_copy_completion import _clear_frames
+from own_process.test_capture_original_material import material, _owner, _forget_state  # noqa: F401
+from own_process.test_original_source_copy_completion import _clear_frames
 
 pytestmark = [pytest.mark.skipif(
     os.environ.get('PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST') != '1'

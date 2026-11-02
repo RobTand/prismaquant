@@ -23,7 +23,7 @@
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[all]": 43,
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[mtp]": 44,
     "tests/test_native_render_source_binding_audit.py::test_native_render_sidecars_reuse_their_own_production_score_table[visual]": 43,
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
+    "tests/own_process/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": 76,
     "tests/test_packed_append_streaming_and_pair_identity.py::test_streaming_append_records_per_layer_section": 47,
     "tests/test_packed_expert_cross_domain_gate.py::test_default_path_keeps_in_domain_holdout": 42,
     "tests/test_packed_grouped_qdq_audit.py::test_grouped_activation_rows_match_expert_reference[32-NVFP4]": 53,
@@ -59,7 +59,7 @@
     "tests/test_select_validated_frontier.py::test_tail_veto_cli_explicit_eta_beats_auto": 41,
     "tests/test_served_activation_contract.py::test_stock_nvfp4_hook_keeps_its_screen_default_and_opt_in": 45,
     "tests/test_stage_a_chain_regime.py::test_batch_eight_is_as_close_to_float64_as_batch_one": 44,
-    "tests/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": 73,
+    "tests/own_process/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": 73,
     "tests/test_stageb_one_pass_spill.py::test_row_local_qdq_admission_admits_the_nvfp4_activation_paths[dynamic-rtn]": 48,
     "tests/test_streamed_cost_checkpoints.py::test_production_anchor_resolves_raw_named_expert_activation_cache": 47,
     "tests/test_striped_render_row_identity.py::test_the_reservoir_is_actually_selecting": 44,
@@ -247,7 +247,7 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-2/effective/8/junit.xml"
     },
-    "tests/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
+    "tests/own_process/test_own_process_isolation.py::test_a_hanging_test_fails_alone_under_the_per_test_bound[pytest-timeout]": {
       "seconds": 37.814,
       "run": 41284744088,
       "attempt": 1,
@@ -499,7 +499,7 @@
       "runner": "ubuntu-24.04",
       "artifact": "gate-final-1/effective/9/junit.xml"
     },
-    "tests/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": {
+    "tests/own_process/test_stage_b_fp8_source_strict_reads_1219.py::test_stage_b_fp8_profile_survives_a_native_dsv4_import": {
       "seconds": 36.245,
       "run": 41285636094,
       "attempt": 2,

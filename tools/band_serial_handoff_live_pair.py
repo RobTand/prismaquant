@@ -7,7 +7,7 @@ this driver runs them as two real admitted actions, so the consumer reads the
 handoff from the stage tier that PrismaBuild filled, not from the pool.
 
 The campaign is the tiny one the unit tests use
-(``tests/test_quantum_executable_readset.py``: layers 3 and 2 of band 4,
+(``tests/own_process/test_quantum_executable_readset.py``: layers 3 and 2 of band 4,
 bound to a real Stage A receipt), written once under ``--root`` by
 ``prepare``. Every call site below is the production one:
 
@@ -112,7 +112,7 @@ def prepare(root: Path, tier: str) -> dict:
         CHECKPOINT_LOAD_PHASE, executable_bound_phase_name,
         executable_source_phase_name,
     )
-    from test_quantum_executable_readset import (
+    from own_process.test_quantum_executable_readset import (
         _bind_slice, _tiny_receipt, _tiny_records)
 
     if root.exists() and any(root.iterdir()):

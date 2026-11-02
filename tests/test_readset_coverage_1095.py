@@ -28,7 +28,7 @@ from prismaquant.layer_streaming import streaming_source_plan
 from test_stageb_readset_source_coverage import (
     HEAD_TENSORS, PREFIX, _build, _source_model, _with_source_paths,
 )
-from test_quantum_executable_readset import _bound_inputs
+from own_process.test_quantum_executable_readset import _bound_inputs
 
 
 # -- one enumeration -----------------------------------------------------------

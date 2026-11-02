@@ -193,7 +193,7 @@ def test_a_seed_without_a_compare_stages_no_reference(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("pinned_pb_source")
 def test_the_seed_manifest_passes_the_prismabuild_validator(tmp_path, monkeypatch):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     source = _source(tmp_path, monkeypatch)
     package = _build(tmp_path, source)

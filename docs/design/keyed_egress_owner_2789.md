@@ -59,7 +59,7 @@ claim is made.
 
 - `python -m pytest tests/test_keyed_egress_validation_retry_2789.py tests/test_keyed_egress_owner_2789.py tests/test_docs_staleness.py tests/test_architecture_doc.py tests/test_docs_entrypoints.py tests/test_duplication_alias_scope_audit.py tests/test_duplication_baseline.py -q --basetemp="$TMPDIR/pytest"`
   — **75 passed**, with 14 existing Torch JIT/Python 3.14 deprecation warnings.
-- `python -m pytest tests/test_stage_a_produced_boundary_chain.py tests/test_stage_a_produced_ownership.py tests/test_stage_a_produced_failfast.py -q --basetemp="$TMPDIR/pytest"`
+- `python -m pytest tests/own_process/test_stage_a_produced_boundary_chain.py tests/own_process/test_stage_a_produced_ownership.py tests/own_process/test_stage_a_produced_failfast.py -q --basetemp="$TMPDIR/pytest"`
   — **52 passed** in this repair run. This is fresh observed evidence, not a
   claim that the separately supplied fixture-admission failures were passes.
 

@@ -17,11 +17,11 @@ import pytest
 from prismaquant import joint_quantum_row as quantum_row
 from prismaquant import joint_layer_quanta as jl
 from prismaquant.layer_streaming import streaming_source_plan
-from test_quantum_executable_readset import (
+from own_process.test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
     _exec_argv, _exec_campaign, _exec_receipt,
 )
-from test_stagea_readset_source_coverage import _write_shard
+from own_process.test_stagea_readset_source_coverage import _write_shard
 
 #: The checkpoint's names. The fixture has no config, so the loader's profile
 #: is the text-only default, which maps them to ``model.layers.N`` live:

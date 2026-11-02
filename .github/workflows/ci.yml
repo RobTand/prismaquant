@@ -192,7 +192,7 @@ jobs:
             env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=.:tools/ci CUDA_VISIBLE_DEVICES= \
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
-            "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
+            "$(command -v python)" -m pytest -c pytest.ini tests/own_process/ -m own_cgroup \
               -q --timeout=300 -ra -p no:cacheprovider -p gate_collect "${known[@]}"
 
   # The boundary allowlists only shrink (decoupling step 0, #1534). The

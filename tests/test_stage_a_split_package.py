@@ -246,7 +246,7 @@ def test_a_later_round_stages_the_joined_checkpoint(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("pinned_pb_source")
 def test_the_round_manifests_pass_the_prismabuild_validator(tmp_path, monkeypatch):
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
     root = tmp_path / "run"
     _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))

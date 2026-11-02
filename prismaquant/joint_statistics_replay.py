@@ -412,7 +412,7 @@ class RetainedRenderDeviceCache:
 #: The capture guard readings each Stage B reclaimer's frees lower
 #: (``CaptureMemoryGuard.add_reclaimer``, PQ #1383), read the way the guard
 #: reads them: at once, after the free. Each is what the GB10 measures
-#: (``tests/test_reclaim_readings_gb10.py``), which fails when a free moves a
+#: (``tests/own_process/test_reclaim_readings_gb10.py``), which fails when a free moves a
 #: reading its declaration leaves out, or leaves one it names.
 #: Renders read ahead are sealed memfds (#1315), shmem charged to the cgroup.
 #: On the GB10 the host and the device share one pool, so the pages a free

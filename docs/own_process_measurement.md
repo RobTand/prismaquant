@@ -81,9 +81,9 @@ and [coverage combination API](https://coverage.readthedocs.io/en/latest/api_cov
 
 Run these files through PrismaBuild with the supplied interpreter:
 
-- `tests/test_own_process_measurement.py`
-- `tests/test_own_process_isolation.py`
-- `tests/test_own_process_child_exit_audit.py`
+- `tests/own_process/test_own_process_measurement.py`
+- `tests/own_process/test_own_process_isolation.py`
+- `tests/own_process/test_own_process_child_exit_audit.py`
 
 Also run the terminal-exit controls with `PQ_OWN_PROCESS_MEASURE=1`. Existing
 controls check the exact terminal state and detect an exit after passing

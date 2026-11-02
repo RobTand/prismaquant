@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 from prismaquant import joint_layer_quanta as jl
-from test_quantum_executable_readset import (
+from own_process.test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
 )
 
@@ -232,7 +232,7 @@ def test_emit_forwards_source_model_root(tmp_path):
 
 def test_cli_filters_rendered_cache_using_sealed_plan_root(tmp_path):
     from test_stageb_readset_source_coverage import _cli_fixture
-    from test_quantum_executable_readset import _exec_argv
+    from own_process.test_quantum_executable_readset import _exec_argv
     import regenerate_joint_quanta as regen
     campaign, receipt_path, _ = _cli_fixture(tmp_path)
     parent = json.loads(campaign["parent_path"].read_text())

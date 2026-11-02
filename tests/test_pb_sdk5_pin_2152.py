@@ -93,7 +93,7 @@ def test_band_planner_and_reader_share_the_reviewed_sdk5_root(monkeypatch):
     require_prismabuild_sdk()
     from fullstack_pb_generation import require_paths
     from test_band_serial_dispatch import _pin_published_helper_root
-    from test_quantum_executable_readset import _pb
+    from own_process.test_quantum_executable_readset import _pb
 
     monkeypatch.setenv(staged_lease.HELPER_ROOT_ENV_VAR, "/unreviewed/active-sdk1")
     _pin_published_helper_root(monkeypatch)

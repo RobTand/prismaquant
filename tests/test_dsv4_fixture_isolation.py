@@ -1,7 +1,7 @@
 """Real DSv4 CPU contracts survive the unsupported-config import predecessor."""
 
 import pytest
-from test_layer_streaming_mxfp4_isolation import native_dsv4_session
+from own_process.test_layer_streaming_mxfp4_isolation import native_dsv4_session
 
 
 @pytest.mark.parametrize("targets", [

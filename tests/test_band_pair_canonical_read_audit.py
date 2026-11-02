@@ -18,7 +18,7 @@ from prismaquant import calibration_data, joint_quantum_handoff, prismabuild_pro
 from prismaquant import residency_map, staged_whole_file
 from prismaquant.staged_tier_policy import TierPolicyRefused
 from prismaquant.joint_adjoint_slices import load_adjoint_slice
-from test_quantum_executable_readset import (
+from own_process.test_quantum_executable_readset import (
     N_PROBES, N_BATCHES, _tiny_records, _tiny_receipt, _bind_slice,
 )
 

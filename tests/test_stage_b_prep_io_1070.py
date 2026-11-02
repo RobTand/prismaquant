@@ -39,7 +39,7 @@ from prismaquant import joint_layer_quanta as jl  # noqa: E402
 from prismaquant import stage_b_prep_io as io  # noqa: E402
 from prismaquant.layer_streaming import streaming_source_plan  # noqa: E402
 from test_stageb_readset_source_coverage import PREFIX, _cli_fixture  # noqa: E402
-from test_quantum_executable_readset import _exec_argv  # noqa: E402
+from own_process.test_quantum_executable_readset import _exec_argv  # noqa: E402
 
 
 # -- the generator-run fixture ----------------------------------------------
