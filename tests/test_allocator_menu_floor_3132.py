@@ -142,7 +142,14 @@ def _nvfp4_artifact_bytes(model_dir, stats):
     return info["floor_bytes"] + body
 
 
-def _run(monkeypatch, tmp_path, probe_p, cost_p, *, budget_bytes):
+def _run(monkeypatch, tmp_path, probe_p, cost_p, *, budget_bytes,
+         refusal_is_failure=True):
+    """Run ``allocator.main``.
+
+    A SystemExit refusal is surfaced as an assertion failure by default, so a
+    false 'below the floor' refusal shows up as a failed assertion carrying the
+    refusal text rather than as a bare SystemExit.
+    """
     lc = tmp_path / "layer_config.json"
     argv = [
         "allocator",
@@ -158,7 +165,15 @@ def _run(monkeypatch, tmp_path, probe_p, cost_p, *, budget_bytes):
         "--artifact-overhead-reserve-bytes", str(_RESERVE),
     ]
     monkeypatch.setattr(sys, "argv", argv)
-    alloc.main()
+    if refusal_is_failure:
+        try:
+            alloc.main()
+        except SystemExit as exc:
+            raise AssertionError(
+                f"budget of {budget_bytes} bytes was refused although the "
+                f"exact minimum-byte assignment fits it: {exc}") from None
+    else:
+        alloc.main()
     selection = json.loads((tmp_path / "selection.json").read_text())
     return selection, json.loads(lc.read_text())
 
@@ -217,7 +232,8 @@ def test_cli_genuine_below_min_byte_floor_reports_the_exact_floor(
 
     _model_dir, probe_p, cost_p, _stats = _fixture(tmp_path)
     with pytest.raises(SystemExit, match="below the floor"):
-        _run(monkeypatch, tmp_path, probe_p, cost_p, budget_bytes=budget)
+        _run(monkeypatch, tmp_path, probe_p, cost_p, budget_bytes=budget,
+             refusal_is_failure=False)
 
     selection = json.loads((tmp_path / "selection.json").read_text())
     assert not selection["feasible"] and selection["below_floor"]
