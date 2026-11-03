@@ -32,7 +32,8 @@ def test_runner_keeps_its_cloud_placement_and_four_cpu_size(mode, monkeypatch):
         'container-image': remote.IMAGE, 'workload-isolation-type': 'firecracker',
         'recycle-runner': 'true'}
     assert 'remote-controller-sentinel' not in json.dumps(request)
-    assert request['steps'][0]['run'].startswith('python3 tools/ci/bazel_gate.py ' + mode)
+    assert request['steps'][0]['run'].startswith(
+        'python3 tools/ci/bazel_selection.py plan --mode ' + mode)
     assert request['wait_until'] == 'STARTED'
 
 

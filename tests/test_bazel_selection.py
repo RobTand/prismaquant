@@ -493,3 +493,42 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
     if mode == 'main':
         assert not hashed_sources
         assert not any(command[0] == 'java' for command in calls)
+
+
+@pytest.mark.parametrize('fault', [None, 'leak', 'unscannable'])
+def test_remote_plan_cli_publishes_only_scanned_manifest_and_matching_receipt(
+        tmp_path, monkeypatch, fault):
+    upload = tmp_path / 'upload'
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'plan-test-secret-sentinel')
+    document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'pr',
+        'base': 'b' * 40, 'head': 'a' * 40, 'selection': 'fallback',
+        'scopes': [], 'all_scopes': True, 'reason': [],
+        'hosted': [], 'hosted_arm64': [], 'architectures': {'amd64': {
+            'population': sorted(TESTS), 'tests': sorted(TESTS),
+            'shards': [[label] for label in sorted(TESTS)]}}}
+    calls = []
+    def plan_sources(root, directory, **kwargs):
+        assert not list(upload.iterdir())
+        calls.append(kwargs)
+        if fault == 'leak':
+            document['reason'] = ['plan-test-secret-sentinel']
+        if fault == 'unscannable':
+            (upload / 'execution_log.binpb.zst').write_bytes(b'\x28\xb5\x2f\xfd')
+        return document
+    monkeypatch.setattr(selection, 'plan_revisions', plan_sources)
+    code = selection.main(['plan', '--mode', 'pr', '--base', 'b' * 40,
+        '--head', 'a' * 40, '--branch', 'bbrun/cutover'])
+    assert len(calls) == 1 and calls[0]['head'] == 'a' * 40
+    if fault:
+        assert code == 75
+        assert list(upload.iterdir()) == []
+    else:
+        assert code == 0
+        assert {path.name for path in upload.iterdir()} == {'shard-manifest.json', 'gate-result.json'}
+        raw = (upload / 'shard-manifest.json').read_bytes()
+        assert json.loads(raw) == document
+        receipt = json.loads((upload / 'gate-result.json').read_text())
+        assert receipt['operation'] == 'plan'
+        assert receipt['head'] == document['head'] and receipt['base'] == document['base']
+        assert receipt['manifest_sha256'] == bytes_sha256hex(raw)
