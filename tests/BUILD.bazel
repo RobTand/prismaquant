@@ -63458,6 +63458,7 @@ pq_py_library(
         "//:tools/ci/gate_quarantine.json",
         "//:tools/ci/graph_impact.py",
         "//:tools/ci/graph_impact.sha256",
+        "//tools/bazel:build_files.py",
         "conftest.py",
         "fixtures/graph_impact_allowlist.json",
         "fixtures/graph_impact_baseline.json",

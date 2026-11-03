@@ -11785,6 +11785,7 @@ pq_py_library(
     data = [
         "//tests:fixtures/graph_impact_allowlist.json",
         "//tests:fixtures/graph_impact_baseline.json",
+        "//tools/bazel:build_files.py",
         "BUILD.bazel",
         "tools/ci/graph_impact_pq.py",
     ],
