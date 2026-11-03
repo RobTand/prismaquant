@@ -7,7 +7,7 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -24,6 +24,39 @@ SCHEMA = 'prismaquant.bazel-gate.v1'
 
 class GateError(RuntimeError):
     """The gate cannot establish complete build or test evidence."""
+
+
+def hosted_assignment(plan, result, architecture):
+    """Narrow the existing hosted plan to this verified result's exact lane."""
+    try:
+        if (architecture not in ('amd64', 'arm64')
+                or plan['schema'] != 'prismaquant.gate_plan.v1'
+                or result['schema'] != SCHEMA or result['mode'] not in ('pr', 'main')
+                or result['verdict'] not in ('pass', 'skipped')
+                or architecture == 'arm64' and result['mode'] != 'main'
+                or any(not re.fullmatch('[0-9a-f]{40}', result[key])
+                       or plan[key + '_sha'] != result[key] for key in ('base', 'head'))):
+            raise GateError('hosted assignment has inconsistent source or lane evidence')
+        labels = result['hosted' if architecture == 'amd64' else 'hosted_arm64']
+        if (not isinstance(labels, list) or any(not isinstance(label, str) for label in labels)
+                or len(labels) != len(set(labels))):
+            raise GateError('hosted assignment has duplicate or invalid labels')
+        paths = set()
+        for label in labels:
+            if not re.fullmatch(r'//tests(?:/[^:\s]+)?:[^:\s]+', label):
+                raise GateError('hosted label is not a test target')
+            raw = label[2:].replace(':', '/') + '.py'
+            path = PurePosixPath(raw)
+            if path.as_posix() != raw or any(part in ('.', '..') for part in path.parts):
+                raise GateError('hosted label has a noncanonical path')
+            paths.add(raw)
+        rows = {row['path']: row for row in plan['selected']}
+        if len(rows) != len(plan['selected']) or not paths <= rows.keys():
+            raise GateError('hosted label is outside the existing test population')
+        return {**plan, 'selected': [rows[path] for path in sorted(paths)],
+                'deselect': [node for node in plan['deselect'] if node.split('::', 1)[0] in paths]}
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise GateError('hosted assignment evidence is malformed') from None
 
 
 def partition_population(population, *, shard_count=8, tests=None):
