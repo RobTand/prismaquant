@@ -89,6 +89,8 @@ from .staged_tier_policy import TierPolicyRefused
 #: inferred from this pin.
 PB_READER_LEASE_PIN_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
+# Bazel fetches this reviewed Git tree as an immutable, hash-checked archive.
+PB_READER_LEASE_ARCHIVE_SHA256 = "e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970"
 
 #: The PrismaBuild client SDK version this package is written against
 #: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
@@ -375,12 +377,59 @@ def sdk_submodule(name: str):
     return module
 
 
+def _reviewed_bazel_distribution(dist, source):
+    """Verify Bazel's archive identity and every installed SDK package byte."""
+    import base64
+    import csv
+    import io
+    from pathlib import PurePosixPath
+    from .digests import bytes_sha256hex
+
+    expected = {
+        "schema": "prismaquant.bazel-sdk-source.v1",
+        "commit": PB_READER_LEASE_PIN_COMMIT,
+        "url": "https://github.com/RobTand/prismabuild/archive/" + PB_READER_LEASE_PIN_COMMIT + ".tar.gz",
+        "sha256": PB_READER_LEASE_ARCHIVE_SHA256,
+    }
+    if source != expected:
+        raise RuntimeError("test SDK injection: unreviewed Bazel archive source")
+    record = dist.read_text("RECORD")
+    if not record:
+        raise RuntimeError("test SDK injection: Bazel SDK has no RECORD")
+    recorded = set()
+    for row in csv.reader(io.StringIO(record)):
+        if len(row) != 3:
+            raise RuntimeError("test SDK injection: malformed Bazel SDK RECORD")
+        name, encoded_hash, size = row
+        entry = PurePosixPath(name)
+        if not entry.parts or entry.parts[0] != "prismabuild":
+            continue
+        if ".." in entry.parts or not encoded_hash.startswith("sha256=") or not size.isdecimal():
+            raise RuntimeError("test SDK injection: incomplete Bazel SDK RECORD")
+        path = Path(dist.locate_file(entry))
+        try:
+            content = path.read_bytes()
+            digest = base64.b64decode(encoded_hash.removeprefix("sha256=") + "===", altchars=b"-_").hex()
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("test SDK injection: unreadable Bazel SDK RECORD bytes") from exc
+        if len(content) != int(size) or bytes_sha256hex(content) != digest:
+            raise RuntimeError(f"test SDK injection: changed Bazel SDK RECORD bytes: {entry}")
+        recorded.add(str(entry))
+    package = Path(dist.locate_file("prismabuild"))
+    actual = {"prismabuild/" + str(path.relative_to(package)) for path in package.rglob("*")
+              if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"}
+    if not actual or actual != recorded:
+        raise RuntimeError("test SDK injection: Bazel SDK RECORD does not cover its package")
+
+
 def reviewed_installed_distribution():
     """TEST-ONLY: the one installed ``prismabuild`` distribution, proven reviewed.
 
     Verifies from install metadata alone, with the standard library, that
     exactly one distribution owns ``prismabuild`` and that it is a
-    non-editable Git install at exactly :data:`PB_READER_LEASE_PIN_COMMIT`.
+    non-editable Git install at exactly :data:`PB_READER_LEASE_PIN_COMMIT`,
+    or Bazel's separately stamped archive at that commit and its pinned SHA-256.
+    The Bazel path also verifies complete package coverage and every RECORD byte.
     That is the identity the pbtest pin guard proves worker-side before
     pytest; the guard also proves the RECORD bytes, once per shard. Raises
     ``RuntimeError`` (never a tier refusal) when the environment does not
@@ -400,6 +449,16 @@ def reviewed_installed_distribution():
     except (OSError, ValueError) as exc:
         raise RuntimeError(
             "test SDK injection cannot prove install provenance") from exc
+    bazel_source = dist.read_text("prismaquant_bazel_source.json")
+    if bazel_source is not None:
+        if direct:
+            raise RuntimeError("test SDK injection: ambiguous Bazel and pip install provenance")
+        try:
+            source = _json.loads(bazel_source)
+        except ValueError as exc:
+            raise RuntimeError("test SDK injection: malformed Bazel source provenance") from exc
+        _reviewed_bazel_distribution(dist, source)
+        return dist
     vcs = direct.get("vcs_info", {})
     if (direct.get("dir_info", {}).get("editable")
             or vcs.get("vcs") != "git"
