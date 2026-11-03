@@ -245,12 +245,13 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
     hosted, hosted_arm64 = set(hosted), set(hosted_arm64)
     full = mode == 'main' or decision['selection'] == 'fallback'
     selected = set(decision.get('selected', ()))
+    requested = selected | set(decision.get('build', ()))
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode,
                 'base': base, 'head': head, 'selection': decision['selection'],
                 'scopes': sorted(set(decision.get('scopes', ()))),
                 'all_scopes': mode == 'main' or decision.get('all_scopes', decision['selection'] == 'fallback'),
                 'reason': list(decision.get('reason', ())),
-                'hosted': sorted(hosted if full else hosted & selected),
+                'hosted': sorted(hosted if full else hosted & requested),
                 'hosted_arm64': sorted(hosted_arm64) if mode == 'main' else [],
                 'architectures': {}}
     for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
@@ -262,10 +263,10 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
                 or not tests <= population or population & hosted
                 or (architecture == 'arm64' and population & hosted_arm64)):
             raise SelectionError('invalid queried build population or hosted overlap')
-        requested = (selected | set(decision.get('build', ()))) - hosted
-        if not full and not requested <= population:
+        action_requested = requested - hosted
+        if not full and not action_requested <= population:
             raise SelectionError('selection contains targets outside the queried population')
-        labels = population if full else requested
+        labels = population if full else action_requested
         try:
             shards = partition_population(labels, tests=tests & labels,
                 shard_count=shard_counts[architecture]) if labels else []
