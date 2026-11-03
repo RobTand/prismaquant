@@ -50,6 +50,46 @@ def run_request(args):
             'timeout': f'{args.timeout}m', 'wait_until': 'STARTED'}
 
 
+def shard_request(args, architecture, index, targets, tests, *, require_execution=False):
+    """One bounded runner drives self-hosted actions for exactly one partition."""
+    if architecture not in ('amd64', 'arm64') or index < 0:
+        raise RemoteError('invalid shard partition')
+    if not targets or not set(tests) <= set(targets):
+        raise RemoteError('invalid shard target population')
+    request = run_request(args)
+    manifest = {'mode': args.mode, 'base': args.base, 'head': args.head,
+                'branch': args.branch, 'architecture': architecture, 'index': index,
+                'targets': sorted(targets), 'tests': sorted(tests),
+                'require_execution': require_execution}
+    request['steps'] = [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
+    request['env'] = {'PQ_BAZEL_SHARD': json.dumps(manifest, separators=(',', ':'))}
+    request['timeout'] = '55m'
+    return request
+
+
+def submit_shards(client, requests, head, *, clock=time.monotonic):
+    """Resolve each own result before admitting another runner; never retry a shard."""
+    results = []
+    for request in requests:
+        expected = json.loads(request['env']['PQ_BAZEL_SHARD'])
+        response = client.call('Run', request)
+        invocation_id = response.get('invocationId', response.get('invocation_id'))
+        if not invocation_id:
+            raise RemoteError('shard submission returned no acknowledgement ID')
+        print('Remote Bazel shard: ' + invocation_id, flush=True)
+        record = await_invocation(client, invocation_id, clock() + 58 * 60, clock=clock)
+        artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
+        if len(artifacts) != 1:
+            raise RemoteError('shard has no unique own result artifact')
+        result = parse_result(client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True), head)
+        if any(result.get(key) != expected[key] for key in ('architecture', 'index', 'targets')):
+            raise RemoteError('shard result has the wrong partition')
+        if result['mode'] != expected['mode'] or result.get('error'):
+            raise RemoteError('shard result does not establish its requested mode')
+        results.append(result)
+    return results
+
+
 def succeeded(record):
     code = record.get('bazelExitCode', record.get('bazel_exit_code'))
     return (record.get('invocationStatus') == 'COMPLETE_INVOCATION_STATUS'
