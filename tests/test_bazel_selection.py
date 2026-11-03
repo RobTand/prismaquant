@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -207,3 +209,13 @@ def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
         '--startingHashes', str(tmp_path / 'base.json'),
         '--finalHashes', str(tmp_path / 'head.json'),
         '--output', str(tmp_path / 'impacted.txt')]
+
+
+@pytest.mark.parametrize('module', ['bazel_selection.py', 'bazel_gate.py', 'remote_gate.py'])
+def test_gate_modules_load_without_repository_pythonpath(tmp_path, module):
+    # Run's allowlisted child environment intentionally omits PYTHONPATH.
+    loaded = subprocess.run([sys.executable, '-I', '-c',
+        'import runpy,sys;runpy.run_path(sys.argv[1],run_name="pq_gate_import_probe")',
+        str(ROOT / 'tools/ci' / module)], cwd=tmp_path, env={},
+        text=True, capture_output=True, check=False)
+    assert loaded.returncode == 0, loaded.stderr
