@@ -35,6 +35,9 @@ def test_cpu_full_suite_only_runs_after_merge_and_keeps_its_name():
     workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text())
     assert workflow['jobs']['tests']['if'] == "github.event_name != 'pull_request'"
     assert workflow['jobs']['tests']['name'] == 'tests (py${{ matrix.python }}, cpu)'
+    checkout = next(step for step in workflow['jobs']['tests']['steps']
+                    if step.get('uses', '').startswith('actions/checkout@'))
+    assert checkout.get('with', {}).get('fetch-depth') == 0, 'historical-main graph contract needs full history'
     assert workflow['jobs']['imports']['name'] == 'import surface'
     assert workflow['jobs']['allowlists']['name'] == 'boundary allowlists only shrink'
     assert not (ROOT / '.github/hosted-known-failures.txt').exists()
