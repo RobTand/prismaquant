@@ -543,3 +543,39 @@ def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proo
         assert output.read_text().splitlines() == [
             'scopes=["//tests"]', 'all_scopes=false', 'scopes_ready=true']
         assert 'Budget warnings: 1' in summary.read_text()
+
+
+@pytest.mark.parametrize('stage', ['await', 'fetch', 'validate'])
+@pytest.mark.parametrize('operation', ['plan', 'shard'])
+def test_remote_evidence_refusal_reports_fixed_subphase_without_private_values(
+        capsys, operation, stage):
+    class BrokenShard(ShardClient):
+        def call(self, method, body, **kwargs):
+            if method == ('GetInvocation' if stage == 'await' else 'GetFile'):
+                if stage != 'validate':
+                    raise remote.RemoteError('private-value/path-token')
+                return b'{"private-value/path-token":true}'
+            return super().call(method, body, **kwargs)
+
+    class BrokenPlan(PlannedGateClient):
+        def call(self, method, body, **kwargs):
+            if method == ('GetInvocation' if stage == 'await' else 'GetFile'):
+                if stage != 'validate':
+                    raise remote.RemoteError('private-value/path-token')
+                return b'{"private-value/path-token":true}'
+            return super().call(method, body, **kwargs)
+
+    with pytest.raises(remote.RemoteError):
+        if operation == 'shard':
+            client = BrokenShard()
+            remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
+            raise AssertionError('refused shard cannot pass')
+        else:
+            client = BrokenPlan(controller_manifest())
+            remote.run_gate(client, arguments(), clock=lambda: 1)
+            raise AssertionError('refused plan cannot pass')
+    output = capsys.readouterr()
+    assert 'Remote evidence refused at ' + operation + '-' + stage in output.err
+    assert 'private-value/path-token' not in output.out + output.err
+    calls = client.calls if operation == 'shard' else client.plan_calls
+    assert calls.count('Run') <= 1
