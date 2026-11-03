@@ -24,7 +24,7 @@ def decision(changed, *, impacted=frozenset(), used=frozenset(), deleted=frozens
 
 
 @pytest.mark.parametrize('path', [
-    '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
+    '.github/workflows/gate.yml', '.github/workflows/bazel-hosted.yml', '.bazelrc', '.bazelversion', '.bazelignore',
     'MODULE.bazel', 'MODULE.bazel.lock', 'BUILD.bazel', 'tests/BUILD.bazel',
     'tools/example/BUILD', 'tools/example/defs.bzl', 'tools/bazel/runtime.py',
     'tools/ci/bazel_selection.py', 'tools/ci/bazel_gate.py', 'tools/ci/remote_gate.py',
