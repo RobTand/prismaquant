@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,15 @@ IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
          '5f0c01e5f6d79e58d7a996330de33aa38ce599bf8431eaf27521e7602daadf50')
 SCHEMA = 'prismaquant.bazel-gate.v1'
 RESULT = 'gate-result.json'
+
+
+@contextlib.contextmanager
+def _evidence_phase(phase):
+    try:
+        yield
+    except (RemoteError, OSError, ValueError, KeyError, TypeError, RuntimeError):
+        print('Remote evidence refused at ' + phase, file=sys.stderr)
+        raise
 
 
 def run_request(args):
@@ -173,30 +183,35 @@ def run_gate(client, args, *, clock=time.monotonic):
     if not invocation:
         raise RemoteError('plan submission returned no acknowledgement ID')
     print('Remote Bazel plan: ' + invocation, flush=True)
-    record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
-    if record.get('commitSha') != args.head:
-        raise RemoteError('plan runner has the wrong source head')
-    artifacts = {}
-    for name in (RESULT, 'shard-manifest.json'):
-        rows = [row for row in record.get('artifacts', []) if row.get('name') == name]
-        if (len(rows) != 1 or not isinstance(rows[0].get('uri'), str)
-                or not rows[0]['uri'].startswith('bytestream://')):
-            raise RemoteError('plan has no unique own ' + name + ' artifact')
-        artifacts[name] = rows[0]['uri']
-    receipt = parse_result(client.call('GetFile', {'uri': artifacts[RESULT]}, raw=True), args.head)
-    raw = client.call('GetFile', {'uri': artifacts['shard-manifest.json']}, raw=True)
-    try:
-        manifest = json.loads(raw)
-        if (receipt.get('operation') != 'plan' or receipt.get('error')
-                or receipt.get('verdict') != 'pass'
-                or receipt.get('mode') != args.mode or receipt.get('base') != args.base
-                or receipt.get('manifest_sha256') != bytes_sha256hex(raw)
-                or any(receipt.get(key) != manifest[key] for key in (
-                    'mode', 'base', 'head', 'selection', 'scopes', 'all_scopes',
-                    'reason', 'hosted', 'hosted_arm64'))):
-            raise RemoteError('plan receipt does not match its source and manifest')
-    except (ValueError, TypeError, KeyError):
-        raise RemoteError('plan manifest is unavailable or malformed') from None
+    with _evidence_phase('plan-await'):
+        record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
+    with _evidence_phase('plan-validate'):
+        if record.get('commitSha') != args.head:
+            raise RemoteError('plan runner has the wrong source head')
+        artifacts = {}
+        for name in (RESULT, 'shard-manifest.json'):
+            rows = [row for row in record.get('artifacts', []) if row.get('name') == name]
+            if (len(rows) != 1 or not isinstance(rows[0].get('uri'), str)
+                    or not rows[0]['uri'].startswith('bytestream://')):
+                raise RemoteError('plan has no unique own ' + name + ' artifact')
+            artifacts[name] = rows[0]['uri']
+    with _evidence_phase('plan-fetch'):
+        receipt_raw = client.call('GetFile', {'uri': artifacts[RESULT]}, raw=True)
+        raw = client.call('GetFile', {'uri': artifacts['shard-manifest.json']}, raw=True)
+    with _evidence_phase('plan-validate'):
+        receipt = parse_result(receipt_raw, args.head)
+        try:
+            manifest = json.loads(raw)
+            if (receipt.get('operation') != 'plan' or receipt.get('error')
+                    or receipt.get('verdict') != 'pass'
+                    or receipt.get('mode') != args.mode or receipt.get('base') != args.base
+                    or receipt.get('manifest_sha256') != bytes_sha256hex(raw)
+                    or any(receipt.get(key) != manifest[key] for key in (
+                        'mode', 'base', 'head', 'selection', 'scopes', 'all_scopes',
+                        'reason', 'hosted', 'hosted_arm64'))):
+                raise RemoteError('plan receipt does not match its source and manifest')
+        except (ValueError, TypeError, KeyError):
+            raise RemoteError('plan manifest is unavailable or malformed') from None
     result = run_manifest(client, args, artifacts['shard-manifest.json'], raw, clock=clock)
     result.update({'plan_invocation': invocation, 'hosted': manifest['hosted'],
                    'hosted_arm64': manifest['hosted_arm64']})
@@ -204,26 +219,31 @@ def run_gate(client, args, *, clock=time.monotonic):
 
 
 def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
-    record = await_invocation(client, invocation_id, deadline, clock=clock)
-    artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
-    if len(artifacts) != 1:
-        raise RemoteError('shard has no unique own result artifact')
-    result = parse_result(client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True), head)
-    if any(result.get(key) != expected[key] for key in (
-            'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
-        raise RemoteError('shard result has the wrong partition')
-    targets = result.get('targets')
-    if (not isinstance(targets, list) or not targets
-            or any(not isinstance(label, str) for label in targets)
-            or text_sha256hex('\n'.join(targets) + '\n')
-               != expected['partition_sha256']):
-        raise RemoteError('shard result has the wrong partition population')
-    if result.get('base') != expected['base']:
-        raise RemoteError('shard result has the wrong source base')
-    if result['mode'] != expected['mode'] or result.get('error'):
-        raise RemoteError('shard result does not establish its requested mode')
-    return {**result, 'runner_invocation': invocation_id,
-            'invocation_status': record['invocationStatus']}
+    with _evidence_phase('shard-await'):
+        record = await_invocation(client, invocation_id, deadline, clock=clock)
+    with _evidence_phase('shard-validate'):
+        artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
+        if len(artifacts) != 1:
+            raise RemoteError('shard has no unique own result artifact')
+    with _evidence_phase('shard-fetch'):
+        raw = client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True)
+    with _evidence_phase('shard-validate'):
+        result = parse_result(raw, head)
+        if any(result.get(key) != expected[key] for key in (
+                'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
+            raise RemoteError('shard result has the wrong partition')
+        targets = result.get('targets')
+        if (not isinstance(targets, list) or not targets
+                or any(not isinstance(label, str) for label in targets)
+                or text_sha256hex('\n'.join(targets) + '\n')
+                   != expected['partition_sha256']):
+            raise RemoteError('shard result has the wrong partition population')
+        if result.get('base') != expected['base']:
+            raise RemoteError('shard result has the wrong source base')
+        if result['mode'] != expected['mode'] or result.get('error'):
+            raise RemoteError('shard result does not establish its requested mode')
+        return {**result, 'runner_invocation': invocation_id,
+                'invocation_status': record['invocationStatus']}
 
 
 def succeeded(record):
