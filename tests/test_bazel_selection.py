@@ -120,6 +120,22 @@ def test_query_population_accepts_protobuf_json_omitted_empty_tag_values(archite
     assert population['hosted'] == [] and population['hosted_arm64'] == []
 
 
+@pytest.mark.parametrize('architecture', ['amd64', 'arm64'])
+def test_query_population_keeps_package_groups_as_dependency_records(architecture):
+    rows = [
+        {'type': 'PACKAGE_GROUP', 'packageGroup': {'name': '//visibility:public'}},
+        {'type': 'PACKAGE_GROUP', 'packageGroup': {'name': '//visibility:private'}},
+        {'rule': {'name': '//:core', 'ruleClass': 'py_library'}},
+        {'rule': {'name': '//tests:cpu', 'ruleClass': 'py_test'}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                  'ruleClass': 'py_library'}},
+    ]
+    population = selection.query_population(rows, architecture)
+    assert population['targets'] == ['//:core', '//tests:cpu']
+    assert population['tests'] == ['//tests:cpu']
+    assert population['wheel_repositories'] == ['rules_python++pip+pq_pip_numpy']
+
+
 @pytest.mark.parametrize('phase', ['command', 'json', 'population'])
 def test_revision_query_refusal_names_check_without_private_diagnostics(tmp_path, capsys, phase):
     from types import SimpleNamespace
