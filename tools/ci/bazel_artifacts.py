@@ -112,3 +112,22 @@ def scan_upload(directory, required):
         print('Artifact unavailable or unsupported; upload refused')
         return 75
     return 0
+
+
+def publish_json(upload, documents, required):
+    """Scan private JSON bytes before publishing the exact upload set."""
+    upload = Path(upload)
+    if upload.is_symlink() or list(upload.iterdir()):
+        raise RuntimeError('upload directory is not empty')
+    with tempfile.TemporaryDirectory(prefix='pq-private-upload-') as directory:
+        staged = Path(directory)
+        for name, content in documents.items():
+            (staged / name).write_bytes(content)
+        if scan_upload(staged, required):
+            raise RuntimeError('artifact scan refused upload')
+        if list(upload.iterdir()):
+            raise RuntimeError('unexpected file in upload directory')
+        for name in documents:
+            (staged / name).replace(upload / name)
+        if scan_upload(upload, required):
+            raise RuntimeError('final artifact scan refused upload')

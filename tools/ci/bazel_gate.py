@@ -285,17 +285,8 @@ def main(argv=None):
         result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
         keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')
                                        if os.environ.get(name)]
-        if list(upload.iterdir()):
-            raise GateError('unexpected file in shard upload directory')
-        with tempfile.TemporaryDirectory(prefix='pq-private-gate-result-') as directory:
-            staged = Path(directory)
-            receipt = staged / 'gate-result.json'
-            receipt.write_bytes(DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n')
-            if artifacts.scan_upload(staged, required=keys):
-                raise GateError('shard artifact scan refused upload')
-            if list(upload.iterdir()):
-                raise GateError('unexpected file in shard upload directory')
-            receipt.replace(upload / receipt.name)
+        artifacts.publish_json(upload, {
+            'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
         return 0 if result['verdict'] == 'pass' else 1
     except (GateError, ValueError, TypeError, KeyError, OSError, RuntimeError):
         if upload.is_symlink():

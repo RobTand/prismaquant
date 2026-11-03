@@ -22,7 +22,8 @@ RESULT = 'gate-result.json'
 def run_request(args):
     if not args.base or not args.head:
         raise RemoteError('empty base or head: queue-aware refs are unavailable')
-    command = ['tools/ci/bazel_gate.py', args.mode, '--base', args.base, '--head', args.head,
+    command = ['tools/ci/bazel_selection.py', 'plan', '--mode', args.mode,
+               '--base', args.base, '--head', args.head,
                '--branch', args.branch]
     return {'repo': args.repo, 'branch': args.branch, 'commit_sha': args.head,
             'steps': [{'run': 'python3 ' + shlex.join(command)}],

@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+import argparse
 import io
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci.bazel_gate import GateError, partition_population
+from tools.ci import bazel_artifacts as artifacts
 from tools.ci.bazel_artifacts import child_environment
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 GATE_INPUTS = {
     '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
@@ -358,3 +363,51 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
         document['architectures'][architecture] = {
             'population': sorted(labels), 'tests': sorted(tests & labels), 'shards': shards}
     return document
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('operation', choices=['plan'])
+    parser.add_argument('--mode', choices=['pr', 'main'], required=True)
+    parser.add_argument('--base', required=True)
+    parser.add_argument('--head', required=True)
+    parser.add_argument('--branch', required=True)
+    args = parser.parse_args(argv)
+    directory = os.environ.get('BUILDBUDDY_ARTIFACTS_DIRECTORY')
+    if not directory:
+        print('plan upload directory unavailable', file=sys.stderr)
+        return 75
+    upload = Path(directory)
+    try:
+        upload.mkdir(parents=True, exist_ok=True)
+        if upload.is_symlink() or list(upload.iterdir()):
+            raise SelectionError('plan upload directory is not empty')
+        artifacts.require_scan_python()
+        with tempfile.TemporaryDirectory(prefix='pq-private-plan-') as private:
+            manifest = plan_revisions(Path.cwd(), Path(private),
+                base=args.base, head=args.head, mode=args.mode)
+            raw = DIRECT_ASCII_SPACED_LAX.encoded(manifest) + b'\n'
+            result = {key: manifest[key] for key in (
+                'mode', 'base', 'head', 'selection', 'scopes', 'all_scopes',
+                'reason', 'hosted', 'hosted_arm64')}
+            result.update({'schema': 'prismaquant.bazel-gate.v1',
+                'operation': 'plan', 'verdict': 'pass',
+                'manifest_sha256': bytes_sha256hex(raw)})
+            keys = ['BUILDBUDDY_API_KEY'] + [name for name in (
+                'GITHUB_TOKEN', 'MERGIFY_TOKEN') if os.environ.get(name)]
+            artifacts.publish_json(upload, {
+                'shard-manifest.json': raw,
+                'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
+        return 0
+    except (SelectionError, ValueError, TypeError, KeyError, OSError, RuntimeError):
+        if upload.is_symlink():
+            upload.unlink()
+        elif upload.exists():
+            shutil.rmtree(upload)
+        upload.mkdir(parents=True, exist_ok=True)
+        print('plan evidence or artifact scan failed; upload refused', file=sys.stderr)
+        return 75
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
