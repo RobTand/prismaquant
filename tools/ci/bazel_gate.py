@@ -9,6 +9,48 @@ class GateError(RuntimeError):
     """The gate cannot establish complete build or test evidence."""
 
 
+def partition_population(population, *, shard_count=8):
+    """Sorted striding keeps full runs bounded without changing their population."""
+    labels = sorted(set(population))
+    if not labels:
+        raise GateError('full population is empty')
+    if shard_count < 1:
+        raise GateError('partition needs a positive shard count')
+    shards = [labels[index::min(shard_count, len(labels))]
+              for index in range(min(shard_count, len(labels)))]
+    check_partition(labels, shards)
+    return shards
+
+
+def check_partition(population, shards):
+    counts = Counter(label for shard in shards for label in shard)
+    if (not shards or any(not shard for shard in shards)
+            or counts != Counter(set(population))):
+        raise GateError('partition does not cover the queried population exactly once')
+
+
+def aggregate_shards(population, shards, records, *, require_execution=False):
+    """Every planned shard needs its own complete invocation and exact test evidence."""
+    check_partition(population, shards)
+    if Counter(record['index'] for record in records) != Counter(range(len(shards))):
+        raise GateError('missing or duplicate shard records')
+    ordered = sorted(records, key=lambda record: record['index'])
+    results = []
+    for labels, record in zip(shards, ordered):
+        if record['invocation_status'] != 'COMPLETE_INVOCATION_STATUS':
+            raise GateError('shard invocation is incomplete or disconnected')
+        run = record['run']
+        if set(run['statuses']) != set(labels):
+            raise GateError('shard evidence has a different test population')
+        result = architecture_result(labels, run, budget_warnings=record['budget_warnings'],
+                                     require_execution=require_execution)
+        results.append(result)
+    return {'verdict': 'pass' if all(result['verdict'] == 'pass' for result in results) else 'fail',
+            'shards': results,
+            'executed_test_actions': sum(result['executed_test_actions'] for result in results),
+            'budget_warnings': [warning for result in results for warning in result['budget_warnings']]}
+
+
 def bep_run(text, *, returncode):
     statuses, executed = {}, set()
     invocation = None
