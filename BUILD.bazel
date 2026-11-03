@@ -11661,7 +11661,10 @@ pq_py_library(
         "tools/ci/remote_gate.py",
     ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
         ":tools/__init__",
+        ":tools/ci/bazel_artifacts",
         ":tools/ci/bazel_gate",
     ],
 )

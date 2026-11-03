@@ -8590,6 +8590,8 @@ pq_py_library(
         "test_bazel_selection.py",
     ],
     deps = [
+        "//:prismaquant/__init__",
+        "//:prismaquant/digests",
         "//:tools/ci/bazel_gate",
         "//:tools/ci/bazel_selection",
         "//:tools/ci/remote_gate",
