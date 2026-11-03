@@ -143,8 +143,14 @@
  "pandas": [
   "pandas"
  ],
+ "pkg_resources": [
+  "setuptools"
+ ],
  "pluggy": [
   "pluggy"
+ ],
+ "prismabuild": [
+  "prismabuild"
  ],
  "propcache": [
   "propcache"
