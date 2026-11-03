@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import unquote, urlsplit
 import zipfile
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
@@ -132,37 +133,41 @@ def inventory_evidence(text, fetch):
         for line in text.splitlines():
             event = json.loads(line)
             for output in event.get('testResult', {}).get('testActionOutput', []):
-                if output.get('name') != 'test.outputs__outputs.zip':
+                name = output.get('name')
+                if name not in ('test.outputs__outputs.zip', 'test.outputs/outputs.zip',
+                                 'test.outputs/inventory.json'):
                     continue
                 uri = output['uri']
                 if uri in seen:
                     continue
                 seen.add(uri)
-                with zipfile.ZipFile(io.BytesIO(fetch(uri))) as archive:
-                    for member in archive.namelist():
-                        if Path(member).name != 'inventory.json':
-                            continue
-                        receipt = json.loads(archive.read(member))
-                        found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
-                        if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
-                            raise ValueError('invalid inventory structure')
-                        for node, status in found_nodes.items():
-                            if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
-                                raise ValueError('invalid inventory node')
-                            if nodes.get(node) != 'failed':
-                                nodes[node] = status
-                        for row in found_warnings:
-                            if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
-                                    or any(type(row.get(key)) not in (int, float)
-                                           for key in ('seconds', 'budget_seconds'))):
-                                raise ValueError('invalid budget warning')
-                            warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
+                if name.endswith('inventory.json'):
+                    receipts = [json.loads(fetch(uri))]
+                else:
+                    with zipfile.ZipFile(io.BytesIO(fetch(uri))) as archive:
+                        receipts = [json.loads(archive.read(member)) for member in archive.namelist()
+                                    if Path(member).name == 'inventory.json']
+                for receipt in receipts:
+                    found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
+                    if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
+                        raise ValueError('invalid inventory structure')
+                    for node, status in found_nodes.items():
+                        if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
+                            raise ValueError('invalid inventory node')
+                        if nodes.get(node) != 'failed':
+                            nodes[node] = status
+                    for row in found_warnings:
+                        if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
+                                or any(type(row.get(key)) not in (int, float)
+                                       for key in ('seconds', 'budget_seconds'))):
+                            raise ValueError('invalid budget warning')
+                        warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
     except (ValueError, TypeError, AttributeError, KeyError, OSError, zipfile.BadZipFile):
         raise GateError('test output inventory is malformed or unavailable') from None
     return {'nodes': nodes, 'budget_warnings': warnings}
 
 
-def execute_shard(manifest, *, root=None, runner=subprocess.run):
+def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     """Execute one immutable build partition, keeping diagnostics out of uploads."""
     root = Path(root or Path(__file__).resolve().parents[2])
     targets, tests = manifest['targets'], manifest['tests']
@@ -186,7 +191,7 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run):
     config = 'remote' if manifest['architecture'] == 'amd64' else 'remote-arm64'
     command = ['bazel', 'test', '--config=' + config, '--config=ci', '--jobs=16',
                '--spawn_strategy=remote,local', '--remote_local_fallback=false',
-               '--keep_going', '--flaky_test_attempts=1',
+               '--keep_going', '--flaky_test_attempts=1', '--zip_undeclared_test_outputs',
                '--build_event_json_file=' + str(bep),
                '--target_pattern_file=' + str(patterns),
                '--build_metadata=COMMIT_SHA=' + manifest['head'],
@@ -197,10 +202,26 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run):
         outcome = runner(command, cwd=root, env=environment, stdout=diagnostic,
                          stderr=subprocess.STDOUT, check=False)
     try:
-        run = bep_run(bep.read_text(), returncode=outcome.returncode)
+        text = bep.read_text()
+        run = bep_run(text, returncode=outcome.returncode)
     except OSError:
         raise GateError('shard left no private build-event evidence') from None
-    result = architecture_result(tests, run, require_execution=manifest['require_execution'])
+    if fetch is None:
+        def fetch(uri):
+            if uri.startswith('file://'):
+                return Path(unquote(urlsplit(uri).path)).read_bytes()
+            if not uri.startswith('bytestream://'):
+                raise GateError('test output inventory has an unsupported URI')
+            spec = importlib.util.spec_from_file_location(
+                'pq_shard_remote_client', Path(__file__).with_name('remote_gate.py'))
+            remote = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(remote)
+            return remote.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
+                'GetFile', {'uri': uri}, raw=True)
+    inventory = inventory_evidence(text, fetch)
+    result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                 require_execution=manifest['require_execution'])
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
             'base': manifest['base'], 'architecture': manifest['architecture'],
-            'index': manifest['index'], 'targets': targets, 'run': run, **result}
+            'index': manifest['index'], 'targets': targets, 'run': run,
+            'nodes': inventory['nodes'], **result}
