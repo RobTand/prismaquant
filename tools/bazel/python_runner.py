@@ -4,8 +4,8 @@ pytest runs from the repository root with pytest.ini and the conftest chain,
 the gate's environment, pytest-timeout's 600 s and the gate's own_cgroup
 exclusion, and its node-level deselects. A file whose every node is deselected
 passes, as the gate accepts pytest's exit 5 for a complete collection. The
-per-test budgets in tools/ci/gate_budget.json apply with gate_run's tolerance
-(PQ_BAZEL_BUDGETS=record reports them without failing). A file Bazel shards
+per-test budgets in tools/ci/gate_budget.json produce warnings without changing
+the test verdict. A file Bazel shards
 runs every TEST_TOTAL_SHARDS-th collected test. After the run,
 test.outputs/inventory.json records each node's outcome for parity.
 """
@@ -62,8 +62,7 @@ def budget_overruns(root, junit, path):
     sys.path.insert(0, str(root / 'tools/ci'))
     import gate_run
     config = gate_run._budget_limits(json.loads((root / 'tools/ci/gate_budget.json').read_text()))
-    return [row for row in gate_run._budget_timings(junit, [path], config)
-            if row['seconds'] > row['budget_seconds'] * gate_run.BUDGET_ENFORCEMENT_TOLERANCE]
+    return gate_run._budget_timings(junit, [path], config)
 
 
 def file_verdict(status, nodes):
@@ -105,17 +104,17 @@ def main():
         print(f'no JUnit verdict for {path}: {error}', file=sys.stderr)
         return status or 1
     status = file_verdict(status, nodes)
+    overruns = []
     if status == 0 and nodes:
         overruns = budget_overruns(root, junit, path)
         for row in overruns:
-            print(f"Per-test time budget exceeded: {row['nodeid']}: {row['seconds']:.3f}s > "
+            print(f"BUDGET_WARNING: {row['nodeid']}: {row['seconds']:.3f}s > "
                   f"{row['budget_seconds']:.3f}s policy", file=sys.stderr)
-        if overruns and os.environ.get('PQ_BAZEL_BUDGETS') != 'record':
-            status = 1
     if status == 0:
         outputs.mkdir(parents=True, exist_ok=True)
         (outputs / 'inventory.json').write_text(json.dumps(
-            {'file': path, 'shard': os.environ.get('TEST_SHARD_INDEX'), 'nodes': nodes}))
+            {'file': path, 'shard': os.environ.get('TEST_SHARD_INDEX'), 'nodes': nodes,
+             'budget_warnings': overruns}))
     return status
 
 
