@@ -1,5 +1,6 @@
 """The cutover records failures and refuses empty architecture proofs."""
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -285,3 +286,34 @@ def test_remote_shard_includes_warnings_and_node_receipts_without_retry(tmp_path
     assert found['budget_warnings'] == [warning]
     assert found['nodes'] == {warning['nodeid']: 'passed'}
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('fault', [None, 'digest', 'head', 'union', 'partition'])
+def test_immutable_manifest_loading_checks_digest_source_union_and_partition(fault):
+    document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'main',
+                'base': 'b' * 40, 'head': 'a' * 40,
+                'architectures': {'amd64': {'population': [LABEL, '//prismaquant:library'],
+                    'tests': [LABEL], 'shards': [[LABEL], ['//prismaquant:library']]}}}
+    if fault == 'head':
+        document['head'] = 'd' * 40
+    if fault == 'union':
+        document['architectures']['amd64']['shards'][1] = [LABEL]
+    raw = json.dumps(document).encode()
+    reference = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'main',
+                 'architecture': 'amd64', 'index': 0, 'require_execution': True,
+                 'manifest_uri': 'bytestream://remote.buildbuddy.io/own-manifest',
+                 'manifest_sha256': hashlib.sha256(raw).hexdigest(),
+                 'partition_sha256': hashlib.sha256((LABEL + '\n').encode()).hexdigest()}
+    if fault == 'digest':
+        reference['manifest_sha256'] = 'e' * 64
+    if fault == 'partition':
+        reference['partition_sha256'] = 'f' * 64
+    if fault:
+        with pytest.raises(gate.GateError, match='manifest|partition'):
+            gate.load_shard_manifest(reference, lambda uri: raw)
+    else:
+        found = gate.load_shard_manifest(reference, lambda uri: raw)
+        assert found['targets'] == [LABEL]
+        assert found['tests'] == [LABEL]
+        assert found['require_execution'] is True
+        assert found['manifest_sha256'] == reference['manifest_sha256']
