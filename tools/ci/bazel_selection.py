@@ -68,6 +68,24 @@ def generate_hashes_command(java, jar, root, bazel, hashes, edges, wheel_reposit
             '--depEdgesFile', str(edges), str(hashes)]
 
 
+def wheel_repositories(labels):
+    """Hash individual canonical wheel repos rather than only their shared hub."""
+    repositories = set()
+    for label in labels:
+        match = re.match(r'^@@?(rules_python\+\+pip\+pq_pip_[A-Za-z0-9_.+-]+)//', label)
+        if match:
+            repositories.add(match[1])
+    if not repositories:
+        raise SelectionError('query produced no canonical wheel repositories')
+    return sorted(repositories)
+
+
+def impacted_targets_command(java, jar, base_hashes, head_hashes, output):
+    return [str(java), '-jar', str(jar), 'get-impacted-targets',
+            '--startingHashes', str(base_hashes), '--finalHashes', str(head_hashes),
+            '--output', str(output)]
+
+
 def verdict_of(selected, statuses):
     failed = sorted(label for label in selected if statuses.get(label) != 'PASSED')
     return ('fail' if failed else 'pass' if selected else 'skipped'), failed
