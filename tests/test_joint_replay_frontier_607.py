@@ -69,8 +69,8 @@ RESUME_ARGV = [*FRESH_ARGV, "--resume"]
 
 
 @pytest.fixture()
-def scratch(request):
-    root = ROOT / ".replay-frontier-scratch" / request.node.name
+def scratch(request, tmp_path):
+    root = tmp_path / request.node.name
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
@@ -84,6 +84,10 @@ def scratch(request):
 def shared_mount(scratch, monkeypatch):
     monkeypatch.setattr(glm_data_manifests, "SHARED_MOUNT", str(scratch))
     return scratch
+
+
+def test_replay_scratch_stays_outside_the_source_checkout(scratch):
+    assert not scratch.resolve().is_relative_to(ROOT)
 
 
 def _phase_paths(manifest, index):
