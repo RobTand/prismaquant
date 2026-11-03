@@ -25,7 +25,7 @@ def installed(tmp_path, monkeypatch):
     (info / 'top_level.txt').write_text('prismabuild\n')
     source = {'schema': 'prismaquant.bazel-sdk-source.v1',
               'commit': staged_lease.PB_READER_LEASE_PIN_COMMIT,
-              'url': 'https://codeload.github.com/RobTand/prismabuild/tar.gz/' + staged_lease.PB_READER_LEASE_PIN_COMMIT,
+              'url': 'https://github.com/RobTand/prismabuild/archive/' + staged_lease.PB_READER_LEASE_PIN_COMMIT + '.tar.gz',
               'sha256': ARCHIVE_SHA256}
     (info / 'prismaquant_bazel_source.json').write_text(json.dumps(source))
     with (info / 'RECORD').open('w') as handle:

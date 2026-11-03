@@ -3803,6 +3803,19 @@ remain coupled prerequisites for the full original native consumer exercise.
 This pin does not change the published fleet runtime or live deployment, and
 does not move numerical, wire, pipeline-default, serving or admission gates.
 
+Bazel test environments (PQ #3216, PR A #3268, 2026-11-03) use the same
+reviewed SDK commit through a separately hash-pinned source archive. The
+frozen test-plus-pbsdk uv export retains the Git identity; the Bazel exporter
+replaces that one hashless requirement with the exact archive URL and SHA-256.
+A rules_python wheel modification carries explicit Bazel source provenance,
+without claiming a pip Git installation. `reviewed_installed_distribution`
+checks that provenance against the reader pin and archive hash, reads raw
+RECORD rows to detect deleted files, verifies every recorded package byte,
+and refuses unlisted package files. Import-shadow and single-generation
+checks still apply. Normal hosted and fleet Git installs keep their existing
+verification path. This affects explicit test injection only; production
+still requires a sealed helper tree and has no implicit installed fallback.
+
 Production-gateway pilot controls (#1293) now bind the actual non-editable
 SDK5 installation through an explicit private helper view. The published
 pbtest pin verifier proves its Git identity, RECORD bytes and import origin

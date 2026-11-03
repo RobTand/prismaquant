@@ -180,6 +180,6 @@ def test_the_registry_export_contains_the_reviewed_hashed_sdk_archive():
     for platform in requirements.PLATFORMS:
         export = (ROOT / requirements.EXPORT.format(platform)).read_text()
         assert requirements.pins(export)['prismabuild'] == (
-            'https://codeload.github.com/RobTand/prismabuild/tar.gz/' + PB_READER_LEASE_PIN_COMMIT)
+            'https://github.com/RobTand/prismabuild/archive/' + PB_READER_LEASE_PIN_COMMIT + '.tar.gz')
         sdk = next(block for block in export.split('\n\n') if block.startswith('prismabuild @'))
         assert '--hash=sha256:e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970' in sdk
