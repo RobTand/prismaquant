@@ -70,7 +70,7 @@ def gate_decision(changed, deleted, impacted, used_sources, tests, *, detection_
 def generate_hashes_command(java, jar, root, bazel, hashes, edges, wheel_repositories):
     """Explicit wheel repositories prevent treating the entire pip hub as opaque."""
     return [str(java), '-jar', str(jar), 'generate-hashes', '--workspacePath', str(root),
-            '--bazelPath', str(bazel), '--excludeExternalTargets', '--includeTargetType',
+            '--bazelPath', str(bazel), '--bazelCommandOptions=--config=ci', '--excludeExternalTargets', '--includeTargetType',
             '--fineGrainedHashExternalReposFile', str(wheel_repositories),
             '--depEdgesFile', str(edges), str(hashes)]
 
