@@ -100,6 +100,10 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_graph_impact": struct(
+        tags = ["runner"],
+        reason = "The live per-PR graph check reads base/head source snapshots from Git history; remote runfiles have no .git.",
+    ),
     "//tests:test_indomain_split_capture": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
