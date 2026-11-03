@@ -2,15 +2,19 @@
 """Remote Bazel requests and exact-run evidence for the PrismaQuant cutover."""
 from __future__ import annotations
 
+import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from prismaquant.digests import bytes_sha256hex, text_sha256hex
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
+from tools.ci import bazel_artifacts as artifacts
 from tools.ci.bazel_artifacts import BuildBuddy, RemoteError
 
 IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
@@ -266,3 +270,50 @@ def parse_result(raw, head):
             'pass', 'fail', 'skipped'):
         raise RemoteError(f'{RESULT} has no valid test verdict')
     return result
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('mode', choices=['pr', 'main'])
+    parser.add_argument('--base', required=True)
+    parser.add_argument('--head', required=True)
+    parser.add_argument('--branch', required=True)
+    parser.add_argument('--repo', default='https://github.com/RobTand/prismaquant')
+    parser.add_argument('--timeout', type=int, default=55, choices=range(1, 56))
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args(argv)
+    upload = args.output
+    try:
+        if any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (args.base, args.head)):
+            raise RemoteError('queue-aware source revisions are invalid')
+        upload.mkdir(parents=True, exist_ok=True)
+        if upload.is_symlink() or list(upload.iterdir()):
+            raise RemoteError('controller upload directory is not empty')
+        artifacts.require_scan_python()
+        result = run_gate(BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')), args)
+        keys = ['BUILDBUDDY_API_KEY'] + [name for name in (
+            'GITHUB_TOKEN', 'MERGIFY_TOKEN') if os.environ.get(name)]
+        artifacts.publish_json(upload, {
+            'result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
+        if output := os.environ.get('GITHUB_OUTPUT'):
+            with Path(output).open('a') as stream:
+                stream.write('scopes=' + json.dumps(result['scopes'], separators=(',', ':')) + '\n')
+                stream.write('all_scopes=' + str(result['all_scopes']).lower() + '\n')
+                stream.write('scopes_ready=true\n')
+        if summary := os.environ.get('GITHUB_STEP_SUMMARY'):
+            with Path(summary).open('a') as stream:
+                stream.write('Bazel verdict: ' + result['verdict'] + '\n\n')
+                stream.write('Budget warnings: ' + str(len(result['budget_warnings'])) + '\n')
+        return 0 if result['verdict'] in ('pass', 'skipped') else 1
+    except (RemoteError, RuntimeError, OSError, ValueError, KeyError, TypeError):
+        if upload.is_symlink():
+            upload.unlink()
+        elif upload.exists():
+            shutil.rmtree(upload)
+        upload.mkdir(parents=True, exist_ok=True)
+        print('Remote gate evidence or artifact scan failed; upload refused', file=sys.stderr)
+        return 75
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
