@@ -188,3 +188,34 @@ def test_full_build_population_cannot_hide_a_missing_test_status():
     records = [shard_record(0, [])]
     with pytest.raises(gate.GateError, match='population'):
         gate.aggregate_shards(population, [population], records, test_population={LABEL})
+
+
+@pytest.mark.parametrize('status,code,verdict', [('PASSED', 0, 'pass'), ('TIMEOUT', 3, 'fail')])
+def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
+        tmp_path, monkeypatch, status, code, verdict):
+    monkeypatch.setenv('MERGIFY_TOKEN', 'must-not-reach-bazel')
+    monkeypatch.setenv('UNRELATED_SECRET', 'must-not-reach-bazel')
+    manifest = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40,
+                'branch': 'main', 'architecture': 'arm64', 'index': 0,
+                'targets': [LABEL, '//prismaquant:library'], 'tests': [LABEL],
+                'require_execution': True}
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        assert '--config=remote-arm64' in command and '--jobs=16' in command
+        assert '--nocache_test_results' in command and '--noremote_accept_cached' in command
+        assert '--flaky_test_attempts=1' in command
+        assert 'MERGIFY_TOKEN' not in kwargs['env'] and 'UNRELATED_SECRET' not in kwargs['env']
+        path = Path(next(arg.split('=', 1)[1] for arg in command
+                         if arg.startswith('--build_event_json_file=')))
+        assert not path.is_relative_to(tmp_path / 'upload')
+        path.write_text(events(result(), summary(status)))
+        from types import SimpleNamespace
+        return SimpleNamespace(returncode=code)
+    found = gate.execute_shard(manifest, root=tmp_path, runner=run)
+    assert len(calls) == 1
+    assert found['verdict'] == verdict
+    assert found['targets'] == manifest['targets']
+    assert found['architecture'] == 'arm64'
+    assert found['run']['statuses'] == {LABEL: status}
+    assert found['budget_warnings'] == []
