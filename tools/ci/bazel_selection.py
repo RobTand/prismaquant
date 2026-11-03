@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+import json
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci.bazel_gate import GateError, partition_population
+from tools.ci.bazel_artifacts import child_environment
 
 GATE_INPUTS = {
     '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
@@ -133,6 +136,39 @@ def impacted_targets_command(java, jar, base_hashes, head_hashes, output):
     return [str(java), '-jar', str(jar), 'get-impacted-targets',
             '--startingHashes', str(base_hashes), '--finalHashes', str(head_hashes),
             '--output', str(output)]
+
+
+def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
+                     runner=subprocess.run):
+    """Capture one revision inside Remote Bazel; callers keep this directory private."""
+    directory = Path(directory)
+    query, hashes, edges, wheels = [directory / name for name in
+        ('query.jsonl', 'hashes.json', 'edges.json', 'wheel-repositories.txt')]
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        environment = child_environment()
+        queried = runner([bazel, 'query', 'deps(//...) union buildfiles(//...)',
+                          '--output=streamed_jsonproto', '--keep_going=false',
+                          '--config=ci'], cwd=root, env=environment, text=True,
+                         capture_output=True, check=False)
+        if queried.returncode:
+            raise SelectionError('revision graph query failed')
+        population = query_population((json.loads(line) for line in queried.stdout.splitlines()),
+                                      architecture)
+        query.write_text(queried.stdout)
+        wheels.write_text('\n'.join(population['wheel_repositories']) + '\n')
+        generated = runner(generate_hashes_command(java, jar, root, bazel, hashes, edges, wheels),
+                           cwd=root, env=environment, text=True, capture_output=True, check=False)
+        if generated.returncode:
+            raise SelectionError('revision graph hashes failed')
+        document = json.loads(hashes.read_text())
+        hashed = document.get('hashes', document)
+        if (not isinstance(hashed, dict) or not hashed
+                or not isinstance(json.loads(edges.read_text()), dict)):
+            raise SelectionError('revision graph hashes or edges are incomplete')
+        return {'population': population, 'query': query, 'hashes': hashes, 'edges': edges}
+    except (OSError, ValueError, TypeError, AttributeError, SelectionError):
+        raise SelectionError('revision graph is incomplete or unavailable') from None
 
 
 def verdict_of(selected, statuses):
