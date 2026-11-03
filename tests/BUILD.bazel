@@ -6884,6 +6884,7 @@ pq_py_test(
         "//:pqtel/__init__",
         "//:prismaquant/lane_shipcard",
         "//:tools/build_streamed_full_kl_teacher",
+        "//:tools/ci/remote_gate",
         "//:tools/dsv4_wikitext_inputs",
         "//:tools/full_kl_teacher_payload",
         "//:tools/g3job/g3_pq_policy/__init__",
