@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import ast
 import os
-import re
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
+
+from tools.bazel import requirements
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 PIN_SOURCE = ROOT / "prismaquant" / "tessera_runtime_contract.py"
 PIN_RESOLVER = ROOT / "tools" / "resolve_tessera_dev_pin.py"
 
@@ -36,30 +36,20 @@ def _dev_pin_literal() -> str:
     raise AssertionError("TESSERA_DEV_PIN_COMMIT is not a literal assignment")
 
 
-def _job(workflow: str, name: str) -> str:
-    match = re.search(
-        rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [a-zA-Z0-9_-]+:\n|\Z)",
-        workflow,
-    )
-    assert match is not None, f"CI workflow has no {name!r} job"
-    return match.group(0)
+HOSTED_JOBS = [("ci.yml", "imports"), ("bazel-hosted.yml", "tests")]
 
 
-@pytest.mark.parametrize("job_name", ["tests", "imports"])
+def _job(filename: str, name: str) -> dict:
+    workflow = yaml.safe_load((ROOT / ".github/workflows" / filename).read_text())
+    return workflow["jobs"][name]
+
+
+@pytest.mark.parametrize("filename,job_name", HOSTED_JOBS)
 @pytest.mark.parametrize("valid_pin", [False, True])
-def test_ci_pin_step_propagates_resolver_status(tmp_path, job_name, valid_pin):
-    job = _job(WORKFLOW.read_text(encoding="utf-8"), job_name)
-    step = re.search(
-        r"(?ms)^      - name: Resolve Tessera development pin\n"
-        r"(.*?)(?=^      -|\Z)",
-        job,
-    )
-    assert step is not None
-    run = re.search(r"(?m)^        run: (.*)$", step.group(1))
-    assert run is not None
-    command = run.group(1)
-    if command == "|":
-        command = textwrap.dedent(step.group(1)[run.end():])
+def test_ci_pin_step_propagates_resolver_status(tmp_path, filename, job_name, valid_pin):
+    steps = _job(filename, job_name)["steps"]
+    step = next(step for step in steps if step.get("id") == "tessera-pin")
+    command = step["run"]
 
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / PIN_RESOLVER.name).write_text(
@@ -112,33 +102,42 @@ def test_stdlib_resolver_reads_the_authoritative_pin_without_package_imports():
     assert _dev_pin_literal() not in resolver
 
 
-def test_ci_installs_the_authoritative_tessera_pin_without_private_credentials():
-    workflow = WORKFLOW.read_text(encoding="utf-8")
-
-    # A copied SHA becomes a second pin and can drift from the admission rule.
-    # The workflow must run the stdlib-only source resolver from its checkout.
+@pytest.mark.parametrize("filename,name", HOSTED_JOBS)
+def test_ci_installs_the_authoritative_tessera_pin_without_private_credentials(filename, name):
+    workflow = (ROOT / ".github/workflows" / filename).read_text()
     assert _dev_pin_literal() not in workflow
+    job = _job(filename, name)
+    assert "TESSERA_REPO_TOKEN" not in yaml.safe_dump(job)
+    steps = job["steps"]
+    resolve_index = next(index for index, step in enumerate(steps)
+                         if step.get("id") == "tessera-pin")
+    assert "python tools/resolve_tessera_dev_pin.py" in steps[resolve_index]["run"]
+    checkout_index = next(index for index, step in enumerate(steps)
+                          if step.get("with", {}).get("repository") == "RobTand/tessera")
+    checkout = steps[checkout_index]
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {
+        "repository": "RobTand/tessera",
+        "ref": "${{ steps.tessera-pin.outputs.commit }}",
+        "persist-credentials": False,
+        "path": ".ci/tessera",
+    }
+    commands = [(index, line.strip()) for index, step in enumerate(steps)
+                for line in step.get("run", "").splitlines()]
+    install = next(position for position, (_, command) in enumerate(commands)
+                   if command == "python -m pip install --no-deps .ci/tessera")
+    prismaquant = next(position for position, (_, command) in enumerate(commands)
+                       if command.startswith("python -m pip install ") and "-e " in command)
+    assert resolve_index < checkout_index < commands[install][0]
+    assert install < prismaquant
 
-    for name in ("tests", "imports"):
-        job = _job(workflow, name)
-        resolve = "python tools/resolve_tessera_dev_pin.py"
-        assert resolve in job, name
-        assert "id: tessera-pin" in job, name
-        assert "TESSERA_REPO_TOKEN" not in job, name
-        assert "repository: RobTand/tessera" in job, name
-        assert "ref: ${{ steps.tessera-pin.outputs.commit }}" in job, name
-        assert "persist-credentials: false" in job, name
-        assert "python -m pip install --no-deps .ci/tessera" in job, name
 
-        # Resolve the pin before checkout; install those bytes before
-        # importing/installing PrismaQuant itself. Ordinary checkout access
-        # becomes sufficient when Tessera is published, including fork PRs.
-        assert job.index(resolve) < job.index(
-            "repository: RobTand/tessera"
-        )
-        assert job.index("repository: RobTand/tessera") < job.index(
-            "python -m pip install --no-deps .ci/tessera"
-        )
-        assert job.index("python -m pip install --no-deps .ci/tessera") < job.index(
-            "name: Install prismaquant"
-        )
+@pytest.mark.parametrize("platform", requirements.PLATFORMS)
+def test_remote_tests_install_the_same_hashed_tessera_pin(platform):
+    export = (ROOT / requirements.EXPORT.format(platform)).read_text()
+    assert requirements.pins(export)["tessera-quant"] == (
+        "https://github.com/RobTand/tessera/archive/" + _dev_pin_literal() + ".tar.gz")
+    block = next(block for block in requirements.export_blocks(export)
+                 if block[0].startswith("tessera-quant @"))
+    assert block[1:] and all(line.startswith("--hash=sha256:") and len(line) == 78
+                            for line in block[1:])
