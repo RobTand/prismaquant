@@ -2498,3 +2498,5 @@ def publish_row_manifests(campaign_manifest, workspace, *, out_dir, out_manifest
         "manifests": report,
     }
     return summary
+
+# PR B leaf selection probe; do not merge.
