@@ -50,6 +50,9 @@ pip.parse(
 pip.whl_mods(
     hub_name = "pq_wheel_modifications",
     whl_name = "prismabuild",
+    # rules_python excludes sdist RECORDs from runfiles by default. The SDK
+    # verifier needs the original package hashes, so include this one explicitly.
+    data = ["site-packages/prismabuild-0.1.0.dist-info/RECORD"],
     copy_files = {
         "@@//tools/bazel:prismabuild_source.json": "site-packages/prismabuild-0.1.0.dist-info/prismaquant_bazel_source.json",
     },
