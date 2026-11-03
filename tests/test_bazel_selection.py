@@ -9,6 +9,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from prismaquant.digests import bytes_sha256hex
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('pq_bazel_selection', ROOT / 'tools/ci/bazel_selection.py')
@@ -307,6 +308,30 @@ def test_revision_graph_refuses_partial_external_evidence(tmp_path, fault):
     with pytest.raises(selection.SelectionError, match='graph'):
         selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
             jar=tmp_path / 'v42.jar', runner=incomplete)
+
+
+@pytest.mark.parametrize('cached', [None, b'wrong jar', b'pinned v42 jar'])
+def test_v42_jar_is_hash_checked_before_use_or_reuse(tmp_path, monkeypatch, cached):
+    content = b'pinned v42 jar'
+    monkeypatch.setattr(selection, 'BAZEL_DIFF_SHA256', bytes_sha256hex(content))
+    path = tmp_path / 'bazel-diff-v42.0.0.jar'
+    if cached is not None:
+        path.write_bytes(cached)
+    requested = []
+
+    def download(url):
+        requested.append(url)
+        return content
+
+    assert selection.bazel_diff_jar(tmp_path, fetch=download) == path
+    assert path.read_bytes() == content
+    assert requested == ([] if cached == content else [selection.BAZEL_DIFF_URL])
+
+
+def test_unverified_jar_is_never_written_or_executed(tmp_path):
+    with pytest.raises(selection.SelectionError, match='checksum'):
+        selection.bazel_diff_jar(tmp_path, fetch=lambda url: b'untrusted jar')
+    assert not (tmp_path / 'bazel-diff-v42.0.0.jar').exists()
 
 
 @pytest.mark.parametrize('module', ['bazel_selection.py', 'bazel_gate.py', 'remote_gate.py'])
