@@ -6090,3 +6090,5 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
 if __name__ == "__main__":
     main()
+
+# PR B hub selection probe; do not merge.
