@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
+import re
+
+from tools.ci.bazel_gate import GateError, partition_population
 
 GATE_INPUTS = {
     '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
@@ -68,3 +71,41 @@ def generate_hashes_command(java, jar, root, bazel, hashes, edges, wheel_reposit
 def verdict_of(selected, statuses):
     failed = sorted(label for label in selected if statuses.get(label) != 'PASSED')
     return ('fail' if failed else 'pass' if selected else 'skipped'), failed
+
+
+def selection_manifest(decision, populations, *, hosted, base, head, mode,
+                       hosted_arm64=frozenset(), shard_counts=None):
+    """Freeze selection and lane routes before any test shard is submitted."""
+    if (mode not in ('pr', 'main')
+            or any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (base, head))):
+        raise SelectionError('invalid manifest mode or source revisions')
+    shard_counts = {'amd64': 2, 'arm64': 4} if shard_counts is None else shard_counts
+    hosted, hosted_arm64 = set(hosted), set(hosted_arm64)
+    full = mode == 'main' or decision['selection'] == 'fallback'
+    selected = set(decision.get('selected', ()))
+    document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode,
+                'base': base, 'head': head, 'selection': decision['selection'],
+                'hosted': sorted(hosted if full else hosted & selected),
+                'hosted_arm64': sorted(hosted_arm64) if mode == 'main' else [],
+                'architectures': {}}
+    for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
+        if architecture not in populations:
+            raise SelectionError('missing queried architecture population: ' + architecture)
+        row = populations[architecture]
+        population, tests = set(row['targets']), set(row['tests'])
+        if (not population or len(population) != len(row['targets'])
+                or not tests <= population or population & hosted
+                or (architecture == 'arm64' and population & hosted_arm64)):
+            raise SelectionError('invalid queried build population or hosted overlap')
+        requested = (selected | set(decision.get('build', ()))) - hosted
+        if not full and not requested <= population:
+            raise SelectionError('selection contains targets outside the queried population')
+        labels = population if full else requested
+        try:
+            shards = partition_population(labels, tests=tests & labels,
+                shard_count=shard_counts[architecture]) if labels else []
+        except (GateError, KeyError) as error:
+            raise SelectionError('cannot partition queried population') from error
+        document['architectures'][architecture] = {
+            'population': sorted(labels), 'tests': sorted(tests & labels), 'shards': shards}
+    return document
