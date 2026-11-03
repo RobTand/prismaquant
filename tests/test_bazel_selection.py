@@ -300,8 +300,11 @@ def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(labels):
 
 def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
     command = selection.impacted_targets_command('java', tmp_path / 'v42.jar',
+        tmp_path / 'head-source', tmp_path / 'pinned-bazel',
         tmp_path / 'base.json', tmp_path / 'head.json', tmp_path / 'impacted.txt')
     assert command == ['java', '-jar', str(tmp_path / 'v42.jar'), 'get-impacted-targets',
+        '--workspacePath', str(tmp_path / 'head-source'),
+        '--bazelPath', str(tmp_path / 'pinned-bazel'),
         '--targetType', 'Rule',
         '--startingHashes', str(tmp_path / 'base.json'),
         '--finalHashes', str(tmp_path / 'head.json'),
@@ -455,7 +458,8 @@ def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_
         return SimpleNamespace(returncode=0)
 
     found = selection.compare_graphs(base, head, {changed}, set(), tmp_path,
-        java='java', jar=tmp_path / 'v42.jar', runner=compare)
+        java='java', jar=tmp_path / 'v42.jar', root=tmp_path / 'head-source',
+        bazel=tmp_path / 'pinned-bazel', runner=compare)
     assert found['selection'] == 'impacted'
     assert found['selected'] == ['//tests:test_consumer']
     assert found['all_scopes'] is False
@@ -474,7 +478,8 @@ def test_graph_comparison_errors_fall_back_to_the_complete_queried_head(tmp_path
         return SimpleNamespace(returncode=1 if fault == 'diff_exit' else 0)
 
     found = selection.compare_graphs(base, head, {'prismaquant/core.py'}, set(), tmp_path,
-        java='java', jar=tmp_path / 'v42.jar', runner=failed_comparison)
+        java='java', jar=tmp_path / 'v42.jar', root=tmp_path / 'head-source',
+        runner=failed_comparison)
     assert found['selection'] == 'fallback'
     assert found['selected'] == sorted(TESTS)
     assert found['build'] == ['//...']
@@ -547,6 +552,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
             Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
             return SimpleNamespace(returncode=1 if fault == 'hash_failure' else 0)
         assert command[3] == 'get-impacted-targets'
+        assert command[command.index('--workspacePath') + 1] == str(root)
+        assert command[command.index('--bazelPath') + 1] == 'bazel'
         Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
         return SimpleNamespace(returncode=1 if fault == 'comparison_failure' else 0)
 
@@ -614,6 +621,7 @@ def test_remote_plan_cli_publishes_only_scanned_manifest_and_matching_receipt(
 def test_v42_impact_adapter_supplies_the_required_workspace_and_bazel(tmp_path):
     # Native v42 declares --workspacePath required even for precomputed hashes.
     command = selection.impacted_targets_command('java', tmp_path / 'v42.jar',
+        tmp_path / 'head-source', tmp_path / 'pinned-bazel',
         tmp_path / 'base.json', tmp_path / 'head.json', tmp_path / 'impacted.txt')
-    assert '--workspacePath' in command
-    assert '--bazelPath' in command
+    assert command[command.index('--workspacePath') + 1] == str(tmp_path / 'head-source')
+    assert command[command.index('--bazelPath') + 1] == str(tmp_path / 'pinned-bazel')

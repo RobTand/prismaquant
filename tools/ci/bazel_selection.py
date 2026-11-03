@@ -164,15 +164,16 @@ def query_population(rows, architecture):
         raise SelectionError('query population is incomplete or malformed') from None
 
 
-def impacted_targets_command(java, jar, base_hashes, head_hashes, output):
+def impacted_targets_command(java, jar, root, bazel, base_hashes, head_hashes, output):
     return [str(java), '-jar', str(jar), 'get-impacted-targets',
+            '--workspacePath', str(root), '--bazelPath', str(bazel),
             '--targetType', 'Rule',
             '--startingHashes', str(base_hashes), '--finalHashes', str(head_hashes),
             '--output', str(output)]
 
 
 def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
-                   java, jar, runner=subprocess.run):
+                   java, jar, root, bazel='bazel', runner=subprocess.run):
     """Keep a queried head population even when base hashes or impact fail."""
     try:
         population = head_graph['population']
@@ -191,7 +192,7 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
         output = directory / 'impacted.txt'
         # Stale evidence cannot turn a missing output into an empty selection.
         output.unlink(missing_ok=True)
-        result = runner(impacted_targets_command(java, jar, base_graph['hashes'],
+        result = runner(impacted_targets_command(java, jar, root, bazel, base_graph['hashes'],
             head_graph['hashes'], output), cwd=directory, env=child_environment(),
             text=True, capture_output=True, check=False)
         if result.returncode:
@@ -320,7 +321,7 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
                 after = collect_revision(root, directory / 'head', 'amd64',
                     java=java, jar=jar, bazel=bazel, runner=runner, queried=head_query)
                 decision = compare_graphs(before, after, changed, deleted, directory,
-                                          java=java, jar=jar, runner=runner)
+                                          java=java, jar=jar, root=root, bazel=bazel, runner=runner)
         except (SelectionError, OSError, ValueError, TypeError,
                 tarfile.TarError, subprocess.SubprocessError):
             decision = everything(['source or graph evidence unavailable'], population['tests'])
