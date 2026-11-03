@@ -210,7 +210,8 @@ def test_cli_refusal_names_a_fixed_phase_without_exception_values(tmp_path, monk
             '--branch', 'runtime-proof', '--output', str(upload)])
     assert code == 75 and list(upload.iterdir()) == []
     output = capsys.readouterr()
-    assert 'refused at scanner-runtime; upload refused' in output.err
+    category = ' category=runtime;' if role == 'shard' else ''
+    assert 'refused at scanner-runtime;' + category + ' upload refused' in output.err
     assert 'private-path-token-and-query' not in output.err + output.out
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
 import argparse
 import importlib.util
 import io
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 from urllib.parse import unquote, urlsplit
+from urllib.error import HTTPError, URLError
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -25,6 +27,52 @@ SCHEMA = 'prismaquant.bazel-gate.v1'
 
 class GateError(RuntimeError):
     """The gate cannot establish complete build or test evidence."""
+
+
+class ShardEvidenceError(GateError):
+    """A fixed diagnostic identity, separate from private exception details."""
+
+    def __init__(self, phase, category):
+        super().__init__('shard evidence unavailable at ' + phase)
+        self.phase, self.category = phase, category
+
+
+def refusal_category(error):
+    category = 'runtime'
+    for _ in range(8):
+        if isinstance(error, TimeoutError) or (
+                isinstance(error, URLError) and isinstance(error.reason, TimeoutError)):
+            return 'timeout'
+        if isinstance(error, HTTPError):
+            return {403: 'http-403', 404: 'http-404', 429: 'http-429'}.get(
+                error.code, 'http-server' if 500 <= error.code < 600 else 'http')
+        if isinstance(error, FileNotFoundError):
+            return 'missing-file'
+        if isinstance(error, PermissionError):
+            return 'permission'
+        if isinstance(error, json.JSONDecodeError):
+            return 'invalid-json'
+        if isinstance(error, zipfile.BadZipFile):
+            return 'invalid-zip'
+        if isinstance(error, OSError):
+            category = 'io'
+        elif isinstance(error, (GateError, ValueError, TypeError, KeyError, AttributeError)):
+            category = 'invalid-evidence'
+        error = error.__cause__ or error.__context__
+        if error is None:
+            break
+    return category
+
+
+@contextmanager
+def evidence_phase(phase):
+    try:
+        yield
+    except ShardEvidenceError:
+        raise
+    except (GateError, ValueError, TypeError, KeyError, AttributeError, OSError,
+            RuntimeError, zipfile.BadZipFile) as error:
+        raise ShardEvidenceError(phase, refusal_category(error)) from None
 
 
 def hosted_assignment(plan, result, architecture):
@@ -198,37 +246,42 @@ def inventory_evidence(text, fetch):
     seen, nodes, warnings = set(), {}, []
     try:
         for line in text.splitlines():
-            event = json.loads(line)
+            with evidence_phase('inventory-bep-parse'):
+                event = json.loads(line)
             for output in event.get('testResult', {}).get('testActionOutput', []):
                 name = output.get('name')
                 if name not in ('test.outputs__outputs.zip', 'test.outputs/outputs.zip',
                                  'test.outputs/inventory.json'):
                     continue
-                uri = output['uri']
-                if uri in seen:
-                    continue
-                seen.add(uri)
-                if name.endswith('inventory.json'):
-                    receipts = [json.loads(fetch(uri))]
-                else:
-                    with zipfile.ZipFile(io.BytesIO(fetch(uri))) as archive:
-                        receipts = [json.loads(archive.read(member)) for member in archive.namelist()
-                                    if Path(member).name == 'inventory.json']
-                for receipt in receipts:
-                    found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
-                    if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
-                        raise ValueError('invalid inventory structure')
-                    for node, status in found_nodes.items():
-                        if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
-                            raise ValueError('invalid inventory node')
-                        if nodes.get(node) != 'failed':
-                            nodes[node] = status
-                    for row in found_warnings:
-                        if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
-                                or any(type(row.get(key)) not in (int, float)
-                                       for key in ('seconds', 'budget_seconds'))):
-                            raise ValueError('invalid budget warning')
-                        warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
+                with evidence_phase('inventory-fetch'):
+                    uri = output['uri']
+                    if uri in seen:
+                        continue
+                    seen.add(uri)
+                    raw = fetch(uri)
+                with evidence_phase('inventory-parse'):
+                    if name.endswith('inventory.json'):
+                        receipts = [json.loads(raw)]
+                    else:
+                        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                            receipts = [json.loads(archive.read(member)) for member in archive.namelist()
+                                        if Path(member).name == 'inventory.json']
+                with evidence_phase('inventory-validate'):
+                    for receipt in receipts:
+                        found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
+                        if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
+                            raise ValueError('invalid inventory structure')
+                        for node, status in found_nodes.items():
+                            if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
+                                raise ValueError('invalid inventory node')
+                            if nodes.get(node) != 'failed':
+                                nodes[node] = status
+                        for row in found_warnings:
+                            if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
+                                    or any(type(row.get(key)) not in (int, float)
+                                           for key in ('seconds', 'budget_seconds'))):
+                                raise ValueError('invalid budget warning')
+                            warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
     except (ValueError, TypeError, AttributeError, KeyError, OSError, zipfile.BadZipFile):
         raise GateError('test output inventory is malformed or unavailable') from None
     return {'nodes': nodes, 'budget_warnings': warnings}
@@ -267,17 +320,18 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         command += ['--flaky_test_attempts=1', '--zip_undeclared_test_outputs']
     if manifest['require_execution']:
         command += ['--noremote_accept_cached', '--nocache_test_results']
-    with (private / 'bazel.log').open('w') as diagnostic:
-        outcome = runner(command, cwd=root, env=environment, stdout=diagnostic,
-                         stderr=subprocess.STDOUT, check=False)
-    try:
+    with evidence_phase('native-execution'):
+        with (private / 'bazel.log').open('w') as diagnostic:
+            outcome = runner(command, cwd=root, env=environment, stdout=diagnostic,
+                             stderr=subprocess.STDOUT, check=False)
+    with evidence_phase('bep-read'):
         text = bep.read_text()
+    with evidence_phase('bep-parse'):
         run = bep_run(text, returncode=outcome.returncode)
-    except OSError:
-        raise GateError('shard left no private build-event evidence') from None
     inventory = inventory_evidence(text, fetch or fetch_artifact)
-    result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                 require_execution=manifest['require_execution'] and bool(tests))
+    with evidence_phase('result-validation'):
+        result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
+                                     require_execution=manifest['require_execution'] and bool(tests))
     if not tests and result['verdict'] == 'skipped':
         result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
@@ -345,13 +399,18 @@ def main(argv=None):
         artifacts.publish_json(upload, {
             'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
         return 0 if result['verdict'] == 'pass' else 1
-    except (GateError, ValueError, TypeError, KeyError, OSError, RuntimeError):
+    except (GateError, ValueError, TypeError, KeyError, OSError, RuntimeError) as error:
         if upload.is_symlink():
             upload.unlink()
         elif upload.exists():
             shutil.rmtree(upload)
         upload.mkdir(parents=True, exist_ok=True)
-        print('shard refused at ' + phase + '; upload refused', file=sys.stderr)
+        if isinstance(error, ShardEvidenceError):
+            phase, category = error.phase, error.category
+        else:
+            category = refusal_category(error)
+        print('shard refused at ' + phase + '; category=' + category + '; upload refused',
+              file=sys.stderr)
         return 75
 
 
