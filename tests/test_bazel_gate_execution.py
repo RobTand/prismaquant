@@ -1,7 +1,9 @@
 """The cutover records failures and refuses empty architecture proofs."""
 import importlib.util
+import io
 import json
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -219,3 +221,39 @@ def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
     assert found['architecture'] == 'arm64'
     assert found['run']['statuses'] == {LABEL: status}
     assert found['budget_warnings'] == []
+
+
+def inventory_zip(payload):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as archive:
+        archive.writestr('inventory.json', json.dumps(payload))
+    return buffer.getvalue()
+
+
+def output_event(uri='bytestream://remote.buildbuddy.io/own-output'):
+    return {'id': {'testResult': {'label': LABEL}}, 'testResult': {
+        'testActionOutput': [{'name': 'test.outputs__outputs.zip', 'uri': uri}]}}
+
+
+def test_inventory_warnings_and_nodes_are_collected_once_from_own_bep_outputs():
+    warning = {'nodeid': 'tests/test_consumer.py::test_one', 'seconds': 21, 'budget_seconds': 20}
+    calls = []
+    def fetch(uri):
+        calls.append(uri)
+        return inventory_zip({'file': 'tests/test_consumer.py',
+                              'nodes': {warning['nodeid']: 'passed'}, 'budget_warnings': [warning]})
+    found = gate.inventory_evidence(events(output_event(), output_event()), fetch)
+    assert found['budget_warnings'] == [warning]
+    assert found['nodes'] == {warning['nodeid']: 'passed'}
+    assert calls == ['bytestream://remote.buildbuddy.io/own-output']
+
+
+@pytest.mark.parametrize('raw', [b'not a zip', inventory_zip({'budget_warnings': 'invalid'})])
+def test_malformed_inventory_is_an_evidence_failure(raw):
+    with pytest.raises(gate.GateError, match='inventory'):
+        gate.inventory_evidence(events(output_event()), lambda uri: raw)
+
+
+def test_native_tests_without_python_inventory_have_no_budget_warnings():
+    assert gate.inventory_evidence(events(result(), summary()), lambda uri: b'') == {
+        'nodes': {}, 'budget_warnings': []}
