@@ -87,7 +87,18 @@ def _selected_run(tmp_path, monkeypatch, capsys, *, rooted=False, value=None):
     # input field in the golden output. Manifest identity remains unmasked.
     assert json.loads(stdout)["handoff_sha256"] == hashlib.sha256(raw).hexdigest()
     stdout = stdout.replace(hashlib.sha256(raw).hexdigest(), "<handoff-sha256>")
-    return code, out.read_bytes(), paths.read_bytes() if rooted else None, stdout
+    paths_raw = paths.read_bytes() if rooted else None
+    if rooted:
+        manifest_path = str(out.resolve())
+        inputs = ["/inputs/a", "/inputs/z-é"]
+        document = {"schema": "prismaquant.selected_cache_read_paths.v1",
+                    "paths": sorted([manifest_path, *inputs])}
+        assert paths_raw == (json.dumps(document, sort_keys=True, indent=2) + "\n").encode()
+        # The frozen row masks the temporary root after serialization. Keep
+        # that fixture path first regardless of where the host puts scratch.
+        document["paths"] = [manifest_path, *inputs]
+        paths_raw = (json.dumps(document, sort_keys=True, indent=2) + "\n").encode()
+    return code, out.read_bytes(), paths_raw, stdout
 
 
 @pytest.mark.parametrize("rooted", [False, True])
