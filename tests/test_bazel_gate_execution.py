@@ -61,6 +61,46 @@ def test_hosted_assignment_refuses_missing_or_inconsistent_lane_evidence(fault):
         gate.hosted_assignment(plan, result, 'other' if fault == 'architecture' else 'amd64')
 
 
+@pytest.mark.parametrize('architecture,fault', [
+    ('amd64', None), ('arm64', None), ('amd64', 'head'),
+    ('amd64', 'malformed'), ('amd64', 'missing'), ('amd64', 'occupied'),
+])
+def test_hosted_cli_materializes_only_the_source_verified_assignment(tmp_path, architecture, fault):
+    plan = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full',
+        'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
+        'population': {'version': 'existing-policy'},
+        'selected': [{'path': 'tests/test_owned.py', 'estimated_seconds': 2},
+                     {'path': 'tests/test_disk.py', 'estimated_seconds': 3},
+                     {'path': 'tests/test_other.py', 'estimated_seconds': 4}],
+        'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known'],
+        'deferred': ['existing-policy-exclusion']}
+    result = {'schema': gate.SCHEMA, 'mode': 'main', 'base': 'b' * 40,
+        'head': 'c' * 40 if fault == 'head' else 'a' * 40, 'verdict': 'pass',
+        'hosted': ['//tests:test_owned'], 'hosted_arm64': ['//tests:test_disk']}
+    plan_path, result_path, output = (tmp_path / name for name in ('plan.json', 'remote.json', 'assigned.json'))
+    plan_path.write_text(json.dumps(plan))
+    result_path.write_text('{' if fault == 'malformed' else json.dumps(result))
+    if fault == 'missing':
+        result_path.unlink()
+    if fault == 'occupied':
+        output.write_text('preexisting private evidence')
+    code = gate.main(['hosted', '--architecture', architecture, '--plan', str(plan_path),
+                      '--result', str(result_path), '--output', str(output)])
+    if fault:
+        assert code == 75
+        if fault == 'occupied':
+            assert output.read_text() == 'preexisting private evidence'
+        else:
+            assert not output.exists()
+    else:
+        assert code == 0
+        assigned = json.loads(output.read_text())
+        assert assigned == {**plan,
+            'selected': [plan['selected'][0 if architecture == 'amd64' else 1]],
+            'deselect': ['tests/test_owned.py::test_known'] if architecture == 'amd64' else []}
+    assert json.loads(plan_path.read_text()) == plan
+
+
 def test_shard_output_reader_does_not_load_the_submission_controller(monkeypatch):
     real_spec = importlib.util.spec_from_file_location
     requested = []
