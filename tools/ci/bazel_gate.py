@@ -2,7 +2,15 @@
 from __future__ import annotations
 
 from collections import Counter
+import importlib.util
 import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+
+SCHEMA = 'prismaquant.bazel-gate.v1'
 
 
 class GateError(RuntimeError):
@@ -113,3 +121,47 @@ def architecture_result(population, run, *, budget_warnings=(), require_executio
             'bazel_exit_code': run['returncode'], 'executed_test_actions': executed,
             'budget_warnings': list(budget_warnings),
             'error': 'architecture ran no test actions' if missing_execution else None}
+
+
+def execute_shard(manifest, *, root=None, runner=subprocess.run):
+    """Execute one immutable build partition, keeping diagnostics out of uploads."""
+    root = Path(root or Path(__file__).resolve().parents[2])
+    targets, tests = manifest['targets'], manifest['tests']
+    if (manifest['architecture'] not in ('amd64', 'arm64') or not targets
+            or len(set(targets)) != len(targets) or not set(tests) <= set(targets)
+            or any(not re.fullmatch(r'//[^\s]*:[^\s]+', label) for label in targets)
+            or not re.fullmatch('[0-9a-f]{40}', manifest['head'])):
+        raise GateError('invalid immutable shard manifest')
+    spec = importlib.util.spec_from_file_location(
+        'pq_shard_artifacts', Path(__file__).with_name('bazel_artifacts.py'))
+    artifacts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(artifacts)
+    environment = artifacts.child_environment()
+    # Only Bazel's client receives its remote-auth key. Neither this key nor
+    # any other controller credential is forwarded to the test action env.
+    if os.environ.get('BUILDBUDDY_API_KEY'):
+        environment['BUILDBUDDY_API_KEY'] = os.environ['BUILDBUDDY_API_KEY']
+    private = Path(tempfile.mkdtemp(prefix='pq-bazel-shard-'))
+    patterns, bep = private / 'targets.txt', private / 'events.jsonl'
+    patterns.write_text('\n'.join(targets) + '\n')
+    config = 'remote' if manifest['architecture'] == 'amd64' else 'remote-arm64'
+    command = ['bazel', 'test', '--config=' + config, '--config=ci', '--jobs=16',
+               '--spawn_strategy=remote,local', '--remote_local_fallback=false',
+               '--keep_going', '--flaky_test_attempts=1',
+               '--build_event_json_file=' + str(bep),
+               '--target_pattern_file=' + str(patterns),
+               '--build_metadata=COMMIT_SHA=' + manifest['head'],
+               '--build_metadata=BRANCH_NAME=' + manifest['branch']]
+    if manifest['require_execution']:
+        command += ['--noremote_accept_cached', '--nocache_test_results']
+    with (private / 'bazel.log').open('w') as diagnostic:
+        outcome = runner(command, cwd=root, env=environment, stdout=diagnostic,
+                         stderr=subprocess.STDOUT, check=False)
+    try:
+        run = bep_run(bep.read_text(), returncode=outcome.returncode)
+    except OSError:
+        raise GateError('shard left no private build-event evidence') from None
+    result = architecture_result(tests, run, require_execution=manifest['require_execution'])
+    return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
+            'base': manifest['base'], 'architecture': manifest['architecture'],
+            'index': manifest['index'], 'targets': targets, 'run': run, **result}
