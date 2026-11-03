@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,3 +65,55 @@ def test_encoded_leaks_fail_without_printing_the_sentinel(tmp_path, monkeypatch,
 def test_missing_upload_directory_cannot_pass_scan(tmp_path, monkeypatch):
     monkeypatch.setenv('PQ_TEST_SCAN_KEY', 'scan-sentinel')
     assert artifacts.scan_upload(tmp_path / 'absent', ['PQ_TEST_SCAN_KEY']) == 75
+
+
+@pytest.mark.parametrize('name,payload', [
+    ('execution_log.binpb.zst', b'\x28\xb5\x2f\xfd'),
+    ('diagnostics.zip', b'PK\x03\x04'),
+    ('diagnostics.xz', b'\xfd7zXZ\x00'),
+    ('diagnostics.bz2', b'BZh9'),
+    ('renamed.json', b'PK\x03\x04'),
+])
+def test_upload_set_refuses_diagnostics_and_disguised_binary(tmp_path, monkeypatch, name, payload):
+    monkeypatch.setenv('PQ_TEST_SCAN_KEY', 'upload-format-sentinel')
+    (tmp_path / 'gate-result.json').write_text('{}')
+    (tmp_path / name).write_bytes(payload)
+    assert artifacts.scan_upload(tmp_path, ['PQ_TEST_SCAN_KEY']) == 75
+    # Rejected evidence remains private; callers must not publish this directory.
+    assert (tmp_path / name).read_bytes() == payload
+
+
+def test_zero_exit_with_not_scanned_diagnostics_refuses_upload(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('PQ_TEST_SCAN_KEY', 'incomplete-scan-sentinel')
+    (tmp_path / 'gate-result.json').write_text('{}')
+    def partial_scan(argv):
+        print('private/path: future format: not scanned')
+        return 0
+    monkeypatch.setattr(artifacts.scanner, 'main', partial_scan)
+    assert artifacts.scan_upload(tmp_path, ['PQ_TEST_SCAN_KEY']) == 75
+    assert 'private/path' not in capsys.readouterr().out
+
+
+def test_scan_requires_python_314_even_for_plain_receipts(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setenv('PQ_TEST_SCAN_KEY', 'runtime-scan-sentinel')
+    (tmp_path / 'gate-result.json').write_text('{}')
+    monkeypatch.setattr(sys, 'version_info', (3, 12, 0))
+    assert artifacts.scan_upload(tmp_path, ['PQ_TEST_SCAN_KEY']) == 75
+
+
+def test_python_314_scanner_really_decodes_zstd(tmp_path, monkeypatch, capsys):
+    from compression import zstd
+    monkeypatch.setenv('PQ_TEST_SCAN_KEY', 'compressed-scan-sentinel')
+    path = tmp_path / 'execution_log.binpb.zst'
+    path.write_bytes(zstd.compress(b'prefix compressed-scan-sentinel suffix'))
+    assert artifacts.scanner.main(['--env', 'PQ_TEST_SCAN_KEY', str(path)]) == 1
+    output = capsys.readouterr().out
+    assert 'secret detected' in output
+    assert 'not scanned' not in output
+    assert 'compressed-scan-sentinel' not in output
+
+
+def test_scanner_core_remains_byte_identical_to_pr_a():
+    import hashlib
+    assert hashlib.sha256((ROOT / 'tools/ci/check_no_secret_leak.py').read_bytes()).hexdigest() == 'a7c88079f0b2558d24d68f7eef2d0824a9b32def42db49c733dc7a905f136eb2'

@@ -319,7 +319,7 @@ def test_immutable_manifest_loading_checks_digest_source_union_and_partition(fau
         assert found['manifest_sha256'] == reference['manifest_sha256']
 
 
-@pytest.mark.parametrize('scan_fault', [None, 'missing_key', 'leak'])
+@pytest.mark.parametrize('scan_fault', [None, 'missing_key', 'leak', 'unscannable'])
 def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_fault):
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'main',
         'base': 'b' * 40, 'head': 'a' * 40, 'architectures': {'amd64': {
@@ -339,6 +339,8 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
     calls = []
     def execute(manifest):
         calls.append(manifest)
+        if scan_fault == 'unscannable':
+            (tmp_path / 'upload' / 'execution_log.binpb.zst').write_bytes(b'\x28\xb5\x2f\xfd')
         return {'schema': gate.SCHEMA, 'mode': 'main', 'head': 'a' * 40,
                 'verdict': 'pass', 'targets': [LABEL], 'budget_warnings': [],
                 'error': 'pq-scan-controller-sentinel' if scan_fault == 'leak' else None}

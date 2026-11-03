@@ -32,7 +32,7 @@ def test_runner_keeps_its_cloud_placement_and_four_cpu_size(mode, monkeypatch):
         'container-image': remote.IMAGE, 'workload-isolation-type': 'firecracker',
         'recycle-runner': 'true'}
     assert 'remote-controller-sentinel' not in json.dumps(request)
-    assert request['steps'][0]['run'].startswith('python3 tools/ci/bazel_gate.py ' + mode)
+    assert request['steps'][0]['run'].startswith('python3.14 tools/ci/bazel_gate.py ' + mode)
     assert request['wait_until'] == 'STARTED'
 
 
@@ -268,3 +268,9 @@ def test_fallback_remains_serial_unless_the_controller_explicitly_selects_two():
     remote.submit_shards(client, fallback_requests(count=2), HEAD, clock=lambda: 1)
     assert client.events == [('submit', 0), ('terminal', 0), ('evidence', 0),
                              ('submit', 1), ('terminal', 1), ('evidence', 1)]
+
+
+def test_shard_uses_python_314_for_its_in_process_upload_scan():
+    request = remote.shard_request(arguments(), 'amd64', 0,
+        'bytestream://remote.buildbuddy.io/manifest', 'c' * 64, 'd' * 64)
+    assert request['steps'] == [{'run': 'python3.14 tools/ci/bazel_gate.py shard'}]
