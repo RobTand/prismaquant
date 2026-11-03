@@ -424,3 +424,72 @@ def test_impacted_hosted_consumer_survives_query_to_manifest_routing():
     assert found['architectures']['amd64']['population'] == []
     assert found['scopes'] == ['//tests']
     assert found['selection'] == 'impacted'
+
+
+@pytest.fixture
+def planning_history(tmp_path):
+    root = tmp_path / 'repo'
+    root.mkdir()
+    def git(*args):
+        return subprocess.run(['git', *args], cwd=root, check=True,
+            text=True, capture_output=True).stdout.strip()
+    git('init', '--quiet')
+    source = root / 'prismaquant/core.py'
+    source.parent.mkdir()
+    revisions = []
+    for content in ('base\n', 'head\n'):
+        source.write_text(content)
+        git('add', '.')
+        git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+            'commit', '--quiet', '-m', content.strip())
+        revisions.append(git('rev-parse', 'HEAD'))
+    return root, revisions
+
+
+@pytest.mark.parametrize('mode,fault', [
+    ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'),
+    ('pr', 'comparison_failure'), ('main', None),
+])
+def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
+        tmp_path, planning_history, mode, fault):
+    root, (base, head) = planning_history
+    calls, hashed_sources = [], []
+    rows = [
+        {'rule': {'name': label, 'ruleClass': 'py_test'}} for label in sorted(TESTS)
+    ] + [{'sourceFile': {'name': '//prismaquant:core.py'}},
+         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}}]
+
+    def planning_command(command, **kwargs):
+        calls.append(command)
+        assert not {'BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN', 'GITHUB_TOKEN'} & set(kwargs['env'])
+        if command[0] == 'git':
+            return subprocess.run(command, **kwargs)
+        if command[1] == 'query':
+            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
+        if command[3] == 'generate-hashes':
+            hashed_sources.append((Path(kwargs['cwd']) / 'prismaquant/core.py').read_text())
+            Path(command[-1]).write_text('{"hashes": {"//tests:test_consumer": "Rule#hash"}}')
+            Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
+            return SimpleNamespace(returncode=1 if fault == 'hash_failure' else 0)
+        assert command[3] == 'get-impacted-targets'
+        Path(command[command.index('--output') + 1]).write_text('//tests:test_consumer\n')
+        return SimpleNamespace(returncode=1 if fault == 'comparison_failure' else 0)
+
+    found = selection.plan_revisions(root, tmp_path / 'private',
+        base='c' * 40 if fault == 'missing_base' else base, head=head, mode=mode,
+        java='java', jar=tmp_path / 'v42.jar', runner=planning_command)
+    assert found['head'] == head
+    assert found['base'] == ('c' * 40 if fault == 'missing_base' else base)
+    assert set(found['architectures']) == ({'amd64', 'arm64'} if mode == 'main' else {'amd64'})
+    expected = sorted(TESTS) if fault or mode == 'main' else ['//tests:test_consumer']
+    for row in found['architectures'].values():
+        assert row['tests'] == expected
+        assert sorted(label for shard in row['shards'] for label in shard) == row['population']
+    if mode == 'pr' and not fault:
+        assert hashed_sources == ['base\n', 'head\n']
+        assert found['selection'] == 'impacted' and found['all_scopes'] is False
+    else:
+        assert found['selection'] == 'fallback' and found['all_scopes'] is True
+    if mode == 'main':
+        assert not hashed_sources
+        assert not any(command[0] == 'java' for command in calls)
