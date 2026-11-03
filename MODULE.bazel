@@ -51,7 +51,7 @@ pip.whl_mods(
     hub_name = "pq_wheel_modifications",
     whl_name = "prismabuild",
     copy_files = {
-        "//tools/bazel:prismabuild_source.json": "site-packages/prismabuild-0.1.0.dist-info/prismaquant_bazel_source.json",
+        "@//tools/bazel:prismabuild_source.json": "site-packages/prismabuild-0.1.0.dist-info/prismaquant_bazel_source.json",
     },
 )
 use_repo(pip, "pq_pip", "pq_wheel_modifications")
