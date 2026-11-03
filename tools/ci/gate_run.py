@@ -40,10 +40,68 @@ def _budget_limits(config):
     return config
 
 
+MIGRATIONS_PATH = 'tools/ci/gate_budget_migrations.json'
+MIGRATION_RUNNERS = frozenset({'ubuntu-24.04', 'ubuntu-24.04-arm'})
+
+
+def _positive_seconds(value):
+    return (not isinstance(value, bool) and isinstance(value, (int, float)) and
+            math.isfinite(value) and value > 0)
+
+
+def _migration_limits(root, base_policy):
+    """Node limits a reviewed migration grants against this exact base policy.
+
+    ``docs/ci_gate.md`` reserves budget growth for an explicit migration the
+    readiness lead reviews after a verified runner or dependency change. Each
+    record names the Git blob of the base ``gate_budget.json`` it was measured
+    against and, per node, hosted evidence from both architectures; its limit
+    is ``ceil(2 * largest hosted time)``. A malformed record fails closed.
+    """
+    path = root / MIGRATIONS_PATH
+    if base_policy is None or not path.exists():
+        return {}
+    try:
+        document = json.loads(path.read_text())
+    except ValueError as error:
+        raise BudgetFailure(f'Budget migration record is not JSON: {error}') from None
+    if (not isinstance(document, dict) or
+            document.get('schema') != 'prismaquant.gate_budget_migration.v1' or
+            not isinstance(document.get('migrations'), list)):
+        raise BudgetFailure('Budget migration record has an unknown shape')
+    granted = {}
+    for migration in document['migrations']:
+        if (not isinstance(migration, dict) or
+                not isinstance(migration.get('base_policy'), str) or
+                len(migration['base_policy']) != 40 or
+                not isinstance(migration.get('reason'), str) or not migration['reason'].strip() or
+                not isinstance(migration.get('slow'), dict) or not migration['slow']):
+            raise BudgetFailure('Budget migration needs a base policy blob, a reason and nodes')
+        for name, entry in migration['slow'].items():
+            rows = entry.get('evidence') if isinstance(entry, dict) else None
+            if (not isinstance(name, str) or '::' not in name or not isinstance(rows, list) or
+                    not rows or any(not isinstance(row, dict) or
+                                    isinstance(row.get('run'), bool) or
+                                    not isinstance(row.get('run'), int) or
+                                    row.get('runner') not in MIGRATION_RUNNERS or
+                                    not _positive_seconds(row.get('seconds')) for row in rows) or
+                    {row['runner'] for row in rows} != MIGRATION_RUNNERS):
+                raise BudgetFailure(f'Budget migration for {name} needs hosted evidence '
+                                    'from both architectures')
+            limit = math.ceil(2 * max(row['seconds'] for row in rows))
+            if entry.get('seconds') != limit:
+                raise BudgetFailure(f'Budget migration for {name} must be ceil(2 x largest '
+                                    f'hosted time) = {limit}')
+            if migration['base_policy'] == base_policy:
+                granted[name] = max(granted.get(name, 0), limit)
+    return granted
+
+
 def _budget_policy(root, base_sha):
     path = 'tools/ci/gate_budget.json'
     current = _budget_limits(json.loads((root / path).read_text()))
     baseline = current
+    base_policy = None
     if base_sha:
         # Check the commit separately: an unavailable target is not a bootstrap.
         target = subprocess.run(['git', 'cat-file', '-e', f'{base_sha}^{{commit}}'],
@@ -53,13 +111,17 @@ def _budget_policy(root, base_sha):
         tree = subprocess.run(['git', 'ls-tree', base_sha, '--', path],
                               cwd=root, text=True, capture_output=True, check=True)
         if tree.stdout.strip():
+            base_policy = tree.stdout.split()[2]
             blob = subprocess.run(['git', 'show', f'{base_sha}:{path}'], cwd=root,
                                   text=True, capture_output=True, check=True)
             baseline = _budget_limits(json.loads(blob.stdout))
+    granted = _migration_limits(root, base_policy)
+    allowed = {**baseline['slow'], **{name: max(limit, baseline['slow'].get(name, 0))
+                                      for name, limit in granted.items()}}
     if (baseline.get('enforced', True) and not current.get('enforced', True) or
             current['seconds'] > baseline['seconds'] or
-            not current['slow'].keys() <= baseline['slow'].keys() or
-            any(limit > baseline['slow'][name] for name, limit in current['slow'].items()) or
+            not current['slow'].keys() <= allowed.keys() or
+            any(limit > allowed[name] for name, limit in current['slow'].items()) or
             not current.get('file_seconds', {}).keys() <= baseline.get('file_seconds', {}).keys() or
             any(limit > baseline['file_seconds'][name]
                 for name, limit in current.get('file_seconds', {}).items())):

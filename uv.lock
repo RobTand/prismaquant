@@ -3096,6 +3096,11 @@ wheels = [
 ]
 
 [[package]]
+name = "prismabuild"
+version = "0.1.0"
+source = { git = "https://github.com/RobTand/prismabuild?rev=027103d9a8417e06c7f13356e58779a313cd7088#027103d9a8417e06c7f13356e58779a313cd7088" }
+
+[[package]]
 name = "prismaquant"
 version = "0.16.2"
 source = { editable = "." }
@@ -3131,6 +3136,11 @@ test = [
     { name = "pytest-xdist" },
 ]
 
+[package.dev-dependencies]
+pbsdk = [
+    { name = "prismabuild" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.30" },
@@ -3155,6 +3165,9 @@ requires-dist = [
     { name = "xxhash", specifier = ">=3.7.0" },
 ]
 provides-extras = ["serve", "task-suite", "test"]
+
+[package.metadata.requires-dev]
+pbsdk = [{ name = "prismabuild", git = "https://github.com/RobTand/prismabuild?rev=027103d9a8417e06c7f13356e58779a313cd7088" }]
 
 [[package]]
 name = "prometheus-client"

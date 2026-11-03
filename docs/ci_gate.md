@@ -48,13 +48,17 @@ swap the architecture assigned to every shard.
 
 The runners are GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`. CI uses no
 PrismaBuild admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
-commit, and `pip install -c .github/ci-constraints.txt -e '.[test]'` preserve the
-existing CPU installation. Pip caches include dependency declarations, constraints,
-and the Tessera pin. Native libraries get one thread each. Pytest workers are
-bounded by inherited CPU affinity and two GiB per worker after reserving one GiB
-for the runner. Work stealing shares long files across those workers, as in the
-post-merge suite. Ordinary files belong to one hosted shard. A file above the
-per-shard target, total estimated time divided by shard count, splits by collected
+commit, and `pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk`
+preserve the existing CPU installation. The `pbsdk` dependency group installs the
+reviewed PrismaBuild client SDK (`prismabuild`, a Git install at
+`staged_lease.PB_READER_LEASE_PIN_COMMIT`), so tests that drive the SDK run on hosted
+runners instead of skipping (#3216). Tests that need the fleet's sealed lease-helper
+generation or PrismaBuild's `tools/` scripts still skip with their own reasons.
+Pip caches include dependency declarations, constraints, and the Tessera pin.
+Native libraries get one thread each. Pytest workers are bounded by inherited
+CPU affinity and two GiB per worker after reserving one GiB for the runner. Work
+stealing shares long files across those workers, as in the post-merge suite.
+Ordinary files belong to one hosted shard. A file above the per-shard target, total estimated time divided by shard count, splits by collected
 pytest node ID. Recorded node durations drive longest-first assignment. Every
 shard collects split files and executes only its assigned nodes. A new node uses
 SHA-256 of its exact node ID modulo the shard count. Deleted nodes disappear at
@@ -143,6 +147,15 @@ or rerunning a failed job. First fix the expensive test or fixture and remeasure
 If a verified runner or dependency change invalidates the baseline, the readiness
 lead must review an explicit policy migration in tooling plus a new hosted
 baseline and final-head qualification. The current runner offers no override.
+`tools/ci/gate_budget_migrations.json` is that migration record. Each migration
+names the Git blob of the base `gate_budget.json` it was measured against
+(`base_policy`), the base commit, the reason, and per node hosted evidence from
+both `ubuntu-24.04` and `ubuntu-24.04-arm`. Its limit must equal
+`ceil(2 * largest hosted time)`. `gate_run` accepts a new or larger node exception
+only for a listed node, only up to that limit, and only while the PR base carries
+that exact policy blob, so a merged migration grants nothing to a later PR. The
+default, file budgets and every unlisted node stay shrink-only. A malformed record
+fails closed. The first migration (#3223) covers installing the PrismaBuild SDK.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
 The legacy file at main `8d72e303e2f070925077ce9e072b254df3856909` had 54 active
