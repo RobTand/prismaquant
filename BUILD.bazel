@@ -11593,6 +11593,8 @@ pq_py_library(
         "tools/ci/check_no_secret_leak.py",
     ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
         ":tools/ci/check_no_secret_leak",
     ],
 )

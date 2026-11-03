@@ -113,47 +113,104 @@ def test_scanner_core_remains_byte_identical_to_pr_a():
     assert hashlib.sha256((ROOT / 'tools/ci/check_no_secret_leak.py').read_bytes()).hexdigest() == 'a7c88079f0b2558d24d68f7eef2d0824a9b32def42db49c733dc7a905f136eb2'
 
 
-def test_scanner_bootstrap_installs_pinned_python_without_secrets_in_children(tmp_path, monkeypatch):
-    from types import SimpleNamespace
+@pytest.mark.parametrize('machine', ['x86_64', 'aarch64'])
+def test_scanner_bootstrap_uses_verified_python_without_pip(tmp_path, monkeypatch, machine):
+    import io
+    import platform
+    import tarfile
     monkeypatch.setattr(artifacts.sys, 'version_info', (3, 12, 0))
+    monkeypatch.setattr(platform, 'machine', lambda: machine)
+    monkeypatch.setattr(platform, 'system', lambda: 'Linux')
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'bootstrap-private-sentinel')
-    monkeypatch.setenv('OTHER_API_KEY', 'bootstrap-other-sentinel')
+    content = b'verified-python-fixture'
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+        member = tarfile.TarInfo('python/bin/python3.14')
+        member.size = len(content)
+        member.mode = 0o755
+        bundle.addfile(member, io.BytesIO(content))
+    payload = archive.getvalue()
+    monkeypatch.setattr(artifacts, 'PYTHON_RUNTIME_SHA256', {
+        machine: artifacts.bytes_sha256hex(payload)})
     calls = []
-    python = str(tmp_path / 'python3.14')
-    def bootstrap_run(command, **kwargs):
-        calls.append(command)
-        assert 'BUILDBUDDY_API_KEY' not in kwargs['env']
-        assert 'OTHER_API_KEY' not in kwargs['env']
-        assert 'bootstrap-private-sentinel' not in repr(command)
-        assert kwargs['check'] is True and kwargs['capture_output'] is True
-        return SimpleNamespace(stdout=python+'\n' if 'find' in command else '')
+    def fetch(url):
+        calls.append(url)
+        assert f'{machine}-unknown-linux-gnu-install_only_stripped.tar.gz' in url
+        assert 'bootstrap-private-sentinel' not in url
+        return payload
+    def forbidden_child(*args, **kwargs):
+        pytest.fail('runtime bootstrap must not launch a pip or installer child')
+    monkeypatch.setattr(artifacts.subprocess, 'run', forbidden_child)
     def replace_interpreter(executable, argv):
-        assert executable == python and argv == [python, *artifacts.sys.argv]
+        assert Path(executable).read_bytes() == content
+        assert argv == [executable, *artifacts.sys.argv]
         assert os.environ['BUILDBUDDY_API_KEY'] == 'bootstrap-private-sentinel'
         raise SystemExit(0)
     with pytest.raises(SystemExit, match='0'):
-        artifacts.require_scan_python(runner=bootstrap_run, execute=replace_interpreter)
-    assert calls[0][-1] == 'uv==0.9.5'
-    assert calls[1][-3:] == ['python', 'install', '3.14.0']
-    assert calls[2][-4:] == ['python', 'find', '--managed-python', '3.14.0']
+        artifacts.require_scan_python(fetch=fetch, execute=replace_interpreter)
+    assert len(calls) == 1
 
 
 def test_scanner_bootstrap_is_a_noop_on_python314(monkeypatch):
     monkeypatch.setattr(artifacts.sys, 'version_info', (3, 14, 0))
     def forbidden_bootstrap(*args, **kwargs):
         pytest.fail('Python 3.14 must not bootstrap again')
-    artifacts.require_scan_python(runner=forbidden_bootstrap, execute=forbidden_bootstrap)
+    artifacts.require_scan_python(fetch=forbidden_bootstrap, execute=forbidden_bootstrap)
 
 
-def test_scanner_bootstrap_failure_never_exposes_child_diagnostics(monkeypatch, capsys):
-    import subprocess
+@pytest.mark.parametrize('failure', ['download', 'integrity', 'extract', 'executable', 'platform'])
+def test_scanner_bootstrap_refuses_unverified_runtime_without_private_diagnostics(
+        monkeypatch, capsys, failure):
+    import io
+    import platform
+    import tarfile
     monkeypatch.setattr(artifacts.sys, 'version_info', (3, 12, 0))
-    def broken_bootstrap(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command, output='private-bootstrap-output')
+    monkeypatch.setattr(platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(platform, 'machine', lambda: 'unknown' if failure == 'platform' else 'x86_64')
+    payload = b'not-a-runtime-archive'
+    if failure == 'executable':
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode='w:gz'):
+            pass
+        payload = archive.getvalue()
+    if failure in ('extract', 'executable'):
+        monkeypatch.setattr(artifacts, 'PYTHON_RUNTIME_SHA256', {
+            'x86_64': artifacts.bytes_sha256hex(payload)})
+    def fetch(url):
+        if failure == 'download':
+            raise OSError('private-path-and-query')
+        return payload
+    def forbidden_exec(*args):
+        pytest.fail('unverified runtime must never execute')
     with pytest.raises(RuntimeError, match='Python 3.14') as error:
-        artifacts.require_scan_python(runner=broken_bootstrap)
-    assert 'private-bootstrap-output' not in str(error.value)
-    assert 'private-bootstrap-output' not in capsys.readouterr().out
+        artifacts.require_scan_python(fetch=fetch, execute=forbidden_exec)
+    assert 'private-path-and-query' not in str(error.value)
+    output = capsys.readouterr()
+    assert failure in output.err
+    assert 'private-path-and-query' not in output.err + output.out
+
+
+@pytest.mark.parametrize('role', ['planner', 'shard', 'merger', 'post-merge'])
+def test_cli_refusal_names_a_fixed_phase_without_exception_values(tmp_path, monkeypatch, capsys, role):
+    from tools.ci import bazel_gate, bazel_selection, remote_gate
+    upload = tmp_path / 'upload'
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    def unavailable_runtime():
+        raise RuntimeError('private-path-token-and-query')
+    monkeypatch.setattr(bazel_gate.artifacts, 'require_scan_python', unavailable_runtime)
+    mode = 'main' if role == 'post-merge' else 'pr'
+    if role == 'planner':
+        code = bazel_selection.main(['plan', '--mode', mode, '--base', 'b' * 40,
+            '--head', 'a' * 40, '--branch', 'runtime-proof'])
+    elif role == 'shard':
+        code = bazel_gate.main(['shard'])
+    else:
+        code = remote_gate.main([mode, '--base', 'b' * 40, '--head', 'a' * 40,
+            '--branch', 'runtime-proof', '--output', str(upload)])
+    assert code == 75 and list(upload.iterdir()) == []
+    output = capsys.readouterr()
+    assert 'refused at scanner-runtime; upload refused' in output.err
+    assert 'private-path-token-and-query' not in output.err + output.out
 
 
 @pytest.mark.parametrize('wrong_head', [False, True])

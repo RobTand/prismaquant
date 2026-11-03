@@ -6,13 +6,18 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import re
 import sys
 import subprocess
+import shutil
+import tarfile
 import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from prismaquant.digests import bytes_sha256hex
 
 CHILD_ENVIRONMENT = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL',
                      'BAZELISK_HOME', 'JAVA_HOME'}
@@ -23,6 +28,11 @@ SCANNER_SPEC.loader.exec_module(scanner)
 
 
 API = 'https://app.buildbuddy.io/api/v1/'
+PYTHON_RUNTIME_RELEASE = '20251014'
+PYTHON_RUNTIME_SHA256 = {
+    'x86_64': '493c477b4a88bb1ea2f6c6f57fa0e88ffbe55d9e7b1405c4699f2d41c04eb154',
+    'aarch64': '7dbb43b742c040835a277318355fb359b41e509dbf4fbb614da38005a9290e16',
+}
 
 
 class RemoteError(RuntimeError):
@@ -94,27 +104,44 @@ def prepare_history(expected_head, *, root=None, runner=None):
         raise RuntimeError('runner history preparation failed; tests refused') from None
 
 
-def require_scan_python(*, runner=None, execute=None):
-    """Bootstrap through key-free children, then replace the keyed parent."""
+def require_scan_python(*, fetch=None, execute=None):
+    """Verify a standalone runtime without pip, then replace the keyed parent."""
     if sys.version_info[:2] == (3, 14):
         return
-    runner = subprocess.run if runner is None else runner
     execute = os.execv if execute is None else execute
-    bootstrap = Path(tempfile.gettempdir()) / 'pq-scanner-bootstrap'
-    environment = child_environment()
-    def prepare(command):
-        return runner(command, env=environment, text=True, capture_output=True,
-                      check=True, timeout=300)
+    bootstrap = None
+    phase = 'platform'
     try:
-        prepare([sys.executable, '-m', 'pip', 'install', '--quiet', '--no-deps',
-                 '--target', str(bootstrap), 'uv==0.9.5'])
-        uv = str(bootstrap / 'bin/uv')
-        prepare([uv, 'python', 'install', '3.14.0'])
-        python = prepare([uv, 'python', 'find', '--managed-python', '3.14.0']).stdout.strip()
-        if not Path(python).is_absolute():
-            raise ValueError('invalid managed Python path')
+        machine = platform.machine()
+        if platform.system() != 'Linux' or machine not in PYTHON_RUNTIME_SHA256:
+            raise ValueError('unsupported bootstrap platform')
+        url = ('https://github.com/astral-sh/python-build-standalone/releases/download/'
+               + PYTHON_RUNTIME_RELEASE + '/cpython-3.14.0%2B' + PYTHON_RUNTIME_RELEASE
+               + '-' + machine + '-unknown-linux-gnu-install_only_stripped.tar.gz')
+        phase = 'download'
+        if fetch is None:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                content = response.read()
+        else:
+            content = fetch(url)
+        phase = 'integrity'
+        if bytes_sha256hex(content) != PYTHON_RUNTIME_SHA256[machine]:
+            raise ValueError('runtime checksum mismatch')
+        phase = 'extract'
+        bootstrap = Path(tempfile.mkdtemp(prefix='pq-scanner-bootstrap-'))
+        with tarfile.open(fileobj=io.BytesIO(content), mode='r:gz') as archive:
+            archive.extractall(bootstrap, filter='data')
+        phase = 'executable'
+        python = str(bootstrap / 'python/bin/python3.14')
+        if not Path(python).is_file():
+            raise ValueError('runtime executable unavailable')
+        phase = 'exec'
         execute(python, [python, *sys.argv])
-    except (OSError, ValueError, subprocess.SubprocessError):
+        raise RuntimeError('runtime replacement returned')
+    except (OSError, ValueError, TypeError, tarfile.TarError, RuntimeError):
+        if bootstrap is not None:
+            shutil.rmtree(bootstrap, ignore_errors=True)
+        print('Scanner runtime bootstrap refused at ' + phase, file=sys.stderr)
         raise RuntimeError('Python 3.14 scanner bootstrap failed; upload refused') from None
 
 

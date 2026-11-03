@@ -379,11 +379,14 @@ def main(argv=None):
         print('plan upload directory unavailable', file=sys.stderr)
         return 75
     upload = Path(directory)
+    phase = 'upload-precondition'
     try:
         upload.mkdir(parents=True, exist_ok=True)
         if upload.is_symlink() or list(upload.iterdir()):
             raise SelectionError('plan upload directory is not empty')
+        phase = 'scanner-runtime'
         artifacts.require_scan_python()
+        phase = 'planning'
         with tempfile.TemporaryDirectory(prefix='pq-private-plan-') as private:
             manifest = plan_revisions(Path.cwd(), Path(private),
                 base=args.base, head=args.head, mode=args.mode)
@@ -396,6 +399,7 @@ def main(argv=None):
                 'manifest_sha256': bytes_sha256hex(raw)})
             keys = ['BUILDBUDDY_API_KEY'] + [name for name in (
                 'GITHUB_TOKEN', 'MERGIFY_TOKEN') if os.environ.get(name)]
+            phase = 'publication'
             artifacts.publish_json(upload, {
                 'shard-manifest.json': raw,
                 'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
@@ -406,7 +410,7 @@ def main(argv=None):
         elif upload.exists():
             shutil.rmtree(upload)
         upload.mkdir(parents=True, exist_ok=True)
-        print('plan evidence or artifact scan failed; upload refused', file=sys.stderr)
+        print('plan refused at ' + phase + '; upload refused', file=sys.stderr)
         return 75
 
 

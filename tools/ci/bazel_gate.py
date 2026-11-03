@@ -324,18 +324,24 @@ def main(argv=None):
         print('shard upload directory unavailable', file=sys.stderr)
         return 75
     upload = Path(directory)
+    phase = 'upload-precondition'
     try:
         upload.mkdir(parents=True, exist_ok=True)
         if upload.is_symlink() or list(upload.iterdir()):
             raise GateError('shard upload directory is not empty')
+        phase = 'scanner-runtime'
         artifacts.require_scan_python()
+        phase = 'manifest'
         reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
         manifest = load_shard_manifest(reference, fetch_artifact)
+        phase = 'history'
         artifacts.prepare_history(manifest['head'])
+        phase = 'execution'
         result = execute_shard(manifest)
         result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
         keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')
                                        if os.environ.get(name)]
+        phase = 'publication'
         artifacts.publish_json(upload, {
             'gate-result.json': DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n'}, keys)
         return 0 if result['verdict'] == 'pass' else 1
@@ -345,7 +351,7 @@ def main(argv=None):
         elif upload.exists():
             shutil.rmtree(upload)
         upload.mkdir(parents=True, exist_ok=True)
-        print('shard evidence or artifact scan failed; upload refused', file=sys.stderr)
+        print('shard refused at ' + phase + '; upload refused', file=sys.stderr)
         return 75
 
 
