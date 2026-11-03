@@ -317,3 +317,41 @@ def test_immutable_manifest_loading_checks_digest_source_union_and_partition(fau
         assert found['tests'] == [LABEL]
         assert found['require_execution'] is True
         assert found['manifest_sha256'] == reference['manifest_sha256']
+
+
+@pytest.mark.parametrize('scan_fault', [None, 'missing_key', 'leak'])
+def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_fault):
+    document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'main',
+        'base': 'b' * 40, 'head': 'a' * 40, 'architectures': {'amd64': {
+            'population': [LABEL], 'tests': [LABEL], 'shards': [[LABEL]]}}}
+    raw = json.dumps(document).encode()
+    reference = {'mode': 'main', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'main',
+        'architecture': 'amd64', 'index': 0, 'require_execution': True,
+        'manifest_uri': 'bytestream://remote.buildbuddy.io/own-manifest',
+        'manifest_sha256': hashlib.sha256(raw).hexdigest(),
+        'partition_sha256': hashlib.sha256((LABEL + '\n').encode()).hexdigest()}
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps(reference))
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(tmp_path / 'upload'))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'pq-scan-controller-sentinel')
+    if scan_fault == 'missing_key':
+        monkeypatch.delenv('BUILDBUDDY_API_KEY')
+    monkeypatch.setattr(gate, 'fetch_artifact', lambda uri: raw, raising=False)
+    calls = []
+    def execute(manifest):
+        calls.append(manifest)
+        return {'schema': gate.SCHEMA, 'mode': 'main', 'head': 'a' * 40,
+                'verdict': 'pass', 'targets': [LABEL], 'budget_warnings': [],
+                'error': 'pq-scan-controller-sentinel' if scan_fault == 'leak' else None}
+    monkeypatch.setattr(gate, 'execute_shard', execute)
+    code = gate.main(['shard'])
+    assert len(calls) == 1
+    if scan_fault:
+        assert code == 75
+        assert list((tmp_path / 'upload').iterdir()) == []
+    else:
+        assert code == 0
+        files = list((tmp_path / 'upload').iterdir())
+        assert [path.name for path in files] == ['gate-result.json']
+        found = json.loads(files[0].read_text())
+        assert found['manifest_sha256'] == reference['manifest_sha256']
+        assert found['partition_sha256'] == reference['partition_sha256']
