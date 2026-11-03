@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
+import io
 import json
 import re
 import subprocess
 import sys
+import tarfile
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -197,27 +199,40 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
     return gate_decision(changed, deleted, impacted, used_sources, tests)
 
 
-def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
-                     runner=subprocess.run):
-    """Capture one revision inside Remote Bazel; callers keep this directory private."""
+def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
+    """Freeze the queried population before optional hash evidence can fail."""
     directory = Path(directory)
-    query, hashes, edges, wheels = [directory / name for name in
-        ('query.jsonl', 'hashes.json', 'edges.json', 'wheel-repositories.txt')]
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        environment = child_environment()
         queried = runner([bazel, 'query', 'deps(//...) union buildfiles(//...)',
                           '--output=streamed_jsonproto', '--keep_going=false',
-                          '--config=ci'], cwd=root, env=environment, text=True,
+                          '--config=ci'], cwd=root, env=child_environment(), text=True,
                          capture_output=True, check=False)
         if queried.returncode:
             raise SelectionError('revision graph query failed')
         population = query_population((json.loads(line) for line in queried.stdout.splitlines()),
                                       architecture)
+        query = directory / 'query.jsonl'
         query.write_text(queried.stdout)
+        return {'population': population, 'query': query}
+    except (OSError, ValueError, TypeError, AttributeError, SelectionError):
+        raise SelectionError('revision graph query is incomplete or unavailable') from None
+
+
+def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
+                     runner=subprocess.run, queried=None):
+    """Capture one revision inside Remote Bazel; callers keep this directory private."""
+    directory = Path(directory)
+    hashes, edges, wheels = [directory / name for name in
+        ('hashes.json', 'edges.json', 'wheel-repositories.txt')]
+    try:
+        graph = queried or query_revision(root, directory, architecture,
+                                          bazel=bazel, runner=runner)
+        population = graph['population']
         wheels.write_text('\n'.join(population['wheel_repositories']) + '\n')
         generated = runner(generate_hashes_command(java, jar, root, bazel, hashes, edges, wheels),
-                           cwd=root, env=environment, text=True, capture_output=True, check=False)
+                           cwd=root, env=child_environment(), text=True,
+                           capture_output=True, check=False)
         if generated.returncode:
             raise SelectionError('revision graph hashes failed')
         document = json.loads(hashes.read_text())
@@ -225,9 +240,77 @@ def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
         if (not isinstance(hashed, dict) or not hashed
                 or not isinstance(json.loads(edges.read_text()), dict)):
             raise SelectionError('revision graph hashes or edges are incomplete')
-        return {'population': population, 'query': query, 'hashes': hashes, 'edges': edges}
-    except (OSError, ValueError, TypeError, AttributeError, SelectionError):
+        return {**graph, 'hashes': hashes, 'edges': edges}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, SelectionError):
         raise SelectionError('revision graph is incomplete or unavailable') from None
+
+
+def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
+                   bazel='bazel', runner=subprocess.run):
+    """Plan in the Remote Bazel runner from immutable Git and private graph inputs."""
+    if (mode not in ('pr', 'main')
+            or any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (base, head))):
+        raise SelectionError('invalid planner mode or source revisions')
+    root, directory = Path(root), Path(directory)
+
+    def git(*arguments, binary=False):
+        result = runner(['git', *arguments], cwd=root, env=child_environment(),
+            text=not binary, capture_output=True, check=False)
+        if result.returncode:
+            raise SelectionError('Git revision evidence is unavailable')
+        return result.stdout
+
+    if git('rev-parse', 'HEAD').strip() != head:
+        raise SelectionError('planner checkout has the wrong head')
+    # Query failure is fatal. A missing population can never become empty success.
+    head_query = query_revision(root, directory / 'head', 'amd64',
+                                bazel=bazel, runner=runner)
+    population = head_query['population']
+    if mode == 'main':
+        decision = everything(['post-merge full record'], population['tests'])
+    else:
+        try:
+            try:
+                git('cat-file', '-e', base + '^{commit}')
+            except SelectionError:
+                git('fetch', '--no-tags', 'origin', base)
+            changed = set(filter(None, git('diff', '--no-renames', '--name-only', '-z',
+                '--diff-filter=ACMRT', base, head, '--').split('\0')))
+            deleted = set(filter(None, git('diff', '--no-renames', '--name-only', '-z',
+                '--diff-filter=D', base, head, '--').split('\0')))
+            if not changed and not deleted:
+                raise SelectionError('empty source diff')
+            if fallback_files(changed | deleted):
+                decision = everything(fallback_files(changed | deleted), population['tests'])
+            else:
+                base_root = directory / 'base-source'
+                base_root.mkdir()
+                with tarfile.open(fileobj=io.BytesIO(git('archive', base, binary=True))) as archive:
+                    archive.extractall(base_root, filter='data')
+                if jar is None:
+                    jar = bazel_diff_jar(directory)
+                if java is None:
+                    info = runner([bazel, 'info', 'java-home', '--config=ci'],
+                        cwd=root, env=child_environment(), text=True,
+                        capture_output=True, check=False)
+                    if info.returncode or not Path(info.stdout.strip()).is_absolute():
+                        raise SelectionError('Bazel Java runtime is unavailable')
+                    java = Path(info.stdout.strip()) / 'bin/java'
+                before = collect_revision(base_root, directory / 'base', 'amd64',
+                    java=java, jar=jar, bazel=bazel, runner=runner)
+                after = collect_revision(root, directory / 'head', 'amd64',
+                    java=java, jar=jar, bazel=bazel, runner=runner, queried=head_query)
+                decision = compare_graphs(before, after, changed, deleted, directory,
+                                          java=java, jar=jar, runner=runner)
+        except (SelectionError, OSError, ValueError, TypeError,
+                tarfile.TarError, subprocess.SubprocessError):
+            decision = everything(['source or graph evidence unavailable'], population['tests'])
+    populations = {'amd64': population}
+    if mode == 'main':
+        populations['arm64'] = query_population(
+            (json.loads(line) for line in head_query['query'].read_text().splitlines()), 'arm64')
+    return selection_manifest(decision, populations, hosted=population['hosted'],
+        hosted_arm64=population['hosted_arm64'], base=base, head=head, mode=mode)
 
 
 def verdict_of(selected, statuses):
