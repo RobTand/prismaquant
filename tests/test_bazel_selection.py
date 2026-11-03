@@ -404,3 +404,23 @@ def test_graph_comparison_errors_fall_back_to_the_complete_queried_head(tmp_path
     assert found['selected'] == sorted(TESTS)
     assert found['build'] == ['//...']
     assert found['all_scopes'] is True
+
+
+def test_impacted_hosted_consumer_survives_query_to_manifest_routing():
+    hosted = '//tests:test_hosted_consumer'
+    population = selection.query_population([
+        {'rule': {'name': '//tests:test_consumer', 'ruleClass': 'py_test'}},
+        {'rule': {'name': hosted, 'ruleClass': 'py_test', 'attribute': [
+            {'name': 'tags', 'stringListValue': ['manual', 'gate-lane-hosted']}]}},
+        {'sourceFile': {'name': '//prismaquant:core.py'}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                  'ruleClass': 'py_library'}},
+    ], 'amd64')
+    selected = selection.gate_decision({'prismaquant/core.py'}, set(), {hosted},
+        set(population['used_sources']), set(population['tests']))
+    found = selection.selection_manifest(selected, {'amd64': population},
+        hosted=population['hosted'], base='b' * 40, head='a' * 40, mode='pr')
+    assert found['hosted'] == [hosted]
+    assert found['architectures']['amd64']['population'] == []
+    assert found['scopes'] == ['//tests']
+    assert found['selection'] == 'impacted'
