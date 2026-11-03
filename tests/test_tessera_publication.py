@@ -242,7 +242,7 @@ class _Cache:
 
 
 def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
-            barrier=None, blob=b"wire-bytes", writer_entered=None):
+            barrier=None, blob=b"wire-bytes", writer_entered=None, writer_threads=None):
     """Measure a cell with controlled encoding, optionally behind a save barrier."""
     import torch
 
@@ -255,6 +255,8 @@ def _finish(tmp_path, monkeypatch, *, publisher, qname="model.layers.0.q",
         real_save = torch.save
 
         def held(obj, path, *args, **kwargs):
+            if writer_threads is not None:
+                writer_threads.append(threading.current_thread())
             if writer_entered is not None:
                 writer_entered.set()
             assert barrier.wait(WAIT), "save barrier never released"
@@ -288,19 +290,20 @@ def test_a_blocked_writer_blocks_the_encode_thread_when_publication_is_synchrono
         importlib.import_module(module)
     barrier = threading.Event()
     writer_entered = threading.Event()
+    writer_threads = []
     returned = threading.Event()
 
     def run():
         _finish(tmp_path, monkeypatch, publisher=None, barrier=barrier,
-                writer_entered=writer_entered)
+                writer_entered=writer_entered, writer_threads=writer_threads)
         returned.set()
 
     worker = threading.Thread(target=run)
     worker.start()
     try:
         assert writer_entered.wait(WAIT), "the writer never reached its save barrier"
-        assert not returned.is_set(), (
-            "the synchronous path returned while its writer was blocked")
+        assert writer_threads == [worker], (
+            "the synchronous writer must run on the encode worker")
         barrier.set()
         assert returned.wait(WAIT)
     finally:
