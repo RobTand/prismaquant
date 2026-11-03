@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import urllib.request
+import urllib.error
 import zipfile
 
 import pytest
@@ -549,3 +550,64 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
         assert any(not tests and operation == 'build' for tests, operation in calls)
         assert all(operation == 'test' for tests, operation in calls if tests)
         assert all(record['code'] == 0 for record in records.values())
+
+
+@pytest.mark.parametrize('fault,phase,category', [
+    ('native', 'native-execution', 'runtime'),
+    ('missing_bep', 'bep-read', 'missing-file'),
+    ('invalid_bep', 'bep-parse', 'invalid-json'),
+    ('timeout', 'inventory-fetch', 'timeout'),
+    ('http', 'inventory-fetch', 'http-429'),
+    ('invalid_zip', 'inventory-parse', 'invalid-zip'),
+    ('invalid_receipt', 'inventory-validate', 'invalid-evidence'),
+])
+def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
+        tmp_path, monkeypatch, capsys, fault, phase, category):
+    from types import SimpleNamespace
+    sentinel = 'private-value-must-never-be-logged'
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
+                'branch': 'probe', 'architecture': 'amd64', 'index': 0,
+                'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', sentinel)
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+    native_calls = []
+
+    def native(command, **kwargs):
+        native_calls.append(command)
+        if fault == 'native':
+            raise RuntimeError(sentinel)
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        if fault != 'missing_bep':
+            path.write_text('{' + sentinel if fault == 'invalid_bep' else
+                            events(result(remote=True), summary(), output_event()))
+        return SimpleNamespace(returncode=0)
+
+    def fetch(uri):
+        if fault == 'timeout':
+            raise TimeoutError(sentinel)
+        if fault == 'http':
+            # The real client hides network exception text. Its category must
+            # survive that boundary without exposing the private URL or value.
+            def unavailable(request, **kwargs):
+                raise urllib.error.HTTPError(sentinel, 429, sentinel, None, None)
+            monkeypatch.setattr(urllib.request, 'urlopen', unavailable)
+            return gate.fetch_artifact(uri)
+        if fault == 'invalid_zip':
+            return sentinel.encode()
+        return inventory_zip({'nodes': {sentinel: 'unknown'}})
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native, fetch=fetch))
+    assert gate.main(['shard']) == 75
+    captured = capsys.readouterr()
+    assert captured.err == f'shard refused at {phase}; category={category}; upload refused\n'
+    assert sentinel not in captured.out + captured.err
+    assert len(native_calls) == 1
+    assert list(upload.iterdir()) == []
