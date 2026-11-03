@@ -160,3 +160,52 @@ def test_scanner_bootstrap_failure_never_exposes_child_diagnostics(monkeypatch, 
         artifacts.require_scan_python(runner=broken_bootstrap)
     assert 'private-bootstrap-output' not in str(error.value)
     assert 'private-bootstrap-output' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('wrong_head', [False, True])
+def test_runner_history_hydrates_a_shallow_checkout_for_archived_main(tmp_path, monkeypatch, wrong_head):
+    import subprocess
+    source, checkout = tmp_path / 'origin', tmp_path / 'checkout'
+    source.mkdir()
+    def git(directory, *arguments):
+        return subprocess.run(['git', *arguments], cwd=directory, check=True,
+            text=True, capture_output=True, env=artifacts.child_environment()).stdout.strip()
+    git(source, 'init', '-b', 'main')
+    git(source, 'config', 'user.name', 'History fixture')
+    git(source, 'config', 'user.email', 'fixture@example.invalid')
+    (source / 'tracked').write_text('archived main')
+    git(source, 'add', 'tracked')
+    git(source, 'commit', '-m', 'base')
+    base = git(source, 'rev-parse', 'HEAD')
+    (source / 'tracked').write_text('head')
+    git(source, 'commit', '-am', 'head')
+    head = git(source, 'rev-parse', 'HEAD')
+    git(tmp_path, 'clone', '--depth=1', source.as_uri(), str(checkout))
+    assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'true'
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'history-private-sentinel')
+    calls = []
+    def run(command, **kwargs):
+        assert 'BUILDBUDDY_API_KEY' not in kwargs['env']
+        assert 'history-private-sentinel' not in repr(command)
+        assert command[:5] == ['git', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false']
+        assert kwargs['capture_output'] is True
+        calls.append(command)
+        return subprocess.run(command, **kwargs)
+    if wrong_head:
+        with pytest.raises(RuntimeError, match='history'):
+            artifacts.prepare_history(base, root=checkout, runner=run)
+    else:
+        artifacts.prepare_history(head, root=checkout, runner=run)
+        assert git(checkout, 'rev-parse', '--is-shallow-repository') == 'false'
+        assert git(checkout, 'show', base + ':tracked') == 'archived main'
+        assert any('--unshallow' in command and '--no-filter' in command for command in calls)
+
+
+def test_runner_history_failure_redacts_git_diagnostics(tmp_path, capsys):
+    import subprocess
+    def broken_git(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, output='private-history-credential')
+    with pytest.raises(RuntimeError, match='history') as error:
+        artifacts.prepare_history('a' * 40, root=tmp_path, runner=broken_git)
+    assert 'private-history-credential' not in str(error.value)
+    assert 'private-history-credential' not in capsys.readouterr().out

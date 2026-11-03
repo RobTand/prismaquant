@@ -71,7 +71,9 @@ def test_hosted_lane_preserves_python_floor_policy_and_own_cgroup_routing():
     setup = next(s for s in steps if s.get('id') == 'test-python')
     assert setup['with']['python-version'] == '3.12'
     execute = next(s for s in steps if s.get('id') == 'tests')
-    assert 'gate_run.py' in execute['run'] and 'assignment.json' in execute['run']
+    assert 'gate_run.py --plan hosted-private/plan.json' in execute['run']
+    assert '--assignment' not in execute['run']
+    assert 'gate_partition.py' not in next(s for s in steps if s.get('id') == 'plan')['run']
     assert not any(key in execute.get('env', {}) for key in ('BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN', 'GITHUB_TOKEN'))
     plan = next(s for s in steps if s.get('id') == 'plan')
     assert '--mode full' in plan['run'] and 'gate_select.py' in plan['run']
@@ -132,3 +134,8 @@ def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
         env={**os.environ,'GITHUB_OUTPUT':str(output),'GATE_BASE':'a'*40,'GATE_HEAD':'b'*40})
     assert (run.returncode==0) is passes,run.stdout+run.stderr
     assert (output.read_text() if output.exists() else '')==('verdict=pass\n' if passes else '')
+
+
+def test_reusable_hosted_callers_grant_the_quarantine_issue_read_permission():
+    for name in ('gate.yml', 'ci.yml'):
+        assert workflows()[name]['permissions']['issues'] == 'read'
