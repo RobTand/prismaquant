@@ -42,7 +42,7 @@ def test_stale_inputs_report_every_failure_and_the_fix(tmp_path):
                [sys.executable, '-c', 'pass'],
                [sys.executable, '-c', 'import sys; print("stale B"); sys.exit(1)']]
     with pytest.raises(RuntimeError) as failed:
-        bazel_generated.check(failing, root=tmp_path)
+        bazel_generated.check_generated(failing, root=tmp_path)
     assert 'stale A' in str(failed.value) and 'stale B' in str(failed.value)
     assert 'Fix them all with: tools/bazel/generate.sh' in str(failed.value)
 
