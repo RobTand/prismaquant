@@ -66,6 +66,44 @@ def test_a_changed_wheel_keeps_unrelated_wheel_consumers_unselected():
     assert found['scopes'] == ['//', '//tests']
 
 
+def test_query_population_preserves_build_rules_and_architecture_lanes():
+    def rule(label, kind='py_test', tags=()):
+        return {'rule': {'name': label, 'ruleClass': kind,
+                         'attribute': [{'name': 'tags', 'stringListValue': list(tags)}]}}
+    rows = [rule('//:core', 'py_library'), rule('//tests:cpu'),
+            rule('//tests:mixed_gpu', tags=['gpu']),
+            rule('//tests:runner', tags=['runner', 'no-remote-exec']),
+            rule('//tests:disk', tags=['hosted-arm64']),
+            rule('//tests:hosted', tags=['manual', 'gate-lane-hosted']),
+            rule('//tests:deferred', tags=['manual', 'gate-lane-root']),
+            rule('@@rules_python++pip+pq_pip_numpy//:pkg', 'py_library'),
+            {'sourceFile': {'name': '//prismaquant:core.py'}},
+            {'sourceFile': {'name': '//:README.md'}}]
+    amd = selection.query_population(rows, 'amd64')
+    arm = selection.query_population(list(reversed(rows)), 'arm64')
+    assert amd['targets'] == ['//:core', '//tests:cpu', '//tests:disk',
+                             '//tests:mixed_gpu', '//tests:runner']
+    assert amd['tests'] == ['//tests:cpu', '//tests:disk', '//tests:mixed_gpu', '//tests:runner']
+    assert arm['targets'] == ['//:core', '//tests:cpu', '//tests:mixed_gpu']
+    assert arm['tests'] == ['//tests:cpu', '//tests:mixed_gpu']
+    for population in (amd, arm):
+        assert population['hosted'] == ['//tests:hosted']
+        assert population['hosted_arm64'] == ['//tests:disk']
+        assert population['used_sources'] == ['README.md', 'prismaquant/core.py']
+        assert population['wheel_repositories'] == ['rules_python++pip+pq_pip_numpy']
+
+
+@pytest.mark.parametrize('rows', [
+    [], [{'rule': {'name': '//tests:missing_kind'}}],
+    [{'rule': {'name': '//tests:bad', 'ruleClass': 'py_test',
+               'attribute': [{'name': 'tags', 'stringListValue': 'manual'}]}}],
+    [{'sourceFile': {'name': '//:../outside.py'}}],
+])
+def test_missing_or_malformed_query_population_cannot_select_an_empty_pass(rows):
+    with pytest.raises(selection.SelectionError, match='query'):
+        selection.query_population(rows, 'amd64')
+
+
 @pytest.mark.parametrize('path', ['prismaquant/new_module.py', 'tests/test_new.py'])
 def test_an_unmapped_python_file_falls_back_instead_of_passing_empty(path):
     found = decision({path})
