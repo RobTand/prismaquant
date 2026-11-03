@@ -91,3 +91,78 @@ def test_budget_warnings_survive_a_passing_result():
               'verdict': 'pass', 'budget_warnings': [
                   {'nodeid': 'tests/test_one.py::test_one', 'seconds': 2, 'budget_seconds': 1}]}
     assert remote.parse_result(json.dumps(result).encode(), HEAD) == result
+
+
+def shard_result(index=0):
+    return {'schema': remote.SCHEMA, 'head': HEAD, 'mode': 'pr', 'verdict': 'pass',
+            'architecture': 'amd64', 'index': index, 'targets': [f'//tests:test_{index}'],
+            'run': {'statuses': {f'//tests:test_{index}': 'PASSED'}, 'returncode': 0}}
+
+
+class ShardClient:
+    def __init__(self, *, status='COMPLETE_INVOCATION_STATUS', missing=False, wrong_head=False):
+        self.calls = []
+        self.status, self.missing, self.wrong_head = status, missing, wrong_head
+
+    def call(self, method, body, **kwargs):
+        self.calls.append(method)
+        index = self.calls.count('Run') - 1
+        if method == 'Run':
+            return {'invocation_id': f'parent-{index}'}
+        if method == 'GetInvocation':
+            assert body['selector']['invocation_id'] == f'parent-{index}'
+            return {'invocation': [{'invocationId': f'parent-{index}',
+                'invocationStatus': self.status, 'success': True, 'bazelExitCode': 0,
+                'artifacts': [] if self.missing else [
+                    {'name': remote.RESULT, 'uri': f'bytestream://own-result-{index}'}]}]}
+        if method == 'GetFile':
+            assert body['uri'] == f'bytestream://own-result-{index}'
+            row = shard_result(index)
+            if self.wrong_head:
+                row['head'] = BASE
+            return json.dumps(row).encode()
+        raise AssertionError(method)
+
+
+def shard_requests():
+    return [remote.shard_request(arguments(), 'amd64', index,
+                                 [f'//tests:test_{index}'], [f'//tests:test_{index}'])
+            for index in range(2)]
+
+
+def test_full_runs_use_serial_subhour_requests_and_own_result_artifacts():
+    client = ShardClient()
+    requests = shard_requests()
+    assert all(request['timeout'] == '55m' for request in requests)
+    assert all(request['platform_properties'] == remote.run_request(arguments())[
+        'platform_properties'] for request in requests)
+    found = remote.submit_shards(client, requests, HEAD, clock=lambda: 1)
+    assert found == [shard_result(0), shard_result(1)]
+    assert client.calls == ['Run', 'GetInvocation', 'GetFile'] * 2
+
+
+@pytest.mark.parametrize('fault', ['missing', 'disconnected', 'wrong_head'])
+def test_incomplete_shard_stops_without_submitting_another_or_retrying(fault):
+    client = ShardClient(missing=fault == 'missing', wrong_head=fault == 'wrong_head',
+        status='DISCONNECTED_INVOCATION_STATUS' if fault == 'disconnected'
+               else 'COMPLETE_INVOCATION_STATUS')
+    with pytest.raises(remote.RemoteError):
+        remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
+    assert client.calls.count('Run') == 1
+
+
+@pytest.mark.parametrize('field,value', [('index', 1), ('architecture', 'arm64'),
+                                        ('targets', ['//tests:foreign'])])
+def test_shard_result_must_match_the_exact_requested_partition(field, value):
+    class WrongPartition(ShardClient):
+        def call(self, method, body, **kwargs):
+            result = super().call(method, body, **kwargs)
+            if method == 'GetFile':
+                row = json.loads(result)
+                row[field] = value
+                return json.dumps(row).encode()
+            return result
+    client = WrongPartition()
+    with pytest.raises(remote.RemoteError, match='partition'):
+        remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
+    assert client.calls.count('Run') == 1
