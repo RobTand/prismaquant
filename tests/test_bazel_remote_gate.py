@@ -500,3 +500,44 @@ def test_invalid_plan_cannot_start_test_shards_or_retry(fault):
         remote.run_gate(client, arguments(), clock=lambda: 1)
     assert client.plan_calls.count('Run') == 1
     assert client.events == []
+
+
+@pytest.mark.parametrize('fault', [None, 'disconnected', 'leak', 'unscannable'])
+def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proof(
+        tmp_path, monkeypatch, fault):
+    upload = tmp_path / 'upload'
+    output = tmp_path / 'github-output'
+    summary = tmp_path / 'summary'
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'controller-cli-secret-sentinel')
+    monkeypatch.setenv('GITHUB_OUTPUT', str(output))
+    monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    calls = []
+
+    def own_gate(client, args):
+        calls.append((client, args))
+        if fault == 'disconnected':
+            raise remote.RemoteError('remote run disconnected')
+        if fault == 'unscannable':
+            (upload / 'execution_log.binpb.zst').write_bytes(b'\x28\xb5\x2f\xfd')
+        return {'schema': remote.SCHEMA, 'mode': 'pr', 'base': BASE, 'head': HEAD,
+            'verdict': 'pass', 'selection': 'impacted', 'scopes': ['//tests'],
+            'all_scopes': False, 'hosted': [], 'hosted_arm64': [],
+            'reason': ['controller-cli-secret-sentinel'] if fault == 'leak' else [],
+            'budget_warnings': [{'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}]}
+
+    monkeypatch.setattr(remote, 'run_gate', own_gate)
+    code = remote.main(['pr', '--base', BASE, '--head', HEAD,
+        '--branch', 'bbrun/cutover', '--output', str(upload)])
+    assert len(calls) == 1
+    if fault:
+        assert code == 75 and list(upload.iterdir()) == []
+        assert not output.exists() and not summary.exists()
+    else:
+        assert code == 0
+        assert {path.name for path in upload.iterdir()} == {'result.json'}
+        result = json.loads((upload / 'result.json').read_text())
+        assert result['budget_warnings'] == [
+            {'nodeid': 'test_one', 'seconds': 2, 'budget_seconds': 1}]
+        assert output.read_text().splitlines() == [
+            'scopes=["//tests"]', 'all_scopes=false', 'scopes_ready=true']
+        assert 'Budget warnings: 1' in summary.read_text()
