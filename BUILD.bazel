@@ -5086,6 +5086,41 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "docs/experiments/3215-priced-unit-formats/assertion_probe",
+    srcs = [
+        "docs/experiments/3215-priced-unit-formats/assertion_probe.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-priced-unit-formats/audit_membership",
+    srcs = [
+        "docs/experiments/3215-priced-unit-formats/audit_membership.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-priced-unit-formats/source_preservation",
+    srcs = [
+        "docs/experiments/3215-priced-unit-formats/source_preservation.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-priced-unit-formats/summarize",
+    srcs = [
+        "docs/experiments/3215-priced-unit-formats/summarize.py",
+    ],
+)
+
+pq_py_library(
+    name = "docs/experiments/3215-priced-unit-formats/timing_probe",
+    srcs = [
+        "docs/experiments/3215-priced-unit-formats/timing_probe.py",
+    ],
+)
+
+pq_py_library(
     name = "docs/experiments/3215-tp-exact-pin/assertion_probe",
     srcs = [
         "docs/experiments/3215-tp-exact-pin/assertion_probe.py",
@@ -11699,16 +11734,70 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/graph_impact",
+    srcs = [
+        "tools/ci/graph_impact.py",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/graph_impact_bazel",
+    srcs = [
+        "tools/ci/graph_impact_bazel.py",
+    ],
+    data = [
+        "tools/ci/graph_impact_bazel.py",
+    ],
+    deps = [
+        ":tools/__init__",
+        ":tools/ci/graph_impact",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/graph_impact_imports",
+    srcs = [
+        "tools/ci/graph_impact_imports.py",
+    ],
+    data = [
+        "//tools/bazel:build_files.py",
+        "tools/ci/gate_durations.json",
+        "tools/ci/gate_quarantine.json",
+        "tools/ci/graph_impact_imports.py",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/graph_impact_pq",
+    srcs = [
+        "tools/ci/graph_impact_pq.py",
+    ],
+    data = [
+        "//tests:fixtures/graph_impact_allowlist.json",
+        "//tests:fixtures/graph_impact_baseline.json",
+        "BUILD.bazel",
+        "tools/ci/graph_impact_pq.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+        ":tools/__init__",
+        ":tools/ci/graph_impact",
+        ":tools/ci/graph_impact_imports",
+    ],
+)
+
+pq_py_library(
     name = "tools/ci/import_fanout",
     srcs = [
         "tools/ci/import_fanout.py",
     ],
     data = [
-        "//tests:fixtures/import_fanout_baseline.json",
-        "//tools/bazel:build_files.py",
-        "tools/ci/gate_durations.json",
-        "tools/ci/gate_quarantine.json",
         "tools/ci/import_fanout.py",
+    ],
+    deps = [
+        ":tools/__init__",
+        ":tools/ci/graph_impact_pq",
     ],
 )
 
