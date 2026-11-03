@@ -284,6 +284,8 @@ def main(argv=None):
         spec.loader.exec_module(artifacts)
         keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')
                                        if os.environ.get(name)]
+        if list(upload.iterdir()):
+            raise GateError('unexpected file in shard upload directory')
         with tempfile.TemporaryDirectory(prefix='pq-private-gate-result-') as directory:
             staged = Path(directory)
             receipt = staged / 'gate-result.json'
