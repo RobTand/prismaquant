@@ -296,8 +296,24 @@ def fetch_artifact(uri):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['shard'])
-    parser.parse_args(argv)
+    commands = parser.add_subparsers(dest='mode', required=True)
+    commands.add_parser('shard')
+    hosted = commands.add_parser('hosted')
+    hosted.add_argument('--architecture', choices=['amd64', 'arm64'], required=True)
+    hosted.add_argument('--plan', type=Path, required=True)
+    hosted.add_argument('--result', type=Path, required=True)
+    hosted.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.mode == 'hosted':
+        try:
+            assignment = hosted_assignment(json.loads(args.plan.read_text()),
+                                           json.loads(args.result.read_text()), args.architecture)
+            with args.output.open('xb') as stream:
+                stream.write(DIRECT_ASCII_SPACED_LAX.encoded(assignment) + b'\n')
+        except (GateError, ValueError, TypeError, OSError):
+            print('hosted assignment evidence unavailable or invalid', file=sys.stderr)
+            return 75
+        return 0
     directory = os.environ.get('BUILDBUDDY_ARTIFACTS_DIRECTORY')
     if not directory:
         print('shard upload directory unavailable', file=sys.stderr)
