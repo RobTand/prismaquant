@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from prismaquant.digests import text_sha256hex
+from prismaquant.digests import bytes_sha256hex, text_sha256hex
 
 API = 'https://app.buildbuddy.io/api/v1/'
 IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
@@ -113,6 +113,75 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
         if error:
             raise error
     return results
+
+
+def run_manifest(client, args, manifest_uri, raw_manifest, *,
+                 clock=time.monotonic, fallback_concurrency=2):
+    """Validate every partition before submitting any run, then join own results."""
+    from tools.ci.bazel_gate import GateError, aggregate_shards, check_partition
+
+    try:
+        document = json.loads(raw_manifest)
+        if (document['schema'] != 'prismaquant.bazel-shards.v1'
+                or args.mode not in ('pr', 'main')
+                or any(document[key] != getattr(args, key)
+                       for key in ('mode', 'base', 'head'))
+                or document['selection'] not in ('impacted', 'fallback', 'irrelevant')):
+            raise RemoteError('manifest has the wrong source, mode or schema')
+        architectures = ('amd64', 'arm64') if args.mode == 'main' else ('amd64',)
+        if set(document['architectures']) != set(architectures):
+            raise RemoteError('manifest has the wrong architecture population')
+        if (not isinstance(document['scopes'], list)
+                or any(not isinstance(scope, str) for scope in document['scopes'])
+                or type(document['all_scopes']) is not bool
+                or not isinstance(document['reason'], list)):
+            raise RemoteError('manifest has invalid scope evidence')
+        for row in document['architectures'].values():
+            population, tests, shards = (row[key] for key in ('population', 'tests', 'shards'))
+            if (not isinstance(population, list) or not isinstance(tests, list)
+                    or not isinstance(shards, list)
+                    or any(not isinstance(label, str) for label in population + tests)
+                    or len(population) != len(set(population))
+                    or len(tests) != len(set(tests)) or not set(tests) <= set(population)):
+                raise RemoteError('manifest has an invalid build or test population')
+            if population:
+                check_partition(population, shards)
+            elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
+                raise RemoteError('manifest has an invalid empty population')
+        if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 2:
+            raise RemoteError('fallback concurrency must be one or two')
+    except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
+        raise RemoteError('invalid shard manifest') from error
+
+    manifest_sha256 = bytes_sha256hex(raw_manifest)
+    results = {}
+    concurrency = (fallback_concurrency if args.mode == 'pr'
+                   and document['selection'] == 'fallback' else 1)
+    for architecture in architectures:
+        row = document['architectures'][architecture]
+        if not row['population']:
+            results[architecture] = {'verdict': 'skipped', 'shards': [],
+                'executed_test_actions': 0, 'budget_warnings': [], 'error': None}
+            continue
+        requests = [shard_request(args, architecture, index, manifest_uri,
+            manifest_sha256, text_sha256hex('\n'.join(labels) + '\n'),
+            require_execution=args.mode == 'main', selection=document['selection'])
+            for index, labels in enumerate(row['shards'])]
+        records = submit_shards(client, requests, args.head,
+                                concurrency=concurrency, clock=clock)
+        try:
+            results[architecture] = aggregate_shards(row['population'], row['shards'],
+                records, require_execution=args.mode == 'main', test_population=row['tests'])
+        except (GateError, KeyError, TypeError) as error:
+            raise RemoteError('shard evidence does not cover its manifest') from error
+    verdicts = {result['verdict'] for result in results.values()}
+    return {'schema': SCHEMA, 'mode': args.mode, 'base': args.base, 'head': args.head,
+            'selection': document['selection'], 'scopes': document['scopes'],
+            'all_scopes': document['all_scopes'], 'reason': document['reason'],
+            'manifest_sha256': manifest_sha256, 'architectures': results,
+            'verdict': 'fail' if 'fail' in verdicts else 'pass' if 'pass' in verdicts else 'skipped',
+            'budget_warnings': [warning for result in results.values()
+                                for warning in result['budget_warnings']]}
 
 
 def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
