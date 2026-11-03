@@ -9,6 +9,8 @@ import os
 import sys
 import subprocess
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 CHILD_ENVIRONMENT = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL',
@@ -17,6 +19,30 @@ SCANNER_SPEC = importlib.util.spec_from_file_location(
     'pq_cutover_secret_scanner', Path(__file__).with_name('check_no_secret_leak.py'))
 scanner = importlib.util.module_from_spec(SCANNER_SPEC)
 SCANNER_SPEC.loader.exec_module(scanner)
+
+
+API = 'https://app.buildbuddy.io/api/v1/'
+
+
+class RemoteError(RuntimeError):
+    """Remote evidence is unavailable or does not establish success."""
+
+
+class BuildBuddy:
+    def __init__(self, key, api=API):
+        if not key:
+            raise RemoteError('BUILDBUDDY_API_KEY is unavailable')
+        self.key, self.api = key, api
+
+    def call(self, method, body, *, raw=False, timeout=120):
+        request = urllib.request.Request(
+            self.api + method, data=json.dumps(body).encode(),
+            headers={'x-buildbuddy-api-key': self.key, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read() if raw else json.load(response)
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            raise RemoteError(f'BuildBuddy {method} request failed') from None
 
 
 def child_environment(environ=None):

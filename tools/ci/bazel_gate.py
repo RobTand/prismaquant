@@ -254,10 +254,10 @@ def fetch_artifact(uri):
     if not uri.startswith('bytestream://'):
         raise GateError('artifact has an unsupported URI')
     spec = importlib.util.spec_from_file_location(
-        'pq_shard_remote_client', Path(__file__).with_name('remote_gate.py'))
-    remote = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(remote)
-    return remote.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
+        'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
+    artifacts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(artifacts)
+    return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
         'GetFile', {'uri': uri}, raw=True)
 
 

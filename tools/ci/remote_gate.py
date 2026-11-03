@@ -8,38 +8,15 @@ import re
 import shlex
 import sys
 import time
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import bytes_sha256hex, text_sha256hex
+from tools.ci.bazel_artifacts import BuildBuddy, RemoteError
 
-API = 'https://app.buildbuddy.io/api/v1/'
 IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
          '5f0c01e5f6d79e58d7a996330de33aa38ce599bf8431eaf27521e7602daadf50')
 SCHEMA = 'prismaquant.bazel-gate.v1'
 RESULT = 'gate-result.json'
-
-
-class RemoteError(RuntimeError):
-    """Remote evidence is unavailable or does not establish success."""
-
-
-class BuildBuddy:
-    def __init__(self, key, api=API):
-        if not key:
-            raise RemoteError('BUILDBUDDY_API_KEY is unavailable')
-        self.key, self.api = key, api
-
-    def call(self, method, body, *, raw=False, timeout=120):
-        request = urllib.request.Request(
-            self.api + method, data=json.dumps(body).encode(),
-            headers={'x-buildbuddy-api-key': self.key, 'Content-Type': 'application/json'})
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return response.read() if raw else json.load(response)
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            raise RemoteError(f'BuildBuddy {method} request failed') from None
 
 
 def run_request(args):
