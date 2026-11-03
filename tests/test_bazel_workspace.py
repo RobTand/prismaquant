@@ -129,6 +129,21 @@ def test_graph_impact_keeps_the_git_checkout_on_the_runner():
     assert environment['PQ_BAZEL_LANE'] == 'runner'
 
 
+@pytest.mark.parametrize('name', [
+    'test_no_secret_on_command_line',
+    'test_fleet_acceptance_pins',
+    'test_fleet_acceptance_level1',
+])
+def test_checkout_sweep_targets_keep_the_real_git_checkout_on_runner(name):
+    scope = {'struct': SimpleNamespace,
+             'native': SimpleNamespace(package_name=lambda: 'tests')}
+    exec((ROOT / 'tools/bazel/nonhermetic.bzl').read_text(), scope)
+    tags, _, environment = scope['nonhermetic'](name)
+    assert {'runner', 'no-remote-exec', 'no-sandbox', 'no-cache'} <= set(tags)
+    assert environment['PQ_BAZEL_LANE'] == 'runner'
+    assert 'git' in scope['NONHERMETIC']['//tests:' + name].reason.lower()
+
+
 def test_sdk_owned_readers_keep_the_hosted_interpreters_linux_apis():
     scope = {'struct': SimpleNamespace,
              'native': SimpleNamespace(package_name=lambda: 'tests')}
