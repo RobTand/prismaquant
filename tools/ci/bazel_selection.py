@@ -82,6 +82,53 @@ def wheel_repositories(labels):
     return sorted(repositories)
 
 
+def query_population(rows, architecture):
+    """Read Bazel query records once, preserving build rules and lane routes."""
+    if architecture not in ('amd64', 'arm64'):
+        raise SelectionError('query has an unsupported architecture')
+    rules, sources, labels = {}, set(), []
+    try:
+        for row in rows:
+            item = row.get('rule') or row.get('sourceFile') or row.get('generatedFile')
+            label = item['name']
+            if not isinstance(label, str):
+                raise ValueError('invalid label')
+            label = label.removeprefix('@') if label.startswith('@//') else label
+            labels.append(label)
+            if not label.startswith('//'):
+                continue
+            if not re.fullmatch(r'//[^:\s]*:[^:\s]+', label):
+                raise ValueError('invalid internal label')
+            if 'sourceFile' in row:
+                path = label[2:].replace(':', '/').lstrip('/')
+                if '\\' in path or any(part in ('.', '..') for part in path.split('/')):
+                    raise ValueError('invalid source path')
+                sources.add(path)
+            elif 'rule' in row:
+                kind = item['ruleClass']
+                tags = next((attr['stringListValue'] for attr in item.get('attribute', [])
+                             if attr['name'] == 'tags'), [])
+                if (not isinstance(kind, str) or not kind or not isinstance(tags, list)
+                        or any(not isinstance(tag, str) for tag in tags) or label in rules):
+                    raise ValueError('invalid rule record')
+                rules[label] = kind, set(tags)
+        targets = {label for label, (_, tags) in rules.items()
+                   if 'manual' not in tags and not (architecture == 'arm64'
+                       and tags & {'runner', 'hosted-arm64'})}
+        tests = {label for label in targets if rules[label][0].endswith('_test')}
+        if not targets or not tests:
+            raise ValueError('empty build or test population')
+        return {'targets': sorted(targets), 'tests': sorted(tests),
+                'hosted': sorted(label for label, (_, tags) in rules.items()
+                                 if 'gate-lane-hosted' in tags),
+                'hosted_arm64': sorted(label for label, (_, tags) in rules.items()
+                                       if 'hosted-arm64' in tags),
+                'used_sources': sorted(sources),
+                'wheel_repositories': wheel_repositories(labels)}
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise SelectionError('query population is incomplete or malformed') from None
+
+
 def impacted_targets_command(java, jar, base_hashes, head_hashes, output):
     return [str(java), '-jar', str(jar), 'get-impacted-targets',
             '--startingHashes', str(base_hashes), '--finalHashes', str(head_hashes),
