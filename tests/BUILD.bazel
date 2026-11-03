@@ -6581,10 +6581,13 @@ pq_py_library(
     ],
     data = [
         "//:tools/ci/bazel_artifacts.py",
+        "//:tools/ci/check_no_secret_leak.py",
         "test_bazel_artifacts.py",
     ],
     deps = [
         "//:tools/ci/bazel_artifacts",
+        "//:tools/ci/check_no_secret_leak",
+        "@pq_pip//pytest",
     ],
 )
 
