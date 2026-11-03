@@ -79,6 +79,26 @@ def test_completed_run_returns_only_after_its_own_success():
     assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
 
 
+def test_public_api_nested_invocation_id_is_accepted():
+    record = {'id': {'invocationId': 'own-run'},
+              'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
+              'success': True, 'bazelExitCode': 0}
+    class Client:
+        def call(self, method, body):
+            return {'invocation': [record]}
+    assert remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1) == record
+
+
+def test_public_api_nested_invocation_id_cannot_return_another_run():
+    class Client:
+        def call(self, method, body):
+            return {'invocation': [{'id': {'invocationId': 'foreign-run'},
+                'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
+                'success': True, 'bazelExitCode': 0}]}
+    with pytest.raises(remote.RemoteError, match='wrong invocation'):
+        remote.await_invocation(Client(), 'own-run', 100, clock=lambda: 1)
+
+
 @pytest.mark.parametrize('raw', [None, b'not JSON', b'{}',
     json.dumps({'schema': 'prismaquant.bazel-gate.v1', 'head': BASE, 'verdict': 'pass'}).encode()])
 def test_missing_or_wrong_head_results_fail(raw):
