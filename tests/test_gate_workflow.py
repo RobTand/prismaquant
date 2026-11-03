@@ -35,6 +35,16 @@ def test_actions_are_pinned_and_execution_jobs_stay_on_github_hosted_runners():
                     assert re.fullmatch(r'[^@]+@[0-9a-f]{40}', uses), uses
 
 
+def test_job_environment_does_not_reference_runtime_only_contexts():
+    for name, workflow in workflows().items():
+        for job_name, job in workflow['jobs'].items():
+            for variable, value in job.get('env', {}).items():
+                for expression in re.findall(r'\$\{\{(.*?)\}\}', str(value)):
+                    assert not re.search(r'\b(?:runner|steps|job|env)\s*\.', expression), (
+                        f'{name}: jobs.{job_name}.env.{variable} references a context '
+                        'available only after the job starts; set it in a step instead')
+
+
 def test_remote_planner_uses_queue_aware_refs_and_requires_scope_upload():
     remote = workflows()['gate.yml']['jobs']['remote']
     steps = {step.get('id'): step for step in remote['steps']}
