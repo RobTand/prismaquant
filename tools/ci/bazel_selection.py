@@ -1,0 +1,70 @@
+"""Pure selection decisions for the Remote Bazel cutover gate."""
+from __future__ import annotations
+
+from pathlib import PurePosixPath
+
+GATE_INPUTS = {
+    '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
+    'MODULE.bazel', 'MODULE.bazel.lock', 'tools/ci/bazel_selection.py',
+    'tools/ci/bazel_gate.py', 'tools/ci/remote_gate.py',
+}
+BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0/bazel-diff_deploy.jar'
+BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
+
+
+class SelectionError(RuntimeError):
+    """The gate cannot establish a valid selection request."""
+
+
+def fallback_files(paths):
+    return sorted(path for path in paths if path in GATE_INPUTS
+                  or path.startswith('tools/bazel/')
+                  or PurePosixPath(path).name in {'BUILD', 'BUILD.bazel'}
+                  or path.endswith('.bzl'))
+
+
+def everything(reason, tests):
+    return {'selection': 'fallback', 'reason': sorted(reason), 'selected': sorted(tests),
+            'build': ['//...'], 'scopes': [], 'all_scopes': True}
+
+
+def gate_decision(changed, deleted, impacted, used_sources, tests, *, detection_error=None):
+    """Missing impact evidence selects the full suite; unread files select none.
+
+    Lock and project metadata use graph evidence, including fine-grained wheel
+    hashes. Other workflows and documentation select their actual consumers.
+    Unmapped Python files may be missing generated BUILD inputs, so fail closed.
+    """
+    if not changed and not deleted:
+        raise SelectionError('empty diff: base/head changed-file evidence is unavailable')
+    if detection_error:
+        return everything(['selection error: ' + detection_error], tests)
+    forced = fallback_files(changed | deleted)
+    if forced:
+        return everything(forced, tests)
+    unmapped = {path for path in changed - deleted
+                if path.endswith('.py') and path not in used_sources
+                and not path.startswith('.github/')}
+    if unmapped:
+        return everything(['unmapped Python: ' + path for path in unmapped], tests)
+    relevant = (changed & used_sources) | deleted
+    if relevant and not impacted:
+        return everything(['missing impact: ' + path for path in relevant], tests)
+    internal = {label for label in impacted if label.startswith('//')}
+    return {'selection': 'impacted' if impacted else 'irrelevant', 'reason': [],
+            'selected': sorted(impacted & tests), 'build': sorted(internal - tests),
+            'scopes': sorted({label.split(':', 1)[0] for label in internal}),
+            'all_scopes': False}
+
+
+def generate_hashes_command(java, jar, root, bazel, hashes, edges, wheel_repositories):
+    """Explicit wheel repositories prevent treating the entire pip hub as opaque."""
+    return [str(java), '-jar', str(jar), 'generate-hashes', '--workspacePath', str(root),
+            '--bazelPath', str(bazel), '--excludeExternalTargets', '--includeTargetType',
+            '--fineGrainedHashExternalReposFile', str(wheel_repositories),
+            '--depEdgesFile', str(edges), str(hashes)]
+
+
+def verdict_of(selected, statuses):
+    failed = sorted(label for label in selected if statuses.get(label) != 'PASSED')
+    return ('fail' if failed else 'pass' if selected else 'skipped'), failed
