@@ -16,6 +16,51 @@ SPEC.loader.exec_module(gate)
 LABEL = '//tests:test_consumer'
 
 
+@pytest.mark.parametrize('architecture,mode,wanted', [
+    ('amd64', 'pr', ['tests/test_owned.py']),
+    ('amd64', 'main', ['tests/test_owned.py']),
+    ('arm64', 'main', ['tests/test_disk.py']),
+])
+def test_hosted_assignment_preserves_the_existing_plan_and_exact_lane(architecture, mode, wanted):
+    plan = {'schema': 'prismaquant.gate_plan.v1', 'mode': 'full',
+        'base_sha': 'b' * 40, 'head_sha': 'a' * 40,
+        'population': {'version': 'full-population'},
+        'selected': [{'path': 'tests/test_owned.py', 'estimated_seconds': 2},
+                     {'path': 'tests/test_disk.py', 'estimated_seconds': 3},
+                     {'path': 'tests/test_other.py', 'estimated_seconds': 4}],
+        'deselect': ['tests/test_owned.py::test_known', 'tests/test_other.py::test_known'],
+        'deferred': []}
+    result = {'schema': gate.SCHEMA, 'mode': mode, 'base': 'b' * 40, 'head': 'a' * 40,
+        'verdict': 'pass', 'hosted': ['//tests:test_owned'],
+        'hosted_arm64': ['//tests:test_disk'] if mode == 'main' else []}
+    found = gate.hosted_assignment(plan, result, architecture)
+    assert [row['path'] for row in found['selected']] == wanted
+    assert found['population'] == {'version': 'full-population'}
+    assert found['deselect'] == (['tests/test_owned.py::test_known'] if architecture == 'amd64' else [])
+    assert len(plan['selected']) == 3 and len(plan['deselect']) == 2
+    assert found['base_sha'] == 'b' * 40 and found['head_sha'] == 'a' * 40
+
+
+@pytest.mark.parametrize('fault', ['base', 'head', 'duplicate', 'unknown', 'escape', 'failed', 'architecture'])
+def test_hosted_assignment_refuses_missing_or_inconsistent_lane_evidence(fault):
+    plan = {'schema': 'prismaquant.gate_plan.v1', 'base_sha': 'b' * 40,
+        'head_sha': 'a' * 40, 'selected': [{'path': 'tests/test_owned.py'}], 'deselect': []}
+    result = {'schema': gate.SCHEMA, 'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
+        'verdict': 'pass', 'hosted': ['//tests:test_owned'], 'hosted_arm64': []}
+    if fault in ('base', 'head'):
+        result[fault] = 'c' * 40
+    elif fault == 'duplicate':
+        result['hosted'] *= 2
+    elif fault == 'unknown':
+        result['hosted'] = ['//tests:test_missing']
+    elif fault == 'escape':
+        result['hosted'] = ['//tests:../test_owned']
+    elif fault == 'failed':
+        result['verdict'] = 'fail'
+    with pytest.raises(gate.GateError):
+        gate.hosted_assignment(plan, result, 'other' if fault == 'architecture' else 'amd64')
+
+
 def test_shard_output_reader_does_not_load_the_submission_controller(monkeypatch):
     real_spec = importlib.util.spec_from_file_location
     requested = []
