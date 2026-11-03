@@ -189,6 +189,17 @@ def test_graph_impact_gate(capsys):
         assert graph_impact_pq.main([]) == 0
 
 
+def test_pra_baseline_matches_main_under_the_current_analyzer():
+    from tools.ci import graph_impact_pq as pq
+
+    main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
+    recorded = json.loads((ROOT / pq.BASELINE).read_text())
+    expected = {**main['recorded_baseline'],
+                'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
+                'test_to_test_count': len(impact.test_to_test_edges(main))}
+    assert recorded == expected
+
+
 def test_bazel_diff_reader_keeps_source_labels_and_excludes_manual(tmp_path):
     path = tmp_path / 'deps.json'
     path.write_text(json.dumps({'//t:fast': ['//lib:core'], '//t:manual': ['//other:x'],
