@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = (ROOT / '.bazelrc').read_text().splitlines()
 MODULE = (ROOT / 'MODULE.bazel').read_text()
@@ -140,3 +142,21 @@ def test_sdk_owned_readers_keep_the_hosted_interpreters_linux_apis():
                              'python-build-standalone 3.12 (rules_python 2.4.6) on amd64;')
     assert 'arm64 standalone has pidfd and is excluded only for table simplicity' in reason
     assert 'Hosted setup-python retains amd64 coverage' in reason
+
+
+@pytest.mark.parametrize('name', [
+    'test_original_diagnostic_context_2149',
+    'test_original_source_admission',
+])
+def test_original_modeling_source_paths_use_hosted_site_packages(name):
+    scope = {'struct': SimpleNamespace,
+             'native': SimpleNamespace(package_name=lambda: 'tests')}
+    exec((ROOT / 'tools/bazel/nonhermetic.bzl').read_text(), scope)
+    tags, _, environment = scope['nonhermetic'](name)
+    assert {'hosted', 'manual', 'gate-lane-hosted'} <= set(tags)
+    assert 'runner' not in tags
+    assert environment.get('PQ_BAZEL_LANE') != 'runner'
+    assert scope['NONHERMETIC']['//tests:' + name].reason == (
+        "Bazel canonical repo paths contain '+', which the modeling-source schema "
+        '(schemas.py:592) correctly rejects. Hosted setup-python retains amd64 coverage; '
+        'arm64 action coverage is deferred for this same layout constraint.')
