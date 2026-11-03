@@ -3,14 +3,13 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
-
-from tools.bazel import requirements
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,12 +131,19 @@ def test_ci_installs_the_authoritative_tessera_pin_without_private_credentials(f
     assert install < prismaquant
 
 
-@pytest.mark.parametrize("platform", requirements.PLATFORMS)
-def test_remote_tests_install_the_same_hashed_tessera_pin(platform):
-    export = (ROOT / requirements.EXPORT.format(platform)).read_text()
-    assert requirements.pins(export)["tessera-quant"] == (
-        "https://github.com/RobTand/tessera/archive/" + _dev_pin_literal() + ".tar.gz")
-    block = next(block for block in requirements.export_blocks(export)
-                 if block[0].startswith("tessera-quant @"))
-    assert block[1:] and all(line.startswith("--hash=sha256:") and len(line) == 78
-                            for line in block[1:])
+@pytest.mark.parametrize("export_path", [
+    ROOT / "tools/bazel/requirements_linux_x86_64.txt",
+    ROOT / "tools/bazel/requirements_linux_aarch64.txt",
+])
+def test_remote_tests_install_the_same_hashed_tessera_pin(export_path):
+    export = export_path.read_text()
+    blocks = [block for block in export.split("\n\n")
+              if re.match(r"tessera[-_.]quant(?:\s|[=@\[])", block, re.I)]
+    assert len(blocks) == 1
+    words = blocks[0].replace("\\\n", " ").split()
+    assert words[:3] == [
+        "tessera-quant", "@",
+        "https://github.com/RobTand/tessera/archive/" + _dev_pin_literal() + ".tar.gz",
+    ]
+    assert words[3:] and all(re.fullmatch(r"--hash=sha256:[0-9a-f]{64}", word)
+                             for word in words[3:])

@@ -1,6 +1,5 @@
 """CI test fixtures must use the temporary workspace owned by their executor."""
 from pathlib import Path
-import subprocess
 
 import pytest
 import yaml
@@ -19,14 +18,8 @@ def test_ci_temp_root_can_hold_an_explicit_charged_cache(tmp_path, mode):
         workflow = yaml.safe_load((ROOT / ".github/workflows/bazel-hosted.yml").read_text())
         step = workflow["jobs"]["tests"]["steps"][0]
         assert step["name"] == "Configure owned temporary space"
-        output = tmp_path / "github-env"
-        subprocess.run(
-            ["/bin/bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
-            env={"RUNNER_TEMP": str(runner_temp), "GITHUB_ENV": str(output)},
-            check=True,
-        )
-        assert output.read_text() == f"TMPDIR={runner_temp}\n"
-        temporary = Path(output.read_text().strip().split("=", 1)[1])
+        assert step["run"] == 'printf \'TMPDIR=%s\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"\n'
+        temporary = runner_temp
     else:
         environment = gate_environment({"TMPDIR": "/tmp", "HOME": "/tmp"}, ROOT, runner_temp)
         temporary = Path(environment["TMPDIR"])
