@@ -162,6 +162,43 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
                                 for warning in result['budget_warnings']]}
 
 
+def run_gate(client, args, *, clock=time.monotonic):
+    """Read this planner's complete, source-bound manifest before any test Run."""
+    response = client.call('Run', run_request(args))
+    invocation = response.get('invocationId', response.get('invocation_id'))
+    if not invocation:
+        raise RemoteError('plan submission returned no acknowledgement ID')
+    print('Remote Bazel plan: ' + invocation, flush=True)
+    record = await_invocation(client, invocation, clock() + args.timeout * 60, clock=clock)
+    if record.get('commitSha') != args.head:
+        raise RemoteError('plan runner has the wrong source head')
+    artifacts = {}
+    for name in (RESULT, 'shard-manifest.json'):
+        rows = [row for row in record.get('artifacts', []) if row.get('name') == name]
+        if (len(rows) != 1 or not isinstance(rows[0].get('uri'), str)
+                or not rows[0]['uri'].startswith('bytestream://')):
+            raise RemoteError('plan has no unique own ' + name + ' artifact')
+        artifacts[name] = rows[0]['uri']
+    receipt = parse_result(client.call('GetFile', {'uri': artifacts[RESULT]}, raw=True), args.head)
+    raw = client.call('GetFile', {'uri': artifacts['shard-manifest.json']}, raw=True)
+    try:
+        manifest = json.loads(raw)
+        if (receipt.get('operation') != 'plan' or receipt.get('error')
+                or receipt.get('verdict') != 'pass'
+                or receipt.get('mode') != args.mode or receipt.get('base') != args.base
+                or receipt.get('manifest_sha256') != bytes_sha256hex(raw)
+                or any(receipt.get(key) != manifest[key] for key in (
+                    'mode', 'base', 'head', 'selection', 'scopes', 'all_scopes',
+                    'reason', 'hosted', 'hosted_arm64'))):
+            raise RemoteError('plan receipt does not match its source and manifest')
+    except (ValueError, TypeError, KeyError):
+        raise RemoteError('plan manifest is unavailable or malformed') from None
+    result = run_manifest(client, args, artifacts['shard-manifest.json'], raw, clock=clock)
+    result.update({'plan_invocation': invocation, 'hosted': manifest['hosted'],
+                   'hosted_arm64': manifest['hosted_arm64']})
+    return result
+
+
 def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
     record = await_invocation(client, invocation_id, deadline, clock=clock)
     artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
