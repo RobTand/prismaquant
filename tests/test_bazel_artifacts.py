@@ -117,3 +117,46 @@ def test_python_314_scanner_really_decodes_zstd(tmp_path, monkeypatch, capsys):
 def test_scanner_core_remains_byte_identical_to_pr_a():
     import hashlib
     assert hashlib.sha256((ROOT / 'tools/ci/check_no_secret_leak.py').read_bytes()).hexdigest() == 'a7c88079f0b2558d24d68f7eef2d0824a9b32def42db49c733dc7a905f136eb2'
+
+
+def test_scanner_bootstrap_installs_pinned_python_without_secrets_in_children(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(artifacts.sys, 'version_info', (3, 12, 0))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'bootstrap-private-sentinel')
+    monkeypatch.setenv('OTHER_API_KEY', 'bootstrap-other-sentinel')
+    calls = []
+    python = str(tmp_path / 'python3.14')
+    def bootstrap_run(command, **kwargs):
+        calls.append(command)
+        assert 'BUILDBUDDY_API_KEY' not in kwargs['env']
+        assert 'OTHER_API_KEY' not in kwargs['env']
+        assert 'bootstrap-private-sentinel' not in repr(command)
+        assert kwargs['check'] is True and kwargs['capture_output'] is True
+        return SimpleNamespace(stdout=python+'\n' if 'find' in command else '')
+    def replace_interpreter(executable, argv):
+        assert executable == python and argv == [python, *artifacts.sys.argv]
+        assert os.environ['BUILDBUDDY_API_KEY'] == 'bootstrap-private-sentinel'
+        raise SystemExit(0)
+    with pytest.raises(SystemExit, match='0'):
+        artifacts.require_scan_python(runner=bootstrap_run, execute=replace_interpreter)
+    assert calls[0][-1] == 'uv==0.9.5'
+    assert calls[1][-3:] == ['python', 'install', '3.14.0']
+    assert calls[2][-4:] == ['python', 'find', '--managed-python', '3.14.0']
+
+
+def test_scanner_bootstrap_is_a_noop_on_python314(monkeypatch):
+    monkeypatch.setattr(artifacts.sys, 'version_info', (3, 14, 0))
+    def forbidden_bootstrap(*args, **kwargs):
+        pytest.fail('Python 3.14 must not bootstrap again')
+    artifacts.require_scan_python(runner=forbidden_bootstrap, execute=forbidden_bootstrap)
+
+
+def test_scanner_bootstrap_failure_never_exposes_child_diagnostics(monkeypatch, capsys):
+    import subprocess
+    monkeypatch.setattr(artifacts.sys, 'version_info', (3, 12, 0))
+    def broken_bootstrap(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command, output='private-bootstrap-output')
+    with pytest.raises(RuntimeError, match='Python 3.14') as error:
+        artifacts.require_scan_python(runner=broken_bootstrap)
+    assert 'private-bootstrap-output' not in str(error.value)
+    assert 'private-bootstrap-output' not in capsys.readouterr().out
