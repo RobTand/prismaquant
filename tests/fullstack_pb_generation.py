@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from fleet_sdk import require_prismabuild_sdk
+from fleet_sdk import require_pb_source_bundle, require_prismabuild_sdk
 
 PIN_PATH = Path(__file__).with_name("pb_runtime_generation_pin.json")
 
@@ -31,8 +31,10 @@ def _resolve_once() -> Path:
     global _ROOT
     if _ROOT is None:
         pin = json.loads(PIN_PATH.read_text())
-        root = Path(pin["bundle_root"]).resolve()
-        assert root.is_dir(), f"pinned PB root missing: {root}"
+        root = Path(pin["bundle_root"])
+        # The installed SDK has no tools/fleet; only the mounted bundle does.
+        require_pb_source_bundle(root)
+        root = root.resolve()
         assert root.name == pin["runtime_generation"], (
             f"PB root {root} differs from its declared generation")
         for name, digest in pin["files"].items():
