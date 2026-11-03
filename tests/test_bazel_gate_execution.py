@@ -345,6 +345,13 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
                 'verdict': 'pass', 'targets': [LABEL], 'budget_warnings': [],
                 'error': 'pq-scan-controller-sentinel' if scan_fault == 'leak' else None}
     monkeypatch.setattr(gate, 'execute_shard', execute)
+    original_write_bytes = Path.write_bytes
+    def stage_receipt(path, content):
+        if path.name == 'gate-result.json':
+            assert not path.is_relative_to(tmp_path / 'upload')
+            assert not list((tmp_path / 'upload').iterdir())
+        return original_write_bytes(path, content)
+    monkeypatch.setattr(Path, 'write_bytes', stage_receipt)
     code = gate.main(['shard'])
     assert len(calls) == 1
     if scan_fault:
