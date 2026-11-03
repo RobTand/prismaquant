@@ -33,7 +33,24 @@ def test_uv_lock_matches_every_hosted_pin(constraint):
 
 def test_cpu_torch_index_is_explicit():
     settings = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["uv"]
-    assert settings["sources"]["torch"] == {"index": "pytorch-cpu"}
+    assert settings["sources"]["torch"]["index"] == "pytorch-cpu"
     index = next(index for index in settings["index"] if index["name"] == "pytorch-cpu")
     assert index["url"] == "https://download.pytorch.org/whl/cpu"
     assert index["explicit"] is True
+
+
+def test_cpu_torch_source_is_limited_to_test_extra():
+    settings = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["uv"]
+    assert settings["sources"]["torch"].get("extra") == "test", (
+        "the CPU index must not replace torch for ordinary uv sync or serving"
+    )
+
+
+def test_non_test_torch_keeps_its_pypi_source():
+    lock = tomllib.loads((ROOT / "uv.lock").read_text())
+    project = next(package for package in lock["package"] if package["name"] == "prismaquant")
+    assert any(
+        edge["name"] == "torch"
+        and edge.get("source") == {"registry": "https://pypi.org/simple"}
+        for edge in project["dependencies"]
+    ), "the non-test project must retain a resolved PyPI torch dependency"
