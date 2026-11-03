@@ -579,3 +579,32 @@ def test_remote_evidence_refusal_reports_fixed_subphase_without_private_values(
     assert 'private-value/path-token' not in output.out + output.err
     calls = client.calls if operation == 'shard' else client.plan_calls
     assert calls.count('Run') <= 1
+
+
+@pytest.mark.parametrize('phase', ['manifest-validate', 'shard-validate'])
+def test_manifest_and_aggregate_refusals_report_fixed_validation_phase(capsys, phase):
+    document = controller_manifest()
+    if phase == 'manifest-validate':
+        document['architectures']['amd64']['shards'][1].append('//tests:private-value')
+
+    class WrongPopulation(ManifestClient):
+        def call(self, method, body, **kwargs):
+            result = super().call(method, body, **kwargs)
+            if method == 'GetFile':
+                row = json.loads(result)
+                row['run']['statuses']['//tests:private-value'] = 'PASSED'
+                return json.dumps(row).encode()
+            return result
+
+    client = WrongPopulation(document)
+    with pytest.raises(remote.RemoteError):
+        remote.run_manifest(client, arguments(), 'bytestream://private-value',
+                            json.dumps(document).encode(), clock=lambda: 1)
+    output = capsys.readouterr()
+    assert 'Remote evidence refused at ' + phase in output.err
+    assert 'private-value' not in output.out + output.err
+    if phase == 'manifest-validate':
+        assert client.events == []
+    else:
+        assert not client.active
+        assert len(client.references) == 2
