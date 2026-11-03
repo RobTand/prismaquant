@@ -146,6 +146,7 @@ def test_v42_hashes_each_actual_wheel_repository_and_keeps_edges_private(tmp_pat
     assert command[-1] == str(hashes)
     assert '--fineGrainedHashExternalRepos' not in command
     assert '--includeTargetType' in command
+    assert '--bazelCommandOptions=--config=ci' in command
 
 
 def test_missing_test_status_fails_and_budget_warning_cannot_change_status():
