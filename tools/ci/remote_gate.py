@@ -104,7 +104,8 @@ def await_invocation(client, invocation_id, deadline, *, interval=15,
         if len(records) > 1:
             raise RemoteError('remote run evidence is ambiguous')
         record = records[0] if records else {}
-        if record and record.get('invocationId') != invocation_id:
+        identity = record.get('invocationId') or record.get('id', {}).get('invocationId')
+        if record and identity != invocation_id:
             raise RemoteError('remote run evidence has the wrong invocation ID')
         status = record.get('invocationStatus')
         if status == 'COMPLETE_INVOCATION_STATUS':
