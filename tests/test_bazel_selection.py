@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -247,6 +249,64 @@ def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
         '--startingHashes', str(tmp_path / 'base.json'),
         '--finalHashes', str(tmp_path / 'head.json'),
         '--output', str(tmp_path / 'impacted.txt')]
+
+
+def test_revision_graph_retains_wheel_hashes_and_source_edges_privately(tmp_path, monkeypatch):
+    rows = [
+        {'rule': {'name': '//tests:test_consumer', 'ruleClass': 'py_test'}},
+        {'sourceFile': {'name': '//prismaquant:core.py'}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                  'ruleClass': 'py_library'}},
+    ]
+    calls = []
+    monkeypatch.setenv('MERGIFY_TOKEN', 'test-controller-only')
+    monkeypatch.setenv('GITHUB_TOKEN', 'test-controller-only')
+
+    def remote_command(command, **kwargs):
+        calls.append(command)
+        assert kwargs['cwd'] == ROOT
+        assert 'MERGIFY_TOKEN' not in kwargs['env']
+        assert 'GITHUB_TOKEN' not in kwargs['env']
+        if command[1] == 'query':
+            return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
+        assert command[3] == 'generate-hashes'
+        wheel_file = Path(command[command.index('--fineGrainedHashExternalReposFile') + 1])
+        assert wheel_file.read_text() == 'rules_python++pip+pq_pip_numpy\n'
+        Path(command[-1]).write_text(json.dumps({'hashes': {'//tests:test_consumer': 'Rule#abc'},
+                                               'metadata': {'moduleGraphJson': '{}'}}))
+        Path(command[command.index('--depEdgesFile') + 1]).write_text(
+            json.dumps({'//tests:test_consumer': ['//prismaquant:core.py']}))
+        return SimpleNamespace(returncode=0, stdout='private diagnostic')
+
+    graph = selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
+        jar=tmp_path / 'v42.jar', runner=remote_command)
+    assert graph['population']['tests'] == ['//tests:test_consumer']
+    assert graph['population']['used_sources'] == ['prismaquant/core.py']
+    assert graph['hashes'].parent == graph['edges'].parent == graph['query'].parent == tmp_path
+    assert json.loads(graph['hashes'].read_text())['hashes']['//tests:test_consumer'] == 'Rule#abc'
+    assert json.loads(graph['query'].read_text().splitlines()[0]) == rows[0]
+    assert calls[0][:3] == ['bazel', 'query', 'deps(//...) union buildfiles(//...)']
+    assert '--output=streamed_jsonproto' in calls[0]
+    assert '--keep_going=false' in calls[0]
+
+
+@pytest.mark.parametrize('fault', ['query_exit', 'query_invalid', 'missing_hashes', 'empty_hashes'])
+def test_revision_graph_refuses_partial_external_evidence(tmp_path, fault):
+    def incomplete(command, **kwargs):
+        if command[1] == 'query':
+            rows = [{'rule': {'name': '//tests:test_consumer', 'ruleClass': 'py_test'}},
+                    {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                              'ruleClass': 'py_library'}}]
+            return SimpleNamespace(returncode=1 if fault == 'query_exit' else 0,
+                stdout='invalid' if fault == 'query_invalid' else '\n'.join(map(json.dumps, rows)))
+        Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
+        if fault == 'empty_hashes':
+            Path(command[-1]).write_text('{"hashes": {}}')
+        return SimpleNamespace(returncode=0, stdout='')
+
+    with pytest.raises(selection.SelectionError, match='graph'):
+        selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
+            jar=tmp_path / 'v42.jar', runner=incomplete)
 
 
 @pytest.mark.parametrize('module', ['bazel_selection.py', 'bazel_gate.py', 'remote_gate.py'])
