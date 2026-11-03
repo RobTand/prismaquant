@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import urllib.request
 import zipfile
 
 import pytest
@@ -13,6 +14,26 @@ SPEC = importlib.util.spec_from_file_location('pq_bazel_execution', ROOT / 'tool
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 LABEL = '//tests:test_consumer'
+
+
+def test_shard_output_reader_does_not_load_the_submission_controller(monkeypatch):
+    real_spec = importlib.util.spec_from_file_location
+    requested = []
+
+    def load_reader(name, path, *args, **kwargs):
+        assert Path(path).name != 'remote_gate.py', 'a shard reader cannot depend on its controller'
+        return real_spec(name, path, *args, **kwargs)
+
+    def read_output(request, *, timeout):
+        requested.append(request)
+        return io.BytesIO(b'own-inventory-output')
+
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'reader-test-sentinel')
+    monkeypatch.setattr(importlib.util, 'spec_from_file_location', load_reader)
+    monkeypatch.setattr(urllib.request, 'urlopen', read_output)
+    assert gate.fetch_artifact('bytestream://remote.buildbuddy.io/own-output') == b'own-inventory-output'
+    assert len(requested) == 1
+    assert json.loads(requested[0].data) == {'uri': 'bytestream://remote.buildbuddy.io/own-output'}
 
 
 def events(*rows):
