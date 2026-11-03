@@ -248,6 +248,7 @@ def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
     command = selection.impacted_targets_command('java', tmp_path / 'v42.jar',
         tmp_path / 'base.json', tmp_path / 'head.json', tmp_path / 'impacted.txt')
     assert command == ['java', '-jar', str(tmp_path / 'v42.jar'), 'get-impacted-targets',
+        '--targetType', 'Rule',
         '--startingHashes', str(tmp_path / 'base.json'),
         '--finalHashes', str(tmp_path / 'head.json'),
         '--output', str(tmp_path / 'impacted.txt')]
@@ -360,3 +361,46 @@ def test_manifest_preserves_mergify_scope_selection(
     assert found['scopes'] == expected_scopes
     assert found['all_scopes'] is all_scopes
     assert found['reason'] == selected['reason']
+
+
+@pytest.mark.parametrize('changed', ['uv.lock', 'prismaquant/core.py'])
+def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_path, changed):
+    population = {'tests': sorted(TESTS), 'used_sources': [changed]}
+    base = {'hashes': tmp_path / 'base.json'}
+    head = {'hashes': tmp_path / 'head.json', 'population': population}
+
+    def compare(command, **kwargs):
+        assert command[3] == 'get-impacted-targets'
+        assert command[command.index('--startingHashes') + 1] == str(base['hashes'])
+        assert command[command.index('--finalHashes') + 1] == str(head['hashes'])
+        assert '--targetType' in command and command[command.index('--targetType') + 1] == 'Rule'
+        assert 'BUILDBUDDY_API_KEY' not in kwargs['env']
+        assert 'MERGIFY_TOKEN' not in kwargs['env']
+        Path(command[command.index('--output') + 1]).write_text('@//tests:test_consumer\n')
+        return SimpleNamespace(returncode=0)
+
+    found = selection.compare_graphs(base, head, {changed}, set(), tmp_path,
+        java='java', jar=tmp_path / 'v42.jar', runner=compare)
+    assert found['selection'] == 'impacted'
+    assert found['selected'] == ['//tests:test_consumer']
+    assert found['all_scopes'] is False
+
+
+@pytest.mark.parametrize('fault', ['base_missing', 'diff_exit', 'invalid_output', 'output_missing'])
+def test_graph_comparison_errors_fall_back_to_the_complete_queried_head(tmp_path, fault):
+    head = {'hashes': tmp_path / 'head.json',
+        'population': {'tests': sorted(TESTS), 'used_sources': ['prismaquant/core.py']}}
+    base = None if fault == 'base_missing' else {'hashes': tmp_path / 'base.json'}
+
+    def failed_comparison(command, **kwargs):
+        assert base is not None, 'missing base cannot start a comparison'
+        if fault == 'invalid_output':
+            Path(command[command.index('--output') + 1]).write_text('not-a-bazel-label\n')
+        return SimpleNamespace(returncode=1 if fault == 'diff_exit' else 0)
+
+    found = selection.compare_graphs(base, head, {'prismaquant/core.py'}, set(), tmp_path,
+        java='java', jar=tmp_path / 'v42.jar', runner=failed_comparison)
+    assert found['selection'] == 'fallback'
+    assert found['selected'] == sorted(TESTS)
+    assert found['build'] == ['//...']
+    assert found['all_scopes'] is True
