@@ -99,3 +99,32 @@ def test_receipts_match_hosted_nodes_and_outcomes(tmp_path):
 def test_quoted_args_are_read_as_bazel_tokenizes_them():
     quoted = rule('tests/test_a.py', args=["'--deselect=tests/test_a.py::test_flaky'"])
     assert bazel_parity.bazel_tests([quoted])['tests/test_a.py'][0][2] == ['tests/test_a.py::test_flaky']
+
+
+def test_missing_imported_execution_fails_node_parity(tmp_path):
+    definition = 'tests/test_band_serial_batched_regime.py'
+    collecting = 'tests/test_band_serial_scratch_plane.py'
+    name = 'test_the_control_at_batch_one_still_holds'
+    report = tmp_path / 'imported.xml'
+    cases = ''.join(
+        f'<testcase file="{definition}" classname="{path[:-3].replace("/", ".")}" '
+        f'name="{name}" time="0.1"><properties>'
+        f'<property name="gate_nodeid" value="{path}::{name}"/>'
+        '</properties></testcase>' for path in (definition, collecting))
+    report.write_text('<testsuites><testsuite>' + cases + '</testsuite></testsuites>')
+    outputs = tmp_path / 'testlogs/tests/definition/test.outputs'
+    outputs.mkdir(parents=True)
+    (outputs / 'inventory.json').write_text(json.dumps({
+        'file': definition, 'nodes': {definition + '::' + name: 'passed'}}))
+    with pytest.raises(RuntimeError, match='missing from Bazel: ' + collecting):
+        bazel_parity.compare_receipts(bazel_parity.hosted_nodes([report]),
+                                     bazel_parity.bazel_nodes(tmp_path / 'testlogs'))
+    # The collecting module's execution is distinct even though JUnit names
+    # the same definition file. Restoring exactly that execution repairs parity.
+    imported = tmp_path / 'testlogs/tests/imported/test.outputs'
+    imported.mkdir(parents=True)
+    (imported / 'inventory.json').write_text(json.dumps({
+        'file': collecting, 'nodes': {collecting + '::' + name: 'passed'}}))
+    assert bazel_parity.compare_receipts(
+        bazel_parity.hosted_nodes([report]),
+        bazel_parity.bazel_nodes(tmp_path / 'testlogs')) == {'nodes': 2, 'files': 2}
