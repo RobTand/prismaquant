@@ -9,15 +9,26 @@ class GateError(RuntimeError):
     """The gate cannot establish complete build or test evidence."""
 
 
-def partition_population(population, *, shard_count=8):
+def partition_population(population, *, shard_count=8, tests=None):
     """Sorted striding keeps full runs bounded without changing their population."""
     labels = sorted(set(population))
     if not labels:
         raise GateError('full population is empty')
     if shard_count < 1:
         raise GateError('partition needs a positive shard count')
-    shards = [labels[index::min(shard_count, len(labels))]
-              for index in range(min(shard_count, len(labels)))]
+    count = min(shard_count, len(labels))
+    if tests is None:
+        shards = [labels[index::count] for index in range(count)]
+    else:
+        tests = set(tests)
+        if not tests <= set(labels):
+            raise GateError('test population is outside the queried build population')
+        # Tests and their libraries often alternate in label order. Striding
+        # that order as one list can put all tests into a single shard.
+        shards = [[] for _ in range(count)]
+        for index, label in enumerate(sorted(tests) + sorted(set(labels) - tests)):
+            shards[index % count].append(label)
+        shards = [sorted(shard) for shard in shards]
     check_partition(labels, shards)
     return shards
 
@@ -29,9 +40,13 @@ def check_partition(population, shards):
         raise GateError('partition does not cover the queried population exactly once')
 
 
-def aggregate_shards(population, shards, records, *, require_execution=False):
+def aggregate_shards(population, shards, records, *, require_execution=False,
+                     test_population=None):
     """Every planned shard needs its own complete invocation and exact test evidence."""
     check_partition(population, shards)
+    tests = set(population if test_population is None else test_population)
+    if not tests <= set(population):
+        raise GateError('test population is outside the queried build population')
     if Counter(record['index'] for record in records) != Counter(range(len(shards))):
         raise GateError('missing or duplicate shard records')
     ordered = sorted(records, key=lambda record: record['index'])
@@ -40,14 +55,19 @@ def aggregate_shards(population, shards, records, *, require_execution=False):
         if record['invocation_status'] != 'COMPLETE_INVOCATION_STATUS':
             raise GateError('shard invocation is incomplete or disconnected')
         run = record['run']
-        if set(run['statuses']) != set(labels):
+        selected_tests = set(labels) & tests
+        if set(run['statuses']) != selected_tests:
             raise GateError('shard evidence has a different test population')
-        result = architecture_result(labels, run, budget_warnings=record['budget_warnings'],
-                                     require_execution=require_execution)
+        result = architecture_result(selected_tests, run,
+                                     budget_warnings=record['budget_warnings'])
         results.append(result)
-    return {'verdict': 'pass' if all(result['verdict'] == 'pass' for result in results) else 'fail',
+    executed = sum(result['executed_test_actions'] for result in results)
+    missing_execution = require_execution and executed == 0
+    return {'verdict': 'fail' if missing_execution or any(
+                result['verdict'] == 'fail' for result in results) else 'pass',
             'shards': results,
-            'executed_test_actions': sum(result['executed_test_actions'] for result in results),
+            'executed_test_actions': executed,
+            'error': 'architecture ran no test actions' if missing_execution else None,
             'budget_warnings': [warning for result in results for warning in result['budget_warnings']]}
 
 
