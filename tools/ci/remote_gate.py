@@ -48,7 +48,7 @@ def run_request(args):
     command = ['tools/ci/bazel_gate.py', args.mode, '--base', args.base, '--head', args.head,
                '--branch', args.branch]
     return {'repo': args.repo, 'branch': args.branch, 'commit_sha': args.head,
-            'steps': [{'run': 'python3.14 ' + shlex.join(command)}],
+            'steps': [{'run': 'python3 ' + shlex.join(command)}],
             'platform_properties': {
                 'EstimatedCPU': '4', 'EstimatedMemory': '8GB', 'EstimatedFreeDiskBytes': '50GB',
                 'container-image': IMAGE, 'workload-isolation-type': 'firecracker',
@@ -72,7 +72,7 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
                 'manifest_uri': manifest_uri, 'manifest_sha256': manifest_sha256,
                 'partition_sha256': partition_sha256,
                 'require_execution': require_execution, 'selection': selection}
-    request['steps'] = [{'run': 'python3.14 tools/ci/bazel_gate.py shard'}]
+    request['steps'] = [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
     request['env'] = {'PQ_BAZEL_SHARD': json.dumps(manifest, separators=(',', ':'))}
     request['timeout'] = '55m'
     return request

@@ -274,14 +274,15 @@ def main(argv=None):
         upload.mkdir(parents=True, exist_ok=True)
         if upload.is_symlink() or list(upload.iterdir()):
             raise GateError('shard upload directory is not empty')
-        reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
-        manifest = load_shard_manifest(reference, fetch_artifact)
-        result = execute_shard(manifest)
-        result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
         spec = importlib.util.spec_from_file_location(
             'pq_shard_upload', Path(__file__).with_name('bazel_artifacts.py'))
         artifacts = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(artifacts)
+        artifacts.require_scan_python()
+        reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
+        manifest = load_shard_manifest(reference, fetch_artifact)
+        result = execute_shard(manifest)
+        result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
         keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')
                                        if os.environ.get(name)]
         if list(upload.iterdir()):
@@ -296,7 +297,7 @@ def main(argv=None):
                 raise GateError('unexpected file in shard upload directory')
             receipt.replace(upload / receipt.name)
         return 0 if result['verdict'] == 'pass' else 1
-    except (GateError, ValueError, TypeError, KeyError, OSError):
+    except (GateError, ValueError, TypeError, KeyError, OSError, RuntimeError):
         if upload.is_symlink():
             upload.unlink()
         elif upload.exists():

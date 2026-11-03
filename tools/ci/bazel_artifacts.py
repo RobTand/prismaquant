@@ -7,6 +7,8 @@ import io
 import json
 import os
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 
 CHILD_ENVIRONMENT = {'PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL',
@@ -20,6 +22,30 @@ SCANNER_SPEC.loader.exec_module(scanner)
 def child_environment(environ=None):
     environ = os.environ if environ is None else environ
     return {name: value for name, value in environ.items() if name in CHILD_ENVIRONMENT}
+
+
+def require_scan_python(*, runner=None, execute=None):
+    """Bootstrap through key-free children, then replace the keyed parent."""
+    if sys.version_info[:2] == (3, 14):
+        return
+    runner = subprocess.run if runner is None else runner
+    execute = os.execv if execute is None else execute
+    bootstrap = Path(tempfile.gettempdir()) / 'pq-scanner-bootstrap'
+    environment = child_environment()
+    def prepare(command):
+        return runner(command, env=environment, text=True, capture_output=True,
+                      check=True, timeout=300)
+    try:
+        prepare([sys.executable, '-m', 'pip', 'install', '--quiet', '--no-deps',
+                 '--target', str(bootstrap), 'uv==0.9.5'])
+        uv = str(bootstrap / 'bin/uv')
+        prepare([uv, 'python', 'install', '3.14.0'])
+        python = prepare([uv, 'python', 'find', '--managed-python', '3.14.0']).stdout.strip()
+        if not Path(python).is_absolute():
+            raise ValueError('invalid managed Python path')
+        execute(python, [python, *sys.argv])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise RuntimeError('Python 3.14 scanner bootstrap failed; upload refused') from None
 
 
 def scan_upload(directory, required):
