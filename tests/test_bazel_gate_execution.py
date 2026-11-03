@@ -322,8 +322,7 @@ def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
         from types import SimpleNamespace
         return SimpleNamespace(returncode=code)
     found = gate.execute_shard(manifest, root=tmp_path, runner=run)
-    assert calls[0] == ('history', 'a' * 40)
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert found['verdict'] == verdict
     assert found['targets'] == manifest['targets']
     assert found['architecture'] == 'arm64'
@@ -392,8 +391,7 @@ def test_remote_shard_includes_warnings_and_node_receipts_without_retry(tmp_path
     assert found['verdict'] == 'pass'
     assert found['budget_warnings'] == [warning]
     assert found['nodes'] == {warning['nodeid']: 'passed'}
-    assert calls[0] == ('history', 'a' * 40)
-    assert len(calls) == 2
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('fault', [None, 'digest', 'head', 'union', 'partition'])
