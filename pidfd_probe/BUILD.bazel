@@ -1,0 +1,3 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+py_test(name = "probe", srcs = ["probe.py"], main = "probe.py", exec_properties = {"EstimatedCPU": "1", "EstimatedMemory": "512MB"}, timeout = "short")
