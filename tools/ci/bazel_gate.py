@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import argparse
 import hashlib
 import importlib.util
 import io
@@ -9,7 +10,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.parse import unquote, urlsplit
 import zipfile
@@ -234,22 +237,64 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         run = bep_run(text, returncode=outcome.returncode)
     except OSError:
         raise GateError('shard left no private build-event evidence') from None
-    if fetch is None:
-        def fetch(uri):
-            if uri.startswith('file://'):
-                return Path(unquote(urlsplit(uri).path)).read_bytes()
-            if not uri.startswith('bytestream://'):
-                raise GateError('test output inventory has an unsupported URI')
-            spec = importlib.util.spec_from_file_location(
-                'pq_shard_remote_client', Path(__file__).with_name('remote_gate.py'))
-            remote = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(remote)
-            return remote.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
-                'GetFile', {'uri': uri}, raw=True)
-    inventory = inventory_evidence(text, fetch)
+    inventory = inventory_evidence(text, fetch or fetch_artifact)
     result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
                                  require_execution=manifest['require_execution'])
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
             'base': manifest['base'], 'architecture': manifest['architecture'],
             'index': manifest['index'], 'targets': targets, 'run': run,
             'nodes': inventory['nodes'], **result}
+
+
+def fetch_artifact(uri):
+    if uri.startswith('file://'):
+        return Path(unquote(urlsplit(uri).path)).read_bytes()
+    if not uri.startswith('bytestream://'):
+        raise GateError('artifact has an unsupported URI')
+    spec = importlib.util.spec_from_file_location(
+        'pq_shard_remote_client', Path(__file__).with_name('remote_gate.py'))
+    remote = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(remote)
+    return remote.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
+        'GetFile', {'uri': uri}, raw=True)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('mode', choices=['shard'])
+    parser.parse_args(argv)
+    directory = os.environ.get('BUILDBUDDY_ARTIFACTS_DIRECTORY')
+    if not directory:
+        print('shard upload directory unavailable', file=sys.stderr)
+        return 75
+    upload = Path(directory)
+    try:
+        upload.mkdir(parents=True, exist_ok=True)
+        if upload.is_symlink() or list(upload.iterdir()):
+            raise GateError('shard upload directory is not empty')
+        reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
+        manifest = load_shard_manifest(reference, fetch_artifact)
+        result = execute_shard(manifest)
+        result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
+        (upload / 'gate-result.json').write_text(json.dumps(result, sort_keys=True) + '\n')
+        spec = importlib.util.spec_from_file_location(
+            'pq_shard_upload', Path(__file__).with_name('bazel_artifacts.py'))
+        artifacts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(artifacts)
+        keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')
+                                       if os.environ.get(name)]
+        if artifacts.scan_upload(upload, required=keys):
+            raise GateError('shard artifact scan refused upload')
+        return 0 if result['verdict'] == 'pass' else 1
+    except (GateError, ValueError, TypeError, KeyError, OSError):
+        if upload.is_symlink():
+            upload.unlink()
+        elif upload.exists():
+            shutil.rmtree(upload)
+        upload.mkdir(parents=True, exist_ok=True)
+        print('shard evidence or artifact scan failed; upload refused', file=sys.stderr)
+        return 75
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
