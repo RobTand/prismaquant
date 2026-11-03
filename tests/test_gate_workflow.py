@@ -89,7 +89,9 @@ def test_hosted_lane_preserves_python_floor_policy_and_own_cgroup_routing():
     assert '--mode full' in plan['run'] and 'gate_select.py' in plan['run']
     assert 'bazel_gate.py hosted' in plan['run']
     assert '--architecture "$ARCHITECTURE"' in plan['run']
-    assert 'TMPDIR' in str(job['env'])
+    scratch = next(s for s in steps if s.get('name') == 'Configure owned temporary space')
+    assert 'printf \'TMPDIR=%s\\n\' "$RUNNER_TEMP" >> "$GITHUB_ENV"' in scratch['run']
+    assert steps.index(scratch) < steps.index(plan)
     assert job['runs-on'] == "${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}"
     assert '--timeout' not in execute['run'], 'per-test hard timeout remains gate_run policy'
 

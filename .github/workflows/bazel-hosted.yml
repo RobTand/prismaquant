@@ -38,7 +38,6 @@ jobs:
     outputs:
       verdict: ${{ steps.tests.outputs.verdict }}
     env:
-      TMPDIR: ${{ runner.temp }}
       PYTHONPATH: .:tools/ci
       CUDA_VISIBLE_DEVICES: ''
       OMP_NUM_THREADS: '1'
