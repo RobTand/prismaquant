@@ -177,3 +177,33 @@ def test_selection_manifest_refuses_incomplete_or_contradictory_population(fault
     with pytest.raises(selection.SelectionError):
         selection.selection_manifest(selected, populations, hosted=hosted,
             base='b' * 40, head='a' * 40, mode=mode, shard_counts={'amd64': 2, 'arm64': 4})
+
+
+def test_wheel_repository_inventory_keeps_each_canonical_package_separate():
+    found = selection.wheel_repositories([
+        '@@rules_python++pip+pq_pip_linux_amd64_numpy//:pkg',
+        '@@rules_python++pip+pq_pip_linux_amd64_torch//:pkg',
+        '@@rules_python++pip+pq_pip_linux_arm64_numpy//:pkg',
+        '@@rules_python++pip+pq_pip_linux_amd64_numpy//:site-packages/numpy/__init__.py',
+        '@@rules_python++pip+pq_pip//numpy:pkg',
+        '@@rules_python+//python:defs.bzl', '//tests:test_consumer',
+    ])
+    assert found == ['rules_python++pip+pq_pip_linux_amd64_numpy',
+                     'rules_python++pip+pq_pip_linux_amd64_torch',
+                     'rules_python++pip+pq_pip_linux_arm64_numpy']
+
+
+@pytest.mark.parametrize('labels', [[], ['//tests:test_consumer'],
+    ['@@rules_python++pip+pq_pip//numpy:pkg']])
+def test_missing_canonical_wheel_inventory_refuses_opaque_hub_selection(labels):
+    with pytest.raises(selection.SelectionError, match='wheel'):
+        selection.wheel_repositories(labels)
+
+
+def test_bazel_diff_impact_query_uses_both_private_graph_snapshots(tmp_path):
+    command = selection.impacted_targets_command('java', tmp_path / 'v42.jar',
+        tmp_path / 'base.json', tmp_path / 'head.json', tmp_path / 'impacted.txt')
+    assert command == ['java', '-jar', str(tmp_path / 'v42.jar'), 'get-impacted-targets',
+        '--startingHashes', str(tmp_path / 'base.json'),
+        '--finalHashes', str(tmp_path / 'head.json'),
+        '--output', str(tmp_path / 'impacted.txt')]
