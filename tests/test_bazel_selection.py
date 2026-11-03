@@ -343,3 +343,20 @@ def test_gate_modules_load_without_repository_pythonpath(tmp_path, module):
         str(ROOT / 'tools/ci' / module)], cwd=tmp_path, env={},
         text=True, capture_output=True, check=False)
     assert loaded.returncode == 0, loaded.stderr
+
+
+@pytest.mark.parametrize('changed,impacted,used,expected_scopes,all_scopes', [
+    ({'prismaquant/core.py'}, {'//:core', '//tests:test_consumer'},
+     {'prismaquant/core.py'}, ['//', '//tests'], False),
+    ({'MODULE.bazel'}, set(), set(), [], True),
+])
+def test_manifest_preserves_mergify_scope_selection(
+        changed, impacted, used, expected_scopes, all_scopes):
+    selected = decision(changed, impacted=impacted, used=used)
+    populations = {'amd64': {'targets': ['//:core', *sorted(TESTS)],
+                             'tests': sorted(TESTS)}}
+    found = selection.selection_manifest(selected, populations, hosted=set(),
+        base='b' * 40, head='a' * 40, mode='pr')
+    assert found['scopes'] == expected_scopes
+    assert found['all_scopes'] is all_scopes
+    assert found['reason'] == selected['reason']
