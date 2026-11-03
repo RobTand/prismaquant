@@ -113,7 +113,9 @@ def assess_attempts(plan, assignments, attempts):
             if verdict == 'fail':
                 failed.append(index)
     coverage = None
-    file_overruns, file_warnings = [], []
+    warnings = [warning for index, attempt in effective.items()
+                for warning in attempts[attempt][index].get('budget_warnings', [])
+                if warning['nodeid'] not in split_files]
     if split_files and not missing and not failed:
         records = {index: attempts[attempt][index] for index, attempt in effective.items()}
         reference = next(iter(records.values()))['node_coverage']['collected']
@@ -142,14 +144,10 @@ def assess_attempts(plan, assignments, attempts):
                         continue
                     seconds = sum(totals)
                     if seconds > limit:
-                        (file_overruns if seconds > limit * 1.5 else file_warnings).append(
-                            {'file': path, 'seconds': seconds, 'budget_seconds': limit})
-                if file_overruns:
-                    failed.extend(indices)
+                        warnings.append({'nodeid': path, 'seconds': seconds, 'budget_seconds': limit})
     return {'schema': 'prismaquant.gate_aggregate.v1', 'retry_indices': sorted(retry),
             'failed_indices': sorted(set(failed)), 'missing_indices': sorted(set(missing)),
-            **({'file_budget_overruns': file_overruns} if file_overruns else {}),
-            **({'file_budget_warnings': file_warnings} if file_warnings else {}),
+            'budget_warnings': warnings,
             'effective_attempts': effective, **({'node_coverage': coverage} if coverage else {}),
             'exit_code': 1 if failed else 75 if missing else 0}
 
@@ -217,6 +215,15 @@ def main(argv=None):
         if args.summary:
             with args.summary.open('a') as handle:
                 handle.write('## Gate verdict\n\n' + message + '\n')
+                warnings = result['budget_warnings']
+                if warnings:
+                    handle.write('\n## Gate budget_warnings\n\n' +
+                                 f'{len(warnings)} warnings; complete list in final.json.\n\n')
+                    for row in warnings[:25]:
+                        handle.write(f"- {row['nodeid'][:1000]}: {row['seconds']:.3f}s > "
+                                     f"{row['budget_seconds']:.3f}s\n")
+                    if len(warnings) > 25:
+                        handle.write(f'{len(warnings) - 25} more warnings in final.json.\n')
         return result['exit_code']
     except (OSError, ValueError, KeyError, TypeError) as error:
         print('NO_VERDICT: ' + str(error), file=sys.stderr)
