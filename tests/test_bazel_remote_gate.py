@@ -125,6 +125,11 @@ def shard_result(index=0):
                     'executed_by_label': {f'//tests:test_{index}': 1}}}
 
 
+def verified_shard(index):
+    return {**shard_result(index), 'runner_invocation': f'parent-{index}',
+            'invocation_status': 'COMPLETE_INVOCATION_STATUS'}
+
+
 class ShardClient:
     def __init__(self, *, status='COMPLETE_INVOCATION_STATUS', missing=False, wrong_head=False):
         self.calls = []
@@ -166,7 +171,7 @@ def test_full_runs_use_serial_subhour_requests_and_own_result_artifacts():
     assert all('//tests:test_' not in json.dumps(request) for request in requests)
     assert all(len(json.dumps(request)) < 2000 for request in requests)
     found = remote.submit_shards(client, requests, HEAD, clock=lambda: 1)
-    assert found == [shard_result(0), shard_result(1)]
+    assert found == [verified_shard(0), verified_shard(1)]
     assert client.calls == ['Run', 'GetInvocation', 'GetFile'] * 2
 
 
@@ -237,7 +242,7 @@ def test_fallback_may_admit_two_shards_and_checks_both_before_the_next_batch():
     client = BoundedFallbackClient()
     found = remote.submit_shards(client, fallback_requests(), HEAD,
                                  concurrency=2, clock=lambda: 1)
-    assert found == [shard_result(0), shard_result(1), shard_result(2)]
+    assert found == [verified_shard(0), verified_shard(1), verified_shard(2)]
     assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0),
         ('evidence', 0), ('terminal', 1), ('evidence', 1),
         ('submit', 2), ('terminal', 2), ('evidence', 2)]

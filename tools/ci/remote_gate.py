@@ -130,9 +130,12 @@ def verify_shard_result(client, invocation_id, expected, head, deadline, *, cloc
             or text_sha256hex('\n'.join(targets) + '\n')
                != expected['partition_sha256']):
         raise RemoteError('shard result has the wrong partition population')
+    if result.get('base') != expected['base']:
+        raise RemoteError('shard result has the wrong source base')
     if result['mode'] != expected['mode'] or result.get('error'):
         raise RemoteError('shard result does not establish its requested mode')
-    return result
+    return {**result, 'runner_invocation': invocation_id,
+            'invocation_status': record['invocationStatus']}
 
 
 def succeeded(record):
