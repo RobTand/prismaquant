@@ -11874,7 +11874,7 @@ pq_py_library(
         "tools/ci/remote_gate.py",
     ],
     data = [
-        "tools/ci/bazel_gate.py",
+        "tools/ci/bazel_selection.py",
         "tools/ci/remote_gate.py",
     ],
     deps = [

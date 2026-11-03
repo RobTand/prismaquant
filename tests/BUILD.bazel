@@ -8496,12 +8496,14 @@ pq_py_library(
     ],
     data = [
         "//:tools/ci/bazel_gate.py",
+        "//:tools/ci/bazel_selection.py",
         "//:tools/ci/remote_gate.py",
         "test_bazel_remote_gate.py",
     ],
     deps = [
         "//:tools/__init__",
         "//:tools/ci/bazel_gate",
+        "//:tools/ci/bazel_selection",
         "//:tools/ci/remote_gate",
         "@pq_pip//pytest",
     ],
