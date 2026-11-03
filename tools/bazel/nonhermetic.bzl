@@ -192,6 +192,10 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_pilot_verified_result_1293": struct(
+        tags = ["hosted"],
+        reason = "needs os.pidfd_open/P_PIDFD/signal.pidfd_send_signal, absent from python-build-standalone 3.12 (rules_python 2.4.6)",
+    ),
     "//tests:test_prismasnap_checkpoint": struct(
         tags = ["runner"],
         reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
