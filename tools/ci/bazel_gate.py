@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from collections import Counter
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
+import zipfile
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
 
@@ -121,6 +123,43 @@ def architecture_result(population, run, *, budget_warnings=(), require_executio
             'bazel_exit_code': run['returncode'], 'executed_test_actions': executed,
             'budget_warnings': list(budget_warnings),
             'error': 'architecture ran no test actions' if missing_execution else None}
+
+
+def inventory_evidence(text, fetch):
+    """Read Python node receipts from only the output URIs in this run's BEP."""
+    seen, nodes, warnings = set(), {}, []
+    try:
+        for line in text.splitlines():
+            event = json.loads(line)
+            for output in event.get('testResult', {}).get('testActionOutput', []):
+                if output.get('name') != 'test.outputs__outputs.zip':
+                    continue
+                uri = output['uri']
+                if uri in seen:
+                    continue
+                seen.add(uri)
+                with zipfile.ZipFile(io.BytesIO(fetch(uri))) as archive:
+                    for member in archive.namelist():
+                        if Path(member).name != 'inventory.json':
+                            continue
+                        receipt = json.loads(archive.read(member))
+                        found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
+                        if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
+                            raise ValueError('invalid inventory structure')
+                        for node, status in found_nodes.items():
+                            if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
+                                raise ValueError('invalid inventory node')
+                            if nodes.get(node) != 'failed':
+                                nodes[node] = status
+                        for row in found_warnings:
+                            if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
+                                    or any(type(row.get(key)) not in (int, float)
+                                           for key in ('seconds', 'budget_seconds'))):
+                                raise ValueError('invalid budget warning')
+                            warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
+    except (ValueError, TypeError, AttributeError, KeyError, OSError, zipfile.BadZipFile):
+        raise GateError('test output inventory is malformed or unavailable') from None
+    return {'nodes': nodes, 'budget_warnings': warnings}
 
 
 def execute_shard(manifest, *, root=None, runner=subprocess.run):
