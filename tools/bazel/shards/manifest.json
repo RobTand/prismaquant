@@ -1,0 +1,60 @@
+{
+  "source_head": "df5ef0af1f721a1f9760e782a95e6ecba1b63a1d",
+  "architectures": {
+    "amd64": {
+      "targets": 3841,
+      "tests": 1373,
+      "population_sha256": "f5610df8a3cdee538041062068d8fc9d859f968e4239176e3140fd381d1a82ae",
+      "query_invocation": "f661921e-5853-4dc8-8c34-121306a1b89c",
+      "shards": [
+        {
+          "path": "tools/bazel/shards/amd64-0.txt",
+          "sha256": "acba154cbebe579c31b4987053209351d93f33e914bddfeb3e5ab7611c94d76f",
+          "targets": 1921,
+          "tests": 687
+        },
+        {
+          "path": "tools/bazel/shards/amd64-1.txt",
+          "sha256": "6f3e30e68afe1420b29a9aa10ad49e2fe91415d9319294b00ccaad7ed809d5e1",
+          "targets": 1920,
+          "tests": 686
+        }
+      ],
+      "union_checked": true
+    },
+    "arm64": {
+      "targets": 3809,
+      "tests": 1341,
+      "population_sha256": "0f3e4e854a45cbe56cb47de411ca86e003f2720c64c4c947c7525bbddfa35b83",
+      "query_invocation": "6b5fff48-19b0-4974-9912-c02f6c84bcb0",
+      "shards": [
+        {
+          "path": "tools/bazel/shards/arm64-0.txt",
+          "sha256": "03d5fdfaeb0650e5585269feed4fb006d1e281e9b517e4fed70e137f08ef0127",
+          "targets": 953,
+          "tests": 336
+        },
+        {
+          "path": "tools/bazel/shards/arm64-1.txt",
+          "sha256": "2f3537cc2e49eb1049b42530ff21a5d7f983bfded515ee21c996f8272e3f7a4e",
+          "targets": 952,
+          "tests": 335
+        },
+        {
+          "path": "tools/bazel/shards/arm64-2.txt",
+          "sha256": "1b30edaa9204ad4ba25ef63c7567c9fffc84ddc257c493892854912e7a0e765f",
+          "targets": 952,
+          "tests": 335
+        },
+        {
+          "path": "tools/bazel/shards/arm64-3.txt",
+          "sha256": "1ab15be8d44a95418c240b40d9089a6d21751d826d071aa1bd7fb6f6795b849f",
+          "targets": 952,
+          "tests": 335
+        }
+      ],
+      "union_checked": true
+    }
+  },
+  "source_manifest_sha256": "65e9d8dfde78a25e28f4e8e5847318512786042748ebc078633ad13b631a41d8"
+}
