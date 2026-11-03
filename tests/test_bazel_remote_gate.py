@@ -192,3 +192,79 @@ def test_shard_result_must_match_the_exact_requested_partition(field, value):
     with pytest.raises(remote.RemoteError, match='partition'):
         remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
     assert client.calls.count('Run') == 1
+
+
+class BoundedFallbackClient:
+    """Own admitted IDs remain active until their own terminal evidence is read."""
+    def __init__(self, fail_first=False):
+        self.active = set()
+        self.events = []
+        self.fail_first = fail_first
+
+    def call(self, method, body, **kwargs):
+        if method == 'Run':
+            index = json.loads(body['env']['PQ_BAZEL_SHARD'])['index']
+            self.active.add(index)
+            self.events.append(('submit', index))
+            assert len(self.active) <= 2, 'more than two admitted fallback shards'
+            return {'invocation_id': f'parent-{index}'}
+        if method == 'GetInvocation':
+            index = int(body['selector']['invocation_id'].removeprefix('parent-'))
+            self.events.append(('terminal', index))
+            return {'invocation': [{'invocationId': f'parent-{index}',
+                'invocationStatus': ('DISCONNECTED_INVOCATION_STATUS'
+                    if self.fail_first and index == 0 else 'COMPLETE_INVOCATION_STATUS'),
+                'success': True, 'bazelExitCode': 0,
+                'artifacts': [{'name': remote.RESULT, 'uri': f'bytestream://result-{index}'}]}]}
+        if method == 'GetFile':
+            index = int(body['uri'].removeprefix('bytestream://result-'))
+            self.active.remove(index)
+            self.events.append(('evidence', index))
+            return json.dumps(shard_result(index)).encode()
+        raise AssertionError(method)
+
+
+def fallback_requests(count=3, *, mode='pr', selection='fallback'):
+    return [remote.shard_request(arguments(mode), 'amd64', index,
+        'bytestream://remote.buildbuddy.io/own-selection-manifest', 'c' * 64,
+        shard_result(index)['partition_sha256'], selection=selection) for index in range(count)]
+
+
+def test_fallback_may_admit_two_shards_and_checks_both_before_the_next_batch():
+    client = BoundedFallbackClient()
+    found = remote.submit_shards(client, fallback_requests(), HEAD,
+                                 concurrency=2, clock=lambda: 1)
+    assert found == [shard_result(0), shard_result(1), shard_result(2)]
+    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0),
+        ('evidence', 0), ('terminal', 1), ('evidence', 1),
+        ('submit', 2), ('terminal', 2), ('evidence', 2)]
+    assert not client.active
+
+
+@pytest.mark.parametrize('concurrency,mode,selection', [
+    (0, 'pr', 'fallback'), (3, 'pr', 'fallback'),
+    (2, 'pr', 'impacted'), (2, 'pr', 'irrelevant'), (2, 'main', 'fallback'),
+])
+def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_fallback(
+        concurrency, mode, selection):
+    client = BoundedFallbackClient()
+    with pytest.raises(remote.RemoteError, match='concurrency|fallback'):
+        remote.submit_shards(client, fallback_requests(mode=mode, selection=selection),
+                             HEAD, concurrency=concurrency, clock=lambda: 1)
+    assert client.events == []
+
+
+def test_fallback_parallel_failure_still_reads_the_other_admitted_shard_and_stops():
+    client = BoundedFallbackClient(fail_first=True)
+    with pytest.raises(remote.RemoteError):
+        remote.submit_shards(client, fallback_requests(), HEAD,
+                             concurrency=2, clock=lambda: 1)
+    assert client.events == [('submit', 0), ('submit', 1), ('terminal', 0),
+                             ('terminal', 1), ('evidence', 1)]
+
+
+def test_fallback_remains_serial_unless_the_controller_explicitly_selects_two():
+    client = BoundedFallbackClient()
+    remote.submit_shards(client, fallback_requests(count=2), HEAD, clock=lambda: 1)
+    assert client.events == [('submit', 0), ('terminal', 0), ('evidence', 0),
+                             ('submit', 1), ('terminal', 1), ('evidence', 1)]
