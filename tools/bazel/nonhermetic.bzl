@@ -60,6 +60,14 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "1 of its test functions (1 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_fleet_acceptance_level1": struct(
+        tags = ["runner"],
+        reason = "Its helper CLI qualifies the real checkout through fleet_acceptance_runner and record_snapshots, which require git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
+    ),
+    "//tests:test_fleet_acceptance_pins": struct(
+        tags = ["runner"],
+        reason = "It qualifies the real checkout through fleet_acceptance_pins.record_snapshots, which requires git; remote runfiles have no .git. Existing absent-PB-bundle skips remain. The amd64 runner covers it; arm64 action coverage is excluded.",
+    ),
     "//tests:test_fp8_batched_midpoint_parity_audit": struct(
         tags = ["gpu"],
         reason = "1 of its test functions (4 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
@@ -155,6 +163,10 @@ NONHERMETIC = {
     "//tests:test_native_retained_cost_source_admission_audit": struct(
         tags = ["runner"],
         reason = "it resolves the source identity with git (rev-parse or ls-files) in the checkout; remote runfiles have no .git.",
+    ),
+    "//tests:test_no_secret_on_command_line": struct(
+        tags = ["runner"],
+        reason = "It scans tracked files with git ls-files in the actual ROOT checkout; remote runfiles have no .git. The amd64 runner covers it; arm64 action coverage is excluded.",
     ),
     "//tests:test_numerics_pairs_1394": struct(
         tags = ["gpu"],
