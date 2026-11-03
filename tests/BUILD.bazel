@@ -6856,6 +6856,7 @@ pq_py_test(
         "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
         ":conftest",
+        ":test_prismabuild_import_leak_1281_lib",
     ],
     timeout = "moderate",
 )
@@ -8355,6 +8356,8 @@ pq_py_library(
     data = [
         "//:tools/ci/bazel_parity.py",
         "g3job/test_g3.py",
+        "test_band_serial_batched_regime.py",
+        "test_band_serial_scratch_plane.py",
         "test_bazel_parity.py",
     ],
     deps = [
@@ -98170,6 +98173,19 @@ pq_py_test(
     deps = [
         ":conftest",
         ":g3job/conftest",
+        ":test_dispatch_shared_tag_placement_lib",
+        ":test_fleet_acceptance_level1_lib",
+        ":test_fullstack_real_chain_lib",
+        ":test_pb_sdk5_pin_2152_lib",
+        ":test_pilot_verified_result_1293_lib",
+        ":test_quality_prefill_pb_adapter_serve_once_lib",
+        ":test_quantum_boundary_readset_lib",
+        ":test_quantum_executable_readset_lib_cycle",
+        ":test_slice_manifest_pb_staging_lib",
+        ":test_stage_a_produced_boundary_chain_lib",
+        ":test_stagea_forward_read_plan_lib",
+        ":test_stagea_readset_source_coverage_lib",
+        ":test_strict_reader_tier_enforcement_lib",
     ],
     timeout = "moderate",
 )
@@ -144870,6 +144886,8 @@ pq_py_test(
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
         "//:pqtel/__init__",
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/lane_shipcard",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/dsv4_wikitext_inputs",
