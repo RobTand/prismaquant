@@ -493,10 +493,11 @@ def statement_imports(tree, path):
             if prefix:
                 names.add(prefix)
             names.update(f'{prefix}.{alias.name}' if prefix else alias.name for alias in node.names)
-        elif isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'pytest_plugins'
-                                                  for target in node.targets):
-            names.update(value.value for value in ast.walk(node.value)
-                         if isinstance(value, ast.Constant) and isinstance(value.value, str))
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, ast.Name) and target.id == 'pytest_plugins' for target in targets):
+                names.update(value.value for value in ast.walk(node.value)
+                             if isinstance(value, ast.Constant) and isinstance(value.value, str))
     return names
 
 
