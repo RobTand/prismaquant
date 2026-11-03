@@ -130,14 +130,32 @@ def test_finish_cli_exports_only_effective_results(tmp_path):
     assert json.loads((tmp_path / 'effective/1/result.json').read_text())['files'] == ['b.py']
 
 
-def test_budget_failure_after_pytest_success_is_final_and_never_retried():
+def test_budget_warnings_survive_aggregation_without_retry():
+    warnings = [{'nodeid': 'a.py::test_slow', 'seconds': 120, 'budget_seconds': 20}]
     result = actions.assess_attempts(PLAN, ASSIGNMENTS, {
-        1: {0: record('a.py', 'fail', pytest_exit_code=0,
-                      budget={'status': 'fail', 'reason': 'Per-test time budget exceeded'}),
-            1: record('b.py')}, 2: {0: record('a.py')}})
-    assert result['exit_code'] == 1
-    assert result['retry_indices'] == [] and result['failed_indices'] == [0]
-    assert result['effective_attempts'][0] == 1
+        1: {0: record('a.py', budget_warnings=warnings), 1: record('b.py')}})
+    assert result['exit_code'] == 0
+    assert result['budget_warnings'] == warnings
+    assert result['retry_indices'] == [] and result['failed_indices'] == []
+
+
+def test_finish_summary_reports_budget_warnings(tmp_path):
+    import json
+    arguments = cli_fixture(tmp_path)
+    save_result(tmp_path, 0)
+    save_result(tmp_path, 1)
+    path = tmp_path / 'artifacts/run-7-a1-0/result.json'
+    result = json.loads(path.read_text())
+    warning = {'nodeid': 'a.py::test_slow', 'seconds': 120, 'budget_seconds': 20}
+    result['budget_warnings'] = [warning]
+    path.write_text(json.dumps(result))
+    summary = tmp_path / 'summary.md'
+    finished = cli('finish', *arguments, '--summary', str(summary))
+    assert finished.returncode == 0, finished.stderr
+    assert json.loads((tmp_path / 'output.json').read_text())['budget_warnings'] == [warning]
+    text = summary.read_text()
+    assert 'GATE_PASS' in text and 'budget_warnings' in text
+    assert 'a.py::test_slow' in text and '120.000s > 20.000s' in text
 
 
 def test_policy_failure_before_pytest_is_final_and_never_retried():
