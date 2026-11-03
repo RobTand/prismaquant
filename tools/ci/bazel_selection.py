@@ -248,7 +248,7 @@ def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
         graph = queried or query_revision(root, directory, architecture,
                                           bazel=bazel, runner=runner)
         population = graph['population']
-        wheels.write_text('\n'.join(population['wheel_repositories']) + '\n')
+        wheels.write_text('\n'.join('@@' + name for name in population['wheel_repositories']) + '\n')
         generated = runner(generate_hashes_command(java, jar, root, bazel, hashes, edges, wheels),
                            cwd=root, env=child_environment(), text=True,
                            capture_output=True, check=False)
