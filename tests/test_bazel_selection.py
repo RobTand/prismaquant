@@ -110,3 +110,70 @@ def test_missing_test_status_fails_and_budget_warning_cannot_change_status():
     assert verdict == 'fail'
     assert failed == ['//tests:test_unrelated']
     assert selection.verdict_of({'//tests:test_consumer'}, {'//tests:test_consumer': 'PASSED'}) == ('pass', [])
+
+
+def test_selection_manifest_preserves_exact_action_population_and_hosted_routes():
+    populations = {
+        'amd64': {'targets': ['//:core', '//tests:one', '//tests:two'],
+                  'tests': ['//tests:one', '//tests:two']},
+        'arm64': {'targets': ['//:core', '//tests:one'], 'tests': ['//tests:one']},
+    }
+    decision = selection.everything(['graph error'], {'//tests:one', '//tests:two', '//tests:hosted'})
+    found = selection.selection_manifest(
+        decision, populations, hosted={'//tests:hosted'},
+        base='b' * 40, head='a' * 40, mode='pr', shard_counts={'amd64': 2})
+    assert set(found['architectures']) == {'amd64'}
+    assert found['hosted'] == ['//tests:hosted']
+    row = found['architectures']['amd64']
+    assert row['population'] == ['//:core', '//tests:one', '//tests:two']
+    assert row['tests'] == ['//tests:one', '//tests:two']
+    assert sorted(label for shard in row['shards'] for label in shard) == row['population']
+    assert len(row['shards']) == 2
+
+
+def test_postmerge_manifest_always_covers_both_architectures_and_hosted_arm64():
+    populations = {
+        'amd64': {'targets': ['//tests:one', '//tests:disk'],
+                  'tests': ['//tests:one', '//tests:disk']},
+        'arm64': {'targets': ['//tests:one'], 'tests': ['//tests:one']},
+    }
+    irrelevant = {'selection': 'irrelevant', 'selected': [], 'build': []}
+    found = selection.selection_manifest(
+        irrelevant, populations, hosted={'//tests:hosted'}, hosted_arm64={'//tests:disk'},
+        base='b' * 40, head='a' * 40, mode='main', shard_counts={'amd64': 2, 'arm64': 4})
+    assert set(found['architectures']) == {'amd64', 'arm64'}
+    assert found['hosted'] == ['//tests:hosted']
+    assert found['hosted_arm64'] == ['//tests:disk']
+    assert found['architectures']['amd64']['population'] == ['//tests:disk', '//tests:one']
+    assert found['architectures']['arm64']['population'] == ['//tests:one']
+
+
+def test_empty_docs_plan_and_partial_selection_keep_their_exact_scope():
+    populations = {'amd64': {'targets': ['//:core', '//tests:test_consumer',
+                                        '//tests:test_unrelated'], 'tests': sorted(TESTS)}}
+    for changed, impacted, expected in [({'README.md'}, set(), []),
+            ({'prismaquant/core.py'}, {'//:core', '//tests:test_consumer'},
+             ['//:core', '//tests:test_consumer'])]:
+        selected = decision(changed, impacted=impacted, used={'prismaquant/core.py'})
+        found = selection.selection_manifest(selected, populations, hosted=set(),
+            base='b' * 40, head='a' * 40, mode='pr', shard_counts={'amd64': 2})
+        assert found['architectures']['amd64']['population'] == expected
+        assert found['architectures']['amd64']['shards'] == ([] if not expected else [
+            ['//tests:test_consumer'], ['//:core']])
+
+
+@pytest.mark.parametrize('fault', ['missing_arch', 'unknown_selected', 'foreign_test', 'overlap'])
+def test_selection_manifest_refuses_incomplete_or_contradictory_population(fault):
+    populations = {'amd64': {'targets': ['//tests:one'], 'tests': ['//tests:one']}}
+    selected = {'selection': 'fallback', 'selected': ['//tests:one'], 'build': ['//...']}
+    hosted = set()
+    mode = 'main' if fault == 'missing_arch' else 'pr'
+    if fault == 'unknown_selected':
+        selected = {'selection': 'impacted', 'selected': ['//tests:missing'], 'build': []}
+    if fault == 'foreign_test':
+        populations['amd64']['tests'].append('//tests:foreign')
+    if fault == 'overlap':
+        hosted.add('//tests:one')
+    with pytest.raises(selection.SelectionError):
+        selection.selection_manifest(selected, populations, hosted=hosted,
+            base='b' * 40, head='a' * 40, mode=mode, shard_counts={'amd64': 2, 'arm64': 4})
