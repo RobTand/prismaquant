@@ -17,7 +17,7 @@ def commands():
     ]
 
 
-def check(checks=None, root=ROOT):
+def check_generated(checks=None, root=ROOT):
     failures = []
     for command in commands() if checks is None else checks:
         result = subprocess.run(command, cwd=root, capture_output=True, text=True)
@@ -30,6 +30,6 @@ def check(checks=None, root=ROOT):
 
 if __name__ == '__main__':
     try:
-        check()
+        check_generated()
     except RuntimeError as error:
         sys.exit(str(error))

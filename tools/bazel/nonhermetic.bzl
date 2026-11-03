@@ -180,6 +180,14 @@ NONHERMETIC = {
         tags = ["gpu"],
         reason = "2 of its test functions (2 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",
     ),
+    "//tests:test_original_diagnostic_context_2149": struct(
+        tags = ["hosted"],
+        reason = "Bazel canonical repo paths contain '+', which the modeling-source schema (schemas.py:592) correctly rejects. Hosted setup-python retains amd64 coverage; arm64 action coverage is deferred for this same layout constraint.",
+    ),
+    "//tests:test_original_source_admission": struct(
+        tags = ["hosted"],
+        reason = "Bazel canonical repo paths contain '+', which the modeling-source schema (schemas.py:592) correctly rejects. Hosted setup-python retains amd64 coverage; arm64 action coverage is deferred for this same layout constraint.",
+    ),
     "//tests:test_original_source_copy_completion_cuda": struct(
         tags = ["gpu"],
         reason = "2 of its test functions (64 nodes) skip on CPU for CUDA, Triton or vLLM (notes/inventory control run); the rest run on CPU.",

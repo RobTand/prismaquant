@@ -8413,6 +8413,9 @@ pq_py_library(
         "//tools/bazel:files",
         "test_bazel_workspace.py",
     ],
+    deps = [
+        "@pq_pip//pytest",
+    ],
 )
 
 pq_py_test(
