@@ -239,6 +239,59 @@ def test_snippets_dynamic_imports_and_pytest_plugins_are_edges(tmp_path):
     assert found.of('tests/conftest.py')[0] == {'prismaquant/bound.py'}
 
 
+@pytest.mark.parametrize('plugins', ['("prismaquant.bound",)', '["prismaquant.bound"]'])
+def test_annotated_pytest_plugins_tuple_and_list_give_the_same_edge_as_the_unannotated_control(tmp_path, plugins):
+    found = evidence(tmp_path, {
+        'tests/plain/conftest.py': f'pytest_plugins = {plugins}\n',
+        'tests/annotated/conftest.py': f'pytest_plugins: tuple[str, ...] = {plugins}\n',
+        'prismaquant/bound.py': '',
+    })
+    expected = {'prismaquant/bound.py'}
+    assert found.of('tests/plain/conftest.py')[0] == expected
+    assert found.of('tests/annotated/conftest.py')[0] == expected
+
+
+def test_an_annotated_pytest_plugins_string_is_an_edge(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/plain/conftest.py': 'pytest_plugins = "prismaquant.bound"\n',
+        'tests/annotated/conftest.py': 'pytest_plugins: str = "prismaquant.bound"\n',
+        'prismaquant/bound.py': '',
+    })
+    expected = {'prismaquant/bound.py'}
+    assert found.of('tests/plain/conftest.py')[0] == expected
+    assert found.of('tests/annotated/conftest.py')[0] == expected
+
+
+def test_an_annotated_plugins_imports_reach_the_consuming_test_and_an_unrelated_module_does_not(tmp_path):
+    tests = graph(tmp_path, {
+        'tests/conftest.py': 'pytest_plugins: tuple[str, ...] = ("prismaquant.bound",)\n',
+        'tests/test_a.py': 'def test_a():\n    pass\n',
+        'prismaquant/bound.py': 'import prismaquant.helper\n',
+        'prismaquant/helper.py': '',
+        'prismaquant/unrelated.py': '',
+    })
+    files = tests.test_files('tests/test_a.py')
+    assert {'tests/test_a.py', 'tests/conftest.py', 'prismaquant/bound.py', 'prismaquant/helper.py'} <= files
+    assert 'prismaquant/unrelated.py' not in files
+
+
+@pytest.mark.parametrize('declaration', [
+    'pytest_plugins: tuple[str, ...]',
+    'pytest_plugins: tuple[str, ...] = runtime_plugins',
+    'pytest_plugins: tuple[str, ...] = load_plugins()',
+])
+def test_a_bare_or_non_literal_annotated_pytest_plugins_adds_no_edge_beside_a_valued_one(tmp_path, declaration):
+    prefix = 'runtime_plugins = ("prismaquant.unrelated",)\n' + declaration + '\n'
+    found = evidence(tmp_path, {
+        'tests/empty/conftest.py': prefix,
+        'tests/valued/conftest.py': prefix + 'pytest_plugins: tuple[str, ...] = ("prismaquant.bound",)\n',
+        'prismaquant/bound.py': '',
+        'prismaquant/unrelated.py': '',
+    })
+    assert found.of('tests/empty/conftest.py')[0] == set()
+    assert found.of('tests/valued/conftest.py')[0] == {'prismaquant/bound.py'}
+
+
 def test_paths_to_tools_are_edges_and_paths_to_tests_or_globs_are_data(tmp_path):
     found = evidence(tmp_path, {
         'tests/test_a.py': ('from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n'
