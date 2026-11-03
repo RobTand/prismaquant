@@ -125,3 +125,16 @@ def test_graph_impact_keeps_the_git_checkout_on_the_runner():
     tags, _, environment = scope['nonhermetic']('test_graph_impact')
     assert {'runner', 'no-remote-exec', 'no-sandbox', 'no-cache'} <= set(tags)
     assert environment['PQ_BAZEL_LANE'] == 'runner'
+
+
+def test_sdk_owned_readers_keep_the_hosted_interpreters_linux_apis():
+    scope = {'struct': SimpleNamespace,
+             'native': SimpleNamespace(package_name=lambda: 'tests')}
+    exec((ROOT / 'tools/bazel/nonhermetic.bzl').read_text(), scope)
+    tags, _, environment = scope['nonhermetic']('test_pilot_verified_result_1293')
+    assert {'hosted', 'manual', 'gate-lane-hosted'} <= set(tags)
+    assert 'runner' not in tags
+    assert environment.get('PQ_BAZEL_LANE') != 'runner'
+    reason = scope['NONHERMETIC']['//tests:test_pilot_verified_result_1293'].reason
+    assert reason == ('needs os.pidfd_open/P_PIDFD/signal.pidfd_send_signal, absent from '
+                      'python-build-standalone 3.12 (rules_python 2.4.6)')
