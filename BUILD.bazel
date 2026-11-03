@@ -11584,6 +11584,38 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/ci/bazel_artifacts",
+    srcs = [
+        "tools/ci/bazel_artifacts.py",
+    ],
+    data = [
+        "tools/ci/bazel_artifacts.py",
+        "tools/ci/check_no_secret_leak.py",
+    ],
+    deps = [
+        ":tools/ci/check_no_secret_leak",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/bazel_gate",
+    srcs = [
+        "tools/ci/bazel_gate.py",
+    ],
+    data = [
+        "tools/ci/bazel_artifacts.py",
+        "tools/ci/bazel_gate.py",
+        "tools/ci/remote_gate.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
+        ":tools/ci/bazel_artifacts",
+        ":tools/ci/remote_gate",
+    ],
+)
+
+pq_py_library(
     name = "tools/ci/bazel_generated",
     srcs = [
         "tools/ci/bazel_generated.py",
@@ -11608,6 +11640,29 @@ pq_py_library(
         "tools/ci/gate_durations.json",
         "tools/ci/gate_quarantine.json",
         "tools/ci/gate_select.py",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/bazel_selection",
+    srcs = [
+        "tools/ci/bazel_selection.py",
+    ],
+    data = [
+        ".bazelignore",
+        ".bazelrc",
+        ".bazelversion",
+        ".github/workflows/gate.yml",
+        "BUILD.bazel",
+        "MODULE.bazel",
+        "MODULE.bazel.lock",
+        "tools/ci/bazel_gate.py",
+        "tools/ci/bazel_selection.py",
+        "tools/ci/remote_gate.py",
+    ],
+    deps = [
+        ":tools/__init__",
+        ":tools/ci/bazel_gate",
     ],
 )
 
@@ -11809,6 +11864,21 @@ pq_py_library(
     deps = [
         ":tools/__init__",
         ":tools/ci/graph_impact_pq",
+    ],
+)
+
+pq_py_library(
+    name = "tools/ci/remote_gate",
+    srcs = [
+        "tools/ci/remote_gate.py",
+    ],
+    data = [
+        "tools/ci/bazel_gate.py",
+        "tools/ci/remote_gate.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
     ],
 )
 

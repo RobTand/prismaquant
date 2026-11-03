@@ -1,9 +1,11 @@
 """Pure selection decisions for the Remote Bazel cutover gate."""
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci.bazel_gate import GateError, partition_population
 
 GATE_INPUTS = {

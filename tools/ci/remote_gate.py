@@ -2,13 +2,17 @@
 """Remote Bazel requests and exact-run evidence for the PrismaQuant cutover."""
 from __future__ import annotations
 
-import hashlib
 import json
+from pathlib import Path
 import re
 import shlex
+import sys
 import time
 import urllib.error
 import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import text_sha256hex
 
 API = 'https://app.buildbuddy.io/api/v1/'
 IMAGE = ('docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:'
@@ -123,7 +127,7 @@ def verify_shard_result(client, invocation_id, expected, head, deadline, *, cloc
     targets = result.get('targets')
     if (not isinstance(targets, list) or not targets
             or any(not isinstance(label, str) for label in targets)
-            or hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
+            or text_sha256hex('\n'.join(targets) + '\n')
                != expected['partition_sha256']):
         raise RemoteError('shard result has the wrong partition population')
     if result['mode'] != expected['mode'] or result.get('error'):

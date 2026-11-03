@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from collections import Counter
 import argparse
-import hashlib
 import importlib.util
 import io
 import json
@@ -16,6 +15,9 @@ import sys
 import tempfile
 from urllib.parse import unquote, urlsplit
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
 
@@ -134,7 +136,7 @@ def load_shard_manifest(reference, fetch):
     """Resolve a compact immutable reference before admitting any Bazel command."""
     try:
         raw = fetch(reference['manifest_uri'])
-        if hashlib.sha256(raw).hexdigest() != reference['manifest_sha256']:
+        if bytes_sha256hex(raw) != reference['manifest_sha256']:
             raise GateError('shard manifest digest does not match its reference')
         document = json.loads(raw)
         if (document['schema'] != 'prismaquant.bazel-shards.v1'
@@ -149,7 +151,7 @@ def load_shard_manifest(reference, fetch):
         if type(index) is not int or not 0 <= index < len(shards):
             raise GateError('shard manifest has no requested partition')
         targets = shards[index]
-        digest = hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
+        digest = text_sha256hex('\n'.join(targets) + '\n')
         if digest != reference['partition_sha256']:
             raise GateError('shard manifest partition digest does not match')
         return {**reference, 'targets': targets, 'tests': sorted(set(targets) & set(tests))}
@@ -276,7 +278,7 @@ def main(argv=None):
         manifest = load_shard_manifest(reference, fetch_artifact)
         result = execute_shard(manifest)
         result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
-        (upload / 'gate-result.json').write_text(json.dumps(result, sort_keys=True) + '\n')
+        (upload / 'gate-result.json').write_bytes(DIRECT_ASCII_SPACED_LAX.encoded(result) + b'\n')
         spec = importlib.util.spec_from_file_location(
             'pq_shard_upload', Path(__file__).with_name('bazel_artifacts.py'))
         artifacts = importlib.util.module_from_spec(spec)
