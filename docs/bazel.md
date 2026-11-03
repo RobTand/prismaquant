@@ -162,3 +162,8 @@ without credentials. The parent replaces its own interpreter before scanning.
 Only valid UTF-8 JSON receipts are uploaded.
 Raw execution logs, BEP, archives and other diagnostics stay private on the
 runner. Renaming a binary artifact to `.json` does not make it eligible.
+
+Before a shard starts, the Remote Bazel runner hydrates full Git history for
+checkout-dependent tests, including the archived-main graph baseline contract.
+Git children receive the same allowlisted environment without credentials.
+Missing history or a source-head mismatch refuses the shard before tests run.

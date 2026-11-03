@@ -322,7 +322,8 @@ def test_remote_shard_executes_once_with_private_bep_and_preserves_timeout(
         from types import SimpleNamespace
         return SimpleNamespace(returncode=code)
     found = gate.execute_shard(manifest, root=tmp_path, runner=run)
-    assert len(calls) == 1
+    assert calls[0] == ('history', 'a' * 40)
+    assert len(calls) == 2
     assert found['verdict'] == verdict
     assert found['targets'] == manifest['targets']
     assert found['architecture'] == 'arm64'
@@ -391,7 +392,8 @@ def test_remote_shard_includes_warnings_and_node_receipts_without_retry(tmp_path
     assert found['verdict'] == 'pass'
     assert found['budget_warnings'] == [warning]
     assert found['nodes'] == {warning['nodeid']: 'passed'}
-    assert len(calls) == 1
+    assert calls[0] == ('history', 'a' * 40)
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize('fault', [None, 'digest', 'head', 'union', 'partition'])
@@ -451,6 +453,7 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
                 'verdict': 'pass', 'targets': [LABEL], 'budget_warnings': [],
                 'error': 'pq-scan-controller-sentinel' if scan_fault == 'leak' else None}
     monkeypatch.setattr(gate, 'execute_shard', execute)
+    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: calls.append(('history', head)))
     original_write_bytes = Path.write_bytes
     def stage_receipt(path, content):
         if path.name == 'gate-result.json':
@@ -459,7 +462,8 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
         return original_write_bytes(path, content)
     monkeypatch.setattr(Path, 'write_bytes', stage_receipt)
     code = gate.main(['shard'])
-    assert len(calls) == 1
+    assert calls[0] == ('history', 'a' * 40)
+    assert len(calls) == 2
     if scan_fault:
         assert code == 75
         assert list((tmp_path / 'upload').iterdir()) == []

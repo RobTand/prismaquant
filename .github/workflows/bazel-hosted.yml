@@ -82,8 +82,6 @@ jobs:
         else
           cp hosted-private/full-plan.json hosted-private/plan.json
         fi
-        python tools/ci/gate_partition.py matrix --plan hosted-private/plan.json --durations tools/ci/gate_durations.json --shards 1 --runners ubuntu-24.04 --output hosted-private/matrix.json
-        python tools/ci/gate_partition.py shard --plan hosted-private/plan.json --durations tools/ci/gate_durations.json --shards 1 --matrix hosted-private/matrix.json --index 0 --output-files hosted-private/assigned.txt --output-assignment hosted-private/assignment.json
     - name: Resolve Tessera development pin
       id: tessera-pin
       run: |
@@ -113,7 +111,7 @@ jobs:
       id: tests
       run: |
         set -Eeuo pipefail
-        python tools/ci/gate_run.py --plan hosted-private/plan.json --assignment hosted-private/assignment.json --workers 4 --result hosted-private/result.json --junitxml hosted-private/junit.xml
+        python tools/ci/gate_run.py --plan hosted-private/plan.json --workers 4 --result hosted-private/result.json --junitxml hosted-private/junit.xml
         python - <<'HOSTED_VERDICT'
         import json, os
         from pathlib import Path

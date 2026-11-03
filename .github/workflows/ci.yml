@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
+  issues: read
 jobs:
   tests:
     if: github.event_name != 'pull_request'

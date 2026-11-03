@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlsplit
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.ci import bazel_artifacts as artifacts
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 
 SCHEMA = 'prismaquant.bazel-gate.v1'
@@ -323,13 +324,10 @@ def main(argv=None):
         upload.mkdir(parents=True, exist_ok=True)
         if upload.is_symlink() or list(upload.iterdir()):
             raise GateError('shard upload directory is not empty')
-        spec = importlib.util.spec_from_file_location(
-            'pq_shard_upload', Path(__file__).with_name('bazel_artifacts.py'))
-        artifacts = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(artifacts)
         artifacts.require_scan_python()
         reference = json.loads(os.environ['PQ_BAZEL_SHARD'])
         manifest = load_shard_manifest(reference, fetch_artifact)
+        artifacts.prepare_history(manifest['head'])
         result = execute_shard(manifest)
         result.update({key: reference[key] for key in ('manifest_sha256', 'partition_sha256')})
         keys = ['BUILDBUDDY_API_KEY'] + [name for name in ('GITHUB_TOKEN', 'MERGIFY_TOKEN')

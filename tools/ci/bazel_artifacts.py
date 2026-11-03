@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import subprocess
 import tempfile
@@ -48,6 +49,49 @@ class BuildBuddy:
 def child_environment(environ=None):
     environ = os.environ if environ is None else environ
     return {name: value for name, value in environ.items() if name in CHILD_ENVIRONMENT}
+
+
+
+def prepare_history(expected_head, *, root=None, runner=None):
+    """Hydrate the runner checkout before tests archive historical main inputs."""
+    runner = subprocess.run if runner is None else runner
+    def git(arguments, accepted=(0,)):
+        result = runner(['git', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
+                         *arguments], cwd=root, env=child_environment(),
+                        capture_output=True, text=True, timeout=300, check=False)
+        if result.returncode not in accepted:
+            raise RuntimeError('runner history preparation failed')
+        return result
+    try:
+        if not re.fullmatch('[0-9a-f]{40}', expected_head):
+            raise ValueError('invalid history head')
+        if git(['rev-parse', '--verify', 'HEAD']).stdout.strip() != expected_head:
+            raise ValueError('runner history head mismatch')
+        shallow = git(['rev-parse', '--is-shallow-repository']).stdout.strip()
+        if shallow not in ('true', 'false'):
+            raise ValueError('invalid shallow status')
+        fetch = ['fetch', '--refetch', '--no-filter', '--tags']
+        if shallow == 'true':
+            fetch.append('--unshallow')
+        git([*fetch, 'origin', '+refs/heads/*:refs/remotes/origin/*'])
+        objects = git(['rev-list', '--objects', '--missing=print', '--all', 'HEAD']).stdout.splitlines()
+        if not objects or any(not re.fullmatch('[0-9a-f]{40}', line.split(' ', 1)[0])
+                              for line in objects):
+            raise ValueError('missing history objects')
+        # A verified full refetch can leave stale partial-clone metadata.
+        pack = Path(git(['rev-parse', '--git-path', 'objects/pack']).stdout.strip())
+        if not pack.is_absolute():
+            pack = Path(root or Path.cwd()) / pack
+        for marker in pack.glob('*.promisor'):
+            marker.unlink(missing_ok=True)
+        for name in ('remote.origin.promisor', 'remote.origin.partialclonefilter',
+                     'extensions.partialclone'):
+            git(['config', '--local', '--unset-all', name], accepted=(0, 5))
+        if (git(['rev-parse', '--verify', 'HEAD']).stdout.strip() != expected_head
+                or git(['rev-parse', '--is-shallow-repository']).stdout.strip() != 'false'):
+            raise ValueError('incomplete runner history')
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError('runner history preparation failed; tests refused') from None
 
 
 def require_scan_python(*, runner=None, execute=None):
