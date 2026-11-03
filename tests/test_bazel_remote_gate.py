@@ -428,3 +428,75 @@ def test_manifest_controller_refuses_a_cache_only_postmerge_architecture():
         'bytestream://remote.buildbuddy.io/manifest', json.dumps(document).encode(), clock=lambda: 1)
     assert found['verdict'] == 'fail'
     assert found['architectures']['arm64']['error'] == 'architecture ran no test actions'
+
+
+class PlannedGateClient(ManifestClient):
+    def __init__(self, document, fault=None):
+        super().__init__(document)
+        self.fault, self.plan_calls = fault, []
+        self.manifest_bytes = json.dumps(document).encode()
+
+    def call(self, method, body, **kwargs):
+        if method == 'Run' and 'env' not in body:
+            self.plan_calls.append(method)
+            assert not self.events
+            assert body['commit_sha'] == HEAD
+            return {'invocation_id': 'plan-parent'}
+        if method == 'GetInvocation' and body['selector']['invocation_id'] == 'plan-parent':
+            self.plan_calls.append(method)
+            artifacts = [{'name': remote.RESULT, 'uri': 'bytestream://plan-receipt'},
+                         {'name': 'shard-manifest.json', 'uri': 'bytestream://manifest'}]
+            if self.fault == 'missing':
+                artifacts.pop()
+            if self.fault == 'duplicate':
+                artifacts.append(artifacts[-1])
+            return {'invocation': [{'invocationId': 'plan-parent', 'commitSha': HEAD,
+                'invocationStatus': 'DISCONNECTED_INVOCATION_STATUS'
+                    if self.fault == 'disconnected' else 'COMPLETE_INVOCATION_STATUS',
+                'success': True, 'bazelExitCode': 0, 'artifacts': artifacts}]}
+        if method == 'GetFile' and body['uri'] in (
+                'bytestream://plan-receipt', 'bytestream://manifest'):
+            self.plan_calls.append(method)
+            if body['uri'] == 'bytestream://manifest':
+                return self.manifest_bytes + (b' ' if self.fault == 'digest' else b'')
+            result = {key: self.document[key] for key in (
+                'mode', 'base', 'head', 'selection', 'scopes', 'all_scopes',
+                'reason', 'hosted', 'hosted_arm64')}
+            result.update({'schema': remote.SCHEMA, 'operation': 'plan', 'verdict': 'pass',
+                'manifest_sha256': hashlib.sha256(self.manifest_bytes).hexdigest()})
+            if self.fault in ('base', 'head'):
+                result[self.fault] = 'd' * 40
+            if self.fault == 'mode':
+                result['mode'] = 'main'
+            if self.fault == 'operation':
+                result['operation'] = 'shard'
+            if self.fault == 'scopes':
+                result['scopes'] = ['//foreign']
+            return json.dumps(result).encode()
+        assert self.plan_calls == ['Run', 'GetInvocation', 'GetFile', 'GetFile'], \
+            'test shards started before complete own plan verification'
+        return super().call(method, body, **kwargs)
+
+
+@pytest.mark.parametrize('mode', ['pr', 'main'])
+def test_complete_gate_uses_only_its_own_verified_plan_before_any_shard(mode):
+    document = controller_manifest(mode)
+    client = PlannedGateClient(document)
+    found = remote.run_gate(client, arguments(mode), clock=lambda: 1)
+    assert found['verdict'] == 'pass'
+    assert found['plan_invocation'] == 'plan-parent'
+    assert found['manifest_sha256'] == hashlib.sha256(client.manifest_bytes).hexdigest()
+    assert found['hosted'] == document['hosted']
+    assert found['hosted_arm64'] == document['hosted_arm64']
+    assert set(found['architectures']) == set(document['architectures'])
+    assert not client.active
+
+
+@pytest.mark.parametrize('fault', ['missing', 'duplicate', 'disconnected', 'digest',
+    'base', 'head', 'mode', 'operation', 'scopes'])
+def test_invalid_plan_cannot_start_test_shards_or_retry(fault):
+    client = PlannedGateClient(controller_manifest(), fault)
+    with pytest.raises(remote.RemoteError):
+        remote.run_gate(client, arguments(), clock=lambda: 1)
+    assert client.plan_calls.count('Run') == 1
+    assert client.events == []
