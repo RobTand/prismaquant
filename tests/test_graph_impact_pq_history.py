@@ -177,7 +177,7 @@ def test_baseline_write_keeps_no_edge_identities(repo, capsys):
 def test_committed_baseline_contains_only_limits():
     config = json.loads((ROOT / pq.BASELINE).read_text())
     assert set(config) == {'schema', 'figures', 'tolerances', 'reach_budget', 'test_to_test',
-                           'test_to_test_count', 'test_to_test_strict_by'}
+                           'test_to_test_count', 'test_to_test_strict_by', 'analyzer_sha256'}
     assert not (ROOT / 'tests/fixtures/import_fanout_baseline.json').exists()
 
 

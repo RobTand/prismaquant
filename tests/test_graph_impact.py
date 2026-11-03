@@ -189,6 +189,67 @@ def test_graph_impact_gate(capsys):
         assert graph_impact_pq.main([]) == 0
 
 
+def test_pra_baseline_matches_main_under_the_current_analyzer():
+    from tools.ci import graph_impact_pq as pq
+
+    main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
+    recorded = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
+    expected = {**main['recorded_baseline'],
+                'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
+                'test_to_test_count': len(impact.test_to_test_edges(main)),
+                'analyzer_sha256': pq.file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
+    assert recorded == expected
+
+
+@pytest.mark.parametrize('mutation', [None, 'base fingerprint', 'base source fingerprint',
+    'head fingerprint', 'executing fingerprint', 'old count', 'old SCC',
+    'measured count', 'measured SCC', 'head count', 'head SCC', 'budget', 'tolerance',
+    'already migrated'])
+def test_pra_remeasurement_is_a_one_shot_transition(mutation, monkeypatch):
+    from copy import deepcopy
+    from tools.ci import graph_impact_pq as pq
+
+    current = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
+    previous = deepcopy(current)
+    previous.update(analyzer_sha256=pq.PR_A_ANALYZERS[0], test_to_test_count=875)
+    previous['figures']['scc_max'] = 168
+    before = {'recorded_baseline': previous, 'recorded_analyzer_sha256': pq.PR_A_ANALYZERS[0],
+              'edge_groups': {'test_to_test': [f'a{i} -> b' for i in range(889)]}, 'scc_max': 174}
+    if mutation == 'base fingerprint':
+        previous['analyzer_sha256'] = '0' * 64
+    elif mutation == 'base source fingerprint':
+        before['recorded_analyzer_sha256'] = '0' * 64
+    elif mutation == 'head fingerprint':
+        current['analyzer_sha256'] = '0' * 64
+    elif mutation == 'executing fingerprint':
+        monkeypatch.setattr(pq, 'file_sha256hex', lambda path: '0' * 64)
+    elif mutation == 'old count':
+        previous['test_to_test_count'] = 874
+    elif mutation == 'old SCC':
+        previous['figures']['scc_max'] = 167
+    elif mutation == 'measured count':
+        before['edge_groups']['test_to_test'].pop()
+    elif mutation == 'measured SCC':
+        before['scc_max'] = 173
+    elif mutation == 'head count':
+        current['test_to_test_count'] += 1
+    elif mutation == 'head SCC':
+        current['figures']['scc_max'] += 1
+    elif mutation == 'budget':
+        current['reach_budget'] += 1
+    elif mutation == 'tolerance':
+        current['tolerances']['scc_max'] += 1
+    elif mutation == 'already migrated':
+        previous = deepcopy(current)
+        before.update(recorded_baseline=previous, recorded_analyzer_sha256=pq.PR_A_ANALYZERS[1])
+        current['test_to_test_count'] += 1
+        current['figures']['scc_max'] += 1
+    saved = deepcopy(previous)
+    errors = impact.baseline_errors(current, pq.baseline_history(before, current))
+    assert bool(errors) == (mutation is not None), errors
+    assert previous == saved
+
+
 def test_bazel_diff_reader_keeps_source_labels_and_excludes_manual(tmp_path):
     path = tmp_path / 'deps.json'
     path.write_text(json.dumps({'//t:fast': ['//lib:core'], '//t:manual': ['//other:x'],

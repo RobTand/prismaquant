@@ -36,6 +36,8 @@ ALLOWLIST = Path('tests/fixtures/graph_impact_allowlist.json')
 SOURCE_ROOTS = ('prismaquant/', 'tools/')
 LEGACY_TOLERANCES = {'median_selected_pct': 1.0, 'p90_selected_pct': 1.0,
                      'modules_over_half': 2, 'conftest_source_modules': 0}
+PR_A_ANALYZERS = ('8e949f05f9cddf82f3353d459f6463920671a00c1dd20dee474350610a79a07f',
+                 '9ad443c9fc2cd96d1c35c488c422742d09b746e91745d8011a8c74562e58a3c7')
 
 
 def files_in(root):
@@ -125,14 +127,30 @@ def record(live, previous=None):
     previous = numeric_baseline(previous) if previous is not None else None
     if previous is not None and 'test_to_test_count' not in previous:
         previous = {**previous, 'test_to_test_count': len(core.test_to_test_edges(live))}
-    return numeric_baseline(core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES))
+    return {**numeric_baseline(core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES)),
+            'analyzer_sha256': file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
+
+
+def baseline_history(before, current):
+    """Recognize PR A's one-shot remeasurement, never a new-to-new increase."""
+    previous = numeric_baseline(before['recorded_baseline']) if before and before.get('recorded_baseline') else None
+    if (previous is not None and previous.get('analyzer_sha256') == PR_A_ANALYZERS[0]
+            and before.get('recorded_analyzer_sha256') == PR_A_ANALYZERS[0]
+            and current.get('analyzer_sha256') == PR_A_ANALYZERS[1]
+            and file_sha256hex(ROOT / 'tools/bazel/build_files.py') == PR_A_ANALYZERS[1]
+            and previous.get('test_to_test_count') == 875 and previous['figures']['scc_max'] == 168
+            and len(core.test_to_test_edges(before)) == 889 and before['scc_max'] == 174
+            and current.get('test_to_test_count') == 889 and current['figures']['scc_max'] == 174):
+        # Only these two measurements changed; retain every historical limit.
+        return {**previous, 'figures': {**previous['figures'], 'scc_max': 174},
+                'test_to_test_count': 889, 'analyzer_sha256': PR_A_ANALYZERS[1]}
+    return previous
 
 
 def check(before, after, baseline_path, allowlist_path, *, changed_tests=(), write_baseline=False):
     baseline = numeric_baseline(json.loads(baseline_path.read_text()))
     allowlist = json.loads(allowlist_path.read_text())
-    previous = before.get('recorded_baseline') if before else None
-    previous = numeric_baseline(previous) if previous is not None else None
+    previous = baseline_history(before, baseline)
     base_allowlist = before.get('recorded_allowlist') if before else None
     mode = core.policy_mode(baseline)
     print(core.summary(before, after, baseline['reach_budget'], test_to_test=mode), flush=True)
@@ -217,7 +235,7 @@ def align_base(before, renames):
     result['edge_groups'] = {group: sorted(f'{path(a)} -> {path(b)}' for a, b in
                                          (edge.split(' -> ', 1) for edge in edges))
                              for group, edges in before['edge_groups'].items()}
-    for key in ('recorded_baseline', 'recorded_allowlist'):
+    for key in ('recorded_baseline', 'recorded_allowlist', 'recorded_analyzer_sha256'):
         result[key] = before.get(key)
     return result
 
@@ -242,6 +260,11 @@ def snapshot_at(root, revision, *, temp_dir=None, legacy=True):
                     files.append(member.name)
         live = load_snapshot(tree, files=sorted(files), legacy=legacy)
         live['recorded_baseline'] = json.loads((tree / BASELINE).read_text()) if (tree / BASELINE).exists() else None
+        analyzer = tree / 'tools/bazel/build_files.py'
+        if analyzer.is_file():
+            live['recorded_analyzer_sha256'] = file_sha256hex(analyzer)
+            if live['recorded_baseline'] is not None:
+                live['recorded_baseline'].setdefault('analyzer_sha256', live['recorded_analyzer_sha256'])
         live['recorded_allowlist'] = json.loads((tree / ALLOWLIST).read_text()) if (tree / ALLOWLIST).exists() else None
         return live
 

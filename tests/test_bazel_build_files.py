@@ -462,3 +462,217 @@ def test_long_files_are_sharded_and_given_a_long_timeout_only_when_needed():
     assert slow['shard_count'] == 5 and slow['timeout'] == 'moderate'
     quick = build_files.test_attributes('tests/test_in.py', PLAN, {'tests/test_in.py': 3.0})
     assert 'shard_count' not in quick and quick['timeout'] == 'moderate'
+
+
+def test_a_test_importing_another_test_depends_on_its_library_not_its_test():
+    assert build_files.library_name('tests/test_b.py') == 'test_b_lib'
+    assert build_files.library_name('tests/helper.py') == 'helper'
+    assert build_files.library_name('prismaquant/allocator.py') == 'prismaquant/allocator'
+
+
+def test_whole_directories_compress_to_one_filegroup_and_the_rest_stay_files():
+    files = ['tests/fixtures/a.json', 'tests/fixtures/b.json', 'tests/test_x.py', 'docs/one.md', 'docs/two.md']
+    trees = build_files.Trees(files)
+    labels = trees.labels({'tests/fixtures/a.json', 'tests/fixtures/b.json', 'docs/one.md'}, 'tests')
+    assert labels == ['//:docs/one.md', ':files/fixtures']
+    assert trees.used == {'tests': {'fixtures'}}
+
+
+def test_a_module_depends_on_the_pip_distributions_it_imports(tmp_path):
+    found = evidence(tmp_path, {
+        'tools/bazel/pip_modules.json': json.dumps({'torch': ['torch'], 'yaml': ['pyyaml'], 'PIL': ['pillow']}),
+        'prismaquant/loader.py': 'import yaml\ndef later():\n    import torch.nn\n',
+        'prismaquant/plain.py': 'import json\n',
+        'tests/test_cli.py': 'import subprocess\nsubprocess.run(["python", "-m", "PIL.Image"])\n'})
+    assert found.packages('prismaquant/loader.py') == {'pyyaml', 'torch'}
+    assert found.packages('prismaquant/plain.py') == set()
+    assert found.packages('tests/test_cli.py') == {'pillow'}
+    assert build_files.pip_label('pyyaml') == '@pq_pip//pyyaml'
+    assert build_files.pip_label('tessera-quant') == '@pq_pip//tessera_quant'
+
+
+SMALL = {
+    'pytest.ini': '[pytest]\ntestpaths = tests\n',
+    'tools/ci/gate_durations.json': json.dumps({'files': {'tests/test_slow.py': 100.0}}),
+    'tools/ci/gate_quarantine.json': json.dumps({'entries': [
+        {'target': 'tests/test_held.py', 'issue': 7, 'reason': 'owned elsewhere'},
+        {'target': 'tests/test_slow.py::test_flaky', 'issue': 8, 'reason': 'flaky'}]}),
+    'tools/bazel/pip_modules.json': json.dumps({'yaml': ['pyyaml']}),
+    'tools/bazel/test_inputs.bzl': 'TEST_INPUTS = {}\n',
+    'tests/conftest.py': 'from prismaquant import core\n',
+    'tests/g3job/conftest.py': 'import sys\n',
+    'tests/g3job/test_deep.py': 'def test_deep(): pass\n',
+    'tests/test_slow.py': 'import yaml\nfrom prismaquant import runner\ndef test_flaky(): pass\n',
+    'tests/test_held.py': 'def test_held(): pass\n',
+    'prismaquant/__init__.py': '', 'prismaquant/core.py': '',
+    'prismaquant/runner.py': ("import subprocess, sys\n"
+                              "def run():\n    subprocess.run([sys.executable, '-m', 'prismaquant.child'])\n"),
+    'prismaquant/child.py': 'import yaml\n',
+}
+
+
+def test_generated_packages_hold_libraries_tests_lanes_and_deselects(tmp_path):
+    files = write(tmp_path, SMALL)
+    generated = build_files.generate(tmp_path, files)
+    assert set(generated) == {'', 'tests'}
+    root, tests = generated[''], generated['tests']
+    assert root.startswith(build_files.HEADER) and tests.startswith(build_files.HEADER)
+    assert 'name = "prismaquant/child",' in root and '"@pq_pip//pyyaml"' in root
+    slow = tests[tests.index('name = "test_slow"'):].split('\n)\n', 1)[0]
+    # The conftest above it, the program its closure launches, its deselect, its shards.
+    assert '":conftest"' in slow and '"//:prismaquant/child"' in slow
+    assert '"--deselect=tests/test_slow.py::test_flaky"' in slow
+    assert 'shard_count = 3' in slow
+    deep = tests[tests.index('name = "g3job/test_deep"'):].split('\n)\n', 1)[0]
+    assert '":conftest"' in deep and '":g3job/conftest"' in deep
+    held = tests[tests.index('name = "test_held"'):].split('\n)\n', 1)[0]
+    assert '"gate-issue-7"' in held and '"manual"' in held
+
+
+def test_an_import_cycle_across_packages_refuses_generation(tmp_path):
+    sources = dict(SMALL, **{'prismaquant/core.py': 'import tests.helper\n',
+                             'tests/helper.py': 'from prismaquant import core\n'})
+    with pytest.raises(build_files.GenerationError, match='crosses Bazel packages'):
+        build_files.generate(tmp_path, write(tmp_path, sources))
+
+
+def test_two_targets_with_one_name_refuse_generation():
+    with pytest.raises(build_files.GenerationError, match='x_lib'):
+        build_files.render_package('tests', [('x_lib', 'pq_py_library', {}), ('x_lib', 'pq_py_library', {})])
+
+
+def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
+    (tmp_path / 'tests').mkdir()
+    (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
+    monkeypatch.setattr(build_files, 'generate', lambda root: {'tests': 'new\n', '': 'root\n'})
+    with pytest.raises(SystemExit) as stopped:
+        build_files.main(['--check', '--root', str(tmp_path)])
+    assert 'BUILD.bazel' in str(stopped.value) and 'tests/BUILD.bazel' in str(stopped.value)
+    assert 'tools/bazel/generate.sh' in str(stopped.value)
+    assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
+
+
+def test_committed_build_files_carry_the_generated_header():
+    for path in [ROOT / 'BUILD.bazel', ROOT / 'tests/BUILD.bazel']:
+        assert path.read_text().startswith(build_files.HEADER), path
+
+
+def test_files_a_module_globs_below_its_own_directory_are_library_data(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('from pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'SPECS = sorted(_SPEC_DIR.glob("*.json"))\n'
+                                     'SOURCES = sorted(Path(__file__).parent.glob("*.py"))\n'),
+        'prismaquant/lane_specs/tessera.json': '{}', 'prismaquant/other.py': ''})
+    _, data = found.of('prismaquant/lane_spec.py')
+    assert 'prismaquant/lane_specs/tessera.json' in data
+    # A scan of the module's own directory stays a tree read of direct importers.
+    assert 'prismaquant/other.py' not in data
+
+
+def test_a_module_that_imports_a_computed_name_depends_on_modules_its_data_names(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('import json\nfrom importlib import import_module\nfrom pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'def plugin(name):\n'
+                                     '    spec = json.loads((_SPEC_DIR / f"{name}.json").read_text())\n'
+                                     '    return import_module(spec["plugin"])\n'),
+        'prismaquant/lane_specs/tessera.json': '{"plugin": "prismaquant.tessera_lane"}',
+        'prismaquant/tessera_lane.py': ''})
+    assert 'prismaquant/tessera_lane.py' in found.of('prismaquant/lane_spec.py')[0]
+
+
+def test_a_test_that_loads_a_module_by_path_depends_on_its_library(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_audit.py': ('import importlib.util\nfrom pathlib import Path\n'
+                                'FIXTURE = Path.cwd() / "tests" / "test_fixture.py"\n'
+                                'spec = importlib.util.spec_from_file_location("fixture", FIXTURE)\n'),
+        'tests/test_fixture.py': 'from test_helper import X\n', 'tests/test_helper.py': 'X = 1\n'})
+    assert 'tests/test_fixture.py' in found.of('tests/test_audit.py')[0]
+    assert 'tests/test_helper.py' in build_files.Graph(found).test_files('tests/test_audit.py')
+
+
+def test_a_directory_a_test_names_brings_its_files_and_a_top_level_one_does_not(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_copy.py': ('import shutil\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n'
+                               'SOURCE = ROOT / "tests" / "fixture-data" / "figure"\n'
+                               'TOP = ROOT / "docs"\n'),
+        'tests/fixture-data/figure/a.json': '{}', 'tests/fixture-data/figure/b.json': '{}', 'docs/x.md': ''})
+    data = found.of('tests/test_copy.py')[1]
+    assert {'tests/fixture-data/figure/a.json', 'tests/fixture-data/figure/b.json'} <= data
+    assert 'docs/x.md' not in data
+
+
+def test_a_py_path_inside_a_longer_string_is_a_reference(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_snippet.py': ("import subprocess, sys\n"
+                                  "CODE = \"import runpy; runpy.run_path(ROOT + '/experiments/manifests.py')\"\n"
+                                  "subprocess.run([sys.executable, '-c', CODE])\n"),
+        'experiments/manifests.py': 'from prismaquant import core\n', 'prismaquant/core.py': ''})
+    assert 'experiments/manifests.py' in found.of('tests/test_snippet.py')[0]
+
+
+def test_entry_points_a_test_runs_from_its_own_data_table_are_its_inputs(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_entrypoints.py': ('import json, subprocess, sys\nfrom pathlib import Path\n'
+                                      'ROWS = json.loads((Path(__file__).parent / "fixtures" / "rows.json").read_text())\n'
+                                      'def test_help():\n'
+                                      '    for row in ROWS:\n'
+                                      '        subprocess.run([sys.executable, *row["probe"]])\n'),
+        'tests/fixtures/rows.json': '[{"file": "tools/capture.py", "probe": ["-m", "tools.capture", "--help"]}]',
+        'tools/__init__.py': '', 'tools/capture.py': 'from prismaquant import replay\n', 'prismaquant/replay.py': ''})
+    assert 'tools/capture.py' in found.test_modules('tests/test_entrypoints.py')
+    assert 'prismaquant/replay.py' in build_files.Graph(found).test_files('tests/test_entrypoints.py')
+
+
+def test_an_entrypoint_string_with_an_attribute_names_its_module(tmp_path):
+    found = evidence(tmp_path, {
+        'prismaquant/lane_spec.py': ('import json\nfrom importlib import import_module\nfrom pathlib import Path\n'
+                                     '_SPEC_DIR = Path(__file__).resolve().parent / "lane_specs"\n'
+                                     'def consumer(name):\n'
+                                     '    spec = json.loads((_SPEC_DIR / f"{name}.json").read_text())\n'
+                                     '    return import_module(spec["entrypoint"].split(":")[0])\n'),
+        'prismaquant/lane_specs/ct.json': '{"entrypoint": "prismaquant.validate_kl:main"}',
+        'prismaquant/validate_kl.py': ''})
+    assert 'prismaquant/validate_kl.py' in found.of('prismaquant/lane_spec.py')[0]
+
+
+def test_modules_a_test_inputs_entry_names_become_the_tests_dependencies(tmp_path):
+    sources = dict(SMALL, **{
+        'tools/bazel/test_inputs.bzl': ('TEST_INPUTS = {\n    "//tests:test_held": struct(\n'
+                                        '        modules = ["prismaquant/child.py"],\n'
+                                        '        reason = "it runs prismaquant.child from a computed name.",\n    ),\n}\n')})
+    generated = build_files.generate(tmp_path, write(tmp_path, sources))['tests']
+    held = generated[generated.index('name = "test_held"'):].split('\n)\n', 1)[0]
+    assert '"//:prismaquant/child"' in held
+    sources['tools/bazel/test_inputs.bzl'] = sources['tools/bazel/test_inputs.bzl'].replace('child.py', 'gone.py')
+    with pytest.raises(build_files.GenerationError, match='prismaquant/gone.py'):
+        build_files.generate(tmp_path, write(tmp_path, sources))
+
+
+def test_a_deselected_node_with_a_space_stays_one_argument():
+    plan = {'selected': [{'path': 'tests/test_in.py'}], 'deferred': [],
+            'deselect': ["tests/test_in.py::test_x[a b]"]}
+    args = build_files.test_attributes('tests/test_in.py', plan, {})['args']
+    assert build_files.shlex.split(args[0]) == ["--deselect=tests/test_in.py::test_x[a b]"]
+
+
+def test_a_package_that_redirects_its_path_serves_that_directorys_modules(tmp_path):
+    found = evidence(tmp_path, {
+        'tools/g3job/g3_policy/__init__.py': ('from pathlib import Path\n'
+                                              '__path__ = [str(Path(__file__).resolve().parents[3] / "prismaquant")]\n'),
+        'tests/g3job/test_a.py': 'from g3_policy.staged_lease import ReadsetUnbound\nfrom g3_policy import exl3\n',
+        'prismaquant/staged_lease.py': '', 'prismaquant/exl3.py': ''})
+    assert {'prismaquant/staged_lease.py', 'prismaquant/exl3.py'} <= found.of('tests/g3job/test_a.py')[0]
+
+
+def test_exact_names_still_count_beside_a_whole_repository_read(tmp_path):
+    found = evidence(tmp_path, {
+        'tests/test_golden.py': ('import importlib.util\nfrom pathlib import Path\n'
+                                 'REPOSITORY = Path(__file__).resolve().parents[1]\n'
+                                 'def _load(name, path):\n'
+                                 '    return importlib.util.spec_from_file_location(name, REPOSITORY / path)\n'
+                                 'WIKITEXT = _load("wikitext", "tools/wikitext_inputs.py")\n'),
+        'tools/wikitext_inputs.py': 'import torch\n'})
+    modules, data = found.of('tests/test_golden.py')
+    assert 'tools/wikitext_inputs.py' in modules
