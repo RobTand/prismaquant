@@ -1,0 +1,50 @@
+{
+  "architectures": {
+    "amd64": {
+      "population_sha256": "b0bf950e6b430d4fff14fdb0c0282b68882fce7c1ca2e2bd2b7e19bec0e82a19",
+      "shards": [
+        {
+          "path": "tools/bazel/shards/amd64-0.txt",
+          "sha256": "fd6480066602c4b70e3d0e445c831f11f01ed4e0818dce321ed94a0a9d759c12",
+          "targets": 1922
+        },
+        {
+          "path": "tools/bazel/shards/amd64-1.txt",
+          "sha256": "542607ed5e46c536c2e21fd3136ca875cc92b3a6cf146e1ae818337604e105ba",
+          "targets": 1921
+        }
+      ],
+      "targets": 3843,
+      "union_checked": true
+    },
+    "arm64": {
+      "population_sha256": "4b2303d82f1d1e815422a87c99c1102bddbaae83e105e9a4f4b6f6d73c293430",
+      "shards": [
+        {
+          "path": "tools/bazel/shards/arm64-0.txt",
+          "sha256": "4528972f43ad66e4aa54ba4b2f7040a8d0e04c942ad02888be36c97b05205cd9",
+          "targets": 953
+        },
+        {
+          "path": "tools/bazel/shards/arm64-1.txt",
+          "sha256": "056812f366451a3320731b5e6544aaec1f74a0b709dbfe08a94f2d6b30668cf8",
+          "targets": 953
+        },
+        {
+          "path": "tools/bazel/shards/arm64-2.txt",
+          "sha256": "20276ba8a2376edc84d3e41468eeda0f54760ed0b83471b1fdd8f61063f28f42",
+          "targets": 953
+        },
+        {
+          "path": "tools/bazel/shards/arm64-3.txt",
+          "sha256": "4a90edf7ba8d5b7e6c5d0f995dad0f64fd59cdd6638f1173dab832a584abdaa2",
+          "targets": 952
+        }
+      ],
+      "targets": 3811,
+      "union_checked": true
+    }
+  },
+  "source_head": "a5b7a82967e9f04801a85871208e4a0fe49d1817",
+  "source_manifest_sha256": "84276c42ab65be7a2c4eb8e478f0223d025b06502ed4accf2cef3109742370d2"
+}
