@@ -193,7 +193,7 @@ def test_pra_baseline_matches_main_under_the_current_analyzer():
     from tools.ci import graph_impact_pq as pq
 
     main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
-    recorded = json.loads((ROOT / pq.BASELINE).read_text())
+    recorded = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
     expected = {**main['recorded_baseline'],
                 'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
                 'test_to_test_count': len(impact.test_to_test_edges(main)),
@@ -209,7 +209,7 @@ def test_pra_remeasurement_is_a_one_shot_transition(mutation, monkeypatch):
     from copy import deepcopy
     from tools.ci import graph_impact_pq as pq
 
-    current = json.loads((ROOT / pq.BASELINE).read_text())
+    current = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
     previous = deepcopy(current)
     previous.update(analyzer_sha256=pq.PR_A_ANALYZERS[0], test_to_test_count=875)
     previous['figures']['scc_max'] = 168
