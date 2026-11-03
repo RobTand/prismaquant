@@ -24,6 +24,7 @@ GATE_INPUTS = {
     '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
     'MODULE.bazel', 'MODULE.bazel.lock', 'tools/ci/bazel_selection.py',
     'tools/ci/bazel_gate.py', 'tools/ci/remote_gate.py',
+    'tools/ci/bazel_artifacts.py', 'tools/ci/check_no_secret_leak.py',
 }
 BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0/bazel-diff_deploy.jar'
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
