@@ -9,6 +9,7 @@ import ast
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -33,6 +34,112 @@ def evidence(tmp_path, sources, **options):
 
 def graph(tmp_path, sources, **options):
     return build_files.Graph(evidence(tmp_path, sources, **options))
+
+
+def git(root, *args):
+    return subprocess.run(['git', *args], cwd=root, capture_output=True, check=True).stdout
+
+
+@pytest.fixture
+def indexed_repository(tmp_path):
+    root = tmp_path / 'repo'
+    root.mkdir()
+    git(root, 'init', '-q')
+    git(root, 'config', 'user.email', 'test@example.invalid')
+    git(root, 'config', 'user.name', 'Test')
+    write(root, {
+        '.gitignore': 'ignored-root.json\n',
+        'tools/__init__.py': '',
+        'tools/scan.py': ("from pathlib import Path\n"
+                          "ROOT = Path(__file__).resolve().parents[1]\n"
+                          "TABLE = ROOT / 'fixture.json'\n"
+                          "FILES = sorted(ROOT.rglob('*'))\n"),
+        'fixture.json': '{"tracked": true}\n',
+        'tests/test_scan.py': 'from tools import scan\n',
+        'tools/ci/gate_durations.json': '{"files": {}}\n',
+        'tools/ci/gate_quarantine.json': '{}\n',
+    })
+    git(root, 'add', '.')
+    git(root, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixed graph inputs')
+    return root
+
+
+def generate_graph_json(root, output):
+    # Exercise the real CLI entry point, including discovery and hosted_plan.
+    assert build_files.main(['--root', str(root), '--graph-json', str(output)]) == 0
+    return output.read_bytes()
+
+
+@pytest.mark.parametrize('name', ['.pbrun-closure.x.json', 'pbrun_result.x.txt'])
+def test_untracked_root_files_leave_the_graph_json_byte_identical(indexed_repository, tmp_path, name):
+    root = indexed_repository
+    output = tmp_path / 'graph.json'  # Not an input to the miniature repository.
+    before = generate_graph_json(root, output)
+    record = json.loads(before)
+    assert 'fixture.json' in record['data']['tools/scan.py']
+    assert 'fixture.json' in record['tests']['tests/test_scan.py']['own_data']
+    write(root, {name: 'unrelated admission bookkeeping\n'})
+    assert git(root, 'ls-files', '--others', '--exclude-standard', '-z') == name.encode() + b'\0'
+    assert generate_graph_json(root, output) == before
+
+
+def test_repository_files_lists_the_index_and_never_untracked_files(indexed_repository):
+    root = indexed_repository
+    committed = set(build_files.repository_files(root))
+    added = {
+        'tools/staged.py': 'VALUE = 1\n',
+        'space and\nnewline.txt': 'NUL-delimited Git paths survive intact\n',
+        'BUILD.bazel': '# excluded\n',
+        'nested/BUILD.bazel': '# also excluded\n',
+        'bazel-output/file.txt': 'excluded prefix\n',
+        'deleted.txt': 'tracked, but absent from the worktree\n',
+        'directory.txt': 'tracked, but replaced by a directory\n',
+    }
+    write(root, added)
+    (root / 'link.txt').symlink_to('fixture.json')
+    git(root, 'add', *added, 'link.txt')
+    (root / 'deleted.txt').unlink()
+    (root / 'directory.txt').unlink()
+    (root / 'directory.txt').mkdir()
+    write(root, {'untracked.py': '', 'untracked.json': '{}', 'untracked.txt': ''})
+    assert set(build_files.repository_files(root)) == committed | {'tools/staged.py', 'space and\nnewline.txt'}
+
+
+def test_tracked_fixture_and_staged_module_participate_in_the_graph(indexed_repository, tmp_path):
+    root = indexed_repository
+    write(root, {'tools/staged.py': 'VALUE = 1\n',
+                 'tests/test_scan.py': 'from tools import scan, staged\n'})
+    git(root, 'add', 'tools/staged.py')
+    assert git(root, 'ls-tree', '-r', '--name-only', 'HEAD', 'tools/staged.py') == b''
+    assert git(root, 'diff', '--cached', '--name-only') == b'tools/staged.py\n'
+    record = json.loads(generate_graph_json(root, tmp_path / 'graph.json'))
+    assert 'tools/staged.py' in record['modules']
+    assert 'tools/staged.py' in record['edges']['tests/test_scan.py']
+    discovered = build_files.Graph(build_files.Evidence(root, build_files.repository_files(root)))
+    assert 'tools/staged.py' in discovered.test_files('tests/test_scan.py')
+    assert 'fixture.json' in record['data']['tools/scan.py']
+
+
+def test_ignored_root_file_leaves_the_graph_json_byte_identical(indexed_repository, tmp_path):
+    root = indexed_repository
+    output = tmp_path / 'graph.json'
+    before = generate_graph_json(root, output)
+    write(root, {'ignored-root.json': '{"ignored": true}\n'})
+    assert git(root, 'check-ignore', 'ignored-root.json') == b'ignored-root.json\n'
+    assert generate_graph_json(root, output) == before
+
+
+def test_deleted_tracked_fixture_is_not_listed_and_generation_succeeds(indexed_repository, tmp_path):
+    root = indexed_repository
+    output = tmp_path / 'graph.json'
+    before = json.loads(generate_graph_json(root, output))
+    assert 'fixture.json' in before['data']['tools/scan.py']
+    (root / 'fixture.json').unlink()
+    assert git(root, 'ls-files', '--error-unmatch', 'fixture.json') == b'fixture.json\n'
+    assert 'fixture.json' not in build_files.repository_files(root)
+    after = json.loads(generate_graph_json(root, output))
+    assert 'fixture.json' not in after['data'].get('tools/scan.py', [])
+    assert 'fixture.json' not in after['tests']['tests/test_scan.py']['own_data']
 
 
 def test_an_import_cycle_becomes_one_strongly_connected_component():
