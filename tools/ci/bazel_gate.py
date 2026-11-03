@@ -256,13 +256,15 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
     patterns, bep = private / 'targets.txt', private / 'events.jsonl'
     patterns.write_text('\n'.join(targets) + '\n')
     config = 'remote' if manifest['architecture'] == 'amd64' else 'remote-arm64'
-    command = ['bazel', 'test', '--config=' + config, '--config=ci', '--jobs=16',
+    command = ['bazel', 'test' if tests else 'build', '--config=' + config, '--config=ci', '--jobs=16',
                '--spawn_strategy=remote,local', '--remote_local_fallback=false',
-               '--keep_going', '--flaky_test_attempts=1', '--zip_undeclared_test_outputs',
+               '--keep_going',
                '--build_event_json_file=' + str(bep),
                '--target_pattern_file=' + str(patterns),
                '--build_metadata=COMMIT_SHA=' + manifest['head'],
                '--build_metadata=BRANCH_NAME=' + manifest['branch']]
+    if tests:
+        command += ['--flaky_test_attempts=1', '--zip_undeclared_test_outputs']
     if manifest['require_execution']:
         command += ['--noremote_accept_cached', '--nocache_test_results']
     with (private / 'bazel.log').open('w') as diagnostic:
@@ -275,7 +277,9 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         raise GateError('shard left no private build-event evidence') from None
     inventory = inventory_evidence(text, fetch or fetch_artifact)
     result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
-                                 require_execution=manifest['require_execution'])
+                                 require_execution=manifest['require_execution'] and bool(tests))
+    if not tests and result['verdict'] == 'skipped':
+        result['verdict'] = 'pass'
     return {'schema': SCHEMA, 'mode': manifest['mode'], 'head': manifest['head'],
             'base': manifest['base'], 'architecture': manifest['architecture'],
             'index': manifest['index'], 'targets': targets, 'run': run,

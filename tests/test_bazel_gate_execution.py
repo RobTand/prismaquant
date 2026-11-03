@@ -427,6 +427,8 @@ def test_immutable_manifest_loading_checks_digest_source_union_and_partition(fau
 
 @pytest.mark.parametrize('scan_fault', [None, 'missing_key', 'leak', 'unscannable'])
 def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_fault):
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': 'main',
         'base': 'b' * 40, 'head': 'a' * 40, 'architectures': {'amd64': {
             'population': [LABEL], 'tests': [LABEL], 'shards': [[LABEL]]}}}
@@ -481,6 +483,8 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
 ])
 def test_build_only_partitions_survive_the_cli_and_controller_handoff(
         tmp_path, monkeypatch, mode, include_test, build_exit, passes):
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
     from argparse import Namespace
     from types import SimpleNamespace
     from tools.ci import remote_gate

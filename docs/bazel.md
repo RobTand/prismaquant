@@ -167,3 +167,11 @@ Before a shard starts, the Remote Bazel runner hydrates full Git history for
 checkout-dependent tests, including the archived-main graph baseline contract.
 Git children receive the same allowlisted environment without credentials.
 Missing history or a source-head mismatch refuses the shard before tests run.
+
+The test population retains Python 3.12. Scanner unit tests isolate runtime
+admission; CLI tests isolate interpreter bootstrap. Each trusted upload step
+runs tests/bazel_scan_runtime.py explicitly with Python 3.14 to prove native
+zstd decoding and JSON publication. No runtime-dependent test is skipped.
+Build-only partitions invoke bazel build and publish a successful shard record
+on build success. Post-merge still rejects zero test executions across an
+entire architecture, while a library-only partition may execute zero tests.

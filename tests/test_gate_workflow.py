@@ -93,6 +93,7 @@ def test_uploads_have_python314_scan_and_no_fork_uploads():
                     assert "steps.scan.outcome == 'success'" in step['if']
                     scan=next(s for s in steps[:index] if s.get('id')=='scan')
                     assert 'scan_upload' in scan['run'] or 'publish_json' in scan['run']
+                    assert 'python tests/bazel_scan_runtime.py' in scan['run']
                     assert 'BUILDBUDDY_API_KEY' in scan['env']
                     assert 'MERGIFY_TOKEN' in scan['env']
                     py=next(s for s in steps[:index] if s.get('id')=='scan-python')

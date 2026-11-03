@@ -505,6 +505,8 @@ def test_invalid_plan_cannot_start_test_shards_or_retry(fault):
 @pytest.mark.parametrize('fault', [None, 'disconnected', 'leak', 'unscannable'])
 def test_controller_cli_publishes_scanned_results_and_scopes_only_after_own_proof(
         tmp_path, monkeypatch, fault):
+    monkeypatch.setattr(remote.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(remote.artifacts, 'scan_runtime_available', lambda: True)
     upload = tmp_path / 'upload'
     output = tmp_path / 'github-output'
     summary = tmp_path / 'summary'

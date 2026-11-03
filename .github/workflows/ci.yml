@@ -75,6 +75,7 @@ jobs:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
       run: |
+        python tests/bazel_scan_runtime.py
         python - <<'SCAN_JSON'
         from pathlib import Path
         from tools.ci.bazel_artifacts import scan_upload

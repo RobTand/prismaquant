@@ -506,6 +506,8 @@ def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
 @pytest.mark.parametrize('fault', [None, 'leak', 'unscannable'])
 def test_remote_plan_cli_publishes_only_scanned_manifest_and_matching_receipt(
         tmp_path, monkeypatch, fault):
+    monkeypatch.setattr(selection.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(selection.artifacts, 'scan_runtime_available', lambda: True)
     upload = tmp_path / 'upload'
     monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'plan-test-secret-sentinel')

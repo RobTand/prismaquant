@@ -118,6 +118,11 @@ def require_scan_python(*, runner=None, execute=None):
         raise RuntimeError('Python 3.14 scanner bootstrap failed; upload refused') from None
 
 
+def scan_runtime_available():
+    """The upload boundary requires the real 3.14 stdlib decoder."""
+    return sys.version_info[:2] == (3, 14) and scanner.zstd is not None
+
+
 def scan_upload(directory, required):
     """The credential stays in this process; the scanner never receives its value in argv."""
     missing = [name for name in required if not os.environ.get(name)]
@@ -129,7 +134,7 @@ def scan_upload(directory, required):
         print('Upload directory or required scan keys unavailable; upload refused')
         return 75
     # The caller publishes JSON receipts only. All raw diagnostics stay private.
-    if sys.version_info[:2] != (3, 14) or scanner.zstd is None:
+    if not scan_runtime_available():
         print('Python 3.14 with compression.zstd required; upload refused')
         return 75
     arguments = [word for name in required for word in ('--env', name)]
