@@ -69,8 +69,8 @@ RESUME_ARGV = [*FRESH_ARGV, "--resume"]
 
 
 @pytest.fixture()
-def scratch(request):
-    root = ROOT / ".replay-frontier-scratch" / request.node.name
+def scratch(request, tmp_path):
+    root = tmp_path / request.node.name
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True)
