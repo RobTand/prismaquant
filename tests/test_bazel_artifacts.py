@@ -114,7 +114,7 @@ def test_scanner_core_remains_byte_identical_to_pr_a():
 
 
 @pytest.mark.parametrize('machine', ['x86_64', 'aarch64'])
-def test_scanner_bootstrap_uses_verified_python_without_pip(tmp_path, monkeypatch, machine):
+def test_scanner_bootstrap_uses_verified_python_without_pip(tmp_path, monkeypatch, capsys, machine):
     import io
     import platform
     import tarfile
@@ -142,6 +142,7 @@ def test_scanner_bootstrap_uses_verified_python_without_pip(tmp_path, monkeypatc
         pytest.fail('runtime bootstrap must not launch a pip or installer child')
     monkeypatch.setattr(artifacts.subprocess, 'run', forbidden_child)
     def replace_interpreter(executable, argv):
+        assert 'Scanner runtime verified: pinned Python 3.14.0' in capsys.readouterr().out
         assert Path(executable).read_bytes() == content
         assert argv == [executable, *artifacts.sys.argv]
         assert os.environ['BUILDBUDDY_API_KEY'] == 'bootstrap-private-sentinel'

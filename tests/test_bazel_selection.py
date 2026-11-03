@@ -104,6 +104,36 @@ def test_query_population_preserves_build_rules_and_architecture_lanes():
         assert population['wheel_repositories'] == ['rules_python++pip+pq_pip_numpy']
 
 
+@pytest.mark.parametrize('architecture', ['amd64', 'arm64'])
+def test_query_population_accepts_protobuf_json_omitted_empty_tag_values(architecture):
+    rows = [
+        {'rule': {'name': '//:core', 'ruleClass': 'py_library',
+                  'attribute': [{'name': 'tags', 'type': 'STRING_LIST'}]}},
+        {'rule': {'name': '//tests:cpu', 'ruleClass': 'py_test',
+                  'attribute': [{'name': 'tags', 'type': 'STRING_LIST'}]}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                  'ruleClass': 'py_library'}},
+    ]
+    population = selection.query_population(rows, architecture)
+    assert population['targets'] == ['//:core', '//tests:cpu']
+    assert population['tests'] == ['//tests:cpu']
+    assert population['hosted'] == [] and population['hosted_arm64'] == []
+
+
+@pytest.mark.parametrize('phase', ['command', 'json', 'population'])
+def test_revision_query_refusal_names_check_without_private_diagnostics(tmp_path, capsys, phase):
+    from types import SimpleNamespace
+    def query(command, **kwargs):
+        return SimpleNamespace(returncode=1 if phase == 'command' else 0,
+            stdout='private-path-token-query' if phase == 'json' else '{}',
+            stderr='private-path-token-query')
+    with pytest.raises(selection.SelectionError):
+        selection.query_revision(tmp_path, tmp_path / 'private', 'amd64', runner=query)
+    output = capsys.readouterr()
+    assert 'Revision query refused at ' + phase in output.err
+    assert 'private-path-token-query' not in output.err + output.out
+
+
 @pytest.mark.parametrize('rows', [
     [], [{'rule': {'name': '//tests:missing_kind'}}],
     [{'rule': {'name': '//tests:bad', 'ruleClass': 'py_test',
