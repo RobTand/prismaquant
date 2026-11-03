@@ -194,7 +194,7 @@ NONHERMETIC = {
     ),
     "//tests:test_pilot_verified_result_1293": struct(
         tags = ["hosted"],
-        reason = "needs os.pidfd_open/P_PIDFD/signal.pidfd_send_signal, absent from python-build-standalone 3.12 (rules_python 2.4.6)",
+        reason = "needs os.pidfd_open/P_PIDFD/signal.pidfd_send_signal, absent from python-build-standalone 3.12 (rules_python 2.4.6) on amd64; arm64 standalone has pidfd and is excluded only for table simplicity. Hosted setup-python retains amd64 coverage.",
     ),
     "//tests:test_prismasnap_checkpoint": struct(
         tags = ["runner"],
