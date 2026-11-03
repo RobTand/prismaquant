@@ -120,3 +120,59 @@ def test_every_upload_is_immediately_guarded_with_step_scoped_secrets():
                 for path in upload['with']['path'].splitlines():
                     assert path in arguments
                 assert arguments.count('--env') == 2
+
+
+def _reusable_secret_workflow(*, target='./.github/workflows/bazel-hosted.yml',
+                              binding='${{ secrets.BUILDBUDDY_API_KEY }}',
+                              key='BUILDBUDDY_API_KEY'):
+    return (f'jobs:\n  call:\n    uses: {target}\n'
+            f'    secrets:\n      {key}: "{binding}"\n')
+
+
+def test_exact_reusable_workflow_secret_binding_is_sanctioned():
+    assert not violations('.github/workflows/gate.yml', _reusable_secret_workflow())
+
+
+@pytest.mark.parametrize('target', [
+    './.github/workflows/unreviewed.yml',
+    'other/repo/.github/workflows/bazel-hosted.yml@main',
+])
+def test_reusable_secret_binding_requires_the_reviewed_local_workflow(target):
+    assert violations('.github/workflows/gate.yml', _reusable_secret_workflow(target=target))
+
+
+@pytest.mark.parametrize('key,binding', [
+    ('OTHER_KEY', '${{ secrets.BUILDBUDDY_API_KEY }}'),
+    ('BUILDBUDDY_API_KEY', 'prefix ${{ secrets.BUILDBUDDY_API_KEY }}'),
+])
+def test_reusable_secret_binding_is_an_exact_same_name_reference(key, binding):
+    assert violations('.github/workflows/gate.yml',
+                      _reusable_secret_workflow(key=key, binding=binding))
+
+
+def test_a_reusable_binding_cannot_also_transport_the_secret_on_argv():
+    text = _reusable_secret_workflow() + (
+        '    steps:\n      - run: echo "${{ secrets.BUILDBUDDY_API_KEY }}"\n')
+    assert violations('.github/workflows/gate.yml', text)
+
+
+@pytest.mark.parametrize('location', ['run', 'with'])
+def test_a_step_secret_yaml_alias_cannot_escape_to_a_command_or_action_input(location):
+    text = ('jobs:\n  test:\n    steps:\n      - env:\n'
+            '          BUILDBUDDY_API_KEY: &key "${{ secrets.BUILDBUDDY_API_KEY }}"\n')
+    text += '        run: *key\n' if location == 'run' else '        with: {key: *key}\n'
+    assert violations('.github/workflows/example.yml', text)
+
+
+def test_a_reusable_secret_yaml_alias_cannot_escape_to_with():
+    text = ('jobs:\n  call:\n    uses: ./.github/workflows/bazel-hosted.yml\n'
+            '    secrets:\n'
+            '      BUILDBUDDY_API_KEY: &key "${{ secrets.BUILDBUDDY_API_KEY }}"\n'
+            '    with: {command: *key}\n')
+    assert violations('.github/workflows/gate.yml', text)
+
+
+def test_reusable_workflows_cannot_inherit_undeclared_secrets():
+    text = ('jobs:\n  call:\n    uses: ./.github/workflows/bazel-hosted.yml\n'
+            '    secrets: inherit\n')
+    assert violations('.github/workflows/gate.yml', text)
