@@ -156,8 +156,45 @@ def query_population(rows, architecture):
 
 def impacted_targets_command(java, jar, base_hashes, head_hashes, output):
     return [str(java), '-jar', str(jar), 'get-impacted-targets',
+            '--targetType', 'Rule',
             '--startingHashes', str(base_hashes), '--finalHashes', str(head_hashes),
             '--output', str(output)]
+
+
+def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
+                   java, jar, runner=subprocess.run):
+    """Keep a queried head population even when base hashes or impact fail."""
+    try:
+        population = head_graph['population']
+        tests, used_sources = set(population['tests']), set(population['used_sources'])
+        if not tests:
+            raise ValueError('empty head test population')
+    except (KeyError, TypeError, ValueError):
+        raise SelectionError('queried head population is unavailable') from None
+    if fallback_files(changed | deleted):
+        return gate_decision(changed, deleted, set(), used_sources, tests)
+    try:
+        if base_graph is None:
+            raise SelectionError('base graph is unavailable')
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        output = directory / 'impacted.txt'
+        # Stale evidence cannot turn a missing output into an empty selection.
+        output.unlink(missing_ok=True)
+        result = runner(impacted_targets_command(java, jar, base_graph['hashes'],
+            head_graph['hashes'], output), cwd=directory, env=child_environment(),
+            text=True, capture_output=True, check=False)
+        if result.returncode:
+            raise SelectionError('graph comparison failed')
+        labels = output.read_text().split()
+        if any(not re.fullmatch(r'@{0,2}[^\s/]*//[^:\s]*:[^:\s]+', label)
+               for label in labels):
+            raise SelectionError('graph comparison returned invalid labels')
+        impacted = {label[1:] if label.startswith('@//') else label for label in labels}
+    except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError, SelectionError):
+        return gate_decision(changed, deleted, set(), used_sources, tests,
+                             detection_error='graph comparison unavailable')
+    return gate_decision(changed, deleted, impacted, used_sources, tests)
 
 
 def collect_revision(root, directory, architecture, *, java, jar, bazel='bazel',
