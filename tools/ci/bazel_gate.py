@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 import importlib.util
 import io
 import json
@@ -124,6 +125,33 @@ def architecture_result(population, run, *, budget_warnings=(), require_executio
             'bazel_exit_code': run['returncode'], 'executed_test_actions': executed,
             'budget_warnings': list(budget_warnings),
             'error': 'architecture ran no test actions' if missing_execution else None}
+
+
+def load_shard_manifest(reference, fetch):
+    """Resolve a compact immutable reference before admitting any Bazel command."""
+    try:
+        raw = fetch(reference['manifest_uri'])
+        if hashlib.sha256(raw).hexdigest() != reference['manifest_sha256']:
+            raise GateError('shard manifest digest does not match its reference')
+        document = json.loads(raw)
+        if (document['schema'] != 'prismaquant.bazel-shards.v1'
+                or any(document[key] != reference[key] for key in ('mode', 'base', 'head'))):
+            raise GateError('shard manifest has the wrong source or schema')
+        architecture = document['architectures'][reference['architecture']]
+        population, tests, shards = (architecture[key] for key in ('population', 'tests', 'shards'))
+        if (len(population) != len(set(population)) or not set(tests) <= set(population)):
+            raise GateError('shard manifest has an invalid build or test population')
+        check_partition(population, shards)
+        index = reference['index']
+        if type(index) is not int or not 0 <= index < len(shards):
+            raise GateError('shard manifest has no requested partition')
+        targets = shards[index]
+        digest = hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
+        if digest != reference['partition_sha256']:
+            raise GateError('shard manifest partition digest does not match')
+        return {**reference, 'targets': targets, 'tests': sorted(set(targets) & set(tests))}
+    except (ValueError, KeyError, TypeError, AttributeError, OSError):
+        raise GateError('shard manifest is malformed or unavailable') from None
 
 
 def inventory_evidence(text, fetch):
