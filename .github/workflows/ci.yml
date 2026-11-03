@@ -1,279 +1,180 @@
-# PrismaQuant CI — full hosted suite on main and manual runs; PR import and boundary checks.
-#
-# WHY THIS EXISTS: five substantial pull requests (#13-#17) sat open for eleven
-# days with nothing to run them, while `main` itself carried three failing
-# doc-staleness tests that the project had deliberately written to catch exactly
-# that kind of drift. Nobody was ignoring a red signal — there was no signal.
-#
-# WHAT IT CAN AND CANNOT COVER. Re-measured 2026-09-05 ON THE RUNNER, which is
-# the number that matters here: the suite is ~4840 tests (4698 passed, 136
-# skipped, 3 xfailed at `main` 8a77b0ad) and the `tests` JOB — install plus
-# suite, which is what `timeout-minutes` bounds — took 15 to 29.5 min across
-# the ten completed runs of 2026-09-05 (job 33973973959 finished at 29m30s
-# against the then 30 min limit; hosted-runner speed is the variable, not
-# the suite). The previous note here, measured 2026-08-03, said ~2762 tests
-# in 10.5-14 min with a ~2x margin and that a further doubling of the suite
-# "should raise `timeout-minutes` in the same PR"; the suite has since grown
-# 1.75x, so this is that PR: 60 min gives ~2x on the worst observed job. A
-# job that reaches the limit is a timeout, not a slow build — re-measure and
-# raise it here again rather than retrying. Re-measured 2026-10-28 from the
-# main runs of 2026-10-22 to 2026-10-26: ~22,500 tests, pytest took 29 to 56
-# min and the worst job 58 min against that 60 min limit. The job now also
-# historically gated pull requests in the Mergify queue (#3140), where a
-# timeout dequeued the pull request. The post-merge suite retains that 90 min
-# limit. PRs and batches now use the separate gate workflow. The skips are the CUDA-gated
-# tests. GitHub-hosted runners have no GPU, so
-# kernel numerics, real-checkpoint streaming and anything touching a served
-# artifact remain a manual gate on the Spark — this is a correctness net for
-# the allocator/solver/footprint/profile logic, which is where the PRs live and
-# where a silent regression is hardest to notice.
-#
-# Action pins are immutable commit SHAs: a re-pointable ref
-# is a supply-chain surface, and CI runs on every contributor's branch.
-
 name: CI
-
 'on':
   push:
-    branches: [main]
+    branches:
+    - main
   pull_request:
-    # ready_for_review starts the PR import and boundary checks.
-    types: [opened, synchronize, reopened, ready_for_review]
-  workflow_dispatch:
-
-# A second push to a PR makes the first run's result irrelevant, so PR runs
-# share a per-ref group and cancel. A push to main (or a manual dispatch) does
-# NOT: each merge is its own tree, and cancelling its run when the next merge
-# landed left main with no hosted run certifying any tree on a busy day
-# (2026-09-22: five consecutive main runs cancelled, #962). Those runs get a
-# group of their own (the run id), because a shared group without
-# cancel-in-progress still keeps only ONE pending run and silently cancels the
-# others queued behind it; a unique group is what gives every merge a complete
-# run. The separate gate workflow supplies pre-merge test verdicts.
+    types:
+    - opened
+    - synchronize
+    - reopened
+    - ready_for_review
+  workflow_dispatch: null
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
-
 jobs:
-  # Post-merge full CPU suite. The hosted merge gate covers PRs and batches.
   tests:
     if: github.event_name != 'pull_request'
-    name: tests (py${{ matrix.python }}, cpu)
+    name: Post-merge Bazel record (amd64 and arm64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        # The hosted job covers the Python 3.12 floor. The current PB queue
-        # environment uses Python 3.14.4, so its full-suite gate is distinct
-        # coverage; main/manual runs retain the full hosted 3.12 suite. Dropped 3.11
-        # on 2026-08-29 (Rob: "I don't care if we don't support python 3.11").
-        # NOTE: 3.11 was not failing on an interpreter incompatibility -- it
-        # stood in for heap/allocation order. The dsa_only NaN it exposed was a
-        # real latent defect (the transformers polyfill left from-config expert
-        # weights uninitialized) and was fixed on its own merits in #94 BEFORE
-        # this job was removed. 3.12 can surface that class of bug just as
-        # easily, so narrowing the matrix hides nothing.
-        # Widen only when a version is actually exercised somewhere.
-        python: ["3.12"]
+    timeout-minutes: 360
+    outputs:
+      base: ${{ steps.source.outputs.base }}
+      head: ${{ github.sha }}
+    env:
+      TRUSTED: 'true'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: ${{ matrix.python }}
-          cache: pip
-
-      # Resolve the compatibility pin without importing prismaquant: its
-      # package surface is exactly what this job has not installed yet.
-      - name: Resolve Tessera development pin
-        id: tessera-pin
-        run: |
-          tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
-          printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
-
-      # RobTand/tessera has been public since 2026-09-05, so the ordinary
-      # checkout credential fetches the pin here, for fork PRs as much as for
-      # branches (first receipt: run 33950707718 on main, both jobs green
-      # end-to-end; #175). No private credential is required or exposed by
-      # this workflow, and none should be added: a repository secret is a
-      # cross-repo credential the issue deliberately avoided, and it would not
-      # reach fork PRs anyway.
-      - name: Check out pinned Tessera
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: RobTand/tessera
-          ref: ${{ steps.tessera-pin.outputs.commit }}
-          persist-credentials: false
-          path: .ci/tessera
-
-      - name: Install pinned Tessera
-        run: python -m pip install --no-deps .ci/tessera
-
-      # CPU torch explicitly: the default PyPI wheel drags a full CUDA stack
-      # (~2.5 GB of runner disk and minutes of download) that no test here can
-      # use. Installed first so the project's own `torch>=2.6` is satisfied and
-      # pip does not go looking for the CUDA build.
-      - name: Install CPU torch
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install prismaquant + test extras
-        # The constraints pin what CI tests to what the campaign runs (#1419).
-        # The pbsdk group is the reviewed PrismaBuild SDK the PB-driving tests
-        # need (#3216); its commit is staged_lease.PB_READER_LEASE_PIN_COMMIT.
-        run: python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
-
-      - name: Exclude owned hosted quarantine entries
-        run: |
-          python - <<'PYTHON'
-          import json, os
-          from pathlib import Path
-          entries = json.loads(Path('tools/ci/gate_quarantine.json').read_text())['entries']
-          Path(os.environ['RUNNER_TEMP'], 'known-failure-args').write_text(''.join(
-              '--ignore=' + row['target'] + '\n' for row in entries if '::' not in row['target']))
-          PYTHON
-
-      # CUDA_VISIBLE_DEVICES is belt-and-braces: hosted runners have no GPU, but
-      # this makes a local reproduction of a CI failure one env var away, and
-      # keeps the skip set identical between here and a developer's box.
-      - name: Run tests
-        env:
-          # Charged-root fixtures intentionally refuse container overlay /tmp.
-          # Use this job's owned runner workspace without relaxing that guard.
-          TMPDIR: ${{ runner.temp }}
-          # tools/ci holds the gate's collection plugin and its sibling modules.
-          PYTHONPATH: .:tools/ci
-          CUDA_VISIBLE_DEVICES: ""
-          OMP_NUM_THREADS: "1"
-          MKL_NUM_THREADS: "1"
-          OPENBLAS_NUM_THREADS: "1"
-          NUMEXPR_NUM_THREADS: "1"
-          TORCHINDUCTOR_COMPILE_THREADS: "1"
-          MAX_JOBS: "1"
-        run: |
-          # Keep one native thread per worker and leave 1 GiB for the runner.
-          # The 2 GiB worker budget bounds collection plus numerical fixtures.
-          workers="$(python - <<'PY'
-          import os
-          from pathlib import Path
-          memory = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
-          available = int(memory["MemAvailable"].split()[0]) * 1024
-          budget = max(1, (available - 1024**3) // (2 * 1024**3))
-          print(min(len(os.sched_getaffinity(0)), budget))
-          PY
-          )"
-          echo "pytest workers=$workers (CPU affinity and available-memory bound)"
-          mapfile -t known < "$RUNNER_TEMP/known-failure-args"
-          # --timeout bounds each test. The slowest took 150 to 217 s on most
-          # main runs, 297 s on a slow runner on 2026-10-23, and hit the old
-          # 300 s limit on 2026-10-28. 600 s keeps ~2x over the worst (#3140).
-          python -m pytest -c pytest.ini tests/ -q --timeout=600 \
-            -m "not own_cgroup" \
-            -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider -p gate_collect \
-            "${known[@]}"
-
-      # Tests with the own_cgroup mark hold this process's cgroup readings to
-      # the bytes they free (tests/cgroup_readings.py). Every process of this
-      # job shares the runner's cgroup (hosted-compute-agent.service), and the
-      # other xdist workers moved its anon reading by up to 22 MB inside one
-      # check (#1424). So these tests run after the suite, without xdist, in a
-      # transient systemd scope that holds only this pytest. sudo is needed to
-      # start the scope; setpriv drops back to the runner user and its groups
-      # before pytest starts, and env passes the job's settings through.
-      - name: Run cgroup-reading tests in a scope of their own
-        if: ${{ !cancelled() }}
-        run: |
-          mapfile -t known < "$RUNNER_TEMP/known-failure-args"
-          sudo -n systemd-run --scope --quiet -- \
-            setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
-            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=.:tools/ci CUDA_VISIBLE_DEVICES= \
-              OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-              NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
-            "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
-              -q --timeout=300 -ra -p no:cacheprovider -p gate_collect "${known[@]}"
-
-  # The boundary allowlists only shrink (decoupling step 0, #1534). The
-  # tests hold each list equal to the code; this job refuses a pull request
-  # that adds a line to one. A file absent at the base is a new gate and is
-  # admitted.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
+      with:
+        python-version: '3.14'
+    - id: source
+      env:
+        BEFORE: ${{ github.event.before }}
+        HEAD: ${{ github.sha }}
+      run: |
+        set -Eeuo pipefail
+        base="$BEFORE"
+        if [ -z "$base" ] || [ "$base" = 0000000000000000000000000000000000000000 ]; then
+          base="$(git rev-parse "$HEAD^1")"
+        fi
+        printf 'base=%s\n' "$base" >> "$GITHUB_OUTPUT"
+    - name: Run source-bound Remote Bazel controller
+      id: controller
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+        BASE: ${{ steps.source.outputs.base }}
+        HEAD: ${{ github.sha }}
+        BRANCH: ${{ github.ref_name }}
+      run: |
+        set -Eeuo pipefail
+        python tools/ci/remote_gate.py main --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-main-upload
+        python - <<'REMOTE_VERDICT'
+        import json, os
+        from pathlib import Path
+        result = json.loads(Path('bazel-main-upload/result.json').read_text())
+        if result['verdict'] not in ('pass', 'skipped'):
+            raise SystemExit('Remote Bazel evidence failed')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=' + result['verdict'] + '\n')
+        REMOTE_VERDICT
+    - name: Scan exact JSON upload set
+      id: scan
+      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.controller.outputs.scopes_ready == 'true' }}
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import scan_upload
+        raise SystemExit(scan_upload(Path('bazel-main-upload'), ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN']))
+        SCAN_JSON
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+      with:
+        name: bazel-main-${{ github.run_attempt }}
+        path: bazel-main-upload/
+        if-no-files-found: error
+        retention-days: 7
   allowlists:
     name: boundary allowlists only shrink
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          fetch-depth: 0
-      - name: Refuse lines added to a shrink-only allowlist
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-        run: |
-          status=0
-          for f in $(git ls-tree -r --name-only HEAD tests/boundary_allowlists/); do
-            if ! git cat-file -e "$BASE:$f" 2>/dev/null; then
-              echo "$f is new in this pull request: admitted as a new gate"
-              continue
-            fi
-            added="$(git diff --numstat "$BASE" HEAD -- "$f" | awk '{s += $1} END {print s + 0}')"
-            if [ "$added" -gt 0 ]; then
-              echo "::error file=$f::$added line(s) added to a shrink-only allowlist"
-              status=1
-            fi
-          done
-          exit "$status"
-
-  # Import hygiene: catches a module that only imports because the reference box
-  # happens to have vLLM, a CUDA extension, or a stray sys.path entry. Cheap, and
-  # it fails in a way that names the offending module.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+    - name: Refuse lines added to a shrink-only allowlist
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+      run: |
+        status=0
+        for f in $(git ls-tree -r --name-only HEAD tests/boundary_allowlists/); do
+          if ! git cat-file -e "$BASE:$f" 2>/dev/null; then
+            echo "$f is new in this pull request: admitted as a new gate"
+            continue
+          fi
+          added="$(git diff --numstat "$BASE" HEAD -- "$f" | awk '{s += $1} END {print s + 0}')"
+          if [ "$added" -gt 0 ]; then
+            echo "::error file=$f::$added line(s) added to a shrink-only allowlist"
+            status=1
+          fi
+        done
+        exit "$status"
   imports:
     name: import surface
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.12"
-          cache: pip
-      - name: Resolve Tessera development pin
-        id: tessera-pin
-        run: |
-          tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
-          printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
-      - name: Check out pinned Tessera
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: RobTand/tessera
-          ref: ${{ steps.tessera-pin.outputs.commit }}
-          persist-credentials: false
-          path: .ci/tessera
-      - name: Install pinned Tessera
-        run: python -m pip install --no-deps .ci/tessera
-      - name: Install CPU torch
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - name: Install prismaquant
-        run: python -m pip install -c .github/ci-constraints.txt -e .
-      - name: Import the package entry points
-        env:
-          CUDA_VISIBLE_DEVICES: ""
-        run: |
-          python -c "import prismaquant; print('prismaquant ok')"
-          python -m prismaquant.allocator --help > /dev/null && echo "allocator CLI ok"
-
-  # The pinned-Gridbook cross-project compatibility job lived here until
-  # 2026-09-02. It installed the external codebook runtime from its immutable
-  # pin and compared that runtime's packaged contract against PrismaQuant's
-  # independent producer layout. The lane is retired
-  # (archive/gridbook_lane_2026-09-02/) and the job went with it; the Tessera
-  # lane's equivalent is producer-side, against the installed `tessera`
-  # distribution's own runtime_contract.json.
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      with:
+        python-version: '3.12'
+        cache: pip
+    - name: Resolve Tessera development pin
+      id: tessera-pin
+      run: |
+        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
+        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
+    - name: Check out pinned Tessera
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: RobTand/tessera
+        ref: ${{ steps.tessera-pin.outputs.commit }}
+        persist-credentials: false
+        path: .ci/tessera
+    - name: Install pinned Tessera
+      run: python -m pip install --no-deps .ci/tessera
+    - name: Install CPU torch
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+    - name: Install prismaquant
+      run: python -m pip install -c .github/ci-constraints.txt -e .
+    - name: Import the package entry points
+      env:
+        CUDA_VISIBLE_DEVICES: ''
+      run: |
+        python -c "import prismaquant; print('prismaquant ok')"
+        python -m prismaquant.allocator --help > /dev/null && echo "allocator CLI ok"
+  hosted-amd64:
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.tests.result == 'success' }}
+    needs:
+    - tests
+    uses: ./.github/workflows/bazel-hosted.yml
+    with:
+      architecture: amd64
+      mode: main
+      base: ${{ needs.tests.outputs.base }}
+      head: ${{ github.sha }}
+      trusted: true
+      receipt: bazel-main-${{ github.run_attempt }}
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+  hosted-arm64:
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.tests.result == 'success' }}
+    needs:
+    - tests
+    uses: ./.github/workflows/bazel-hosted.yml
+    with:
+      architecture: arm64
+      mode: main
+      base: ${{ needs.tests.outputs.base }}
+      head: ${{ github.sha }}
+      trusted: true
+      receipt: bazel-main-${{ github.run_attempt }}
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}

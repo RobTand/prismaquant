@@ -129,6 +129,6 @@ def test_graph_job_publishes_only_one_passing_test(cases, passes, tmp_path):
     (tmp_path/'graph-impact/junit.xml').write_text('<testsuites><testsuite>'+cases+'</testsuite></testsuites>')
     output=tmp_path/'output'
     run=subprocess.run([sys.executable,'-c',script],cwd=tmp_path,capture_output=True,text=True,
-        env={**os.environ,'GITHUB_OUTPUT':str(output)})
+        env={**os.environ,'GITHUB_OUTPUT':str(output),'GATE_BASE':'a'*40,'GATE_HEAD':'b'*40})
     assert (run.returncode==0) is passes,run.stdout+run.stderr
     assert (output.read_text() if output.exists() else '')==('verdict=pass\n' if passes else '')
