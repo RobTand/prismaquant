@@ -218,11 +218,13 @@ jobs:
         GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
       run: |
         set -Eeuo pipefail
-        test "$HOSTED_RESULT" = success && test "$HOSTED_VERDICT" = pass
-        test "$GRAPH_RESULT" = success && test "$GRAPH_VERDICT" = pass
+        test "$HOSTED_RESULT" = success
+        test "$HOSTED_VERDICT" = pass
+        test "$GRAPH_RESULT" = success
+        test "$GRAPH_VERDICT" = pass
         case "$TRUSTED" in
           true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
-          false) test "$REMOTE_RESULT" = skipped && test -z "$REMOTE_VERDICT";;
+          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
           *) exit 1;;
         esac
   gate:
@@ -246,10 +248,12 @@ jobs:
         GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
       run: |
         set -Eeuo pipefail
-        test "$HOSTED_RESULT" = success && test "$HOSTED_VERDICT" = pass
-        test "$GRAPH_RESULT" = success && test "$GRAPH_VERDICT" = pass
+        test "$HOSTED_RESULT" = success
+        test "$HOSTED_VERDICT" = pass
+        test "$GRAPH_RESULT" = success
+        test "$GRAPH_VERDICT" = pass
         case "$TRUSTED" in
           true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
-          false) test "$REMOTE_RESULT" = skipped && test -z "$REMOTE_VERDICT";;
+          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
           *) exit 1;;
         esac
