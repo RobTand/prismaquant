@@ -21,6 +21,8 @@ platform(
         "@bazel_tools//tools/cpp:gcc",
     ],
     exec_properties = {
+        "Pool": "selfhosted-amd64",
+        "use-self-hosted-executors": "true",
         "OSFamily": "Linux",
         "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:5f0c01e5f6d79e58d7a996330de33aa38ce599bf8431eaf27521e7602daadf50",
         # Hermetic by default; tests in nonhermetic.bzl opt back in.
@@ -37,6 +39,8 @@ platform(
         "@bazel_tools//tools/cpp:gcc",
     ],
     exec_properties = {
+        "Pool": "selfhosted-arm64",
+        "use-self-hosted-executors": "true",
         "Arch": "arm64",
         "OSFamily": "Linux",
         "container-image": "docker://gcr.io/flame-public/rbe-ubuntu24-04@sha256:2f48fc6c0c7f0794a76c74d77ff23b1a80944e05acacff22c63da2ef002ebf9b",
