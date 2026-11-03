@@ -152,3 +152,39 @@ def test_full_shards_preserve_hard_failures_and_execution_requirement(fault):
     if fault == 'timeout':
         records[0]['run']['statuses'][LABEL] = 'TIMEOUT'
     assert gate.aggregate_shards([LABEL], shards, records, require_execution=True)['verdict'] == 'fail'
+
+
+def test_full_partition_distributes_tests_and_includes_non_test_build_targets():
+    tests = {f'//tests:test_{number:04}' for number in range(16)}
+    libraries = {label + '_lib' for label in tests}
+    population = tests | libraries
+    shards = gate.partition_population(population, tests=tests, shard_count=4)
+    assert sorted(label for shard in shards for label in shard) == sorted(population)
+    assert [len(set(shard) & tests) for shard in shards] == [4] * 4
+    assert shards == gate.partition_population(reversed(sorted(population)),
+                                               tests=tests, shard_count=4)
+
+
+def test_test_population_must_belong_to_full_build_population():
+    with pytest.raises(gate.GateError, match='population'):
+        gate.partition_population([LABEL], tests={LABEL, '//tests:foreign'})
+
+
+def test_full_shards_verify_only_test_statuses_but_build_failures_still_fail():
+    population = [LABEL, '//prismaquant:library']
+    shards = [[LABEL], ['//prismaquant:library']]
+    records = [shard_record(0, [LABEL]), shard_record(1, [])]
+    passed = gate.aggregate_shards(population, shards, records, test_population={LABEL},
+                                   require_execution=True)
+    assert passed['verdict'] == 'pass'
+    assert passed['executed_test_actions'] == 1
+    records[1]['run']['returncode'] = 1
+    assert gate.aggregate_shards(population, shards, records, test_population={LABEL},
+                                 require_execution=True)['verdict'] == 'fail'
+
+
+def test_full_build_population_cannot_hide_a_missing_test_status():
+    population = [LABEL, '//prismaquant:library']
+    records = [shard_record(0, [])]
+    with pytest.raises(gate.GateError, match='population'):
+        gate.aggregate_shards(population, [population], records, test_population={LABEL})
