@@ -115,11 +115,14 @@ def test_budget_warnings_survive_a_passing_result():
 
 
 def shard_result(index=0):
-    return {'schema': remote.SCHEMA, 'head': HEAD, 'mode': 'pr', 'verdict': 'pass',
+    return {'schema': remote.SCHEMA, 'head': HEAD, 'base': BASE, 'mode': 'pr', 'verdict': 'pass',
             'architecture': 'amd64', 'index': index, 'targets': [f'//tests:test_{index}'],
             'manifest_sha256': 'c' * 64,
             'partition_sha256': hashlib.sha256(f'//tests:test_{index}\n'.encode()).hexdigest(),
-            'run': {'statuses': {f'//tests:test_{index}': 'PASSED'}, 'returncode': 0}}
+            'budget_warnings': [],
+            'run': {'statuses': {f'//tests:test_{index}': 'PASSED'}, 'returncode': 0,
+                    'invocation': f'child-{index}',
+                    'executed_by_label': {f'//tests:test_{index}': 1}}}
 
 
 class ShardClient:
@@ -274,3 +277,33 @@ def test_shard_enters_the_gate_before_its_python314_bootstrap():
     request = remote.shard_request(arguments(), 'amd64', 0,
         'bytestream://remote.buildbuddy.io/manifest', 'c' * 64, 'd' * 64)
     assert request['steps'] == [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
+
+
+def test_verified_shard_records_feed_the_exact_union_aggregator():
+    from tools.ci.bazel_gate import aggregate_shards
+
+    records = remote.submit_shards(ShardClient(), shard_requests(), HEAD, clock=lambda: 1)
+    labels = [f'//tests:test_{index}' for index in range(2)]
+    assert [record['invocation_status'] for record in records] == [
+        'COMPLETE_INVOCATION_STATUS', 'COMPLETE_INVOCATION_STATUS']
+    assert [record['runner_invocation'] for record in records] == ['parent-0', 'parent-1']
+    summary = aggregate_shards(labels, [[label] for label in labels], records,
+                               require_execution=True)
+    assert summary['verdict'] == 'pass'
+    assert summary['executed_test_actions'] == 2
+
+
+def test_same_head_receipt_from_another_base_is_refused():
+    class OtherBase(ShardClient):
+        def call(self, method, body, **kwargs):
+            result = super().call(method, body, **kwargs)
+            if method == 'GetFile':
+                row = json.loads(result)
+                row['base'] = 'd' * 40
+                return json.dumps(row).encode()
+            return result
+
+    client = OtherBase()
+    with pytest.raises(remote.RemoteError, match='base'):
+        remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
+    assert client.calls.count('Run') == 1
