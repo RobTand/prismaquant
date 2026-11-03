@@ -86,6 +86,10 @@ def shared_mount(scratch, monkeypatch):
     return scratch
 
 
+def test_replay_scratch_stays_outside_the_source_checkout(scratch):
+    assert not scratch.resolve().is_relative_to(ROOT)
+
+
 def _phase_paths(manifest, index):
     """The entry paths of phase ``index``, in manifest order."""
     phases = manifest["annotations"]["phases"]
