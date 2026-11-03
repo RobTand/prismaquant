@@ -116,3 +116,12 @@ def test_torch_comes_from_the_cpu_index_per_platform():
         export = (ROOT / f'tools/bazel/requirements_linux_{platform}.txt').read_text()
         assert 'torch==' in export and '+cpu' in export.split('torch==', 1)[1].split()[0]
         assert '--extra-index-url' not in export
+
+
+def test_graph_impact_keeps_the_git_checkout_on_the_runner():
+    scope = {'struct': SimpleNamespace,
+             'native': SimpleNamespace(package_name=lambda: 'tests')}
+    exec((ROOT / 'tools/bazel/nonhermetic.bzl').read_text(), scope)
+    tags, _, environment = scope['nonhermetic']('test_graph_impact')
+    assert {'runner', 'no-remote-exec', 'no-sandbox', 'no-cache'} <= set(tags)
+    assert environment['PQ_BAZEL_LANE'] == 'runner'
