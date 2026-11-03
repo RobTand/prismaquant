@@ -150,3 +150,11 @@ or DISCONNECTED shard. An admitted sibling still needs its own terminal
 evidence when another shard fails. No shard is retried to obtain a pass.
 
 TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
+
+
+Upload scanning runs in-process under Python 3.14 with stdlib `compression.zstd`.
+The vendored scanner remains unchanged. The upload boundary refuses every
+`not scanned` diagnostic, including scanner exit zero, and refuses a missing
+Python 3.14 runtime or zstd decoder. Only valid UTF-8 JSON receipts are uploaded.
+Raw execution logs, BEP, archives and other diagnostics stay private on the
+runner. Renaming a binary artifact to `.json` does not make it eligible.
