@@ -162,3 +162,24 @@ def test_no_credential_reaches_a_test_on_any_lane(tmp_path):
     environment = runtime.gate_environment(environ, tmp_path, tmp_path / 'scratch')
     assert not [name for name in environment if 'API_KEY' in name.upper() or 'TOKEN' in name.upper()]
     assert environment['PATH'] == '/usr/bin'
+
+
+def test_the_export_tracks_the_project_lock_and_sdk_pin(tmp_path):
+    for name in requirements.SOURCES:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / name).read_bytes())
+    before = requirements.source_digest(tmp_path)
+    (tmp_path / 'uv.lock').write_text((ROOT / 'uv.lock').read_text() + '\n')
+    assert requirements.source_digest(tmp_path) != before
+    assert 'prismaquant/staged_lease.py' in requirements.SOURCES
+
+
+def test_the_registry_export_contains_the_reviewed_hashed_sdk_archive():
+    from prismaquant.staged_lease import PB_READER_LEASE_PIN_COMMIT
+    for platform in requirements.PLATFORMS:
+        export = (ROOT / requirements.EXPORT.format(platform)).read_text()
+        assert requirements.pins(export)['prismabuild'] == (
+            'https://codeload.github.com/RobTand/prismabuild/tar.gz/' + PB_READER_LEASE_PIN_COMMIT)
+        sdk = next(block for block in export.split('\n\n') if block.startswith('prismabuild @'))
+        assert '--hash=sha256:e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970' in sdk
