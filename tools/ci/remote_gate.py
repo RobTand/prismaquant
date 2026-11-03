@@ -2,7 +2,9 @@
 """Remote Bazel requests and exact-run evidence for the PrismaQuant cutover."""
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shlex
 import time
 import urllib.error
@@ -50,16 +52,20 @@ def run_request(args):
             'timeout': f'{args.timeout}m', 'wait_until': 'STARTED'}
 
 
-def shard_request(args, architecture, index, targets, tests, *, require_execution=False):
+def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
+                  partition_sha256, *, require_execution=False):
     """One bounded runner drives self-hosted actions for exactly one partition."""
     if architecture not in ('amd64', 'arm64') or index < 0:
         raise RemoteError('invalid shard partition')
-    if not targets or not set(tests) <= set(targets):
-        raise RemoteError('invalid shard target population')
+    if (not manifest_uri.startswith('bytestream://')
+            or any(not re.fullmatch('[0-9a-f]{64}', value)
+                   for value in (manifest_sha256, partition_sha256))):
+        raise RemoteError('invalid immutable shard manifest reference')
     request = run_request(args)
     manifest = {'mode': args.mode, 'base': args.base, 'head': args.head,
                 'branch': args.branch, 'architecture': architecture, 'index': index,
-                'targets': sorted(targets), 'tests': sorted(tests),
+                'manifest_uri': manifest_uri, 'manifest_sha256': manifest_sha256,
+                'partition_sha256': partition_sha256,
                 'require_execution': require_execution}
     request['steps'] = [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
     request['env'] = {'PQ_BAZEL_SHARD': json.dumps(manifest, separators=(',', ':'))}
@@ -82,8 +88,15 @@ def submit_shards(client, requests, head, *, clock=time.monotonic):
         if len(artifacts) != 1:
             raise RemoteError('shard has no unique own result artifact')
         result = parse_result(client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True), head)
-        if any(result.get(key) != expected[key] for key in ('architecture', 'index', 'targets')):
+        if any(result.get(key) != expected[key] for key in (
+                'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
             raise RemoteError('shard result has the wrong partition')
+        targets = result.get('targets')
+        if (not isinstance(targets, list) or not targets
+                or any(not isinstance(label, str) for label in targets)
+                or hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
+                   != expected['partition_sha256']):
+            raise RemoteError('shard result has the wrong partition population')
         if result['mode'] != expected['mode'] or result.get('error'):
             raise RemoteError('shard result does not establish its requested mode')
         results.append(result)
