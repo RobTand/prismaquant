@@ -6,10 +6,12 @@ import json
 import re
 import subprocess
 import sys
+import urllib.request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci.bazel_gate import GateError, partition_population
 from tools.ci.bazel_artifacts import child_environment
+from prismaquant.digests import bytes_sha256hex
 
 GATE_INPUTS = {
     '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
@@ -71,6 +73,26 @@ def generate_hashes_command(java, jar, root, bazel, hashes, edges, wheel_reposit
             '--bazelPath', str(bazel), '--excludeExternalTargets', '--includeTargetType',
             '--fineGrainedHashExternalReposFile', str(wheel_repositories),
             '--depEdgesFile', str(edges), str(hashes)]
+
+
+def bazel_diff_jar(directory, *, fetch=None):
+    """Only the pinned v42 bytes may enter the selection runner's Java process."""
+    path = Path(directory) / 'bazel-diff-v42.0.0.jar'
+    try:
+        if path.is_file() and bytes_sha256hex(path.read_bytes()) == BAZEL_DIFF_SHA256:
+            return path
+        if fetch is None:
+            with urllib.request.urlopen(BAZEL_DIFF_URL, timeout=120) as response:
+                content = response.read()
+        else:
+            content = fetch(BAZEL_DIFF_URL)
+        if bytes_sha256hex(content) != BAZEL_DIFF_SHA256:
+            raise SelectionError('bazel-diff v42 checksum mismatch')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        return path
+    except (OSError, ValueError, TypeError):
+        raise SelectionError('bazel-diff v42 download is unavailable') from None
 
 
 def wheel_repositories(labels):
