@@ -11651,6 +11651,7 @@ pq_py_library(
         ".bazelignore",
         ".bazelrc",
         ".bazelversion",
+        ".github/workflows/bazel-hosted.yml",
         ".github/workflows/gate.yml",
         "BUILD.bazel",
         "MODULE.bazel",
