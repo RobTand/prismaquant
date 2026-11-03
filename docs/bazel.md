@@ -121,3 +121,23 @@ The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
 still checks absolute figures, the count limit and every test's reach budget.
 The shrink-only exceptions preserve existing broad tests in that lane.
+
+## Remote gate execution
+
+The cutover sends Bazel actions to `selfhosted-amd64` or `selfhosted-arm64`,
+with no cloud fallback. Remote Bazel runners keep their existing four-CPU
+cloud placement. Hosted pytest exception lanes stay on GitHub-hosted runners.
+
+Selected gates and post-merge records submit one Remote Bazel shard at a
+time. The gate's fail-closed `//...` fallback alone may submit at most two
+concurrent Remote Bazel runs per repo on the self-hosted pools, each with
+`--jobs=16`. The controller rejects concurrency above two, and rejects
+concurrency above one outside PR fallback. Post-merge and development runs
+remain serial. Mergify's `checks_timeout` and merge conditions stay unchanged.
+
+Both modes use deterministic target-pattern partitions, verify their union
+against the queried population exactly once, and fail closed on any missing
+or DISCONNECTED shard. An admitted sibling still needs its own terminal
+evidence when another shard fails. No shard is retried to obtain a pass.
+
+TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.

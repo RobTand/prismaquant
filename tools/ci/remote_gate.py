@@ -53,9 +53,10 @@ def run_request(args):
 
 
 def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
-                  partition_sha256, *, require_execution=False):
+                  partition_sha256, *, require_execution=False, selection='impacted'):
     """One bounded runner drives self-hosted actions for exactly one partition."""
-    if architecture not in ('amd64', 'arm64') or index < 0:
+    if (architecture not in ('amd64', 'arm64') or index < 0
+            or selection not in ('impacted', 'irrelevant', 'fallback')):
         raise RemoteError('invalid shard partition')
     if (not manifest_uri.startswith('bytestream://')
             or any(not re.fullmatch('[0-9a-f]{64}', value)
@@ -66,41 +67,68 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
                 'branch': args.branch, 'architecture': architecture, 'index': index,
                 'manifest_uri': manifest_uri, 'manifest_sha256': manifest_sha256,
                 'partition_sha256': partition_sha256,
-                'require_execution': require_execution}
+                'require_execution': require_execution, 'selection': selection}
     request['steps'] = [{'run': 'python3 tools/ci/bazel_gate.py shard'}]
     request['env'] = {'PQ_BAZEL_SHARD': json.dumps(manifest, separators=(',', ':'))}
     request['timeout'] = '55m'
     return request
 
 
-def submit_shards(client, requests, head, *, clock=time.monotonic):
-    """Resolve each own result before admitting another runner; never retry a shard."""
+def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic):
+    """Only PR fallback may admit two runs; drain each batch without retries."""
+    if type(concurrency) is not int or not 1 <= concurrency <= 2:
+        raise RemoteError('shard concurrency must be one or two')
+    planned = [(request, json.loads(request['env']['PQ_BAZEL_SHARD']))
+               for request in requests]
+    if concurrency == 2 and (not planned or any(
+            expected['mode'] != 'pr' or expected.get('selection') != 'fallback'
+            for _, expected in planned)):
+        raise RemoteError('concurrency above one is allowed only for PR fallback')
     results = []
-    for request in requests:
-        expected = json.loads(request['env']['PQ_BAZEL_SHARD'])
-        response = client.call('Run', request)
-        invocation_id = response.get('invocationId', response.get('invocation_id'))
-        if not invocation_id:
-            raise RemoteError('shard submission returned no acknowledgement ID')
-        print('Remote Bazel shard: ' + invocation_id, flush=True)
-        record = await_invocation(client, invocation_id, clock() + 58 * 60, clock=clock)
-        artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
-        if len(artifacts) != 1:
-            raise RemoteError('shard has no unique own result artifact')
-        result = parse_result(client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True), head)
-        if any(result.get(key) != expected[key] for key in (
-                'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
-            raise RemoteError('shard result has the wrong partition')
-        targets = result.get('targets')
-        if (not isinstance(targets, list) or not targets
-                or any(not isinstance(label, str) for label in targets)
-                or hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
-                   != expected['partition_sha256']):
-            raise RemoteError('shard result has the wrong partition population')
-        if result['mode'] != expected['mode'] or result.get('error'):
-            raise RemoteError('shard result does not establish its requested mode')
-        results.append(result)
+    for start in range(0, len(planned), concurrency):
+        pending, error = [], None
+        for request, expected in planned[start:start + concurrency]:
+            try:
+                response = client.call('Run', request)
+                invocation_id = response.get('invocationId', response.get('invocation_id'))
+                if not invocation_id:
+                    raise RemoteError('shard submission returned no acknowledgement ID')
+                print('Remote Bazel shard: ' + invocation_id, flush=True)
+                pending.append((invocation_id, expected, clock() + 58 * 60))
+            except RemoteError as failure:
+                error = failure
+                break
+        # A failed sibling cannot abandon an already admitted run or permit
+        # a new batch. Read each known run's own terminal evidence first.
+        for invocation_id, expected, deadline in pending:
+            try:
+                results.append(verify_shard_result(client, invocation_id, expected,
+                                                   head, deadline, clock=clock))
+            except RemoteError as failure:
+                error = error or failure
+        if error:
+            raise error
     return results
+
+
+def verify_shard_result(client, invocation_id, expected, head, deadline, *, clock):
+    record = await_invocation(client, invocation_id, deadline, clock=clock)
+    artifacts = [row for row in record.get('artifacts', []) if row.get('name') == RESULT]
+    if len(artifacts) != 1:
+        raise RemoteError('shard has no unique own result artifact')
+    result = parse_result(client.call('GetFile', {'uri': artifacts[0]['uri']}, raw=True), head)
+    if any(result.get(key) != expected[key] for key in (
+            'architecture', 'index', 'manifest_sha256', 'partition_sha256')):
+        raise RemoteError('shard result has the wrong partition')
+    targets = result.get('targets')
+    if (not isinstance(targets, list) or not targets
+            or any(not isinstance(label, str) for label in targets)
+            or hashlib.sha256(('\n'.join(targets) + '\n').encode()).hexdigest()
+               != expected['partition_sha256']):
+        raise RemoteError('shard result has the wrong partition population')
+    if result['mode'] != expected['mode'] or result.get('error'):
+        raise RemoteError('shard result does not establish its requested mode')
+    return result
 
 
 def succeeded(record):
