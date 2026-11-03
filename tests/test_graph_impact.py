@@ -197,7 +197,7 @@ def test_pra_baseline_matches_main_under_the_current_analyzer():
     expected = {**main['recorded_baseline'],
                 'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
                 'test_to_test_count': len(impact.test_to_test_edges(main)),
-                'analyzer_sha256': pq.file_sha256hex(Path(pq.build.__file__))}
+                'analyzer_sha256': pq.file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
     assert recorded == expected
 
 

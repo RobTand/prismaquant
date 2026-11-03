@@ -128,7 +128,7 @@ def record(live, previous=None):
     if previous is not None and 'test_to_test_count' not in previous:
         previous = {**previous, 'test_to_test_count': len(core.test_to_test_edges(live))}
     return {**numeric_baseline(core.baseline_record(live, previous, tolerances=LEGACY_TOLERANCES)),
-            'analyzer_sha256': file_sha256hex(Path(build.__file__))}
+            'analyzer_sha256': file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
 
 
 def baseline_history(before, current):
@@ -137,7 +137,7 @@ def baseline_history(before, current):
     if (previous is not None and previous.get('analyzer_sha256') == PR_A_ANALYZERS[0]
             and before.get('recorded_analyzer_sha256') == PR_A_ANALYZERS[0]
             and current.get('analyzer_sha256') == PR_A_ANALYZERS[1]
-            and file_sha256hex(Path(build.__file__)) == PR_A_ANALYZERS[1]
+            and file_sha256hex(ROOT / 'tools/bazel/build_files.py') == PR_A_ANALYZERS[1]
             and previous.get('test_to_test_count') == 875 and previous['figures']['scc_max'] == 168
             and len(core.test_to_test_edges(before)) == 889 and before['scc_max'] == 174
             and current.get('test_to_test_count') == 889 and current['figures']['scc_max'] == 174):
