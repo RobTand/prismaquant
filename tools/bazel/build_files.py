@@ -86,8 +86,8 @@ gate_paths = GATE_SELECT.gate_paths
 
 
 def repository_files(root):
-    """Tracked and untracked, unignored files: a new test counts before `git add`."""
-    output = subprocess.run(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    """Tracked files in the Git index, including staged but uncommitted additions."""
+    output = subprocess.run(['git', 'ls-files', '-z', '--cached'],
                             cwd=root, capture_output=True, check=True).stdout.decode()
     # BUILD files define the graph; no test reads them.
     return sorted(path for path in set(output.split('\0')) if path and not path.startswith(SKIPPED)
