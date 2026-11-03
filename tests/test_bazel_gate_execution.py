@@ -472,3 +472,76 @@ def test_shard_cli_uploads_only_its_scanned_result(tmp_path, monkeypatch, scan_f
         found = json.loads(files[0].read_text())
         assert found['manifest_sha256'] == reference['manifest_sha256']
         assert found['partition_sha256'] == reference['partition_sha256']
+
+
+@pytest.mark.parametrize('mode,include_test,build_exit,passes', [
+    ('pr', False, 0, True), ('pr', True, 0, True),
+    ('main', True, 0, True), ('main', False, 0, False),
+    ('pr', True, 1, False),
+])
+def test_build_only_partitions_survive_the_cli_and_controller_handoff(
+        tmp_path, monkeypatch, mode, include_test, build_exit, passes):
+    from argparse import Namespace
+    from types import SimpleNamespace
+    from tools.ci import remote_gate
+    library = '//prismaquant:library'
+    population = [library] + ([LABEL] if include_test else [])
+    row = {'population': population, 'tests': [LABEL] if include_test else [],
+           'shards': [[label] for label in population]}
+    document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode,
+        'base': 'b' * 40, 'head': 'a' * 40, 'selection': 'impacted',
+        'scopes': ['//prismaquant'], 'all_scopes': False, 'reason': [],
+        'hosted': [], 'hosted_arm64': [],
+        'architectures': {arch: row for arch in (
+            ('amd64', 'arm64') if mode == 'main' else ('amd64',))}}
+    raw = json.dumps(document).encode()
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'build-only-upload-sentinel')
+    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
+    calls, records = [], {}
+    execute = gate.execute_shard
+    def run_partition(manifest):
+        def bazel(command, **kwargs):
+            calls.append((list(manifest['tests']), command[1]))
+            report = Path(next(word.split('=', 1)[1] for word in command
+                               if word.startswith('--build_event_json_file=')))
+            if manifest['tests']:
+                report.write_text(events(summary(), result()))
+                return SimpleNamespace(returncode=0)
+            report.write_text(events({'id': {'started': {}}, 'started': {'uuid': 'build-only'}}))
+            return SimpleNamespace(returncode=build_exit if command[1] == 'build' else 4)
+        return execute(manifest, root=tmp_path, runner=bazel)
+    monkeypatch.setattr(gate, 'execute_shard', run_partition)
+    class NativeBoundaries:
+        def call(self, method, body, **kwargs):
+            if method == 'Run':
+                identity = 'runner-' + str(len(records))
+                upload = tmp_path / identity
+                with monkeypatch.context() as scoped:
+                    scoped.setenv('PQ_BAZEL_SHARD', body['env']['PQ_BAZEL_SHARD'])
+                    scoped.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+                    scoped.setattr(gate, 'fetch_artifact', lambda uri: raw)
+                    code = gate.main(['shard'])
+                records[identity] = {'code': code, 'result': (upload / 'gate-result.json').read_bytes()}
+                return {'invocation_id': identity}
+            if method == 'GetInvocation':
+                identity = body['selector']['invocation_id']
+                return {'invocation': [{'invocationId': identity,
+                    'invocationStatus': 'COMPLETE_INVOCATION_STATUS',
+                    'success': records[identity]['code'] == 0,
+                    'artifacts': [{'name': 'gate-result.json', 'uri': 'bytestream://' + identity}]}]}
+            if method == 'GetFile':
+                return records[body['uri'].removeprefix('bytestream://')]['result']
+            raise AssertionError(method)
+    args = Namespace(mode=mode, base='b' * 40, head='a' * 40, branch='probe',
+                     repo='https://github.com/RobTand/prismaquant', timeout=20)
+    try:
+        found = remote_gate.run_manifest(NativeBoundaries(), args,
+            'bytestream://manifest', raw, clock=lambda: 1)
+    except remote_gate.RemoteError:
+        assert not passes
+    else:
+        assert (found['verdict'] == 'pass') is passes
+    if passes:
+        assert any(not tests and operation == 'build' for tests, operation in calls)
+        assert all(operation == 'test' for tests, operation in calls if tests)
+        assert all(record['code'] == 0 for record in records.values())
