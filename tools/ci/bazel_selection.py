@@ -122,7 +122,8 @@ def query_population(rows, architecture):
     rules, sources, labels = {}, set(), []
     try:
         for row in rows:
-            item = row.get('rule') or row.get('sourceFile') or row.get('generatedFile')
+            item = (row.get('rule') or row.get('sourceFile') or row.get('generatedFile')
+                    or row.get('packageGroup'))
             label = item['name']
             if not isinstance(label, str):
                 raise ValueError('invalid label')
@@ -139,8 +140,9 @@ def query_population(rows, architecture):
                 sources.add(path)
             elif 'rule' in row:
                 kind = item['ruleClass']
-                tags = next((attr['stringListValue'] for attr in item.get('attribute', [])
-                             if attr['name'] == 'tags'), [])
+                tags = next((attr.get('stringListValue',
+                                     [] if attr.get('type') == 'STRING_LIST' else None)
+                             for attr in item.get('attribute', []) if attr['name'] == 'tags'), [])
                 if (not isinstance(kind, str) or not kind or not isinstance(tags, list)
                         or any(not isinstance(tag, str) for tag in tags) or label in rules):
                     raise ValueError('invalid rule record')
@@ -208,20 +210,31 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
 def query_revision(root, directory, architecture, *, bazel='bazel', runner=subprocess.run):
     """Freeze the queried population before optional hash evidence can fail."""
     directory = Path(directory)
+    phase = 'output-precondition'
     try:
         directory.mkdir(parents=True, exist_ok=True)
+        phase = 'command'
         queried = runner([bazel, 'query', 'deps(//...) union buildfiles(//...)',
                           '--output=streamed_jsonproto', '--keep_going=false',
                           '--config=ci'], cwd=root, env=child_environment(), text=True,
                          capture_output=True, check=False)
         if queried.returncode:
             raise SelectionError('revision graph query failed')
-        population = query_population((json.loads(line) for line in queried.stdout.splitlines()),
-                                      architecture)
+        def rows():
+            nonlocal phase
+            for line in queried.stdout.splitlines():
+                phase = 'json'
+                row = json.loads(line)
+                phase = 'population'
+                yield row
+        phase = 'population'
+        population = query_population(rows(), architecture)
+        phase = 'query-record'
         query = directory / 'query.jsonl'
         query.write_text(queried.stdout)
         return {'population': population, 'query': query}
     except (OSError, ValueError, TypeError, AttributeError, SelectionError):
+        print('Revision query refused at ' + phase, file=sys.stderr)
         raise SelectionError('revision graph query is incomplete or unavailable') from None
 
 

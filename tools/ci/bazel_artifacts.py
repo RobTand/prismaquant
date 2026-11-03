@@ -107,6 +107,7 @@ def prepare_history(expected_head, *, root=None, runner=None):
 def require_scan_python(*, fetch=None, execute=None):
     """Verify a standalone runtime without pip, then replace the keyed parent."""
     if sys.version_info[:2] == (3, 14):
+        print('Scanner runtime active: Python 3.14', flush=True)
         return
     execute = os.execv if execute is None else execute
     bootstrap = None
@@ -136,6 +137,7 @@ def require_scan_python(*, fetch=None, execute=None):
         if not Path(python).is_file():
             raise ValueError('runtime executable unavailable')
         phase = 'exec'
+        print('Scanner runtime verified: pinned Python 3.14.0', flush=True)
         execute(python, [python, *sys.argv])
         raise RuntimeError('runtime replacement returned')
     except (OSError, ValueError, TypeError, tarfile.TarError, RuntimeError):
