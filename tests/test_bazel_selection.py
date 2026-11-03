@@ -609,3 +609,11 @@ def test_remote_plan_cli_publishes_only_scanned_manifest_and_matching_receipt(
         assert receipt['operation'] == 'plan'
         assert receipt['head'] == document['head'] and receipt['base'] == document['base']
         assert receipt['manifest_sha256'] == bytes_sha256hex(raw)
+
+
+def test_v42_impact_adapter_supplies_the_required_workspace_and_bazel(tmp_path):
+    # Native v42 declares --workspacePath required even for precomputed hashes.
+    command = selection.impacted_targets_command('java', tmp_path / 'v42.jar',
+        tmp_path / 'base.json', tmp_path / 'head.json', tmp_path / 'impacted.txt')
+    assert '--workspacePath' in command
+    assert '--bazelPath' in command
