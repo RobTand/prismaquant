@@ -42,12 +42,14 @@ NO_TESTS_COLLECTED = 5
 
 def outcomes(junit):
     """Node ID to passed, skipped or failed, from an xunit1 report."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ci'))
+    from gate_run import gate_junit_identity
+
     found = {}
     for case in ET.parse(junit).iter('testcase'):
-        filename = case.get('file', '').removeprefix('./')
-        module = filename.removesuffix('.py').replace('/', '.')
-        classes = case.get('classname', '')[len(module):].lstrip('.').replace('.', '::')
-        node = filename + '::' + (classes + '::' if classes else '') + case.get('name', '')
+        _, node = gate_junit_identity(case)
+        if node is None:
+            continue
         if case.find('failure') is not None or case.find('error') is not None:
             found[node] = 'failed'
         elif case.find('skipped') is not None:
