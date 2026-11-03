@@ -37,6 +37,14 @@ def test_gate_and_bazel_inputs_select_everything(path):
     assert found['all_scopes'] is True
 
 
+@pytest.mark.parametrize('path', ['tools/ci/bazel_artifacts.py', 'tools/ci/check_no_secret_leak.py'])
+def test_artifact_boundary_changes_force_full_coverage_even_with_narrow_graph_evidence(path):
+    found = decision({path}, impacted={'//tests:test_consumer'}, used={path})
+    assert found['selection'] == 'fallback'
+    assert found['selected'] == sorted(TESTS)
+    assert found['all_scopes'] is True
+
+
 @pytest.mark.parametrize('path', [
     'README.md', 'docs/bazel.md', '.github/workflows/ci.yml', '.github/scripts/check.py',
     '.mergify.yml',
