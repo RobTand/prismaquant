@@ -112,38 +112,39 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
     """Validate every partition before submitting any run, then join own results."""
     from tools.ci.bazel_gate import GateError, aggregate_shards, check_partition
 
-    try:
-        document = json.loads(raw_manifest)
-        if (document['schema'] != 'prismaquant.bazel-shards.v1'
-                or args.mode not in ('pr', 'main')
-                or any(document[key] != getattr(args, key)
-                       for key in ('mode', 'base', 'head'))
-                or document['selection'] not in ('impacted', 'fallback', 'irrelevant')):
-            raise RemoteError('manifest has the wrong source, mode or schema')
-        architectures = ('amd64', 'arm64') if args.mode == 'main' else ('amd64',)
-        if set(document['architectures']) != set(architectures):
-            raise RemoteError('manifest has the wrong architecture population')
-        if (not isinstance(document['scopes'], list)
-                or any(not isinstance(scope, str) for scope in document['scopes'])
-                or type(document['all_scopes']) is not bool
-                or not isinstance(document['reason'], list)):
-            raise RemoteError('manifest has invalid scope evidence')
-        for row in document['architectures'].values():
-            population, tests, shards = (row[key] for key in ('population', 'tests', 'shards'))
-            if (not isinstance(population, list) or not isinstance(tests, list)
-                    or not isinstance(shards, list)
-                    or any(not isinstance(label, str) for label in population + tests)
-                    or len(population) != len(set(population))
-                    or len(tests) != len(set(tests)) or not set(tests) <= set(population)):
-                raise RemoteError('manifest has an invalid build or test population')
-            if population:
-                check_partition(population, shards)
-            elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
-                raise RemoteError('manifest has an invalid empty population')
-        if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 2:
-            raise RemoteError('fallback concurrency must be one or two')
-    except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
-        raise RemoteError('invalid shard manifest') from error
+    with _evidence_phase('manifest-validate'):
+        try:
+            document = json.loads(raw_manifest)
+            if (document['schema'] != 'prismaquant.bazel-shards.v1'
+                    or args.mode not in ('pr', 'main')
+                    or any(document[key] != getattr(args, key)
+                           for key in ('mode', 'base', 'head'))
+                    or document['selection'] not in ('impacted', 'fallback', 'irrelevant')):
+                raise RemoteError('manifest has the wrong source, mode or schema')
+            architectures = ('amd64', 'arm64') if args.mode == 'main' else ('amd64',)
+            if set(document['architectures']) != set(architectures):
+                raise RemoteError('manifest has the wrong architecture population')
+            if (not isinstance(document['scopes'], list)
+                    or any(not isinstance(scope, str) for scope in document['scopes'])
+                    or type(document['all_scopes']) is not bool
+                    or not isinstance(document['reason'], list)):
+                raise RemoteError('manifest has invalid scope evidence')
+            for row in document['architectures'].values():
+                population, tests, shards = (row[key] for key in ('population', 'tests', 'shards'))
+                if (not isinstance(population, list) or not isinstance(tests, list)
+                        or not isinstance(shards, list)
+                        or any(not isinstance(label, str) for label in population + tests)
+                        or len(population) != len(set(population))
+                        or len(tests) != len(set(tests)) or not set(tests) <= set(population)):
+                    raise RemoteError('manifest has an invalid build or test population')
+                if population:
+                    check_partition(population, shards)
+                elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
+                    raise RemoteError('manifest has an invalid empty population')
+            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 2:
+                raise RemoteError('fallback concurrency must be one or two')
+        except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
+            raise RemoteError('invalid shard manifest') from error
 
     manifest_sha256 = bytes_sha256hex(raw_manifest)
     results = {}
@@ -161,11 +162,12 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
             for index, labels in enumerate(row['shards'])]
         records = submit_shards(client, requests, args.head,
                                 concurrency=concurrency, clock=clock)
-        try:
-            results[architecture] = aggregate_shards(row['population'], row['shards'],
-                records, require_execution=args.mode == 'main', test_population=row['tests'])
-        except (GateError, KeyError, TypeError) as error:
-            raise RemoteError('shard evidence does not cover its manifest') from error
+        with _evidence_phase('shard-validate'):
+            try:
+                results[architecture] = aggregate_shards(row['population'], row['shards'],
+                    records, require_execution=args.mode == 'main', test_population=row['tests'])
+            except (GateError, KeyError, TypeError) as error:
+                raise RemoteError('shard evidence does not cover its manifest') from error
     verdicts = {result['verdict'] for result in results.values()}
     return {'schema': SCHEMA, 'mode': args.mode, 'base': args.base, 'head': args.head,
             'selection': document['selection'], 'scopes': document['scopes'],
