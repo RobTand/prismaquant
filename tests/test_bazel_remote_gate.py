@@ -312,3 +312,118 @@ def test_same_head_receipt_from_another_base_is_refused():
     with pytest.raises(remote.RemoteError, match='base'):
         remote.submit_shards(client, shard_requests(), HEAD, clock=lambda: 1)
     assert client.calls.count('Run') == 1
+
+
+def controller_manifest(mode='pr', selection='fallback'):
+    labels = [f'//tests:test_{index}' for index in range(4)]
+    architectures = {}
+    for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
+        count = 2 if architecture == 'amd64' else 4
+        population = [] if selection == 'irrelevant' else labels
+        architectures[architecture] = {'population': population, 'tests': population,
+            'shards': [population[index::count] for index in range(count)] if population else []}
+    return {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode, 'base': BASE,
+        'head': HEAD, 'selection': selection, 'scopes': ['//tests'],
+        'all_scopes': selection == 'fallback' or mode == 'main', 'reason': [],
+        'hosted': [], 'hosted_arm64': [], 'architectures': architectures}
+
+
+class ManifestClient:
+    def __init__(self, document, *, cached_arm64=False):
+        self.document, self.cached_arm64 = document, cached_arm64
+        self.references, self.active, self.events = {}, set(), []
+        self.max_active = 0
+
+    def call(self, method, body, **kwargs):
+        if method == 'Run':
+            reference = json.loads(body['env']['PQ_BAZEL_SHARD'])
+            identity = f"parent-{reference['architecture']}-{reference['index']}"
+            self.references[identity] = reference
+            self.active.add(identity)
+            self.max_active = max(self.max_active, len(self.active))
+            self.events.append(('submit', identity))
+            return {'invocation_id': identity}
+        if method == 'GetInvocation':
+            identity = body['selector']['invocation_id']
+            assert identity in self.active
+            self.events.append(('terminal', identity))
+            return {'invocation': [{'invocationId': identity,
+                'invocationStatus': 'COMPLETE_INVOCATION_STATUS', 'success': True,
+                'bazelExitCode': 0, 'artifacts': [
+                    {'name': remote.RESULT, 'uri': 'bytestream://' + identity}]}]}
+        if method == 'GetFile':
+            identity = body['uri'].removeprefix('bytestream://')
+            reference = self.references[identity]
+            self.active.remove(identity)
+            self.events.append(('evidence', identity))
+            architecture, index = reference['architecture'], reference['index']
+            row = self.document['architectures'][architecture]
+            labels = row['shards'][index]
+            tests = set(labels) & set(row['tests'])
+            executed = 0 if self.cached_arm64 and architecture == 'arm64' else 1
+            return json.dumps({'schema': remote.SCHEMA, 'mode': reference['mode'],
+                'base': BASE, 'head': HEAD, 'architecture': architecture, 'index': index,
+                'manifest_sha256': reference['manifest_sha256'],
+                'partition_sha256': reference['partition_sha256'],
+                'targets': labels, 'verdict': 'pass', 'budget_warnings': [],
+                'run': {'statuses': {label: 'PASSED' for label in tests},
+                    'invocation': 'child-' + identity, 'returncode': 0,
+                    'executed_by_label': {label: executed for label in tests}}}).encode()
+        raise AssertionError(method)
+
+
+@pytest.mark.parametrize('mode,selection,maximum', [
+    ('pr', 'fallback', 2), ('pr', 'impacted', 1), ('main', 'fallback', 1),
+])
+def test_manifest_controller_runs_exact_partitions_with_only_fallback_overlap(mode, selection, maximum):
+    document = controller_manifest(mode, selection)
+    raw = json.dumps(document).encode()
+    client = ManifestClient(document)
+    found = remote.run_manifest(client, arguments(mode),
+        'bytestream://remote.buildbuddy.io/manifest', raw, clock=lambda: 1)
+    assert found['verdict'] == 'pass'
+    assert found['scopes'] == document['scopes']
+    assert found['all_scopes'] == document['all_scopes']
+    assert client.max_active == maximum
+    assert not client.active
+    assert set(found['architectures']) == set(document['architectures'])
+    for reference in client.references.values():
+        assert reference['manifest_sha256'] == hashlib.sha256(raw).hexdigest()
+        assert reference['require_execution'] is (mode == 'main')
+
+
+def test_manifest_controller_makes_unread_docs_an_explicit_empty_selection():
+    document = controller_manifest(selection='irrelevant')
+    client = ManifestClient(document)
+    found = remote.run_manifest(client, arguments(), 'bytestream://remote.buildbuddy.io/manifest',
+                                json.dumps(document).encode(), clock=lambda: 1)
+    assert found['verdict'] == 'skipped'
+    assert client.events == []
+
+
+@pytest.mark.parametrize('fault', ['duplicate', 'missing', 'wrong_head', 'missing_arm64'])
+def test_manifest_controller_validates_the_whole_union_before_any_submission(fault):
+    document = controller_manifest(mode='main')
+    row = document['architectures']['arm64']
+    if fault == 'duplicate':
+        row['shards'][1] = row['shards'][0]
+    elif fault == 'missing':
+        row['shards'].pop()
+    elif fault == 'wrong_head':
+        document['head'] = 'd' * 40
+    else:
+        del document['architectures']['arm64']
+    client = ManifestClient(document)
+    with pytest.raises(remote.RemoteError):
+        remote.run_manifest(client, arguments('main'), 'bytestream://remote.buildbuddy.io/manifest',
+                            json.dumps(document).encode(), clock=lambda: 1)
+    assert client.events == []
+
+
+def test_manifest_controller_refuses_a_cache_only_postmerge_architecture():
+    document = controller_manifest(mode='main')
+    client = ManifestClient(document, cached_arm64=True)
+    found = remote.run_manifest(client, arguments('main'),
+        'bytestream://remote.buildbuddy.io/manifest', json.dumps(document).encode(), clock=lambda: 1)
+    assert found['verdict'] == 'fail'
+    assert found['architectures']['arm64']['error'] == 'architecture ran no test actions'
