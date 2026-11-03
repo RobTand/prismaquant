@@ -25,6 +25,12 @@ python_runner = load('bazel_python_runner', 'tools/bazel/python_runner.py')
 runtime = load('bazel_runtime', 'tools/bazel/runtime.py')
 
 
+def test_sdk_admission_state_uses_the_actions_private_local_scratch(tmp_path):
+    environ = runtime.gate_environment({'PRISMABUILD_BOX_STATE_ROOT': '/ambient/state'},
+                                       ROOT, tmp_path)
+    assert environ['PRISMABUILD_BOX_STATE_ROOT'] == str(tmp_path / 'pb-box-state')
+
+
 def test_every_generated_input_has_a_check_and_one_fix():
     commands = [' '.join(map(str, command)) for command in bazel_generated.commands()]
     assert any('tools/bazel/requirements.py --check' in command for command in commands)
