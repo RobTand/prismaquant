@@ -328,7 +328,7 @@ def test_revision_graph_retains_wheel_hashes_and_source_edges_privately(tmp_path
             return SimpleNamespace(returncode=0, stdout='\n'.join(map(json.dumps, rows)))
         assert command[3] == 'generate-hashes'
         wheel_file = Path(command[command.index('--fineGrainedHashExternalReposFile') + 1])
-        assert wheel_file.read_text() == 'rules_python++pip+pq_pip_numpy\n'
+        assert wheel_file.read_text() == '@@rules_python++pip+pq_pip_numpy\n'
         Path(command[-1]).write_text(json.dumps({'hashes': {'//tests:test_consumer': 'Rule#abc'},
                                                'metadata': {'moduleGraphJson': '{}'}}))
         Path(command[command.index('--depEdgesFile') + 1]).write_text(
@@ -345,6 +345,27 @@ def test_revision_graph_retains_wheel_hashes_and_source_edges_privately(tmp_path
     assert calls[0][:3] == ['bazel', 'query', 'deps(//...) union buildfiles(//...)']
     assert '--output=streamed_jsonproto' in calls[0]
     assert '--keep_going=false' in calls[0]
+
+
+def test_v42_adapter_qualifies_the_native_sdist_repository_failure_shape(tmp_path):
+    # Native ffaecdd3 refused the bare repo as an invalid package path.
+    repo = 'rules_python++pip+pq_pip_312__sdist_52ec077b'
+    rows = [{'rule': {'name': '//tests:consumer', 'ruleClass': 'py_test'}},
+            {'rule': {'name': '@@' + repo + '//:pkg', 'ruleClass': 'py_library'}}]
+    population = selection.query_population(rows, 'amd64')
+    assert population['wheel_repositories'] == [repo]
+
+    def hashes(command, **kwargs):
+        wheels = Path(command[command.index('--fineGrainedHashExternalReposFile') + 1])
+        patterns = [line + '//...:all-targets' for line in wheels.read_text().splitlines()]
+        assert patterns == ['@@' + repo + '//...:all-targets']
+        Path(command[-1]).write_text('{"//tests:consumer":"Rule#hash"}')
+        Path(command[command.index('--depEdgesFile') + 1]).write_text('{}')
+        return SimpleNamespace(returncode=0)
+
+    selection.collect_revision(ROOT, tmp_path, 'amd64', java='java',
+        jar=tmp_path / 'v42.jar', runner=hashes,
+        queried={'population': population, 'query': tmp_path / 'query.jsonl'})
 
 
 @pytest.mark.parametrize('fault', ['query_exit', 'query_invalid', 'missing_hashes', 'empty_hashes'])
