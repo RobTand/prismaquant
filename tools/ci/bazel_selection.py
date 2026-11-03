@@ -21,7 +21,7 @@ from tools.ci.bazel_artifacts import child_environment
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 GATE_INPUTS = {
-    '.github/workflows/gate.yml', '.bazelrc', '.bazelversion', '.bazelignore',
+    '.github/workflows/gate.yml', '.github/workflows/bazel-hosted.yml', '.bazelrc', '.bazelversion', '.bazelignore',
     'MODULE.bazel', 'MODULE.bazel.lock', 'tools/ci/bazel_selection.py',
     'tools/ci/bazel_gate.py', 'tools/ci/remote_gate.py',
     'tools/ci/bazel_artifacts.py', 'tools/ci/check_no_secret_leak.py',
