@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -116,6 +117,8 @@ def test_budget_warnings_survive_a_passing_result():
 def shard_result(index=0):
     return {'schema': remote.SCHEMA, 'head': HEAD, 'mode': 'pr', 'verdict': 'pass',
             'architecture': 'amd64', 'index': index, 'targets': [f'//tests:test_{index}'],
+            'manifest_sha256': 'c' * 64,
+            'partition_sha256': hashlib.sha256(f'//tests:test_{index}\n'.encode()).hexdigest(),
             'run': {'statuses': {f'//tests:test_{index}': 'PASSED'}, 'returncode': 0}}
 
 
@@ -146,7 +149,8 @@ class ShardClient:
 
 def shard_requests():
     return [remote.shard_request(arguments(), 'amd64', index,
-                                 [f'//tests:test_{index}'], [f'//tests:test_{index}'])
+                                 'bytestream://remote.buildbuddy.io/own-selection-manifest',
+                                 'c' * 64, shard_result(index)['partition_sha256'])
             for index in range(2)]
 
 
@@ -156,6 +160,8 @@ def test_full_runs_use_serial_subhour_requests_and_own_result_artifacts():
     assert all(request['timeout'] == '55m' for request in requests)
     assert all(request['platform_properties'] == remote.run_request(arguments())[
         'platform_properties'] for request in requests)
+    assert all('//tests:test_' not in json.dumps(request) for request in requests)
+    assert all(len(json.dumps(request)) < 2000 for request in requests)
     found = remote.submit_shards(client, requests, HEAD, clock=lambda: 1)
     assert found == [shard_result(0), shard_result(1)]
     assert client.calls == ['Run', 'GetInvocation', 'GetFile'] * 2
