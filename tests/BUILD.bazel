@@ -8499,6 +8499,7 @@ pq_py_library(
         "test_bazel_remote_gate.py",
     ],
     deps = [
+        "//:tools/__init__",
         "//:tools/ci/bazel_gate",
         "//:tools/ci/remote_gate",
         "@pq_pip//pytest",

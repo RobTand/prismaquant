@@ -155,6 +155,10 @@ TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is bac
 Upload scanning runs in-process under Python 3.14 with stdlib `compression.zstd`.
 The vendored scanner remains unchanged. The upload boundary refuses every
 `not scanned` diagnostic, including scanner exit zero, and refuses a missing
-Python 3.14 runtime or zstd decoder. Only valid UTF-8 JSON receipts are uploaded.
+Python 3.14 runtime or zstd decoder. Remote requests enter through the runner's
+Python 3.12, then provision managed Python 3.14.0 with uv 0.9.5 before fetching a
+manifest or running a shard. Bootstrap children receive an allowlisted environment
+without credentials. The parent replaces its own interpreter before scanning.
+Only valid UTF-8 JSON receipts are uploaded.
 Raw execution logs, BEP, archives and other diagnostics stay private on the
 runner. Renaming a binary artifact to `.json` does not make it eligible.

@@ -210,6 +210,9 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
     selected = set(decision.get('selected', ()))
     document = {'schema': 'prismaquant.bazel-shards.v1', 'mode': mode,
                 'base': base, 'head': head, 'selection': decision['selection'],
+                'scopes': sorted(set(decision.get('scopes', ()))),
+                'all_scopes': mode == 'main' or decision.get('all_scopes', decision['selection'] == 'fallback'),
+                'reason': list(decision.get('reason', ())),
                 'hosted': sorted(hosted if full else hosted & selected),
                 'hosted_arm64': sorted(hosted_arm64) if mode == 'main' else [],
                 'architectures': {}}
