@@ -230,9 +230,9 @@ def inventory_zip(payload):
     return buffer.getvalue()
 
 
-def output_event(uri='bytestream://remote.buildbuddy.io/own-output'):
+def output_event(uri='bytestream://remote.buildbuddy.io/own-output', name='test.outputs__outputs.zip'):
     return {'id': {'testResult': {'label': LABEL}}, 'testResult': {
-        'testActionOutput': [{'name': 'test.outputs__outputs.zip', 'uri': uri}]}}
+        'testActionOutput': [{'name': name, 'uri': uri}]}}
 
 
 def test_inventory_warnings_and_nodes_are_collected_once_from_own_bep_outputs():
@@ -257,3 +257,31 @@ def test_malformed_inventory_is_an_evidence_failure(raw):
 def test_native_tests_without_python_inventory_have_no_budget_warnings():
     assert gate.inventory_evidence(events(result(), summary()), lambda uri: b'') == {
         'nodes': {}, 'budget_warnings': []}
+
+
+@pytest.mark.parametrize('name', ['test.outputs/outputs.zip', 'test.outputs/inventory.json'])
+def test_inventory_accepts_bazel_zip_and_direct_output_names(name):
+    receipt = {'nodes': {'tests/test_one.py::test_one': 'passed'}, 'budget_warnings': []}
+    raw = json.dumps(receipt).encode() if name.endswith('inventory.json') else inventory_zip(receipt)
+    assert gate.inventory_evidence(events(output_event(name=name)), lambda uri: raw) == receipt
+
+
+def test_remote_shard_includes_warnings_and_node_receipts_without_retry(tmp_path):
+    warning = {'nodeid': 'tests/test_consumer.py::test_one', 'seconds': 21, 'budget_seconds': 20}
+    payload = inventory_zip({'nodes': {warning['nodeid']: 'passed'}, 'budget_warnings': [warning]})
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40, 'branch': 'bbrun/cutover',
+                'architecture': 'amd64', 'index': 0, 'targets': [LABEL], 'tests': [LABEL],
+                'require_execution': False}
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        path = Path(next(arg.split('=', 1)[1] for arg in command
+                         if arg.startswith('--build_event_json_file=')))
+        path.write_text(events(result(), summary(), output_event()))
+        from types import SimpleNamespace
+        return SimpleNamespace(returncode=0)
+    found = gate.execute_shard(manifest, root=tmp_path, runner=run, fetch=lambda uri: payload)
+    assert found['verdict'] == 'pass'
+    assert found['budget_warnings'] == [warning]
+    assert found['nodes'] == {warning['nodeid']: 'passed'}
+    assert len(calls) == 1
