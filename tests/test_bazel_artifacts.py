@@ -431,56 +431,55 @@ def test_runtime_archive_concurrent_writers_publish_only_complete_verified_bytes
     assert [p.name for p in cache.parent.iterdir()] == [cache.name]
 
 
-@pytest.mark.parametrize('outcome', ['success', 'truncation', 'deadline', 'transport'])
-def test_runtime_transfer_uses_secret_free_child_with_remaining_wall_deadline(
-        runtime_archive, monkeypatch, tmp_path, capsys, outcome):
-    import subprocess
-    from types import SimpleNamespace
+def test_runtime_slow_drip_refuses_within_original_wall_deadline(
+        runtime_archive, monkeypatch, tmp_path, capsys):
+    import threading
+    import time
+    from http.server import BaseHTTPRequestHandler, HTTPServer
     raw, digest = runtime_archive
-    state = SimpleNamespace(elapsed=0., calls=[])
-    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'private-transfer-child-sentinel')
-    monkeypatch.setenv('MERGIFY_TOKEN', 'private-second-child-sentinel')
-    monkeypatch.setattr(artifacts, 'time', SimpleNamespace(
-        monotonic=lambda: state.elapsed,
-        sleep=lambda seconds: setattr(state, 'elapsed', state.elapsed + seconds)))
+    stop = threading.Event()
+    requests = []
 
-    def direct_read(*args, **kwargs):
-        pytest.fail('download must have a killable wall-deadline child')
+    class SlowDrip(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            # Every individual read is fast; the complete body takes124s.
+            start, sent = time.monotonic(), 0
+            try:
+                while time.monotonic() - start < 124:
+                    self.wfile.write(raw[sent:sent + 1])
+                    self.wfile.flush()
+                    sent += 1
+                    if stop.wait(0.25):
+                        return
+                self.wfile.write(raw[sent:])
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
-    def child(command, *, timeout, env, **kwargs):
-        state.calls.append(timeout)
-        assert 0 < timeout <= 120
-        assert env == artifacts.child_environment()
-        assert 'BUILDBUDDY_API_KEY' not in env and 'MERGIFY_TOKEN' not in env
-        assert 'private-transfer-child-sentinel' not in str(command)
-        assert kwargs == {'capture_output': True, 'check': False}
-        assert command[1:3] == ['-I', '-S']
-        if outcome == 'success':
-            return SimpleNamespace(returncode=0, stdout=raw, stderr=b'')
-        if len(state.calls) == 1 and outcome in ('truncation', 'deadline'):
-            state.elapsed = 110.
-            return SimpleNamespace(returncode=76, stdout=b'', stderr=b'')
-        if outcome == 'deadline':
-            assert timeout == pytest.approx(9.9)
-            raise subprocess.TimeoutExpired(command, timeout,
-                                           output=b'private-transfer-child-sentinel')
-        return SimpleNamespace(returncode=76 if outcome == 'truncation' else 77,
-                               stdout=b'private-transfer-child-sentinel',
-                               stderr=b'private-second-child-sentinel')
+        def log_message(self, *_):
+            pass
 
-    monkeypatch.setattr(artifacts.urllib.request, 'urlopen', direct_read)
-    monkeypatch.setattr(artifacts.subprocess, 'run', child)
-    def execute(*args):
-        raise SystemExit(0)
-    if outcome == 'success':
-        with pytest.raises(SystemExit):
-            artifacts.require_scan_python(execute=execute)
-    else:
-        with pytest.raises(RuntimeError, match='Python 3.14'):
-            artifacts.require_scan_python(execute=execute)
-    assert len(state.calls) == {'success': 1, 'truncation': 3, 'deadline': 2, 'transport': 1}[outcome]
-    if outcome in ('truncation', 'deadline'):
-        assert state.calls[1] == pytest.approx(9.9)
+    server = HTTPServer(('127.0.0.1', 0), SlowDrip)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f'http://127.0.0.1:{server.server_port}/pinned-runtime'
+    started = time.monotonic()
+    try:
+        with pytest.raises(artifacts.RuntimeDownloadError):
+            artifacts.download_runtime_archive(url, None)
+    finally:
+        elapsed = time.monotonic() - started
+        stop.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert 119 <= elapsed <= 121.5
+    assert requests == ['/pinned-runtime']
+    assert not list((Path.home() / '.cache').rglob('*.tar.gz'))
+    assert not (tmp_path / 'upload').exists()
     captured = capsys.readouterr()
-    assert 'private-transfer-child-sentinel' not in captured.out + captured.err
-    assert 'private-second-child-sentinel' not in captured.out + captured.err
+    assert not captured.out and not captured.err
