@@ -1,0 +1,153 @@
+name: Bazel hosted exception tests
+'on':
+  workflow_call:
+    inputs:
+      architecture:
+        required: true
+        type: string
+      mode:
+        required: true
+        type: string
+      base:
+        required: true
+        type: string
+      head:
+        required: true
+        type: string
+      trusted:
+        required: true
+        type: boolean
+      receipt:
+        required: true
+        type: string
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: false
+      MERGIFY_TOKEN:
+        required: false
+    outputs:
+      verdict:
+        value: ${{ jobs.tests.outputs.verdict }}
+permissions:
+  contents: read
+  issues: read
+jobs:
+  tests:
+    runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 90
+    outputs:
+      verdict: ${{ steps.tests.outputs.verdict }}
+    env:
+      PYTHONPATH: .:tools/ci
+      CUDA_VISIBLE_DEVICES: ''
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      NUMEXPR_NUM_THREADS: '1'
+      TORCHINDUCTOR_COMPILE_THREADS: '1'
+      MAX_JOBS: '1'
+    steps:
+    - name: Configure owned temporary space
+      run: |
+        printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ inputs.head }}
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      if: ${{ inputs.trusted }}
+      with:
+        name: ${{ inputs.receipt }}
+        path: controller-receipt/
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: test-python
+      with:
+        python-version: '3.12'
+    - name: Plan complete hosted policy then narrow verified exceptions
+      id: plan
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+        TRUSTED: ${{ inputs.trusted }}
+        ARCHITECTURE: ${{ inputs.architecture }}
+      run: |
+        set -Eeuo pipefail
+        mkdir -p hosted-private
+        python tools/ci/gate_select.py --base "$BASE" --head "$HEAD" --mode full --output hosted-private/full-plan.json
+        if [ "$TRUSTED" = true ]; then
+          python tools/ci/bazel_gate.py hosted --architecture "$ARCHITECTURE" --plan hosted-private/full-plan.json --result controller-receipt/result.json --output hosted-private/plan.json
+        else
+          cp hosted-private/full-plan.json hosted-private/plan.json
+        fi
+    - name: Resolve Tessera development pin
+      id: tessera-pin
+      run: |
+        unset BUILDBUDDY_API_KEY
+        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
+        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
+    - name: Check out pinned Tessera
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: RobTand/tessera
+        ref: ${{ steps.tessera-pin.outputs.commit }}
+        persist-credentials: false
+        path: .ci/tessera
+    - name: Install CPU test environment
+      shell: bash
+      run: |
+        unset BUILDBUDDY_API_KEY
+        set -Eeuo pipefail
+        trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
+        python -m pip install --upgrade pip
+        python -m pip install --no-deps .ci/tessera
+        python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
+        python --version
+        python -m pip --version
+    - name: Run assigned hosted tests
+      id: tests
+      run: |
+        set -Eeuo pipefail
+        python tools/ci/gate_run.py --plan hosted-private/plan.json --workers 4 --result hosted-private/result.json --junitxml hosted-private/junit.xml
+        python - <<'HOSTED_VERDICT'
+        import json, os
+        from pathlib import Path
+        result = json.loads(Path('hosted-private/result.json').read_text())
+        if result['verdict'] != 'pass':
+            raise SystemExit('Hosted evidence failed')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=pass\n')
+        HOSTED_VERDICT
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
+      with:
+        python-version: '3.14'
+    - name: Scan exact JSON upload set
+      id: scan
+      if: ${{ !cancelled() && inputs.trusted && steps.tests.outcome == 'success' }}
+      env:
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        python tests/bazel_scan_runtime.py
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import publish_json
+        import os
+        upload = Path('hosted-upload')
+        upload.mkdir(parents=True, exist_ok=True)
+        publish_json(upload, {'result.json': Path('hosted-private/result.json').read_bytes()}, ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'])
+        SCAN_JSON
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
+      with:
+        name: hosted-${{ inputs.mode }}-${{ inputs.architecture }}-${{ github.run_attempt }}
+        path: hosted-upload/
+        if-no-files-found: error
+        retention-days: 7
+    - name: Fork verdict without artifact upload
+      if: ${{ !inputs.trusted }}
+      run: |
+        echo "Fork verdict comes from hosted execution; uploads are disabled."

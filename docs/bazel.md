@@ -121,3 +121,57 @@ The full check belongs in Bazel's runner-VM lane because attribution requires
 a git checkout and history. Without git, it reports `no base available` and
 still checks absolute figures, the count limit and every test's reach budget.
 The shrink-only exceptions preserve existing broad tests in that lane.
+
+## Remote gate execution
+
+The cutover sends Bazel actions to `selfhosted-amd64` or `selfhosted-arm64`,
+with no cloud fallback. Remote Bazel runners keep their existing four-CPU
+cloud placement. Hosted pytest exception lanes stay on GitHub-hosted runners.
+
+Selected gates and post-merge records submit one Remote Bazel shard at a
+time. The gate's fail-closed `//...` fallback alone may submit at most two
+concurrent Remote Bazel runs per controller on the self-hosted pools, each with
+`--jobs=16`. The controller rejects concurrency above two, and rejects
+concurrency above one outside PR fallback. Post-merge and development runs
+remain serial. Mergify's `checks_timeout` and merge conditions stay unchanged.
+
+Mergify's existing `max_parallel_checks: 2` and per-PR workflow concurrency
+bound gate overlap. There is no shared GitHub job concurrency group, because
+GitHub cancels an older pending job when a newer one queues, causing Mergify
+to see a failed check and dequeue it. The worst case for Bazel, lock or workflow
+changes is four concurrent Remote Bazel runs per repo: two batch-draft fallback
+controllers, each with two shards. Extra runs queue on the self-hosted executors
+rather than fail; this appears as longer shards, not errors. This exception does
+not permit concurrent agent or development runs.
+
+Both modes use deterministic target-pattern partitions, verify their union
+against the queried population exactly once, and fail closed on any missing
+or DISCONNECTED shard. An admitted sibling still needs its own terminal
+evidence when another shard fails. No shard is retried to obtain a pass.
+
+TL3 keeps BuildBuddy priority if a fallback batch arrives while its queue is backed up; this cutover adds no scheduler.
+
+
+Upload scanning runs in-process under Python 3.14 with stdlib `compression.zstd`.
+The vendored scanner remains unchanged. The upload boundary refuses every
+`not scanned` diagnostic, including scanner exit zero, and refuses a missing
+Python 3.14 runtime or zstd decoder. Remote requests enter through the runner's
+Python 3.12, then provision managed Python 3.14.0 with uv 0.9.5 before fetching a
+manifest or running a shard. Bootstrap children receive an allowlisted environment
+without credentials. The parent replaces its own interpreter before scanning.
+Only valid UTF-8 JSON receipts are uploaded.
+Raw execution logs, BEP, archives and other diagnostics stay private on the
+runner. Renaming a binary artifact to `.json` does not make it eligible.
+
+Before a shard starts, the Remote Bazel runner hydrates full Git history for
+checkout-dependent tests, including the archived-main graph baseline contract.
+Git children receive the same allowlisted environment without credentials.
+Missing history or a source-head mismatch refuses the shard before tests run.
+
+The test population retains Python 3.12. Scanner unit tests isolate runtime
+admission; CLI tests isolate interpreter bootstrap. Each trusted upload step
+runs tests/bazel_scan_runtime.py explicitly with Python 3.14 to prove native
+zstd decoding and JSON publication. No runtime-dependent test is skipped.
+Build-only partitions invoke bazel build and publish a successful shard record
+on build success. Post-merge still rejects zero test executions across an
+entire architecture, while a library-only partition may execute zero tests.
