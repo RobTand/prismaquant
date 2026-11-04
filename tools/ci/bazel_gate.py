@@ -448,14 +448,15 @@ class InventoryFetcher:
                         raise HTTPError('https://app.buildbuddy.io/api/v1/GetFile',
                                         response.status, 'inventory fetch refused', None, None)
                     chunks, received = [], 0
-                    while received <= size:
+                    while not response.isclosed() and received <= size:
                         self.remaining(deadline, sock)
                         chunk = response.read1(min(65536, size + 1 - received))
                         if not chunk:
                             break
                         chunks.append(chunk)
                         received += len(chunk)
-                    self.remaining(deadline, sock)
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError('inventory fetch deadline exhausted')
                 raw = b''.join(chunks)
                 if len(raw) != size or bytes_sha256hex(raw) != digest:
                     raise GateError('inventory artifact digest or size mismatch')
