@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import contextmanager
 import argparse
+import errno
 import importlib.util
 import io
 import json
@@ -11,6 +12,8 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -35,6 +38,7 @@ class ShardEvidenceError(GateError):
     def __init__(self, phase, category):
         super().__init__('shard evidence unavailable at ' + phase)
         self.phase, self.category = phase, category
+        self.inventory_progress = None
 
 
 def refusal_category(error):
@@ -46,6 +50,14 @@ def refusal_category(error):
         if isinstance(error, HTTPError):
             return {403: 'http-403', 404: 'http-404', 429: 'http-429'}.get(
                 error.code, 'http-server' if 500 <= error.code < 600 else 'http')
+        if isinstance(error, ssl.SSLCertVerificationError):
+            return 'ssl-certificate'
+        if isinstance(error, ssl.SSLEOFError):
+            return 'ssl-eof'
+        if isinstance(error, ssl.SSLError):
+            return 'ssl-protocol'
+        if isinstance(error, socket.gaierror):
+            return 'network-dns'
         if isinstance(error, FileNotFoundError):
             return 'missing-file'
         if isinstance(error, PermissionError):
@@ -55,10 +67,22 @@ def refusal_category(error):
         if isinstance(error, zipfile.BadZipFile):
             return 'invalid-zip'
         if isinstance(error, OSError):
+            known = {
+                errno.EISDIR: 'io-directory', errno.ELOOP: 'io-symlink-loop',
+                errno.ENOSPC: 'io-no-space', errno.EMFILE: 'io-fd-limit',
+                errno.ENFILE: 'io-fd-limit', errno.ENOMEM: 'io-resource-limit',
+                errno.ESTALE: 'io-stale', errno.EIO: 'io-device',
+                errno.ECONNRESET: 'network-reset', errno.ECONNREFUSED: 'network-refused',
+                errno.ECONNABORTED: 'network-aborted', errno.EPIPE: 'network-broken-pipe',
+                errno.ENETUNREACH: 'network-unreachable', errno.EHOSTUNREACH: 'network-unreachable',
+            }.get(error.errno)
+            if known:
+                return known
             category = 'io'
         elif isinstance(error, (GateError, ValueError, TypeError, KeyError, AttributeError)):
             category = 'invalid-evidence'
-        error = error.__cause__ or error.__context__
+        reason = error.reason if isinstance(error, URLError) else None
+        error = reason if isinstance(reason, BaseException) else error.__cause__ or error.__context__
         if error is None:
             break
     return category
@@ -243,47 +267,50 @@ def load_shard_manifest(reference, fetch):
 
 def inventory_evidence(text, fetch):
     """Read Python node receipts from only the output URIs in this run's BEP."""
-    seen, nodes, warnings = set(), {}, []
-    try:
+    sources, nodes, warnings = {}, {}, []
+    with evidence_phase('inventory-bep-parse'):
         for line in text.splitlines():
-            with evidence_phase('inventory-bep-parse'):
-                event = json.loads(line)
+            event = json.loads(line)
             for output in event.get('testResult', {}).get('testActionOutput', []):
                 name = output.get('name')
-                if name not in ('test.outputs__outputs.zip', 'test.outputs/outputs.zip',
-                                 'test.outputs/inventory.json'):
-                    continue
-                with evidence_phase('inventory-fetch'):
+                if name in ('test.outputs__outputs.zip', 'test.outputs/outputs.zip',
+                            'test.outputs/inventory.json'):
                     uri = output['uri']
-                    if uri in seen:
-                        continue
-                    seen.add(uri)
-                    raw = fetch(uri)
-                with evidence_phase('inventory-parse'):
-                    if name.endswith('inventory.json'):
-                        receipts = [json.loads(raw)]
-                    else:
-                        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                            receipts = [json.loads(archive.read(member)) for member in archive.namelist()
-                                        if Path(member).name == 'inventory.json']
-                with evidence_phase('inventory-validate'):
-                    for receipt in receipts:
-                        found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
-                        if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
-                            raise ValueError('invalid inventory structure')
-                        for node, status in found_nodes.items():
-                            if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
-                                raise ValueError('invalid inventory node')
-                            if nodes.get(node) != 'failed':
-                                nodes[node] = status
-                        for row in found_warnings:
-                            if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
-                                    or any(type(row.get(key)) not in (int, float)
-                                           for key in ('seconds', 'budget_seconds'))):
-                                raise ValueError('invalid budget warning')
-                            warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
-    except (ValueError, TypeError, AttributeError, KeyError, OSError, zipfile.BadZipFile):
-        raise GateError('test output inventory is malformed or unavailable') from None
+                    if not isinstance(uri, str):
+                        raise GateError('invalid inventory source')
+                    sources.setdefault(uri, name)
+    local = sum(uri.startswith('file://') for uri in sources)
+    remote = sum(uri.startswith('bytestream://') for uri in sources)
+    for index, (uri, name) in enumerate(sources.items(), start=1):
+        try:
+            with evidence_phase('inventory-fetch'):
+                raw = fetch(uri)
+            with evidence_phase('inventory-parse'):
+                if name.endswith('inventory.json'):
+                    receipts = [json.loads(raw)]
+                else:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                        receipts = [json.loads(archive.read(member)) for member in archive.namelist()
+                                    if Path(member).name == 'inventory.json']
+            with evidence_phase('inventory-validate'):
+                for receipt in receipts:
+                    found_nodes, found_warnings = receipt.get('nodes', {}), receipt.get('budget_warnings', [])
+                    if not isinstance(found_nodes, dict) or not isinstance(found_warnings, list):
+                        raise ValueError('invalid inventory structure')
+                    for node, status in found_nodes.items():
+                        if not isinstance(node, str) or status not in ('passed', 'skipped', 'failed'):
+                            raise ValueError('invalid inventory node')
+                        if nodes.get(node) != 'failed':
+                            nodes[node] = status
+                    for row in found_warnings:
+                        if (not isinstance(row, dict) or not isinstance(row.get('nodeid'), str)
+                                or any(type(row.get(key)) not in (int, float)
+                                       for key in ('seconds', 'budget_seconds'))):
+                            raise ValueError('invalid budget warning')
+                        warnings.append({key: row[key] for key in ('nodeid', 'seconds', 'budget_seconds')})
+        except ShardEvidenceError as error:
+            error.inventory_progress = (local, remote, index, len(sources))
+            raise
     return {'nodes': nodes, 'budget_warnings': warnings}
 
 
@@ -342,15 +369,17 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
 
 def fetch_artifact(uri):
     if uri.startswith('file://'):
-        return Path(unquote(urlsplit(uri).path)).read_bytes()
+        with evidence_phase('inventory-local-read'):
+            return Path(unquote(urlsplit(uri).path)).read_bytes()
     if not uri.startswith('bytestream://'):
         raise GateError('artifact has an unsupported URI')
-    spec = importlib.util.spec_from_file_location(
-        'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
-    artifacts = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(artifacts)
-    return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
-        'GetFile', {'uri': uri}, raw=True)
+    with evidence_phase('inventory-remote-fetch'):
+        spec = importlib.util.spec_from_file_location(
+            'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
+        artifacts = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(artifacts)
+        return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
+            'GetFile', {'uri': uri}, raw=True)
 
 
 def main(argv=None):
@@ -411,6 +440,10 @@ def main(argv=None):
             category = refusal_category(error)
         print('shard refused at ' + phase + '; category=' + category + '; upload refused',
               file=sys.stderr)
+        if isinstance(error, ShardEvidenceError) and error.inventory_progress is not None:
+            local, remote, index, total = error.inventory_progress
+            print(f'inventory sources: local={local} remote={remote}; '
+                  f'failed at index {index} of {total}', file=sys.stderr)
         return 75
 
 
