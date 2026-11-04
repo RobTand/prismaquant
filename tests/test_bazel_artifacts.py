@@ -262,3 +262,165 @@ def test_runner_history_failure_redacts_git_diagnostics(tmp_path, capsys):
         artifacts.prepare_history('a' * 40, root=tmp_path, runner=broken_git)
     assert 'private-history-credential' not in str(error.value)
     assert 'private-history-credential' not in capsys.readouterr().out
+
+
+@pytest.fixture
+def runtime_archive(tmp_path, monkeypatch):
+    import hashlib
+    import io
+    import platform
+    import tarfile
+    monkeypatch.setenv('HOME', str(tmp_path / 'home'))
+    monkeypatch.setattr(artifacts.sys, 'version_info', (3, 12, 0))
+    monkeypatch.setattr(platform, 'system', lambda: 'Linux')
+    monkeypatch.setattr(platform, 'machine', lambda: 'x86_64')
+    # Match the observed 34,580,370-byte archive transfer and truncated shape.
+    source = io.BytesIO()
+    with tarfile.open(fileobj=source, mode='w:gz') as bundle:
+        item = tarfile.TarInfo('python/bin/python3.14')
+        item.size, item.mode = 8, 0o755
+        bundle.addfile(item, io.BytesIO(b'fixture!'))
+    raw = source.getvalue().ljust(34580370, b'\0')
+    digest = hashlib.sha256(raw).hexdigest()
+    monkeypatch.setattr(artifacts, 'PYTHON_RUNTIME_SHA256', {'x86_64': digest})
+    return raw, digest
+
+
+@pytest.mark.parametrize('fault,failures,passes,attempts', [
+    ('truncated', 1, True, 2), ('truncated', 2, True, 3),
+    ('truncated', 3, False, 3), ('deadline', 1, False, 1),
+    ('nontruncation', 1, False, 1),
+])
+def test_runtime_archive_truncation_guard_at_bootstrap_boundary(
+        runtime_archive, tmp_path, monkeypatch, capsys, fault, failures, passes, attempts):
+    import http.client
+    import io
+    from types import SimpleNamespace
+    raw, digest = runtime_archive
+    upload = tmp_path / 'upload'
+    upload.mkdir()
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'private-bootstrap-sentinel')
+    state = SimpleNamespace(calls=0, elapsed=0., sleeps=[], executions=0)
+
+    def sleep(seconds):
+        state.sleeps.append(seconds)
+        state.elapsed += seconds
+
+    monkeypatch.setattr(artifacts, 'time', SimpleNamespace(
+        monotonic=lambda: state.elapsed, sleep=sleep), raising=False)
+
+    class Response(io.BytesIO):
+        def read(self, *args):
+            if state.calls <= failures:
+                if fault == 'nontruncation':
+                    raise ConnectionResetError('private-bootstrap-sentinel')
+                if fault == 'deadline':
+                    state.elapsed = 120.
+                raise http.client.IncompleteRead(raw[:31522816], 3057554)
+            return super().read(*args)
+
+    def download(url, timeout):
+        state.calls += 1
+        assert 'private-bootstrap-sentinel' not in url
+        assert 0 < timeout <= 120
+        return Response(raw)
+
+    def execute(executable, argv):
+        state.executions += 1
+        assert Path(executable).read_bytes() == b'fixture!'
+        raise SystemExit(0)
+
+    monkeypatch.setattr(artifacts.urllib.request, 'urlopen', download)
+    if passes:
+        with pytest.raises(SystemExit) as done:
+            artifacts.require_scan_python(execute=execute)
+        assert done.value.code == 0
+    else:
+        with pytest.raises(RuntimeError, match='Python 3.14'):
+            artifacts.require_scan_python(execute=execute)
+    assert state.calls == attempts
+    assert state.executions == int(passes)
+    assert state.elapsed <= 120
+    assert len(state.sleeps) == (attempts - 1 if fault == 'truncated' else 0)
+    assert list(upload.iterdir()) == []
+    captured = capsys.readouterr()
+    assert 'private-bootstrap-sentinel' not in captured.out + captured.err
+    assert 'IncompleteRead(' not in captured.out + captured.err
+    if not passes and fault != 'nontruncation':
+        assert captured.err == (f'Scanner runtime bootstrap refused at download; '
+                                f'category=incomplete-read; attempts={attempts}\n')
+
+
+@pytest.mark.parametrize('machine', ['x86_64', 'aarch64'])
+def test_runtime_archive_cache_verifies_every_hit_and_refetches_corruption(
+        runtime_archive, monkeypatch, machine):
+    import platform
+    raw, digest = runtime_archive
+    monkeypatch.setattr(platform, 'machine', lambda: machine)
+    monkeypatch.setattr(artifacts, 'PYTHON_RUNTIME_SHA256', {machine: digest})
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return raw
+
+    def execute(path, argv):
+        assert Path(path).read_bytes() == b'fixture!'
+        # Extracted executable corruption must not become a trusted cache hit.
+        Path(path).write_bytes(b'changed!')
+        raise SystemExit(0)
+
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            artifacts.require_scan_python(fetch=fetch, execute=execute)
+    assert len(calls) == 1
+    cache = list((Path.home() / '.cache/prismaquant/scan-runtime').glob('*.tar.gz'))
+    assert len(cache) == 1
+    assert cache[0].name == digest + '.tar.gz'
+    assert cache[0].read_bytes() == raw
+    cache[0].write_bytes(b'corrupt cache')
+    with pytest.raises(SystemExit):
+        artifacts.require_scan_python(fetch=fetch, execute=execute)
+    assert len(calls) == 2
+    assert cache[0].read_bytes() == raw
+
+
+def test_runtime_archive_concurrent_writers_publish_only_complete_verified_bytes(
+        runtime_archive, monkeypatch):
+    import threading
+    raw, digest = runtime_archive
+    barrier = threading.Barrier(2)
+    errors, done, calls = [], [], []
+    cache = Path.home() / '.cache/prismaquant/scan-runtime' / (digest + '.tar.gz')
+
+    def fetch(url):
+        calls.append(url)
+        assert not cache.exists()
+        barrier.wait(timeout=10)
+        return raw
+
+    def execute(path, argv):
+        assert cache.read_bytes() == raw
+        assert Path(path).read_bytes() == b'fixture!'
+        raise SystemExit(0)
+
+    def worker():
+        try:
+            artifacts.require_scan_python(fetch=fetch, execute=execute)
+        except SystemExit as result:
+            done.append(result.code)
+        except BaseException as error:
+            errors.append(type(error).__name__)
+
+    workers = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in workers:
+        thread.start()
+    for thread in workers:
+        thread.join(timeout=15)
+    assert not any(thread.is_alive() for thread in workers)
+    assert not errors
+    assert done == [0, 0]
+    assert len(calls) == 2
+    assert cache.read_bytes() == raw
+    assert [p.name for p in cache.parent.iterdir()] == [cache.name]
