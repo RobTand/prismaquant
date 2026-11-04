@@ -464,18 +464,21 @@ class InventoryFetcher:
             except socket.gaierror as error:
                 self.close()
                 backoff = 0.1 * attempt
-                if attempt == 3 or deadline - time.monotonic() <= backoff:
-                    names = ('EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA',
-                             'EAI_FAMILY', 'EAI_ADDRFAMILY', 'EAI_SERVICE', 'EAI_SOCKTYPE',
-                             'EAI_MEMORY', 'EAI_SYSTEM', 'EAI_BADFLAGS', 'EAI_OVERFLOW')
-                    subtype = next((name for name in names
-                                    if getattr(socket, name, None) == error.errno), 'EAI_UNKNOWN')
-                    failure = ShardEvidenceError('inventory-remote-fetch', 'network-dns')
-                    failure.dns_detail = (subtype, attempt)
-                    raise failure from None
-                time.sleep(backoff)
+                if attempt < 3 and deadline - time.monotonic() > backoff:
+                    time.sleep(backoff)
+                    if time.monotonic() < deadline:
+                        continue
+                names = ('EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA',
+                         'EAI_FAMILY', 'EAI_ADDRFAMILY', 'EAI_SERVICE', 'EAI_SOCKTYPE',
+                         'EAI_MEMORY', 'EAI_SYSTEM', 'EAI_BADFLAGS', 'EAI_OVERFLOW')
+                subtype = next((name for name in names if error.errno is not None
+                                and getattr(socket, name, None) == error.errno), 'EAI_UNKNOWN')
+                failure = ShardEvidenceError('inventory-remote-fetch', 'network-dns')
+                failure.dns_detail = (subtype, attempt)
+                raise failure from None
             except http.client.HTTPException:
                 raise GateError('inventory HTTP evidence unavailable') from None
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
