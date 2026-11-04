@@ -13,6 +13,11 @@ artifacts = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(artifacts)
 
 
+@pytest.fixture(autouse=True)
+def isolated_runtime_home(tmp_path, monkeypatch):
+    monkeypatch.setenv('HOME', str(tmp_path / 'runner-home'))
+
+
 @pytest.fixture
 def controlled_scan_runtime(monkeypatch):
     """Isolate runtime admission; native 3.14 behavior has its own explicit step."""
