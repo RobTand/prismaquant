@@ -316,6 +316,11 @@ def test_runtime_archive_truncation_guard_at_bootstrap_boundary(
         monotonic=lambda: state.elapsed, sleep=sleep), raising=False)
 
     class Response(io.BytesIO):
+        headers = {'Content-Length': str(len(raw))}
+
+        def read1(self, *args):
+            return self.read(*args)
+
         def read(self, *args):
             if state.calls <= failures:
                 if fault == 'nontruncation':
@@ -336,7 +341,7 @@ def test_runtime_archive_truncation_guard_at_bootstrap_boundary(
         assert Path(executable).read_bytes() == b'fixture!'
         raise SystemExit(0)
 
-    monkeypatch.setattr(artifacts.urllib.request, 'urlopen', download)
+    monkeypatch.setattr(artifacts, 'open_runtime_url', download)
     if passes:
         with pytest.raises(SystemExit) as done:
             artifacts.require_scan_python(execute=execute)

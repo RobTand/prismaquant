@@ -12,6 +12,7 @@ import re
 import sys
 import subprocess
 import shutil
+import socket
 import tarfile
 import tempfile
 import time
@@ -115,6 +116,100 @@ class RuntimeDownloadError(RuntimeError):
         self.category, self.attempts = category, attempts
 
 
+
+def runtime_remaining(deadline, sock=None):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError('runtime download deadline exhausted')
+    if sock is not None:
+        sock.settimeout(remaining)
+    return remaining
+
+
+class RuntimeDeadlineReader(io.RawIOBase):
+    """Bound every socket read, including headers and slow-drip body chunks."""
+
+    def __init__(self, raw, sock, deadline):
+        self.raw, self.sock, self.deadline = raw, sock, deadline
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        runtime_remaining(self.deadline, self.sock)
+        return self.raw.readinto(buffer)
+
+    def close(self):
+        try:
+            self.raw.close()
+        finally:
+            super().close()
+
+
+class RuntimeResponseSocket:
+    def __init__(self, sock, deadline):
+        self.sock, self.deadline = sock, deadline
+
+    def makefile(self, mode):
+        raw = self.sock.makefile(mode, buffering=0)
+        return io.BufferedReader(RuntimeDeadlineReader(raw, self.sock, self.deadline))
+
+
+def open_runtime_url(url, deadline):
+    """Keep urllib redirects/TLS while sharing one deadline across operations."""
+    def connect(address, timeout=None, source_address=None):
+        # getaddrinfo is synchronous; a hung resolver remains a documented risk.
+        addresses = socket.getaddrinfo(*address, 0, socket.SOCK_STREAM)
+        error = None
+        for family, kind, protocol, _, destination in addresses:
+            sock = socket.socket(family, kind, protocol)
+            try:
+                runtime_remaining(deadline, sock)
+                if source_address:
+                    sock.bind(source_address)
+                sock.connect(destination)
+                runtime_remaining(deadline, sock)
+                return sock
+            except OSError as failure:
+                sock.close()
+                error = failure
+        if error is not None:
+            raise error
+        raise OSError('runtime download has no address')
+
+    def connection_type(base):
+        class Connection(base):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._create_connection = connect
+                self.response_class = lambda sock, *a, **kw: http.client.HTTPResponse(
+                    RuntimeResponseSocket(sock, deadline), *a, **kw)
+
+            def connect(self):
+                super().connect()
+                runtime_remaining(deadline, self.sock)
+
+            def send(self, data):
+                if self.sock is None:
+                    self.connect()
+                runtime_remaining(deadline, self.sock)
+                super().send(data)
+        return Connection
+
+    class HTTP(urllib.request.HTTPHandler):
+        def http_open(self, request):
+            return self.do_open(connection_type(http.client.HTTPConnection), request)
+
+    class HTTPS(urllib.request.HTTPSHandler):
+        def https_open(self, request):
+            return self.do_open(connection_type(http.client.HTTPSConnection), request,
+                                context=self._context)
+
+    opener = urllib.request.build_opener(HTTP(), HTTPS())
+    return opener.open(url, timeout=runtime_remaining(deadline))
+
+
+
 def download_runtime_archive(url, fetch):
     deadline = time.monotonic() + 120
     for attempt in range(1, 4):
@@ -123,10 +218,24 @@ def download_runtime_archive(url, fetch):
             raise RuntimeDownloadError('deadline', attempt - 1)
         try:
             if fetch is None:
-                with urllib.request.urlopen(url, timeout=remaining) as response:
-                    content = response.read()
+                with open_runtime_url(url, deadline) as response:
+                    length = response.headers.get('Content-Length')
+                    expected = int(length) if length is not None else None
+                    chunks, received = [], 0
+                    while True:
+                        runtime_remaining(deadline)
+                        chunk = response.read1(65536)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        received += len(chunk)
+                    if expected is not None and received < expected:
+                        raise http.client.IncompleteRead(b'', expected - received)
+                    content = b''.join(chunks)
             else:
                 content = fetch(url)
+        except TimeoutError:
+            raise RuntimeDownloadError('deadline', attempt) from None
         except http.client.IncompleteRead:
             backoff = attempt * 0.1
             if attempt < 3 and deadline - time.monotonic() > backoff:
@@ -169,6 +278,7 @@ def runtime_archive(url, digest, fetch):
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return content
+
 
 def require_scan_python(*, fetch=None, execute=None):
     """Verify a standalone runtime without pip, then replace the keyed parent."""
