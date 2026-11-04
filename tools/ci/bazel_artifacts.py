@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import http.client
 import json
 import os
 import platform
@@ -13,6 +14,7 @@ import subprocess
 import shutil
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -104,6 +106,70 @@ def prepare_history(expected_head, *, root=None, runner=None):
         raise RuntimeError('runner history preparation failed; tests refused') from None
 
 
+
+class RuntimeDownloadError(RuntimeError):
+    """Fixed bootstrap diagnostics, never a partial response or exception text."""
+
+    def __init__(self, category, attempts):
+        super().__init__('scanner runtime download unavailable')
+        self.category, self.attempts = category, attempts
+
+
+def download_runtime_archive(url, fetch):
+    deadline = time.monotonic() + 120
+    for attempt in range(1, 4):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeDownloadError('deadline', attempt - 1)
+        try:
+            if fetch is None:
+                with urllib.request.urlopen(url, timeout=remaining) as response:
+                    content = response.read()
+            else:
+                content = fetch(url)
+        except http.client.IncompleteRead:
+            backoff = attempt * 0.1
+            if attempt < 3 and deadline - time.monotonic() > backoff:
+                time.sleep(backoff)
+                if time.monotonic() < deadline:
+                    continue
+            raise RuntimeDownloadError('incomplete-read', attempt) from None
+        if time.monotonic() >= deadline:
+            raise RuntimeDownloadError('deadline', attempt)
+        return content
+
+
+def runtime_archive(url, digest, fetch):
+    """Reuse only digest-verified archives, with atomic concurrent publication."""
+    cache = Path.home() / '.cache/prismaquant/scan-runtime'
+    if directory := os.environ.get('BUILDBUDDY_ARTIFACTS_DIRECTORY'):
+        if cache.resolve().is_relative_to(Path(directory).resolve()):
+            raise RuntimeError('runtime cache overlaps uploads')
+    cache.mkdir(parents=True, exist_ok=True)
+    archive = cache / (digest + '.tar.gz')
+    try:
+        with os.fdopen(os.open(archive, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+            content = stream.read()
+    except FileNotFoundError:
+        content = None
+    if content is not None and bytes_sha256hex(content) == digest:
+        return content
+    content = download_runtime_archive(url, fetch)
+    if bytes_sha256hex(content) != digest:
+        raise ValueError('runtime checksum mismatch')
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=cache, prefix='.runtime-', delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, archive)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return content
+
 def require_scan_python(*, fetch=None, execute=None):
     """Verify a standalone runtime without pip, then replace the keyed parent."""
     if sys.version_info[:2] == (3, 14):
@@ -120,11 +186,7 @@ def require_scan_python(*, fetch=None, execute=None):
                + PYTHON_RUNTIME_RELEASE + '/cpython-3.14.0%2B' + PYTHON_RUNTIME_RELEASE
                + '-' + machine + '-unknown-linux-gnu-install_only_stripped.tar.gz')
         phase = 'download'
-        if fetch is None:
-            with urllib.request.urlopen(url, timeout=120) as response:
-                content = response.read()
-        else:
-            content = fetch(url)
+        content = runtime_archive(url, PYTHON_RUNTIME_SHA256[machine], fetch)
         phase = 'integrity'
         if bytes_sha256hex(content) != PYTHON_RUNTIME_SHA256[machine]:
             raise ValueError('runtime checksum mismatch')
@@ -140,10 +202,16 @@ def require_scan_python(*, fetch=None, execute=None):
         print('Scanner runtime verified: pinned Python 3.14.0', flush=True)
         execute(python, [python, *sys.argv])
         raise RuntimeError('runtime replacement returned')
-    except (OSError, ValueError, TypeError, tarfile.TarError, RuntimeError):
+    except (OSError, ValueError, TypeError, tarfile.TarError, RuntimeError,
+            http.client.HTTPException) as error:
         if bootstrap is not None:
             shutil.rmtree(bootstrap, ignore_errors=True)
-        print('Scanner runtime bootstrap refused at ' + phase, file=sys.stderr)
+        detail = ''
+        if isinstance(error, RuntimeDownloadError):
+            detail = f'; category={error.category}; attempts={error.attempts}'
+        elif isinstance(error, ValueError) and phase == 'download':
+            phase = 'integrity'
+        print('Scanner runtime bootstrap refused at ' + phase + detail, file=sys.stderr)
         raise RuntimeError('Python 3.14 scanner bootstrap failed; upload refused') from None
 
 
