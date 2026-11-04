@@ -7,6 +7,7 @@ import argparse
 import errno
 import importlib.util
 import io
+import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -17,6 +18,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import unquote, urlsplit
 from urllib.error import HTTPError, URLError
 import zipfile
@@ -39,6 +41,7 @@ class ShardEvidenceError(GateError):
         super().__init__('shard evidence unavailable at ' + phase)
         self.phase, self.category = phase, category
         self.inventory_progress = None
+        self.dns_detail = None
 
 
 def refusal_category(error):
@@ -358,7 +361,11 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
         text = bep.read_text()
     with evidence_phase('bep-parse'):
         run = bep_run(text, returncode=outcome.returncode)
-    inventory = inventory_evidence(text, fetch or fetch_artifact)
+    if fetch is None:
+        with InventoryFetcher() as inventory_fetch:
+            inventory = inventory_evidence(text, inventory_fetch)
+    else:
+        inventory = inventory_evidence(text, fetch)
     with evidence_phase('result-validation'):
         result = architecture_result(tests, run, budget_warnings=inventory['budget_warnings'],
                                      require_execution=manifest['require_execution'] and bool(tests))
@@ -382,6 +389,92 @@ def fetch_artifact(uri):
     return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
         'GetFile', {'uri': uri}, raw=True)
 
+
+
+class InventoryFetcher:
+    """One inventory's fixed-host TLS connection; retry only immutable DNS reads."""
+
+    def __init__(self):
+        self.connection = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self):
+        if self.connection is not None:
+            self.connection.close()
+            self.connection = None
+
+    def remaining(self, deadline, sock=None):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('inventory fetch deadline exhausted')
+        if self.connection is not None:
+            self.connection.timeout = remaining
+            sock = sock or self.connection.sock
+        if sock is not None:
+            sock.settimeout(remaining)
+        return remaining
+
+    def __call__(self, uri):
+        if uri.startswith('file://'):
+            return fetch_artifact(uri)
+        parsed = urlsplit(uri)
+        identity = re.fullmatch(r'.*/blobs/([0-9a-f]{64})/(0|[1-9][0-9]*)', parsed.path)
+        if (parsed.scheme != 'bytestream' or not parsed.hostname or parsed.username
+                or parsed.password or parsed.query or parsed.fragment or not identity):
+            raise GateError('inventory source is not immutable')
+        digest, size = identity[1], int(identity[2])
+        key = os.environ.get('BUILDBUDDY_API_KEY')
+        if not key:
+            raise GateError('inventory fetch key unavailable')
+        body = json.dumps({'uri': uri}).encode()
+        deadline = time.monotonic() + 120
+        for attempt in range(1, 4):
+            try:
+                remaining = self.remaining(deadline)
+                if self.connection is None:
+                    self.connection = http.client.HTTPSConnection(
+                        'app.buildbuddy.io', timeout=remaining)
+                self.connection.request('POST', '/api/v1/GetFile', body=body,
+                    headers={'x-buildbuddy-api-key': key, 'Content-Type': 'application/json'})
+                self.remaining(deadline)
+                sock = self.connection.sock
+                with self.connection.getresponse() as response:
+                    if response.status != 200:
+                        raise HTTPError('https://app.buildbuddy.io/api/v1/GetFile',
+                                        response.status, 'inventory fetch refused', None, None)
+                    chunks, received = [], 0
+                    while received <= size:
+                        self.remaining(deadline, sock)
+                        chunk = response.read1(min(65536, size + 1 - received))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        received += len(chunk)
+                    self.remaining(deadline, sock)
+                raw = b''.join(chunks)
+                if len(raw) != size or bytes_sha256hex(raw) != digest:
+                    raise GateError('inventory artifact digest or size mismatch')
+                return raw
+            except socket.gaierror as error:
+                self.close()
+                backoff = 0.1 * attempt
+                if attempt == 3 or deadline - time.monotonic() <= backoff:
+                    names = ('EAI_AGAIN', 'EAI_NONAME', 'EAI_FAIL', 'EAI_NODATA',
+                             'EAI_FAMILY', 'EAI_ADDRFAMILY', 'EAI_SERVICE', 'EAI_SOCKTYPE',
+                             'EAI_MEMORY', 'EAI_SYSTEM', 'EAI_BADFLAGS', 'EAI_OVERFLOW')
+                    subtype = next((name for name in names
+                                    if getattr(socket, name, None) == error.errno), 'EAI_UNKNOWN')
+                    failure = ShardEvidenceError('inventory-remote-fetch', 'network-dns')
+                    failure.dns_detail = (subtype, attempt)
+                    raise failure from None
+                time.sleep(backoff)
+            except http.client.HTTPException:
+                raise GateError('inventory HTTP evidence unavailable') from None
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -439,7 +532,11 @@ def main(argv=None):
             phase, category = error.phase, error.category
         else:
             category = refusal_category(error)
-        print('shard refused at ' + phase + '; category=' + category + '; upload refused',
+        detail = ''
+        if isinstance(error, ShardEvidenceError) and error.dns_detail is not None:
+            subtype, attempts = error.dns_detail
+            detail = f'; eai={subtype}; attempts={attempts}'
+        print('shard refused at ' + phase + '; category=' + category + detail + '; upload refused',
               file=sys.stderr)
         if isinstance(error, ShardEvidenceError) and error.inventory_progress is not None:
             local, remote, index, total = error.inventory_progress
