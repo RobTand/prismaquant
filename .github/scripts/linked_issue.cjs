@@ -253,12 +253,31 @@ async function publishStatus(github, identity, targetUrl, state, description) {
   });
 }
 
+function isMergifyBatchDraft(context, identity) {
+  const pullRequest = context.payload.pull_request;
+  const prefix = "mergify/merge-queue/";
+  const isMergify = actor => actor?.id === 37929162 &&
+    actor?.login === "mergify[bot]" && actor?.type === "Bot";
+  return ["pull_request", "pull_request_target"].includes(context.eventName) &&
+    pullRequest.draft === true &&
+    typeof pullRequest.head.ref === "string" &&
+    pullRequest.head.ref.startsWith(prefix) && pullRequest.head.ref.length > prefix.length &&
+    pullRequest.head.repo?.full_name === identity.repository &&
+    isMergify(pullRequest.user) && isMergify(context.payload.sender);
+}
+
 async function run({ github, context, core }) {
   let identity;
   let targetUrl;
   try {
     identity = pullRequestIdentity(context);
     targetUrl = `${context.serverUrl}/${identity.repository}/actions/runs/${context.runId}`;
+    if (isMergifyBatchDraft(context, identity)) {
+      await publishStatus(github, identity, targetUrl, "success",
+        "Authenticated Mergify merge-queue draft");
+      core.info("accepted authenticated Mergify merge-queue draft");
+      return;
+    }
     await publishStatus(
       github,
       identity,
