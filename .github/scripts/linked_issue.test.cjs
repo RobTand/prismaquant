@@ -21,7 +21,7 @@ function workflowEvent(eventName, change = () => {}) {
   const root = path.resolve(__dirname, "../..");
   const event = JSON.parse(fs.readFileSync(path.join(__dirname,
     "fixtures/linked-issue-mergify-batch.json"), "utf8"));
-  change(event.pull_request);
+  change(event.pull_request, event);
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/linked-issue.yml"), "utf8");
   const match = workflow.match(/          script: \|\n((?:            .*\n?)*)/);
   assert.ok(match, "the production policy script must exist in the real workflow");
@@ -492,4 +492,13 @@ test("an exempt branch still fails closed on a parent API error", async () => {
   const result = await parentCheck("Refs #123", null, { branch: "ig/train/x-9", lookupError: true });
   assert.equal(result.statuses.at(-1).state, "failure");
   assert.match(result.failures.at(-1), /failed closed.*parent lookup unavailable/);
+});
+
+
+test("real workflow rejects a batch-shaped event from an ordinary sender", () => {
+  const result = workflowEvent("pull_request", (_pr, event) => {
+    event.sender = { login: "contributor", id: 123, type: "User" };
+  });
+  assert.equal(result.returncode, 1);
+  assert.equal(result.statuses.at(-1).state, "failure");
 });
