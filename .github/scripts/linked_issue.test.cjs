@@ -2,6 +2,10 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const {
   CHECK_NAME,
@@ -12,6 +16,99 @@ const {
 
 const REPOSITORY = "RobTand/prismaquant";
 const HEAD_SHA = "a".repeat(40);
+
+function workflowEvent(eventName, change = () => {}) {
+  const root = path.resolve(__dirname, "../..");
+  const event = JSON.parse(fs.readFileSync(path.join(__dirname,
+    "fixtures/linked-issue-mergify-batch.json"), "utf8"));
+  change(event.pull_request);
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/linked-issue.yml"), "utf8");
+  const match = workflow.match(/          script: \|\n((?:            .*\n?)*)/);
+  assert.ok(match, "the production policy script must exist in the real workflow");
+  const script = match[1].replace(/^ {12}/gm, "");
+  assert.match(script, /await policy\.run\(\{ github, context, core \}\)/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pq-linked-event-"));
+  const eventPath = path.join(directory, "event.json");
+  fs.writeFileSync(eventPath, JSON.stringify(event));
+  const driver = `
+    const fs = require("node:fs");
+    const payload = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+    const context = { eventName: process.env.GITHUB_EVENT_NAME, payload,
+      repo: { owner: "RobTand", repo: "prismaquant" },
+      serverUrl: "https://github.com", runId: 1234 };
+    const statuses = [], failures = [], lookups = [];
+    const github = {
+      graphql: async (_query, variables) => {
+        lookups.push(variables);
+        if (variables.issueNumber !== undefined) return { repository: { issue:
+          variables.issueNumber === 3216 ? { __typename: "Issue", number: 3216,
+            state: "OPEN", url: "https://github.com/RobTand/prismaquant/issues/3216",
+            repository: { nameWithOwner: "RobTand/prismaquant" } } : null } };
+        return { repository: { pullRequest: { number: payload.pull_request.number,
+          body: payload.pull_request.body, closingIssuesReferences: { nodes: [] } } } };
+      },
+      rest: { repos: { createCommitStatus: async status => statuses.push(status) } }
+    };
+    const core = { info() {}, error() {}, setFailed(message) { failures.push(message); } };
+    (async () => {
+      ${script}
+      process.stdout.write(JSON.stringify({ statuses, failures, lookupCount: lookups.length }));
+      process.exitCode = failures.length ? 1 : 0;
+    })().catch(() => { process.exitCode = 2; });
+  `;
+  try {
+    const child = spawnSync(process.execPath, ["--v8-pool-size=1", "-e", driver], {
+      cwd: root, encoding: "utf8", timeout: 10000,
+      env: { PATH: process.env.PATH, TMPDIR: os.tmpdir(), UV_THREADPOOL_SIZE: "1",
+        GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: eventName },
+    });
+    assert.ifError(child.error);
+    assert.notEqual(child.status, 2, "the workflow entry point must complete");
+    return { ...JSON.parse(child.stdout), returncode: child.status };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+for (const eventName of ["pull_request", "pull_request_target"]) {
+  test(`real workflow accepts the reference-free authenticated batch event: ${eventName}`, () => {
+    const result = workflowEvent(eventName);
+    assert.equal(result.returncode, 0);
+    assert.deepEqual(result.failures, []);
+    assert.equal(result.statuses.at(-1).state, "success");
+    assert.equal(result.lookupCount, 0);
+  });
+}
+
+for (const [name, change] of [
+  ["ordinary PR", pr => { pr.head.ref = "prismaquant-3216-topic"; }],
+  ["spoofed batch prefix", pr => { pr.user = { login: "contributor", id: 123, type: "User" }; }],
+  ["wrong bot id", pr => { pr.user.id = 123; }],
+  ["wrong bot login", pr => { pr.user.login = "different[bot]"; }],
+  ["non-bot author", pr => { pr.user.type = "User"; }],
+  ["foreign head repository", pr => { pr.head.repo.full_name = "someone/prismaquant"; }],
+  ["non-draft branch", pr => { pr.draft = false; }],
+]) {
+  test(`real workflow still rejects a reference-free ${name}`, () => {
+    const result = workflowEvent("pull_request", change);
+    assert.equal(result.returncode, 1);
+    assert.equal(result.failures.length, 1);
+    assert.equal(result.statuses.at(-1).state, "failure");
+    assert.ok(result.lookupCount > 0);
+  });
+}
+
+test("real workflow still validates an ordinary PR against its open parent", () => {
+  const result = workflowEvent("pull_request", pr => {
+    pr.head.ref = "prismaquant-3216-topic";
+    pr.user = { login: "contributor", id: 123, type: "User" };
+    pr.draft = false;
+    pr.body = "Refs #3216";
+  });
+  assert.equal(result.returncode, 0);
+  assert.equal(result.statuses.at(-1).state, "success");
+  assert.equal(result.lookupCount, 2);
+});
 
 function issue(number, repository = REPOSITORY) {
   return {
