@@ -704,3 +704,187 @@ def test_manifest_transport_refusal_keeps_manifest_phase(tmp_path, monkeypatch, 
     assert captured.err == 'shard refused at manifest; category=network-reset; upload refused\n'
     assert sentinel not in captured.out + captured.err
     assert list(upload.iterdir()) == []
+
+
+@pytest.fixture
+def inventory_transport(monkeypatch):
+    """Exercise real HTTP framing, connection reuse and DNS lookup boundaries."""
+    import http.client
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from types import SimpleNamespace
+    import threading
+
+    payloads = {}
+    for index in range(1, 749):
+        raw = inventory_zip({'nodes': {f'node-{index}': 'passed'}})
+        uri = ('bytestream://remote.buildbuddy.io/instance/blobs/'
+               + hashlib.sha256(raw).hexdigest() + '/' + str(len(raw)))
+        payloads[uri] = raw
+    state = SimpleNamespace(payloads=payloads, requests=[], connections=0, dns=0,
+                            failures=0, error=None, corrupt=False, elapsed=0., sleeps=[])
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def do_POST(self):
+            assert self.path == '/api/v1/GetFile'
+            assert self.headers['x-buildbuddy-api-key'] == 'private-transport-sentinel'
+            request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            state.requests.append(request['uri'])
+            raw = payloads[request['uri']]
+            if state.corrupt:
+                raw = b'x' * len(raw)
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(raw)))
+            # A server-initiated close forces a real reconnect at source 743.
+            if len(state.requests) == 742:
+                self.send_header('Connection', 'close')
+                self.close_connection = True
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *_):
+            pass
+
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    original_dns = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if (host, port) == server.server_address:
+            state.dns += 1
+            if len(state.requests) == 742 and state.failures:
+                state.failures -= 1
+                if state.error == 'deadline':
+                    state.elapsed = 120.
+                elif state.error == 'short-budget':
+                    state.elapsed = 119.95
+                if state.error == 'reset':
+                    raise ConnectionResetError(errno.ECONNRESET, 'private-transport-sentinel')
+                code = (socket.EAI_NONAME if state.error == 'permanent' else
+                        -987654 if state.error == 'unknown-eai' else socket.EAI_AGAIN)
+                raise socket.gaierror(code, 'private-transport-sentinel')
+        return original_dns(host, port, *args, **kwargs)
+
+    def connection(host, timeout=120, **_):
+        assert host == 'app.buildbuddy.io'
+        assert 0 < timeout <= 120
+        state.connections += 1
+        return http.client.HTTPConnection(*server.server_address, timeout=timeout)
+
+    def sleep(seconds):
+        state.sleeps.append(seconds)
+        state.elapsed += seconds
+
+    monkeypatch.setattr(socket, 'getaddrinfo', resolve)
+    monkeypatch.setattr(http.client, 'HTTPSConnection', connection)
+    monkeypatch.setattr(gate, 'time', SimpleNamespace(
+        monotonic=lambda: state.elapsed, sleep=sleep), raising=False)
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', 'private-transport-sentinel')
+    try:
+        yield state
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+
+def test_inventory_reuses_one_connection_until_server_closes_it(inventory_transport):
+    # Stop before the fixture's deliberate close at request 742.
+    state = inventory_transport
+    text = events(*(output_event(uri) for uri in list(state.payloads)[:741]))
+    with gate.InventoryFetcher() as fetch:
+        found = gate.inventory_evidence(text, fetch)
+    assert len(found['nodes']) == 741
+    assert len(state.requests) == 741
+    assert state.connections == state.dns == 1
+
+
+@pytest.mark.parametrize('fault,failures,passes,attempts,eai', [
+    ('again', 1, True, 2, 'EAI_AGAIN'),
+    ('again', 2, True, 3, 'EAI_AGAIN'),
+    ('again', 3, False, 3, 'EAI_AGAIN'),
+    ('permanent', 3, False, 3, 'EAI_NONAME'),
+    ('unknown-eai', 3, False, 3, 'EAI_UNKNOWN'),
+    ('deadline', 1, False, 1, 'EAI_AGAIN'),
+    ('short-budget', 1, False, 1, 'EAI_AGAIN'),
+    ('reset', 1, False, 1, None),
+])
+def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
+        inventory_transport, tmp_path, monkeypatch, capsys, fault, failures, passes, attempts, eai):
+    from types import SimpleNamespace
+    state = inventory_transport
+    state.failures, state.error = failures, fault
+    upload = tmp_path / 'upload'
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
+                'branch': 'probe', 'architecture': 'amd64', 'index': 0,
+                'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+    monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
+    monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
+    monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
+    calls = []
+
+    def native(command, **_):
+        calls.append(command)
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events(result(remote=True), summary(),
+                               *(output_event(uri) for uri in state.payloads)))
+        return SimpleNamespace(returncode=0)
+
+    execute = gate.execute_shard
+    monkeypatch.setattr(gate, 'execute_shard', lambda document: execute(
+        document, root=tmp_path, runner=native))
+    assert gate.main(['shard']) == (0 if passes else 75)
+    captured = capsys.readouterr()
+    assert 'private-transport-sentinel' not in captured.out + captured.err
+    assert 'bytestream://' not in captured.out + captured.err
+    assert 'app.buildbuddy.io' not in captured.out + captured.err
+    assert len(calls) == 1
+    assert state.dns == 1 + attempts
+    assert len(state.sleeps) == (attempts - 1 if eai else 0)
+    assert state.elapsed <= 120
+    if passes:
+        receipt = json.loads((upload / 'gate-result.json').read_text())
+        assert receipt['verdict'] == 'pass'
+        assert len(receipt['nodes']) == 748
+        assert len(state.requests) == len(set(state.requests)) == 748
+        assert [p.name for p in upload.iterdir()] == ['gate-result.json']
+        assert captured.err == ''
+    else:
+        assert list(upload.iterdir()) == []
+        assert len(state.requests) == 742
+        category = 'network-dns' if eai else 'network-reset'
+        detail = f'; eai={eai}; attempts={attempts}' if eai else ''
+        assert captured.err == (
+            f'shard refused at inventory-remote-fetch; category={category}{detail}; upload refused\n'
+            'inventory sources: local=0 remote=748; failed at index 743 of 748\n')
+
+
+def test_inventory_transport_checks_digest_before_accepting_bytes(inventory_transport):
+    state = inventory_transport
+    state.corrupt = True
+    with gate.InventoryFetcher() as fetch:
+        with pytest.raises(gate.ShardEvidenceError) as failure:
+            gate.inventory_evidence(events(output_event(next(iter(state.payloads)))), fetch)
+    assert failure.value.category == 'invalid-evidence'
+    assert state.dns == len(state.requests) == 1
+    assert state.sleeps == []
+
+
+@pytest.mark.parametrize('uri', [
+    'bytestream://remote.buildbuddy.io/not-content-addressed',
+    'bytestream://remote.buildbuddy.io/blobs/' + 'a' * 64 + '/1?private=value',
+    'https://private-host/blobs/' + 'a' * 64 + '/1',
+])
+def test_inventory_transport_refuses_nonimmutable_sources_before_network(inventory_transport, uri):
+    with gate.InventoryFetcher() as fetch:
+        with pytest.raises(gate.GateError):
+            fetch(uri)
+    assert inventory_transport.dns == 0
+    assert inventory_transport.requests == []
