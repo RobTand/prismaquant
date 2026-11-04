@@ -747,6 +747,7 @@ def inventory_transport(monkeypatch):
             pass
 
     server = HTTPServer(('127.0.0.1', 0), Handler)
+    server.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     original_dns = socket.getaddrinfo
@@ -767,18 +768,19 @@ def inventory_transport(monkeypatch):
                 raise socket.gaierror(code, 'private-transport-sentinel')
         return original_dns(host, port, *args, **kwargs)
 
-    def connection(host, timeout=120, **_):
-        assert host == 'app.buildbuddy.io'
-        assert 0 < timeout <= 120
-        state.connections += 1
-        return http.client.HTTPConnection(*server.server_address, timeout=timeout)
+    class Connection(http.client.HTTPConnection):
+        def __init__(self, host, timeout=120, **_):
+            assert host == 'app.buildbuddy.io'
+            assert 0 < timeout <= 120
+            state.connections += 1
+            super().__init__(*server.server_address, timeout=timeout)
 
     def sleep(seconds):
         state.sleeps.append(seconds)
         state.elapsed += seconds
 
     monkeypatch.setattr(socket, 'getaddrinfo', resolve)
-    monkeypatch.setattr(http.client, 'HTTPSConnection', connection)
+    monkeypatch.setattr(http.client, 'HTTPSConnection', Connection)
     monkeypatch.setattr(gate, 'time', SimpleNamespace(
         monotonic=lambda: state.elapsed, sleep=sleep), raising=False)
     monkeypatch.setenv('BUILDBUDDY_API_KEY', 'private-transport-sentinel')
@@ -791,12 +793,21 @@ def inventory_transport(monkeypatch):
         assert not thread.is_alive()
 
 
-def test_inventory_reuses_one_connection_until_server_closes_it(inventory_transport):
-    # Stop before the fixture's deliberate close at request 742.
+def test_inventory_reuses_one_connection_until_server_closes_it(inventory_transport, tmp_path):
+    from types import SimpleNamespace
     state = inventory_transport
-    text = events(*(output_event(uri) for uri in list(state.payloads)[:741]))
-    with gate.InventoryFetcher() as fetch:
-        found = gate.inventory_evidence(text, fetch)
+    manifest = {'mode': 'pr', 'base': 'b' * 40, 'head': 'a' * 40,
+                'branch': 'probe', 'architecture': 'amd64', 'index': 0,
+                'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
+
+    def native(command, **_):
+        path = Path(next(word.split('=', 1)[1] for word in command
+                         if word.startswith('--build_event_json_file=')))
+        path.write_text(events(result(remote=True), summary(),
+                               *(output_event(uri) for uri in list(state.payloads)[:741])))
+        return SimpleNamespace(returncode=0)
+
+    found = gate.execute_shard(manifest, root=tmp_path, runner=native)
     assert len(found['nodes']) == 741
     assert len(state.requests) == 741
     assert state.connections == state.dns == 1
@@ -822,7 +833,8 @@ def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
                 'branch': 'probe', 'architecture': 'amd64', 'index': 0,
                 'targets': [LABEL], 'tests': [LABEL], 'require_execution': False}
     monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
-    monkeypatch.setenv('PQ_BAZEL_SHARD', '{}')
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps({
+        'manifest_sha256': 'd' * 64, 'partition_sha256': 'e' * 64}))
     monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
     monkeypatch.setattr(gate.artifacts, 'scan_runtime_available', lambda: True)
     monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
