@@ -189,6 +189,10 @@ def open_runtime_url(url, deadline):
                 super().connect()
                 runtime_remaining(deadline, self.sock)
 
+            def _tunnel(self):
+                super()._tunnel()
+                runtime_remaining(deadline, self.sock)
+
             def send(self, data):
                 if self.sock is None:
                     self.connect()
