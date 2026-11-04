@@ -687,3 +687,22 @@ def test_inventory_progress_does_not_change_successful_duplicate_or_mixed_source
     assert gate.inventory_evidence(text, fetch) == {
         'nodes': {'first': 'passed', 'second': 'skipped'}, 'budget_warnings': []}
     assert len(calls) == 2
+
+
+def test_manifest_transport_refusal_keeps_manifest_phase(tmp_path, monkeypatch, capsys):
+    upload = tmp_path / 'upload'
+    sentinel = 'private-manifest-transport'
+    monkeypatch.setenv('BUILDBUDDY_ARTIFACTS_DIRECTORY', str(upload))
+    monkeypatch.setenv('PQ_BAZEL_SHARD', json.dumps({'manifest_uri': 'bytestream://private-manifest'}))
+    monkeypatch.setenv('BUILDBUDDY_API_KEY', sentinel)
+    monkeypatch.setattr(gate.artifacts, 'require_scan_python', lambda: None)
+
+    def unavailable(request, **kwargs):
+        raise urllib.error.URLError(ConnectionResetError(errno.ECONNRESET, sentinel)) from None
+
+    monkeypatch.setattr(urllib.request, 'urlopen', unavailable)
+    assert gate.main(['shard']) == 75
+    captured = capsys.readouterr()
+    assert captured.err == 'shard refused at manifest; category=network-reset; upload refused\n'
+    assert sentinel not in captured.out + captured.err
+    assert list(upload.iterdir()) == []
