@@ -3,6 +3,9 @@ import importlib.util
 import hashlib
 import io
 import json
+import errno
+import socket
+import ssl
 from pathlib import Path
 import urllib.request
 import urllib.error
@@ -558,6 +561,10 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
     ('invalid_bep', 'bep-parse', 'invalid-json'),
     ('timeout', 'inventory-fetch', 'timeout'),
     ('http', 'inventory-fetch', 'http-429'),
+    ('local', 'inventory-local-read', 'io-directory'),
+    ('local_late', 'inventory-local-read', 'io-directory'),
+    ('reset', 'inventory-remote-fetch', 'network-reset'),
+    ('ssl', 'inventory-remote-fetch', 'ssl-certificate'),
     ('invalid_zip', 'inventory-parse', 'invalid-zip'),
     ('invalid_receipt', 'inventory-validate', 'invalid-evidence'),
 ])
@@ -576,6 +583,15 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
     monkeypatch.setattr(gate.artifacts, 'prepare_history', lambda head: None)
     monkeypatch.setattr(gate, 'load_shard_manifest', lambda reference, fetch: manifest)
     native_calls = []
+    local_output = tmp_path / sentinel
+    local_output.mkdir()
+    output_uri = local_output.as_uri() if fault.startswith('local') else 'bytestream://remote.buildbuddy.io/own-output'
+    first_output = tmp_path / 'good-output.zip'
+    first_output.write_bytes(inventory_zip({'nodes': {}}))
+    output_rows = ([output_event(first_output.as_uri()), output_event(first_output.as_uri())]
+                   if fault == 'local_late' else [])
+    output_rows.append(output_event(output_uri))
+    output_rows.append(output_event('bytestream://remote.buildbuddy.io/later-output'))
 
     def native(command, **kwargs):
         native_calls.append(command)
@@ -585,18 +601,24 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
                          if word.startswith('--build_event_json_file=')))
         if fault != 'missing_bep':
             path.write_text('{' + sentinel if fault == 'invalid_bep' else
-                            events(result(remote=True), summary(), output_event()))
+                            events(result(remote=True), summary(), *output_rows))
         return SimpleNamespace(returncode=0)
 
     def fetch(uri):
         if fault == 'timeout':
             raise TimeoutError(sentinel)
-        if fault == 'http':
+        if fault in ('http', 'reset', 'ssl'):
             # The real client hides network exception text. Its category must
             # survive that boundary without exposing the private URL or value.
             def unavailable(request, **kwargs):
-                raise urllib.error.HTTPError(sentinel, 429, sentinel, None, None)
+                if fault == 'http':
+                    raise urllib.error.HTTPError(sentinel, 429, sentinel, None, None)
+                reason = (ConnectionResetError(errno.ECONNRESET, sentinel) if fault == 'reset'
+                          else ssl.SSLCertVerificationError(1, sentinel))
+                raise urllib.error.URLError(reason) from None
             monkeypatch.setattr(urllib.request, 'urlopen', unavailable)
+            return gate.fetch_artifact(uri)
+        if fault.startswith('local'):
             return gate.fetch_artifact(uri)
         if fault == 'invalid_zip':
             return sentinel.encode()
@@ -607,7 +629,61 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
         document, root=tmp_path, runner=native, fetch=fetch))
     assert gate.main(['shard']) == 75
     captured = capsys.readouterr()
-    assert captured.err == f'shard refused at {phase}; category={category}; upload refused\n'
+    if fault == 'http':
+        phase = 'inventory-remote-fetch'
+    expected = f'shard refused at {phase}; category={category}; upload refused\n'
+    if phase.startswith('inventory-'):
+        local = 2 if fault == 'local_late' else int(fault == 'local')
+        remote = 1 if fault.startswith('local') else 2
+        index = 2 if fault == 'local_late' else 1
+        expected += (f'inventory sources: local={local} remote={remote}; '
+                     f'failed at index {index} of {local + remote}\n')
+    assert captured.err == expected
     assert sentinel not in captured.out + captured.err
     assert len(native_calls) == 1
     assert list(upload.iterdir()) == []
+
+
+@pytest.mark.parametrize('error,category', [
+    (OSError(errno.EIO, 'private'), 'io-device'),
+    (OSError(errno.ELOOP, 'private'), 'io-symlink-loop'),
+    (OSError(errno.ENOSPC, 'private'), 'io-no-space'),
+    (OSError(errno.EMFILE, 'private'), 'io-fd-limit'),
+    (OSError(errno.ENFILE, 'private'), 'io-fd-limit'),
+    (OSError(errno.ESTALE, 'private'), 'io-stale'),
+    (OSError(errno.ENOMEM, 'private'), 'io-resource-limit'),
+    (OSError(errno.EINVAL, 'private'), 'io'),
+    (socket.gaierror(socket.EAI_AGAIN, 'private'), 'network-dns'),
+    (ConnectionRefusedError(errno.ECONNREFUSED, 'private'), 'network-refused'),
+    (ConnectionAbortedError(errno.ECONNABORTED, 'private'), 'network-aborted'),
+    (BrokenPipeError(errno.EPIPE, 'private'), 'network-broken-pipe'),
+    (OSError(errno.ENETUNREACH, 'private'), 'network-unreachable'),
+    (OSError(errno.EHOSTUNREACH, 'private'), 'network-unreachable'),
+    (ssl.SSLEOFError(1, 'private'), 'ssl-eof'),
+    (ssl.SSLError(1, 'private'), 'ssl-protocol'),
+])
+def test_inventory_error_categories_are_allowlisted_and_survive_masked_transport(error, category):
+    assert gate.refusal_category(error) == category
+    try:
+        raise urllib.error.URLError(error) from None
+    except urllib.error.URLError:
+        try:
+            raise RuntimeError('masked private transport') from None
+        except RuntimeError as masked:
+            assert gate.refusal_category(masked) == category
+
+
+def test_inventory_progress_does_not_change_successful_duplicate_or_mixed_source_reads(tmp_path):
+    first = tmp_path / 'inventory.zip'
+    first.write_bytes(inventory_zip({'nodes': {'first': 'passed'}}))
+    text = events(output_event(first.as_uri()), output_event(first.as_uri()), output_event())
+    calls = []
+
+    def fetch(uri):
+        calls.append(uri)
+        return (gate.fetch_artifact(uri) if uri.startswith('file://')
+                else inventory_zip({'nodes': {'second': 'skipped'}}))
+
+    assert gate.inventory_evidence(text, fetch) == {
+        'nodes': {'first': 'passed', 'second': 'skipped'}, 'budget_warnings': []}
+    assert len(calls) == 2
