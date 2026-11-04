@@ -488,3 +488,55 @@ def test_runtime_slow_drip_refuses_within_original_wall_deadline(
     assert not (tmp_path / 'upload').exists()
     captured = capsys.readouterr()
     assert not captured.out and not captured.err
+
+
+def test_runtime_proxy_connect_refreshes_budget_before_tls_handshake(
+        monkeypatch, capsys):
+    import ssl
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from types import SimpleNamespace
+    state = SimpleNamespace(elapsed=0., handshakes=0)
+    monkeypatch.setattr(artifacts, 'time', SimpleNamespace(
+        monotonic=lambda: state.elapsed, sleep=lambda _: None))
+
+    class Proxy(BaseHTTPRequestHandler):
+        def do_CONNECT(self):
+            self.wfile.write(b'HTTP/1.0 200 Connection established\r\n\r\n')
+            self.wfile.flush()
+
+        def log_message(self, *_):
+            pass
+
+    server = HTTPServer(('127.0.0.1', 0), Proxy)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    readinto = artifacts.RuntimeDeadlineReader.readinto
+
+    def delayed_headers(reader, buffer):
+        received = readinto(reader, buffer)
+        if received:
+            state.elapsed = 119.
+        return received
+
+    def stalled_tls(context, sock, **kwargs):
+        state.handshakes += 1
+        assert 0 < sock.gettimeout() <= 1, 'TLS inherited a stale CONNECT timeout'
+        raise TimeoutError('private-handshake-sentinel')
+
+    monkeypatch.setattr(artifacts.RuntimeDeadlineReader, 'readinto', delayed_headers)
+    monkeypatch.setattr(ssl.SSLContext, 'wrap_socket', stalled_tls)
+    monkeypatch.setattr(artifacts.urllib.request, 'getproxies', lambda: {
+        'https': f'http://127.0.0.1:{server.server_port}'})
+    monkeypatch.setattr(artifacts.urllib.request, 'proxy_bypass', lambda host: False)
+    try:
+        with pytest.raises((artifacts.RuntimeDownloadError, OSError)):
+            artifacts.download_runtime_archive('https://runtime.example/pinned', None)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert state.handshakes == 1
+    captured = capsys.readouterr()
+    assert not captured.out and not captured.err
