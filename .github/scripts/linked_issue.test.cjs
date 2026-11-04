@@ -80,22 +80,31 @@ for (const eventName of ["pull_request", "pull_request_target"]) {
   });
 }
 
-for (const [name, change] of [
-  ["ordinary PR", pr => { pr.head.ref = "prismaquant-3216-topic"; }],
-  ["spoofed batch prefix", pr => { pr.user = { login: "contributor", id: 123, type: "User" }; }],
-  ["wrong bot id", pr => { pr.user.id = 123; }],
-  ["wrong bot login", pr => { pr.user.login = "different[bot]"; }],
-  ["non-bot author", pr => { pr.user.type = "User"; }],
-  ["foreign head repository", pr => { pr.head.repo.full_name = "someone/prismaquant"; }],
-  ["non-draft branch", pr => { pr.draft = false; }],
-]) {
-  test(`real workflow still rejects a reference-free ${name}`, () => {
-    const result = workflowEvent("pull_request", change);
-    assert.equal(result.returncode, 1);
-    assert.equal(result.failures.length, 1);
-    assert.equal(result.statuses.at(-1).state, "failure");
-    assert.ok(result.lookupCount > 0);
-  });
+for (const eventName of ["pull_request", "pull_request_target"]) {
+  for (const [name, change] of [
+    ["ordinary PR", pr => { pr.head.ref = "prismaquant-3216-topic"; }],
+    ["empty batch suffix", pr => { pr.head.ref = "mergify/merge-queue/"; }],
+    ["spoofed batch prefix", pr => { pr.user = { login: "contributor", id: 123, type: "User" }; }],
+    ["wrong bot id", pr => { pr.user.id = 123; }],
+    ["wrong bot login", pr => { pr.user.login = "different[bot]"; }],
+    ["non-bot author", pr => { pr.user.type = "User"; }],
+    ["foreign head repository", pr => { pr.head.repo.full_name = "someone/prismaquant"; }],
+    ["missing head repository", pr => { delete pr.head.repo; }],
+    ["non-draft branch", pr => { pr.draft = false; }],
+    ["ordinary sender", (_pr, event) => { event.sender = { login: "contributor", id: 123, type: "User" }; }],
+    ["wrong sender id", (_pr, event) => { event.sender.id = 123; }],
+    ["wrong sender login", (_pr, event) => { event.sender.login = "different[bot]"; }],
+    ["non-bot sender", (_pr, event) => { event.sender.type = "User"; }],
+    ["missing sender", (_pr, event) => { delete event.sender; }],
+  ]) {
+    test(`real workflow still rejects a reference-free ${name}: ${eventName}`, () => {
+      const result = workflowEvent(eventName, change);
+      assert.equal(result.returncode, 1);
+      assert.equal(result.failures.length, 1);
+      assert.equal(result.statuses.at(-1).state, "failure");
+      assert.ok(result.lookupCount > 0);
+    });
+  }
 }
 
 test("real workflow still validates an ordinary PR against its open parent", () => {
@@ -492,13 +501,4 @@ test("an exempt branch still fails closed on a parent API error", async () => {
   const result = await parentCheck("Refs #123", null, { branch: "ig/train/x-9", lookupError: true });
   assert.equal(result.statuses.at(-1).state, "failure");
   assert.match(result.failures.at(-1), /failed closed.*parent lookup unavailable/);
-});
-
-
-test("real workflow rejects a batch-shaped event from an ordinary sender", () => {
-  const result = workflowEvent("pull_request", (_pr, event) => {
-    event.sender = { login: "contributor", id: 123, type: "User" };
-  });
-  assert.equal(result.returncode, 1);
-  assert.equal(result.statuses.at(-1).state, "failure");
 });
