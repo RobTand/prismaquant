@@ -777,7 +777,7 @@ def inventory_transport(monkeypatch):
 
     def sleep(seconds):
         state.sleeps.append(seconds)
-        state.elapsed += seconds
+        state.elapsed = 120. if state.error == 'oversleep' else state.elapsed + seconds
 
     monkeypatch.setattr(socket, 'getaddrinfo', resolve)
     monkeypatch.setattr(http.client, 'HTTPSConnection', Connection)
@@ -821,6 +821,7 @@ def test_inventory_reuses_one_connection_until_server_closes_it(inventory_transp
     ('unknown-eai', 3, False, 3, 'EAI_UNKNOWN'),
     ('deadline', 1, False, 1, 'EAI_AGAIN'),
     ('short-budget', 1, False, 1, 'EAI_AGAIN'),
+    ('oversleep', 1, False, 1, 'EAI_AGAIN'),
     ('reset', 1, False, 1, None),
 ])
 def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
@@ -859,7 +860,7 @@ def test_inventory_late_dns_recovery_and_refusal_at_real_transport_boundary(
     assert 'app.buildbuddy.io' not in captured.out + captured.err
     assert len(calls) == 1
     assert state.dns == 1 + attempts
-    assert len(state.sleeps) == (attempts - 1 if eai else 0)
+    assert len(state.sleeps) == (1 if fault == 'oversleep' else attempts - 1 if eai else 0)
     assert state.elapsed <= 120
     if passes:
         receipt = json.loads((upload / 'gate-result.json').read_text())
