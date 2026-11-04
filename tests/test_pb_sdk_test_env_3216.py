@@ -9,20 +9,27 @@ The reviewed commit lives in one place,
 ``staged_lease.PB_READER_LEASE_PIN_COMMIT``, which pbtest's pin guard and
 ``staged_lease.reviewed_installed_distribution`` already enforce. The
 ``pbsdk`` dependency group in ``pyproject.toml`` and its ``uv.lock`` entry
-must name that same commit, and every hosted job that runs the suite must
-install the group. A dependency group, not the ``test`` extra: an extra is
-published package metadata, and PyPI refuses a direct Git reference in it.
+must name that same commit. The hosted exception suite installs the group;
+Remote Bazel suites install the same reviewed archive with its authoritative
+hash. A dependency group, not the ``test`` extra: an extra is published package
+metadata, and PyPI refuses a direct Git reference in it.
 """
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import re
 import tomllib
 from urllib.parse import parse_qs, urlsplit
 
 from packaging.requirements import Requirement
+import pytest
 import yaml
 
-from prismaquant.staged_lease import PB_READER_LEASE_PIN_COMMIT
+from prismaquant.staged_lease import (
+    PB_READER_LEASE_ARCHIVE_SHA256,
+    PB_READER_LEASE_PIN_COMMIT,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "https://github.com/RobTand/prismabuild"
@@ -78,11 +85,26 @@ def test_the_lock_resolves_prismabuild_at_the_reviewed_commit():
                          "git": f"{REPOSITORY}?rev={PB_READER_LEASE_PIN_COMMIT}"}]
 
 
-def test_every_gate_shard_installs_the_pbsdk_group():
-    jobs = _workflow("gate.yml")["jobs"]
-    for name in ("shards", "retry-shards"):
-        assert INSTALL in _runs(jobs[name]), name
+def test_the_hosted_exception_suite_installs_the_pbsdk_group():
+    assert INSTALL in _runs(_workflow("bazel-hosted.yml")["jobs"]["tests"])
 
 
-def test_the_post_merge_suite_installs_the_pbsdk_group():
-    assert INSTALL in _runs(_workflow("ci.yml")["jobs"]["tests"])
+@pytest.mark.parametrize("export_path", [
+    ROOT / "tools/bazel/requirements_linux_x86_64.txt",
+    ROOT / "tools/bazel/requirements_linux_aarch64.txt",
+])
+def test_remote_suites_install_the_hash_verified_reviewed_sdk(export_path):
+    url = f"{REPOSITORY}/archive/{PB_READER_LEASE_PIN_COMMIT}.tar.gz"
+    source = json.loads((ROOT / "tools/bazel/prismabuild_source.json").read_text())
+    assert source == {
+        "schema": "prismaquant.bazel-sdk-source.v1",
+        "commit": PB_READER_LEASE_PIN_COMMIT,
+        "url": url,
+        "sha256": PB_READER_LEASE_ARCHIVE_SHA256,
+    }
+    blocks = [block for block in export_path.read_text().split("\n\n")
+              if re.match(r"prismabuild(?:\s|[=@\[])", block, re.I)]
+    assert len(blocks) == 1
+    assert blocks[0].replace("\\\n", " ").split() == [
+        "prismabuild", "@", url, "--hash=sha256:" + PB_READER_LEASE_ARCHIVE_SHA256,
+    ]

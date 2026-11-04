@@ -1,21 +1,17 @@
 name: Merge gate
 'on':
   pull_request:
-    # No label triggers: Mergify adds and removes its own labels on queued pull
-    # requests, and each would rerun pr-gate, which the queue requires.
-    types: [opened, synchronize, reopened]
+    types:
+    - opened
+    - synchronize
+    - reopened
 permissions:
   contents: read
-  # The planner reads quarantine owner issues with the job token.
   issues: read
 concurrency:
   group: merge-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 env:
-  # Test execution destinations. Control jobs bootstrap on the hosted x64 image.
-  GATE_SHARDS: '12'
-  GATE_PR_SINGLE_SECONDS: '90'
-  GATE_RUNNERS: '["ubuntu-24.04-arm","ubuntu-24.04"]'
   PYTHONPATH: .
   OMP_NUM_THREADS: '1'
   MKL_NUM_THREADS: '1'
@@ -32,110 +28,108 @@ env:
   GATE_HEAD: ${{ github.event.pull_request.head.sha }}
   GATE_GRAPH_BASE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162 && 'batch' || 'pr' }}
   GATE_MODE: ${{ github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) && 'full' || 'selection' }}
+  TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
 jobs:
-  plan:
-    name: Plan selected or full gate
+  remote:
+    name: Remote Bazel selection and shards
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 140
     outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-      shards: ${{ steps.plan.outputs.shards }}
-      compatible: ${{ steps.head-contract.outputs.compatible }}
-      policy_exit: ${{ steps.plan.outputs.policy_exit }}
+      verdict: ${{ steps.controller.outputs.verdict }}
+      base: ${{ steps.refs.outputs.base }}
+      head: ${{ steps.refs.outputs.head }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         ref: ${{ github.event.pull_request.head.sha }}
         fetch-depth: 0
         persist-credentials: false
-    - name: Require current gate tooling in the PR head
-      id: head-contract
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        for file in tools/ci/gate_select.py tools/ci/gate_run.py tools/ci/gate_collect.py tools/ci/gate_partition.py tools/ci/gate_actions.py tools/ci/gate_budget.json tools/ci/gate_durations.json tools/ci/gate_quarantine.json tools/ci/gate_paths.py; do
-          if [ ! -f "$file" ]; then
-            echo 'compatible=false' >> "$GITHUB_OUTPUT"
-            echo "GATE_TEST_FAILURE: PR head predates gate tooling ($file); merge origin/main and push again."
-            exit 1
-          fi
-        done
-        echo 'compatible=true' >> "$GITHUB_OUTPUT"
     - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
       with:
-        python-version: '3.12'
-    - name: Plan coverage and balanced shards
-      id: plan
-      shell: bash
+        python-version: '3.14'
+    - id: refs
+      uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1
+      with:
+        action: scopes-git-refs
+    - name: Run source-bound Remote Bazel controller
+      id: controller
       env:
-        GITHUB_TOKEN: ${{ github.token }}
+        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+        BASE: ${{ steps.refs.outputs.base }}
+        HEAD: ${{ steps.refs.outputs.head }}
+        BRANCH: ${{ github.head_ref }}
       run: |
-        unset BUILDBUDDY_API_KEY
         set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: planning infrastructure failed"; exit 75' ERR
-        mkdir -p gate-artifacts
-        if python tools/ci/gate_select.py --base "$GATE_BASE" --head "$GATE_HEAD" \
-          --mode "$GATE_MODE" --output gate-artifacts/plan.json \
-          --files-output gate-artifacts/population.txt --summary "$GITHUB_STEP_SUMMARY"; then
-          echo 'policy_exit=0' >> "$GITHUB_OUTPUT"
-        else
-          code=$?
-          echo "policy_exit=$code" >> "$GITHUB_OUTPUT"
-          exit "$code"
-        fi
-        runners=$(python - <<'PYTHON'
+        python tools/ci/remote_gate.py pr --base "$BASE" --head "$HEAD" --branch "$BRANCH" --timeout 20 --output bazel-upload
+        python - <<'REMOTE_VERDICT'
         import json, os
-        labels = json.loads(os.environ['GATE_RUNNERS'])
-        if os.environ['GATE_MODE'] == 'full' and int(os.environ['GITHUB_RUN_ATTEMPT']) % 2 == 0:
-            labels.reverse()
-        print(','.join(labels))
-        PYTHON
-        )
-        selection=()
-        if [ "$GATE_MODE" = selection ]; then
-          selection=(--single-shard-seconds "$GATE_PR_SINGLE_SECONDS" --workers 4)
-        fi
-        python tools/ci/gate_partition.py matrix --plan gate-artifacts/plan.json --files-from gate-artifacts/population.txt \
-          --durations tools/ci/gate_durations.json --shards "$GATE_SHARDS" \
-          --runners "$runners" "${selection[@]}" --output gate-artifacts/matrix.json
-        python - <<'PYTHON'
-        import json, math, os
         from pathlib import Path
-        matrix = json.loads(Path('gate-artifacts/matrix.json').read_text())
-        for row in matrix['include']:
-            row['timeout_minutes'] = max(15, math.ceil(row['estimated_seconds'] * 1.5 / 4 / 60) + 10)
-        Path('gate-artifacts/job-matrix.json').write_text(json.dumps(matrix) + '\n')
-        with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-            output.write('matrix=' + json.dumps({'include': matrix['include']}, separators=(',', ':')) + '\n')
-            output.write('shards=' + str(matrix['shards']) + '\n')
-        PYTHON
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-1
+        result = json.loads(Path('bazel-upload/result.json').read_text())
+        if result['verdict'] not in ('pass', 'skipped'):
+            raise SystemExit('Remote Bazel evidence failed')
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+            output.write('verdict=' + result['verdict'] + '\n')
+        REMOTE_VERDICT
+    - name: Require configured scope token
+      id: token
+      if: ${{ !cancelled() && steps.controller.outputs.scopes_ready == 'true' }}
+      env:
+        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
+      run: |
+        test -n "$MERGIFY_TOKEN" || { echo "Mergify scope token unavailable"; exit 1; }
+    - id: scopes
+      if: ${{ !cancelled() && steps.token.outcome == 'success' }}
+      uses: Mergifyio/gha-mergify-ci@392d123d84a27960993927aec1f2cbb059fb95c1
+      with:
+        action: scopes-upload
+        token: ${{ secrets.MERGIFY_TOKEN }}
+        scopes: ${{ steps.controller.outputs.scopes }}
+        all_scopes: ${{ steps.controller.outputs.all_scopes }}
+    - id: scope-verdict
       if: ${{ !cancelled() }}
+      env:
+        OUTCOME: ${{ steps.scopes.outcome }}
+      run: |
+        test "$OUTCOME" = success || { echo "Mergify scopes were not uploaded"; exit 1; }
+    - name: Scan exact JSON upload set
+      id: scan
+      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.controller.outputs.scopes_ready == 'true' }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
+      run: |
+        python tests/bazel_scan_runtime.py
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import scan_upload
+        raise SystemExit(scan_upload(Path('bazel-upload'), ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN']))
+        SCAN_JSON
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      if: ${{ !cancelled() && steps.scan-artifacts-1.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
       with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
+        name: bazel-pr-${{ github.run_attempt }}
+        path: bazel-upload/
+        if-no-files-found: error
         retention-days: 7
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-2
-      if: ${{ !cancelled() }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts/plan.json
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      if: ${{ !cancelled() && steps.scan-artifacts-2.outcome == 'success' }}
-      with:
-        name: gate-shadow-selection-${{ github.run_attempt }}
-        path: gate-artifacts/plan.json
-        retention-days: 7
+  hosted:
+    name: Hosted exception lane
+    needs:
+    - remote
+    if: ${{ !cancelled() && (needs.remote.result == 'success' || github.event.pull_request.head.repo.full_name != github.repository) }}
+    uses: ./.github/workflows/bazel-hosted.yml
+    with:
+      architecture: amd64
+      mode: pr
+      base: ${{ needs.remote.outputs.base || github.event.pull_request.base.sha }}
+      head: ${{ needs.remote.outputs.head || github.event.pull_request.head.sha }}
+      trusted: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+      receipt: bazel-pr-${{ github.run_attempt }}
+    secrets:
+      BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+      MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
   graph-impact:
     name: Graph impact
     runs-on: ubuntu-24.04
@@ -173,414 +167,95 @@ jobs:
             case.find(tag) is not None for case in cases
                                   for tag in ('failure', 'error', 'skipped')):
             raise SystemExit('NO_VERDICT: expected exactly one passing graph impact test')
+        import json
+        Path('graph-impact/result.json').write_text(json.dumps({'verdict': 'pass', 'base': os.environ['GATE_BASE'], 'head': os.environ['GATE_HEAD']}) + '\n')
         with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
             output.write('verdict=pass\n')
         GRAPH_VERDICT
-    - name: Scan graph artifacts before upload
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      id: scan-python
+      with:
+        python-version: '3.14'
+    - name: Scan exact JSON upload set
       id: scan
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && env.TRUSTED == 'true' && steps.check.outcome == 'success' }}
       env:
         BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN graph-impact
-    - if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      run: |
+        python tests/bazel_scan_runtime.py
+        python - <<'SCAN_JSON'
+        from pathlib import Path
+        from tools.ci.bazel_artifacts import publish_json
+        import os
+        upload = Path('graph-upload')
+        upload.mkdir(parents=True, exist_ok=True)
+        publish_json(upload, {'result.json': Path('graph-impact/result.json').read_bytes()}, ['BUILDBUDDY_API_KEY', 'MERGIFY_TOKEN'])
+        SCAN_JSON
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      if: ${{ !cancelled() && steps.scan.outcome == 'success' }}
       with:
         name: graph-impact-${{ github.run_attempt }}
-        path: graph-impact
+        path: graph-upload/
         if-no-files-found: error
-        retention-days: 7
-  shards:
-    name: shard-${{ matrix.index }}-a1
-    needs: plan
-    if: ${{ needs.plan.result == 'success' }}
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    steps:
-    - name: Configure owned temporary space
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 0
-        persist-credentials: false
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
-    - name: Compute assignment before setup
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_partition.py shard --plan gate-artifacts/plan.json --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-      with:
-        python-version: '3.12'
-        cache: pip
-        cache-dependency-path: |
-          pyproject.toml
-          .github/ci-constraints.txt
-          prismaquant/tessera_runtime/tessera_serving_runtime_pin.json
-    - name: Resolve Tessera development pin
-      id: tessera-pin
-      run: |
-        unset BUILDBUDDY_API_KEY
-        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
-        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
-    - name: Check out pinned Tessera
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        repository: RobTand/tessera
-        ref: ${{ steps.tessera-pin.outputs.commit }}
-        persist-credentials: false
-        path: .ci/tessera
-    - name: Install CPU test environment
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
-        python -m pip install --upgrade pip
-        python -m pip install --no-deps .ci/tessera
-        python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
-        python --version
-        python -m pip --version
-    - name: Run assigned gate tests
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
-        printf '## Shard %s, attempt 1\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
-        wc -l gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
-        if python tools/ci/gate_run.py --plan gate-artifacts/plan.json             --assignment gate-artifacts/assignment.json --workers 4             --result gate-artifacts/result.json --junitxml gate-artifacts/junit.xml; then
-          code=0
-        else
-          code=$?
-        fi
-        case "$code" in
-          0) marker=GATE_PASS;;
-          1) marker=GATE_TEST_FAILURE;;
-          *) marker=NO_VERDICT; code=75;;
-        esac
-        echo "$marker: shard ${{ matrix.index }}, attempt 1" | tee -a "$GITHUB_STEP_SUMMARY"
-        exit "$code"
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-3
-      if: ${{ !cancelled() }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - name: Upload verdict and JUnit
-      if: ${{ !cancelled() && steps.scan-artifacts-3.outcome == 'success' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: gate-result-${{ github.run_attempt }}-a1-${{ matrix.index }}
-        path: gate-artifacts
-        if-no-files-found: warn
-        retention-days: 7
-  retry-plan:
-    name: Plan infrastructure retry
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
-    needs:
-    - plan
-    - shards
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      retry: ${{ steps.retry.outputs.retry }}
-      matrix: ${{ steps.retry.outputs.matrix }}
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 1
-        persist-credentials: false
-        sparse-checkout: |
-          tools/ci
-          prismaquant
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
-    - name: Download first attempt verdicts
-      continue-on-error: true
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        pattern: gate-result-${{ github.run_attempt }}-a1-*
-        path: verdicts
-    - name: Retry only missing verdicts
-      id: retry
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: retry planning infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_actions.py retries --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/retry-matrix.json             >> "$GITHUB_OUTPUT"
-  retry-shards:
-    name: shard-${{ matrix.index }}-a2
-    if: ${{ !cancelled() && needs.retry-plan.result == 'success' && needs.retry-plan.outputs.retry == 'true' }}
-    needs:
-    - plan
-    - retry-plan
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.retry-plan.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    steps:
-    - name: Configure owned temporary space
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        printf 'TMPDIR=%s\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 0
-        persist-credentials: false
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
-    - name: Compute assignment before setup
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: assignment infrastructure failed"; exit 75' ERR
-        python3 tools/ci/gate_partition.py shard --plan gate-artifacts/plan.json --files-from gate-artifacts/population.txt             --durations tools/ci/gate_durations.json --shards "${{ needs.plan.outputs.shards }}"             --matrix gate-artifacts/job-matrix.json --index "${{ matrix.index }}" --output-files gate-artifacts/assigned.txt --output-assignment gate-artifacts/assignment.json
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-      with:
-        python-version: '3.12'
-        cache: pip
-        cache-dependency-path: |
-          pyproject.toml
-          .github/ci-constraints.txt
-          prismaquant/tessera_runtime/tessera_serving_runtime_pin.json
-    - name: Resolve Tessera development pin
-      id: tessera-pin
-      run: |
-        unset BUILDBUDDY_API_KEY
-        tessera_commit="$(python tools/resolve_tessera_dev_pin.py)"
-        printf 'commit=%s\n' "$tessera_commit" >> "$GITHUB_OUTPUT"
-    - name: Check out pinned Tessera
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        repository: RobTand/tessera
-        ref: ${{ steps.tessera-pin.outputs.commit }}
-        persist-credentials: false
-        path: .ci/tessera
-    - name: Install CPU test environment
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: dependency setup failed"; exit 75' ERR
-        python -m pip install --upgrade pip
-        python -m pip install --no-deps .ci/tessera
-        python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-        python -m pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk
-        python --version
-        python -m pip --version
-    - name: Run assigned gate tests
-      shell: bash
-      run: |
-        unset BUILDBUDDY_API_KEY
-        set -Eeuo pipefail
-        trap 'echo "NO_VERDICT: assignment or execution infrastructure failed"; exit 75' ERR
-        printf '## Shard %s, attempt 2\n\n' '${{ matrix.index }}' >> "$GITHUB_STEP_SUMMARY"
-        wc -l gate-artifacts/assigned.txt >> "$GITHUB_STEP_SUMMARY"
-        if python tools/ci/gate_run.py --plan gate-artifacts/plan.json             --assignment gate-artifacts/assignment.json --workers 4             --result gate-artifacts/result.json --junitxml gate-artifacts/junit.xml; then
-          code=0
-        else
-          code=$?
-        fi
-        case "$code" in
-          0) marker=GATE_PASS;;
-          1) marker=GATE_TEST_FAILURE;;
-          *) marker=NO_VERDICT; code=75;;
-        esac
-        echo "$marker: shard ${{ matrix.index }}, attempt 2" | tee -a "$GITHUB_STEP_SUMMARY"
-        exit "$code"
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-4
-      if: ${{ !cancelled() }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - name: Upload verdict and JUnit
-      if: ${{ !cancelled() && steps.scan-artifacts-4.outcome == 'success' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: gate-result-${{ github.run_attempt }}-a2-${{ matrix.index }}
-        path: gate-artifacts
-        if-no-files-found: warn
         retention-days: 7
   pr-gate:
     name: pr-gate
     if: ${{ !cancelled() && !(github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary'))) }}
     needs:
-    - plan
-    - shards
-    - retry-plan
-    - retry-shards
+    - remote
+    - hosted
     - graph-impact
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-    - name: Require graph impact verdict
+    - name: Require complete cutover evidence
       env:
+        TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        REMOTE_RESULT: ${{ needs.remote.result }}
+        REMOTE_VERDICT: ${{ needs.remote.outputs.verdict }}
+        HOSTED_RESULT: ${{ needs.hosted.result }}
+        HOSTED_VERDICT: ${{ needs.hosted.outputs.verdict }}
         GRAPH_RESULT: ${{ needs.graph-impact.result }}
         GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
       run: |
-        unset BUILDBUDDY_API_KEY
-        if [ "$GRAPH_RESULT" != success ] || [ "$GRAPH_VERDICT" != pass ]; then
-          echo 'GATE_TEST_FAILURE: graph impact failed or has no passing verdict'
-          exit 1
-        fi
-    - name: Require a complete plan
-      env:
-        PLAN_RESULT: ${{ needs.plan.result }}
-        HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
-        POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
-      run: |
-        unset BUILDBUDDY_API_KEY
-        if [ "$HEAD_COMPATIBLE" = false ]; then
-          echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
-          exit 1
-        fi
-        if [ "$POLICY_EXIT" = 1 ]; then
-          echo 'GATE_POLICY_FAILURE: quarantine policy rejected the plan'
-          exit 1
-        fi
-        if [ "$PLAN_RESULT" != success ]; then
-          echo 'NO_VERDICT: gate plan did not complete'
-          exit 75
-        fi
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 1
-        persist-credentials: false
-        sparse-checkout: |
-          tools/ci
-          prismaquant
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
-    - name: Download attempt verdicts
-      continue-on-error: true
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        pattern: gate-result-${{ github.run_attempt }}-*
-        path: verdicts
-    - name: Aggregate complete coverage and final verdicts
-      run: |
-        unset BUILDBUDDY_API_KEY
-        python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-5
-      if: ${{ !cancelled() }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - if: ${{ !cancelled() && steps.scan-artifacts-5.outcome == 'success' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: gate-pr-final-${{ github.run_attempt }}
-        path: gate-artifacts
-        if-no-files-found: warn
-        retention-days: 7
+        set -Eeuo pipefail
+        test "$HOSTED_RESULT" = success
+        test "$HOSTED_VERDICT" = pass
+        test "$GRAPH_RESULT" = success
+        test "$GRAPH_VERDICT" = pass
+        case "$TRUSTED" in
+          true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
+          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
+          *) exit 1;;
+        esac
   gate:
     name: gate
     if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && ((startsWith(github.head_ref, 'mergify/merge-queue/') && github.event.pull_request.user.login == 'mergify[bot]' && github.event.pull_request.user.id == 37929162) || contains(github.event.pull_request.labels.*.name, 'gate-canary')) }}
     needs:
-    - plan
-    - shards
-    - retry-plan
-    - retry-shards
+    - remote
+    - hosted
     - graph-impact
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-    - name: Require graph impact verdict
+    - name: Require complete cutover evidence
       env:
+        TRUSTED: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        REMOTE_RESULT: ${{ needs.remote.result }}
+        REMOTE_VERDICT: ${{ needs.remote.outputs.verdict }}
+        HOSTED_RESULT: ${{ needs.hosted.result }}
+        HOSTED_VERDICT: ${{ needs.hosted.outputs.verdict }}
         GRAPH_RESULT: ${{ needs.graph-impact.result }}
         GRAPH_VERDICT: ${{ needs.graph-impact.outputs.verdict }}
       run: |
-        unset BUILDBUDDY_API_KEY
-        if [ "$GRAPH_RESULT" != success ] || [ "$GRAPH_VERDICT" != pass ]; then
-          echo 'GATE_TEST_FAILURE: graph impact failed or has no passing verdict'
-          exit 1
-        fi
-    - name: Require a complete plan
-      env:
-        PLAN_RESULT: ${{ needs.plan.result }}
-        HEAD_COMPATIBLE: ${{ needs.plan.outputs.compatible }}
-        POLICY_EXIT: ${{ needs.plan.outputs.policy_exit }}
-      run: |
-        unset BUILDBUDDY_API_KEY
-        if [ "$HEAD_COMPATIBLE" = false ]; then
-          echo 'GATE_TEST_FAILURE: PR head predates gate tooling; merge origin/main and push again.'
-          exit 1
-        fi
-        if [ "$POLICY_EXIT" = 1 ]; then
-          echo 'GATE_POLICY_FAILURE: quarantine policy rejected the plan'
-          exit 1
-        fi
-        if [ "$PLAN_RESULT" != success ]; then
-          echo 'NO_VERDICT: gate plan did not complete'
-          exit 75
-        fi
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.pull_request.head.sha }}
-        fetch-depth: 1
-        persist-credentials: false
-        sparse-checkout: |
-          tools/ci
-          prismaquant
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: gate-plan-${{ github.run_attempt }}
-        path: gate-artifacts
-    - name: Download attempt verdicts
-      continue-on-error: true
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        pattern: gate-result-${{ github.run_attempt }}-*
-        path: verdicts
-    - name: Aggregate complete coverage and final verdicts
-      run: |
-        unset BUILDBUDDY_API_KEY
-        python3 tools/ci/gate_actions.py finish --plan gate-artifacts/plan.json             --matrix gate-artifacts/job-matrix.json --artifacts verdicts             --prefix gate-result-${{ github.run_attempt }} --output gate-artifacts/final.json             --effective-output gate-artifacts/effective --summary "$GITHUB_STEP_SUMMARY"
-    - name: Scan artifact paths for secrets
-      id: scan-artifacts-6
-      if: ${{ !cancelled() }}
-      env:
-        BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
-        MERGIFY_TOKEN: ${{ secrets.MERGIFY_TOKEN }}
-      run: python3 tools/ci/check_no_secret_leak.py --env BUILDBUDDY_API_KEY --env MERGIFY_TOKEN gate-artifacts
-    - if: ${{ !cancelled() && steps.scan-artifacts-6.outcome == 'success' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: gate-final-${{ github.run_attempt }}
-        path: gate-artifacts
-        if-no-files-found: warn
-        retention-days: 7
+        set -Eeuo pipefail
+        test "$HOSTED_RESULT" = success
+        test "$HOSTED_VERDICT" = pass
+        test "$GRAPH_RESULT" = success
+        test "$GRAPH_VERDICT" = pass
+        case "$TRUSTED" in
+          true) test "$REMOTE_RESULT" = success; case "$REMOTE_VERDICT" in pass|skipped) ;; *) exit 1;; esac;;
+          false) test "$REMOTE_RESULT" = skipped; test -z "$REMOTE_VERDICT";;
+          *) exit 1;;
+        esac
