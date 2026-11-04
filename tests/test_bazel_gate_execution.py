@@ -559,8 +559,8 @@ def test_build_only_partitions_survive_the_cli_and_controller_handoff(
     ('native', 'native-execution', 'runtime'),
     ('missing_bep', 'bep-read', 'missing-file'),
     ('invalid_bep', 'bep-parse', 'invalid-json'),
-    ('timeout', 'inventory-fetch', 'timeout'),
-    ('http', 'inventory-fetch', 'http-429'),
+    ('timeout', 'inventory-remote-fetch', 'timeout'),
+    ('http', 'inventory-remote-fetch', 'http-429'),
     ('local', 'inventory-local-read', 'io-directory'),
     ('local_late', 'inventory-local-read', 'io-directory'),
     ('reset', 'inventory-remote-fetch', 'network-reset'),
@@ -629,8 +629,6 @@ def test_shard_refusal_names_fixed_phase_and_category_without_private_values(
         document, root=tmp_path, runner=native, fetch=fetch))
     assert gate.main(['shard']) == 75
     captured = capsys.readouterr()
-    if fault == 'http':
-        phase = 'inventory-remote-fetch'
     expected = f'shard refused at {phase}; category={category}; upload refused\n'
     if phase.startswith('inventory-'):
         local = 2 if fault == 'local_late' else int(fault == 'local')

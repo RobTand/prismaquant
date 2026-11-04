@@ -283,7 +283,10 @@ def inventory_evidence(text, fetch):
     remote = sum(uri.startswith('bytestream://') for uri in sources)
     for index, (uri, name) in enumerate(sources.items(), start=1):
         try:
-            with evidence_phase('inventory-fetch'):
+            phase = ('inventory-local-read' if uri.startswith('file://') else
+                     'inventory-remote-fetch' if uri.startswith('bytestream://') else
+                     'inventory-fetch')
+            with evidence_phase(phase):
                 raw = fetch(uri)
             with evidence_phase('inventory-parse'):
                 if name.endswith('inventory.json'):
@@ -369,17 +372,15 @@ def execute_shard(manifest, *, root=None, runner=subprocess.run, fetch=None):
 
 def fetch_artifact(uri):
     if uri.startswith('file://'):
-        with evidence_phase('inventory-local-read'):
-            return Path(unquote(urlsplit(uri).path)).read_bytes()
+        return Path(unquote(urlsplit(uri).path)).read_bytes()
     if not uri.startswith('bytestream://'):
         raise GateError('artifact has an unsupported URI')
-    with evidence_phase('inventory-remote-fetch'):
-        spec = importlib.util.spec_from_file_location(
-            'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
-        artifacts = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(artifacts)
-        return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
-            'GetFile', {'uri': uri}, raw=True)
+    spec = importlib.util.spec_from_file_location(
+        'pq_shard_output_client', Path(__file__).with_name('bazel_artifacts.py'))
+    artifacts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(artifacts)
+    return artifacts.BuildBuddy(os.environ.get('BUILDBUDDY_API_KEY')).call(
+        'GetFile', {'uri': uri}, raw=True)
 
 
 def main(argv=None):
