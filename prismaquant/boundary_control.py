@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 
 from prismaquant import validate_quantized_model as vqm
-from .digests import DIRECT_UTF8_STRICT, file_sha256hex
+from .digests import DIRECT_UTF8_STRICT, file_sha256hex, is_sha256hex
 
 SCHEMA = "prismaquant.boundary_control/1"
 DECLARED_STACK_SCHEMA = "prismaquant.boundary_control/2"
@@ -51,7 +51,7 @@ def artifact_content_id(content):
     if (not isinstance(content, dict)
             or set(content) != {"model_sha", "weight_content_manifest"}
             or not isinstance(content["model_sha"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", content["model_sha"]) is None):
+            or not is_sha256hex(content["model_sha"])):
         raise ValueError("artifact_content requires model_sha and exact weight content manifest")
     _closed_weight_content_manifest(content["weight_content_manifest"],
                                     where="boundary artifact_content")
@@ -71,7 +71,7 @@ def validate_stack_contract(contract):
     for row in roles.values():
         if (not isinstance(row, dict) or set(row) != {"artifact_id", "resident_extensions"}
                 or not isinstance(row["artifact_id"], str)
-                or not re.fullmatch(r"[0-9a-f]{64}", row["artifact_id"])):
+                or not is_sha256hex(row["artifact_id"])):
             raise ValueError("paired stack contract requires exact artifact_id")
         extensions = row["resident_extensions"]
         if (not isinstance(extensions, list)

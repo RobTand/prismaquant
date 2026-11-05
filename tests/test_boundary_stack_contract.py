@@ -1,5 +1,6 @@
 """A declared native treatment changes only its exact extension residency."""
 import copy
+import sys
 
 import pytest
 
@@ -150,3 +151,131 @@ def test_projected_stack_comparison_preserves_json_types(monkeypatch):
     _rehash(candidate)
     with pytest.raises(ValueError, match="gpu_count"):
         bc.measure_candidate("http://server", "candidate", control, candidate)
+
+
+ROLES = ("bf16_control", "candidate")
+CONTENT_REFUSAL = "artifact_content requires model_sha and exact weight content manifest"
+ARTIFACT_REFUSAL = "paired stack contract requires exact artifact_id"
+
+
+class _Text(str):
+    """An ordinary str subclass with no overridden behavior."""
+
+
+ACCEPTED_SHA = [pytest.param("a" * 64, id="lowercase"),
+                pytest.param("0123456789abcdef" * 4, id="all-hex-digits"),
+                pytest.param(_Text("b" * 64), id="str-subclass")]
+REFUSED_SHA = [pytest.param("A" * 64, id="uppercase"),
+               pytest.param("a" * 63 + "A", id="one-uppercase"),
+               pytest.param("a" * 63, id="short"),
+               pytest.param("a" * 65, id="long"),
+               pytest.param("", id="empty"),
+               pytest.param("a" * 64 + "\n", id="newline-suffix"),
+               pytest.param("\n" + "a" * 64, id="newline-prefix"),
+               pytest.param("g" * 64, id="non-hex"),
+               pytest.param(" " + "a" * 63, id="space"),
+               pytest.param(_Text("A" * 64), id="str-subclass-uppercase"),
+               pytest.param(b"a" * 64, id="bytes"),
+               pytest.param(None, id="none"),
+               pytest.param(0, id="zero"),
+               pytest.param(int("1" * 64), id="integer")]
+
+
+def _content(model_sha):
+    content = copy.deepcopy(_binding("quant")["artifact_content"])
+    content["model_sha"] = model_sha
+    return content
+
+
+def _stack_contract():
+    return copy.deepcopy(_declared_pair()["candidate"]["paired_stack"]["contract"])
+
+
+def _refusal(call, *args):
+    with pytest.raises(Exception) as caught:
+        call(*args)
+    return type(caught.value), str(caught.value)
+
+
+def test_boundary_declarations_use_shared_sha256_grammar(monkeypatch):
+    consumer = sys.modules["prismaquant.boundary_control"]
+    owner = sys.modules["prismaquant.digests"]
+    real = owner.is_sha256hex
+    content = copy.deepcopy(_binding("quant")["artifact_content"])
+    contract = copy.deepcopy(_declared_pair()["candidate"]["paired_stack"]["contract"])
+    expected_id = consumer.digest(content)
+    seen = []
+
+    def recording(value):
+        seen.append(value)
+        return real(value)
+
+    monkeypatch.setattr(owner, "is_sha256hex", recording, raising=False)
+    monkeypatch.setattr(consumer, "is_sha256hex", recording, raising=False)
+    assert consumer.artifact_content_id(content) == expected_id
+    assert consumer.validate_stack_contract(contract) is contract
+    expected = [content["model_sha"]] + [contract["roles"][role]["artifact_id"]
+                                         for role in ("bf16_control", "candidate")]
+    assert seen == expected, "wrapper did not record the owner calls"
+
+
+@pytest.mark.parametrize("model_sha", ACCEPTED_SHA)
+def test_artifact_content_id_accepts_lowercase_sha256_text(model_sha):
+    content = _content(model_sha)
+    plain = _content(str(model_sha))
+    assert bc.artifact_content_id(content) == bc.digest(plain)
+    assert content["model_sha"] is model_sha
+
+
+@pytest.mark.parametrize("model_sha", REFUSED_SHA)
+def test_artifact_content_id_refuses_other_model_sha(model_sha):
+    assert _refusal(bc.artifact_content_id, _content(model_sha)) == (ValueError, CONTENT_REFUSAL)
+
+
+def test_artifact_content_id_checks_model_sha_before_manifest():
+    content = _content("A" * 64)
+    content["weight_content_manifest"] = {}
+    assert _refusal(bc.artifact_content_id, content) == (ValueError, CONTENT_REFUSAL)
+    content["model_sha"] = "a" * 64
+    assert _refusal(bc.artifact_content_id, content) == (
+        ValueError, "invalid closed weight content manifest in boundary artifact_content")
+
+
+@pytest.mark.parametrize("role", ROLES)
+@pytest.mark.parametrize("artifact_id", ACCEPTED_SHA)
+def test_stack_contract_accepts_lowercase_artifact_id_per_role(role, artifact_id):
+    contract = _stack_contract()
+    contract["roles"][role]["artifact_id"] = artifact_id
+    assert bc.validate_stack_contract(contract) is contract
+    assert contract["roles"][role]["artifact_id"] is artifact_id
+
+
+@pytest.mark.parametrize("role", ROLES)
+@pytest.mark.parametrize("artifact_id", REFUSED_SHA)
+def test_stack_contract_refuses_other_artifact_id_per_role(role, artifact_id):
+    contract = _stack_contract()
+    contract["roles"][role]["artifact_id"] = artifact_id
+    assert _refusal(bc.validate_stack_contract, contract) == (ValueError, ARTIFACT_REFUSAL)
+
+
+def test_stack_contract_keeps_field_precedence_for_artifact_id():
+    contract = _stack_contract()
+    for role in ROLES:
+        contract["roles"][role]["artifact_id"] = "A" * 64
+    contract["image"] = "fixture@sha256:" + "D" * 64
+    assert _refusal(bc.validate_stack_contract, contract) == (
+        ValueError, "invalid paired stack contract")
+    contract = _stack_contract()
+    contract["roles"]["candidate"]["artifact_id"] = None
+    contract["roles"]["candidate"]["resident_extensions"] = ["bad name"]
+    assert _refusal(bc.validate_stack_contract, contract) == (ValueError, ARTIFACT_REFUSAL)
+    contract = _stack_contract()
+    contract["roles"]["bf16_control"]["resident_extensions"] = ["bad name"]
+    contract["roles"]["candidate"]["artifact_id"] = b"a" * 64
+    assert _refusal(bc.validate_stack_contract, contract) == (
+        ValueError, "paired resident_extensions must be exact sorted unique basenames")
+    contract = _stack_contract()
+    contract["roles"]["bf16_control"]["artifact_id"] = "a" * 64
+    contract["roles"]["candidate"]["artifact_id"] = _Text("a" * 64)
+    assert _refusal(bc.validate_stack_contract, contract) == (
+        ValueError, "paired stack contract requires distinct treatment artifacts")
