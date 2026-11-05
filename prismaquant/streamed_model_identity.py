@@ -9,7 +9,7 @@ import re
 
 
 from prismaquant.dev_mode import dev_mode_enabled, dev_stamp, dev_warning, seal_check
-from .digests import DIRECT_ASCII_LAX, DIRECT_UTF8_INDENT2_STRICT, file_sha256hex
+from .digests import DIRECT_ASCII_LAX, DIRECT_UTF8_INDENT2_STRICT, file_sha256hex, is_sha256hex
 
 
 STREAMED_MODEL_IDENTITY_SCHEMA = "prismaquant.streamed_model.identity.v1"
@@ -1248,7 +1248,7 @@ def validate_streamed_model_identity(
             f"{STREAMED_MODEL_IDENTITY_SCHEMA!r}"
         )
     digest = str(identity.get("content_sha256", "")).lower()
-    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+    if not is_sha256hex(digest):
         raise RuntimeError(
             f"{where} requires exact model content_sha256"
         )
@@ -1259,7 +1259,7 @@ def validate_streamed_model_identity(
         if not isinstance(shard, Mapping):
             raise RuntimeError(f"{where} model shard {index} is malformed")
         shard_digest = str(shard.get("sha256", "")).lower()
-        if re.fullmatch(r"[0-9a-f]{64}", shard_digest) is None:
+        if not is_sha256hex(shard_digest):
             raise RuntimeError(
                 f"{where} model shard {index} lacks content sha256"
             )
