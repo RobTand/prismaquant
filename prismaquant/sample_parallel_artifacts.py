@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 import numpy as np
 import torch
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex
+from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, is_sha256hex
 from .probe_statistics import merge_marginals, finalize_fisher_stats
 
 SAMPLE_PARALLEL_META_FIELDS = (
@@ -257,7 +257,7 @@ def activation_cache_shard_stamp(
             "activation-cache priority cardinalities must be positive"
         )
     execution_digest = str(execution_identity_sha256)
-    if re.fullmatch(r"[0-9a-f]{64}", execution_digest) is None:
+    if not is_sha256hex(execution_digest):
         raise SampleParallelProbeError(
             "activation-cache execution identity must be a SHA-256 digest"
         )

@@ -550,3 +550,104 @@ def test_recorded_activation_blob_replays_exact_priority_contract(tmp_path, muta
     torch.save(blob, path)
     with pytest.raises(ValueError):
         _validate_sample_activation_blob(path, **kwargs)
+
+
+class _DigestText:
+    def __init__(self, text):
+        self.text = text
+
+    def __str__(self):
+        return self.text
+
+
+def _stamp(execution_identity_sha256, *, qname=BODY_QNAMES[0], rows_limit=3,
+           candidate_rows=8):
+    return artifacts.activation_cache_shard_stamp(
+        _contract(1), qname=qname, rows_limit=rows_limit,
+        candidate_rows=candidate_rows,
+        execution_identity_sha256=execution_identity_sha256)
+
+
+def test_activation_shard_stamp_uses_shared_sha256_grammar(monkeypatch):
+    consumer = sys.modules["prismaquant.sample_parallel_artifacts"]
+    owner = sys.modules["prismaquant.digests"]
+    real = owner.is_sha256hex
+    calls = []
+
+    def recording(value):
+        calls.append(value)
+        return real(value)
+
+    monkeypatch.setattr(owner, "is_sha256hex", recording, raising=False)
+    monkeypatch.setattr(consumer, "is_sha256hex", recording, raising=False)
+    digest = "c" * 64
+
+    class Identity:
+        def __str__(self):
+            return digest
+
+    stamp = consumer.activation_cache_shard_stamp(
+        {"global_calibration_hash": "a" * 32, "partition_index": 0},
+        qname="model.layers.0.q_proj", rows_limit=3, candidate_rows=8,
+        execution_identity_sha256=Identity())
+    assert calls == [digest] and all(type(call) is str for call in calls), (
+        "activation_cache_shard_stamp did not route the execution digest "
+        "through digests.is_sha256hex")
+    assert stamp["execution_identity_sha256"] == digest
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("0123456789abcdef" * 4, "0123456789abcdef" * 4),
+    ("e" * 64, "e" * 64),
+    (_DigestText("d" * 64), "d" * 64),
+    (int("1" * 64), "1" * 64),
+])
+def test_activation_shard_stamp_accepts_lowercase_sha256_text(value, expected):
+    stamp = _stamp(value)
+    assert stamp["execution_identity_sha256"] == expected
+    assert type(stamp["execution_identity_sha256"]) is str
+
+
+@pytest.mark.parametrize("value", [
+    "E" * 64, "aB" * 32, "e" * 63, "e" * 65, "", "g" * 64, "e" * 63 + "-",
+    "e" * 64 + "\n", " " + "e" * 63, None, 0, 7, 1.5, b"e" * 64,
+    _DigestText("F" * 64), _DigestText("e" * 63),
+])
+def test_activation_shard_stamp_refuses_non_sha256_text(value):
+    with pytest.raises(artifacts.SampleParallelProbeError,
+                       match="activation-cache execution identity must be a SHA-256 digest"):
+        _stamp(value)
+
+
+@pytest.mark.parametrize("rows_limit, candidate_rows", [(0, 8), (3, 0), (-1, -1)])
+@pytest.mark.parametrize("digest", ["E" * 64, None, "e" * 63])
+def test_activation_shard_stamp_refuses_cardinalities_before_digest(
+        rows_limit, candidate_rows, digest):
+    with pytest.raises(artifacts.SampleParallelProbeError,
+                       match="activation-cache priority cardinalities must be positive"):
+        _stamp(digest, rows_limit=rows_limit, candidate_rows=candidate_rows)
+
+
+@pytest.mark.parametrize("qname, group", [
+    ("model.layers.3.self_attn.k_proj", "model.layers.3.qkv"),
+    ("model.layers.2.mlp.up_proj.weight", "model.layers.2.gate_up"),
+    ("model.layers.1.linear_attn.in_proj_b", "model.layers.1.in_proj_ab"),
+    ("model.layers.0.mlp.down_proj", "model.layers.0.mlp.down_proj"),
+])
+def test_activation_shard_stamp_keeps_group_and_priority_metadata(qname, group):
+    stamp = _stamp("a" * 64, qname=qname, rows_limit="4", candidate_rows=9.0)
+    assert stamp == {
+        "schema": "prismaquant.sample_parallel_probe.activation_cache_shard.v1",
+        "priority_schema": "blake2b64-keyed-fmix32x2-prp-global-row-fused-group-v2",
+        "priority_group": group,
+        "selection": "local_top_r",
+        "row_indices_scope": "shard_local_flat_tokens",
+        "layout": "dense_linear",
+        "global_calibration_hash": "a" * 32,
+        "execution_identity_sha256": "a" * 64,
+        "partition_index": 1,
+        "rows_limit": 4,
+        "candidate_rows": 9,
+    }
+    assert stamp["priority_group"] == artifacts.activation_priority_group(qname)
+    assert type(stamp["rows_limit"]) is int and type(stamp["candidate_rows"]) is int
