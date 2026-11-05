@@ -18,7 +18,10 @@ CHILD = """
 import os, signal, sys, time
 from pathlib import Path
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
-Path(sys.argv[1]).write_text(str(os.getpid()))
+# Publish the pid atomically: the record never exists without its content.
+staging = Path(sys.argv[1] + '.tmp')
+staging.write_text(str(os.getpid()))
+os.replace(staging, sys.argv[1])
 while True:
     with open(sys.argv[2], 'ab', buffering=0) as stream:
         stream.write(b'x')
@@ -32,7 +35,9 @@ environment = dict(os.environ)
 if sys.argv[6] == 'unknown':
     environment.pop('PRISMAQUANT_CLUSTER_OWNER', None)
 subprocess.Popen([sys.executable, '-c', sys.argv[5], sys.argv[2], sys.argv[3]], env=environment)
-while not Path(sys.argv[2]).exists():
+child_pid = Path(sys.argv[2])
+# Wait for a complete pid record, not only for the file to exist.
+while not (child_pid.exists() and child_pid.read_text().isdecimal()):
     time.sleep(.01)
 Path(sys.argv[4]).write_bytes(b'done')
 if sys.argv[7] != 'normal':
