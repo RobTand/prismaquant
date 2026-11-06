@@ -26,6 +26,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+from time import time_ns
 import uuid
 
 RESULT_PREFIX = 'PB_TESSERA_RESULT='
@@ -86,12 +87,21 @@ def stamp(path):
     return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
 
 
-def verified_inputs(source, identity, cache_root):
-    """Hash once per worker and unchanged file identity; changes fail closed.
+def racy_stamp(value):
+    # Use a conservative two-second filesystem timestamp granularity.
+    # Do not trust a stamp if its newest mtime or ctime is within two seconds
+    # of this check or in the future.
+    return max(value[3:]) >= time_ns() - 2_000_000_000
 
-    The cache is private to the worker uid, locked across admitted children,
-    and bound to expected digests. Before/after stat checks reject mutation.
-    This is cooperative filesystem identity, not hostile-writer immutability.
+
+def verified_inputs(source, identity, cache_root):
+    """Reuse a verified hash only for an old, unchanged file stamp.
+
+    The worker locks its private cache across admitted children.
+    Each cache record binds the stamp to the expected digest.
+    Recent stamps require another hash check.
+    Before/after stat checks reject mutation during hashing.
+    This check assumes cooperative writers, not hostile-writer immutability.
     """
     source, cache_root = Path(source).resolve(), Path(cache_root)
     cache_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -115,18 +125,27 @@ def verified_inputs(source, identity, cache_root):
                 raise ValueError('source manifest contains a nonlocal filename')
             path = source / name
             before = stamp(path)
-            if cached.get(name) != {'stamp': before, 'sha256': digest}:
+            racy = racy_stamp(before)
+            record = {'stamp': before, 'sha256': digest, 'racy': racy}
+            # Old cache records lack the racy flag. Verify them once again.
+            if racy or cached.get(name) != record:
                 if digest_file(path) != digest or stamp(path) != before:
                     raise ValueError(f'source changed: {name}')
-            snapshots[name] = {'stamp': before, 'sha256': digest}
+            snapshots[name] = record
         atomic_json(cache_path, snapshots)
     return snapshots
 
 
 def check_stamps(source, snapshots):
     for name, record in snapshots.items():
-        if stamp(Path(source) / name) != record['stamp']:
+        path = Path(source) / name
+        if stamp(path) != record['stamp']:
             raise ValueError(f'source changed during export: {name}')
+        # A recent snapshot stays unsafe after the clock advances.
+        # Treat snapshots without the flag as unsafe too.
+        if record.get('racy', True) or racy_stamp(record['stamp']):
+            if digest_file(path) != record['sha256'] or stamp(path) != record['stamp']:
+                raise ValueError(f'source changed during export: {name}')
 
 
 def verify_output_record(path, expected=None):
@@ -161,8 +180,7 @@ def inside(spec, mode, index, destination):
         path = Path(path)
         if path.parent.resolve() == source.resolve() and path.name in snapshots:
             record = snapshots[path.name]
-            if stamp(path) != record['stamp']:
-                raise ValueError(f'source changed: {path.name}')
+            check_stamps(source, {path.name: record})
             return record['sha256']
         return original_hash(path)
     parts.sha256_file = memoized_hash
@@ -274,9 +292,15 @@ def main(argv=None):
         parts = producer_parts('encoder')
         source = Path(spec['source'])
         before = {p.name: stamp(p) for p in source.iterdir() if p.is_file()}
+        # Compare bytes across identity generation for each recent stamp.
+        # Keep this set even if the stamp becomes old during preparation.
+        recent = [name for name, value in before.items() if racy_stamp(value)]
+        digests = {name: digest_file(source / name) for name in recent}
         identity = parts.source_identity(source)
         after = {p.name: stamp(p) for p in source.iterdir() if p.is_file()}
-        if before != after:
+        if before != after or any(
+                digest_file(source / name) != digest or stamp(source / name) != before[name]
+                for name, digest in digests.items()):
             raise ValueError('source changed during preparation')
         result = {'source_identity': identity,
                   'count': len(whole_layer_partitions(identity['tensors'], parts))}
