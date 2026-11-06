@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-06, Remote Bazel PR fallback uses six shards, PQ #3345.
+Source: `tools/ci/bazel_selection.py` and `tools/ci/remote_gate.py`, based on
+main `118c4b17`. PR fallback now plans six timing-balanced shards and the
+controller admits six concurrent runs, so the full gate fits Mergify's
+30-minute `checks_timeout`. Balancing, the 55-minute shard request cap, the
+58-minute await deadline, arm64 and serial non-fallback submission are unchanged.
+
 As of: 2026-11-06, Remote Bazel PR fallback sharding, PQ #3335.
 Source: `tools/ci/bazel_selection.py`, `tools/ci/bazel_gate.py` and
 `tools/ci/remote_gate.py`, based on main `ef817b9d`.

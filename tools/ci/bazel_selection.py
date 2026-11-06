@@ -355,7 +355,7 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
             or any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (base, head))):
         raise SelectionError('invalid manifest mode or source revisions')
     fallback = mode == 'pr' and decision['selection'] == 'fallback'
-    shard_counts = {'amd64': 4 if fallback else 2, 'arm64': 4} if shard_counts is None else shard_counts
+    shard_counts = {'amd64': 6 if fallback else 2, 'arm64': 4} if shard_counts is None else shard_counts
     hosted, hosted_arm64 = set(hosted), set(hosted_arm64)
     full = mode == 'main' or decision['selection'] == 'fallback'
     selected = set(decision.get('selected', ()))

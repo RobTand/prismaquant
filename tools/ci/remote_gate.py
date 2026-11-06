@@ -71,9 +71,9 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
 
 
 def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic):
-    """Only PR fallback may admit up to four runs; drain each batch without retries."""
-    if type(concurrency) is not int or not 1 <= concurrency <= 4:
-        raise RemoteError('shard concurrency must be between one and four')
+    """Only PR fallback may admit up to six runs; drain each batch without retries."""
+    if type(concurrency) is not int or not 1 <= concurrency <= 6:
+        raise RemoteError('shard concurrency must be between one and six')
     planned = [(request, json.loads(request['env']['PQ_BAZEL_SHARD']))
                for request in requests]
     if concurrency > 1 and (not planned or any(
@@ -108,7 +108,7 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
 
 
 def run_manifest(client, args, manifest_uri, raw_manifest, *,
-                 clock=time.monotonic, fallback_concurrency=4):
+                 clock=time.monotonic, fallback_concurrency=6):
     """Validate every partition before submitting any run, then join own results."""
     from tools.ci.bazel_gate import GateError, aggregate_shards, check_partition
 
@@ -141,8 +141,8 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
                     check_partition(population, shards)
                 elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
                     raise RemoteError('manifest has an invalid empty population')
-            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 4:
-                raise RemoteError('fallback concurrency must be between one and four')
+            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 6:
+                raise RemoteError('fallback concurrency must be between one and six')
         except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
             raise RemoteError('invalid shard manifest') from error
 
