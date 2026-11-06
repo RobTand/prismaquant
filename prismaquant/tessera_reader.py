@@ -13,13 +13,12 @@ import importlib.abc
 import importlib.machinery
 import importlib.util
 from pathlib import Path
-import re
 import sys
 from types import SimpleNamespace
 
 from .digests import (
     SOURCE_TREE_V1, SOURCE_TREE_V2, bytes_sha256hex,
-    compare_source_profiles, source_tree_profiles,
+    compare_source_profiles, is_sha256hex, source_tree_profiles,
 )
 
 SOURCE_SUFFIXES = {'.py', '.cu', '.cuh', '.cpp', '.h'}
@@ -101,7 +100,7 @@ def load_declared_reader(record):
     if (not isinstance(record, dict) or not {'path', 'source_sha256'} <= set(record)
             or not set(record) <= {'path', 'source_sha256', 'source_profiles'}):
         raise ValueError('reader requires an explicit package path and source_sha256')
-    if not re.fullmatch(r'[0-9a-f]{64}', str(record['source_sha256'])):
+    if not is_sha256hex(str(record['source_sha256'])):
         raise ValueError('reader requires an exact source SHA256')
     root = Path(record['path']).resolve()
     profiles, files = _source_tree_profiles(root)
