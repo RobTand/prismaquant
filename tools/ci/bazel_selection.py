@@ -154,6 +154,8 @@ def query_population(rows, architecture):
         if not targets or not tests:
             raise ValueError('empty build or test population')
         return {'targets': sorted(targets), 'tests': sorted(tests),
+                'excluded': sorted(label for label, (_, tags) in rules.items()
+                                   if 'manual' in tags and 'gate-lane-hosted' not in tags),
                 'hosted': sorted(label for label, (_, tags) in rules.items()
                                  if 'gate-lane-hosted' in tags),
                 'hosted_arm64': sorted(label for label, (_, tags) in rules.items()
@@ -202,6 +204,7 @@ def compare_graphs(base_graph, head_graph, changed, deleted, directory, *,
                for label in labels):
             raise SelectionError('graph comparison returned invalid labels')
         impacted = {label[1:] if label.startswith('@//') else label for label in labels}
+        impacted -= set(population['excluded'])
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError, SelectionError):
         return gate_decision(changed, deleted, set(), used_sources, tests,
                              detection_error='graph comparison unavailable')

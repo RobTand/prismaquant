@@ -443,7 +443,7 @@ def test_manifest_preserves_mergify_scope_selection(
 
 @pytest.mark.parametrize('changed', ['uv.lock', 'prismaquant/core.py'])
 def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_path, changed):
-    population = {'tests': sorted(TESTS), 'used_sources': [changed]}
+    population = {'tests': sorted(TESTS), 'used_sources': [changed], 'excluded': []}
     base = {'hashes': tmp_path / 'base.json'}
     head = {'hashes': tmp_path / 'head.json', 'population': population}
 
@@ -468,7 +468,7 @@ def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_
 @pytest.mark.parametrize('fault', ['base_missing', 'diff_exit', 'invalid_output', 'output_missing'])
 def test_graph_comparison_errors_fall_back_to_the_complete_queried_head(tmp_path, fault):
     head = {'hashes': tmp_path / 'head.json',
-        'population': {'tests': sorted(TESTS), 'used_sources': ['prismaquant/core.py']}}
+        'population': {'tests': sorted(TESTS), 'used_sources': ['prismaquant/core.py'], 'excluded': []}}
     base = None if fault == 'base_missing' else {'hashes': tmp_path / 'base.json'}
 
     def failed_comparison(command, **kwargs):

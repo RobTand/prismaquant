@@ -8595,7 +8595,6 @@ pq_py_test(
         "//:tools/prepare_dsv4_wikitext_inputs",
         "//:tools/prismasnap",
         "//:tools/resolve_tessera_dev_pin",
-        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
         ":conftest",
@@ -8624,6 +8623,7 @@ pq_py_library(
         "//:files/tools/ci",
         "//:pyproject.toml",
         "//:pytest.ini",
+        "//:tools/tessera_campaign_container.py",
         "//:uv.lock",
         "//tools/bazel:runtime.py",
         "BUILD.bazel",
@@ -8637,6 +8637,7 @@ pq_py_library(
         "//:tools/ci/bazel_selection",
         "//:tools/ci/check_no_secret_leak",
         "//:tools/ci/remote_gate",
+        "//:tools/tessera_campaign_container",
         "@pq_pip//pytest",
     ],
 )
