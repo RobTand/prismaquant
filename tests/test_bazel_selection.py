@@ -565,15 +565,17 @@ def planning_history(tmp_path):
     return root, revisions
 
 
+@pytest.mark.parametrize('timed', [False, True])
 def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
-        tmp_path, planning_history, monkeypatch):
+        tmp_path, planning_history, monkeypatch, timed):
     root, (_, head) = planning_history
-    tests = [f'//tests:test_{index}' for index in range(8)]
-    files = {f'tests/test_{index}.py': seconds
+    tests = [f'//tests:test_pq_fallback_cost_{index}' for index in range(8)]
+    files = {'tests/' + f'test_pq_fallback_cost_{index}.py': seconds
              for index, seconds in enumerate([40, 39, 38, 37, 4, 3, 2, 1])}
-    timing_file = root / 'tools/ci/gate_durations.json'
-    timing_file.parent.mkdir(parents=True)
-    timing_file.write_text(json.dumps({'files': files}))
+    if timed:
+        timing_file = root / selection.DURATIONS_PATH
+        timing_file.parent.mkdir(parents=True)
+        timing_file.write_text(json.dumps({'files': files}))
     population = selection.query_population([
         *[{'rule': {'name': label, 'ruleClass': 'py_test'}} for label in tests],
         {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
@@ -585,8 +587,11 @@ def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
     assert document['selection'] == 'fallback'
     assert len(row['shards']) == 4
     assert sorted(label for shard in row['shards'] for label in shard) == tests
-    assert [sum(files[label[2:].replace(':', '/') + '.py'] for label in shard)
-            for shard in row['shards']] == [41] * 4
+    if timed:
+        assert [sum(files[label[2:].replace(':', '/') + '.py'] for label in shard)
+                for shard in row['shards']] == [41] * 4
+    else:
+        assert [len(shard) for shard in row['shards']] == [2] * 4
 
 
 @pytest.mark.parametrize('mode,fault', [

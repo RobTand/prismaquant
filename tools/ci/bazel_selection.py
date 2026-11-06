@@ -28,6 +28,7 @@ GATE_INPUTS = {
 }
 BAZEL_DIFF_URL = 'https://github.com/Tinder/bazel-diff/releases/download/v42.0.0/bazel-diff_deploy.jar'
 BAZEL_DIFF_SHA256 = '0170b70fe2f24477ab056c11f5c3240d8b45a1dca5ab73ad252c096679c5500c'
+DURATIONS_PATH = 'tools/ci/gate_durations.json'
 
 
 class SelectionError(RuntimeError):
@@ -332,8 +333,14 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
     if mode == 'main':
         populations['arm64'] = query_population(
             (json.loads(line) for line in head_query['query'].read_text().splitlines()), 'arm64')
+    durations = {}
+    timing_file = root / DURATIONS_PATH
+    if mode == 'pr' and decision['selection'] == 'fallback' and timing_file.is_file():
+        files = json.loads(timing_file.read_text())['files']
+        durations = {label: files[path] for label in population['tests']
+                     if (path := label[2:].replace(':', '/') + '.py') in files}
     return selection_manifest(decision, populations, hosted=population['hosted'],
-        hosted_arm64=population['hosted_arm64'], base=base, head=head, mode=mode)
+        hosted_arm64=population['hosted_arm64'], base=base, head=head, mode=mode, durations=durations)
 
 
 def verdict_of(selected, statuses):
@@ -342,12 +349,13 @@ def verdict_of(selected, statuses):
 
 
 def selection_manifest(decision, populations, *, hosted, base, head, mode,
-                       hosted_arm64=frozenset(), shard_counts=None):
+                       hosted_arm64=frozenset(), shard_counts=None, durations=None):
     """Freeze selection and lane routes before any test shard is submitted."""
     if (mode not in ('pr', 'main')
             or any(not re.fullmatch('[0-9a-f]{40}', revision) for revision in (base, head))):
         raise SelectionError('invalid manifest mode or source revisions')
-    shard_counts = {'amd64': 2, 'arm64': 4} if shard_counts is None else shard_counts
+    fallback = mode == 'pr' and decision['selection'] == 'fallback'
+    shard_counts = {'amd64': 4 if fallback else 2, 'arm64': 4} if shard_counts is None else shard_counts
     hosted, hosted_arm64 = set(hosted), set(hosted_arm64)
     full = mode == 'main' or decision['selection'] == 'fallback'
     selected = set(decision.get('selected', ()))
@@ -375,7 +383,7 @@ def selection_manifest(decision, populations, *, hosted, base, head, mode,
         labels = population if full else action_requested
         try:
             shards = partition_population(labels, tests=tests & labels,
-                shard_count=shard_counts[architecture]) if labels else []
+                shard_count=shard_counts[architecture], durations=durations if fallback else None) if labels else []
         except (GateError, KeyError) as error:
             raise SelectionError('cannot partition queried population') from error
         document['architectures'][architecture] = {

@@ -71,12 +71,12 @@ def shard_request(args, architecture, index, manifest_uri, manifest_sha256,
 
 
 def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic):
-    """Only PR fallback may admit two runs; drain each batch without retries."""
-    if type(concurrency) is not int or not 1 <= concurrency <= 2:
-        raise RemoteError('shard concurrency must be one or two')
+    """Only PR fallback may admit up to four runs; drain each batch without retries."""
+    if type(concurrency) is not int or not 1 <= concurrency <= 4:
+        raise RemoteError('shard concurrency must be between one and four')
     planned = [(request, json.loads(request['env']['PQ_BAZEL_SHARD']))
                for request in requests]
-    if concurrency == 2 and (not planned or any(
+    if concurrency > 1 and (not planned or any(
             expected['mode'] != 'pr' or expected.get('selection') != 'fallback'
             for _, expected in planned)):
         raise RemoteError('concurrency above one is allowed only for PR fallback')
@@ -108,7 +108,7 @@ def submit_shards(client, requests, head, *, concurrency=1, clock=time.monotonic
 
 
 def run_manifest(client, args, manifest_uri, raw_manifest, *,
-                 clock=time.monotonic, fallback_concurrency=2):
+                 clock=time.monotonic, fallback_concurrency=4):
     """Validate every partition before submitting any run, then join own results."""
     from tools.ci.bazel_gate import GateError, aggregate_shards, check_partition
 
@@ -141,8 +141,8 @@ def run_manifest(client, args, manifest_uri, raw_manifest, *,
                     check_partition(population, shards)
                 elif shards or tests or args.mode != 'pr' or document['selection'] == 'fallback':
                     raise RemoteError('manifest has an invalid empty population')
-            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 2:
-                raise RemoteError('fallback concurrency must be one or two')
+            if type(fallback_concurrency) is not int or not 1 <= fallback_concurrency <= 4:
+                raise RemoteError('fallback concurrency must be between one and four')
         except (ValueError, TypeError, AttributeError, KeyError, GateError) as error:
             raise RemoteError('invalid shard manifest') from error
 
