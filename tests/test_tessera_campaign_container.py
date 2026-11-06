@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import unittest
 
 import pytest
 
@@ -162,6 +163,108 @@ assert "PRISMABUILD_ACTION_PROGRESS_TOKEN=minted-token" in argv
                                cwd=tmp_path, env=environment,
                                capture_output=True, text=True)
     assert completed.returncode == 0, completed.stderr
+
+
+class ProgressMountTest(unittest.TestCase):
+    def test_readonly_child_mount_refuses_the_pb_progress_channel(self):
+        from tools import tessera_campaign_container as launcher
+
+        spec = {"env": {}, "container": {"mounts": [
+            {"source": "/queue", "target": "/queue"},
+            {"source": "/host/readonly", "target": "/queue/progress", "readonly": True},
+        ]}}
+        env = {launcher.PATH_ENV: "/queue/progress/action.json",
+               launcher.TOKEN_ENV: "fixture-token"}
+        with self.assertRaises(RuntimeError):
+            launcher.progress_environment(spec, env)
+
+    def test_writable_identity_mount_forwards_until_a_readonly_child_is_declared_first(self):
+        from tools import tessera_campaign_container as launcher
+
+        spec = {"env": {}, "container": {"mounts": [
+            {"source": "/queue", "target": "/queue"},
+        ]}}
+        env = {launcher.PATH_ENV: "/queue/progress/action.json",
+               launcher.TOKEN_ENV: "fixture-token"}
+        self.assertEqual(launcher.progress_environment(spec, env), env)
+        env[launcher.PHASES_ENV] = "prepare,commit"
+        self.assertEqual(launcher.progress_environment(spec, env), env)
+        spec["container"]["mounts"].insert(0, {
+            "source": "/host/readonly", "target": "/queue/progress", "readonly": True,
+        })
+        with self.assertRaises(RuntimeError):
+            launcher.progress_environment(spec, env)
+
+    def test_missing_path_or_token_disables_the_channel(self):
+        from tools import tessera_campaign_container as launcher
+
+        spec = {"env": {}, "container": {"mounts": []}}
+        for env in ({}, {launcher.PATH_ENV: "/queue/progress/action.json"},
+                    {launcher.TOKEN_ENV: "fixture-token"},
+                    {launcher.PATH_ENV: "", launcher.TOKEN_ENV: "fixture-token"},
+                    {launcher.PATH_ENV: "/queue/progress/action.json", launcher.TOKEN_ENV: ""}):
+            with self.subTest(env=env):
+                self.assertEqual(launcher.progress_environment(spec, env), {})
+
+    def test_no_covering_mount_keeps_the_refusal_text(self):
+        from tools import tessera_campaign_container as launcher
+
+        env = {launcher.PATH_ENV: "/queue/progress/action.json",
+               launcher.TOKEN_ENV: "fixture-token"}
+        expected = (
+            "the PrismaBuild progress file /queue/progress/action.json is not inside any writable "
+            "container mount, so this row could not report the anchors it commits "
+            "and would be ended as a stall; declare a mount covering it")
+        for mounts in ([], [{"source": "/queue/pro", "target": "/queue/pro"}]):
+            with self.subTest(mounts=mounts):
+                spec = {"env": {}, "container": {"mounts": mounts}}
+                with self.assertRaises(RuntimeError) as caught:
+                    launcher.progress_environment(spec, env)
+                self.assertEqual(str(caught.exception), expected)
+
+    def test_writable_child_overrides_a_readonly_ancestor_in_both_orders(self):
+        from tools import tessera_campaign_container as launcher
+
+        mounts = [
+            {"source": "/queue", "target": "/queue", "readonly": True},
+            {"source": "/queue/progress", "target": "/queue/progress"},
+        ]
+        env = {launcher.PATH_ENV: "/queue/progress/nested/action.json",
+               launcher.TOKEN_ENV: "fixture-token", launcher.PHASES_ENV: ""}
+        expected = {launcher.PATH_ENV: "/queue/progress/nested/action.json",
+                    launcher.TOKEN_ENV: "fixture-token"}
+        for ordered in (mounts, list(reversed(mounts))):
+            with self.subTest(mounts=ordered):
+                spec = {"env": {}, "container": {"mounts": ordered}}
+                self.assertEqual(launcher.progress_environment(spec, env), expected)
+
+    def test_readonly_mount_wins_an_equal_target_tie_in_both_orders(self):
+        from tools import tessera_campaign_container as launcher
+
+        mounts = [
+            {"source": "/queue", "target": "/queue"},
+            {"source": "/host/readonly", "target": "/queue", "readonly": True},
+        ]
+        env = {launcher.PATH_ENV: "/queue/progress/action.json",
+               launcher.TOKEN_ENV: "fixture-token"}
+        for ordered in (mounts, list(reversed(mounts))):
+            with self.subTest(mounts=ordered):
+                spec = {"env": {}, "container": {"mounts": ordered}}
+                with self.assertRaises(RuntimeError):
+                    launcher.progress_environment(spec, env)
+
+    def test_temporary_directories_need_a_writable_declared_mount(self):
+        from tools import tessera_campaign_container as launcher
+
+        for directory in ("/tmp", "/var/tmp"):
+            for mounts in ([], [{"source": "/host/readonly", "target": directory,
+                                 "readonly": True}]):
+                with self.subTest(directory=directory, mounts=mounts):
+                    spec = {"env": {}, "container": {"mounts": mounts}}
+                    env = {launcher.PATH_ENV: directory + "/action.json",
+                           launcher.TOKEN_ENV: "fixture-token"}
+                    with self.assertRaises(RuntimeError):
+                        launcher.progress_environment(spec, env)
 
 
 def test_host_launcher_validates_with_the_package_spec_contract():
