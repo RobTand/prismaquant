@@ -66,6 +66,9 @@ def _source(tmp_path):
 def test_input_hash_is_reused_only_for_unchanged_verified_files(tmp_path, monkeypatch):
     source, identity = _source(tmp_path)
     cache = tmp_path / 'cache'
+    newest = max(max(model.stamp(path)[3:]) for path in source.iterdir())
+    now = newest + 10_000_000_000
+    monkeypatch.setattr(model, 'time_ns', lambda: now, raising=False)
     model.verified_inputs(source, identity, cache)
     original = model.digest_file
     calls = []
@@ -74,16 +77,138 @@ def test_input_hash_is_reused_only_for_unchanged_verified_files(tmp_path, monkey
         calls.append(path)
         return original(path)
     monkeypatch.setattr(model, 'digest_file', digest)
+    snapshots = model.verified_inputs(source, identity, cache)
+    model.check_stamps(source, snapshots)
+    assert calls == []
+    now = min(max(model.stamp(path)[3:]) for path in source.iterdir())
+    model.verified_inputs(source, identity, cache)
+    assert sorted(path.name for path in calls) == ['config.json', 'weights'], (
+        'an unchanged file with a racy stamp was not rehashed')
+    calls.clear()
+    now = newest + 10_000_000_000
+    model.verified_inputs(source, identity, cache)
+    assert sorted(path.name for path in calls) == ['config.json', 'weights']
+    calls.clear()
     model.verified_inputs(source, identity, cache)
     assert calls == []
-    # Same size on purpose: the stamp then differs only by time.  Rewriting
-    # within one filesystem timestamp tick would leave it unchanged, so the new
-    # mtime is set explicitly instead of left to the clock.
+    # Keep the size the same. Set mtime to force a different stamp.
     before = (source / 'weights').stat()
     (source / 'weights').write_bytes(b'modified')
     os.utime(source / 'weights', ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
     with pytest.raises(ValueError, match='source changed'):
         model.verified_inputs(source, identity, cache)
+
+
+@pytest.mark.parametrize(('newest_field', 'offset_ns', 'elapsed_ns'), [
+    (4, -10_000_000_000, 0),
+    (3, 2_000_000_000, 0),
+    (4, 0, 10_000_000_000),
+], ids=['future-ctime', 'boundary-mtime', 'aged-ctime'])
+def test_verified_inputs_rehashes_a_same_size_rewrite_within_one_tick(
+        tmp_path, monkeypatch, offset_ns, newest_field, elapsed_ns):
+    source, identity = _source(tmp_path)
+    saved = {path.name: model.stamp(path)[:3] + [1, 1] for path in source.iterdir()}
+    for value in saved.values():
+        value[newest_field] = 20_000_000_000
+    now = 20_000_000_000 + offset_ns
+    monkeypatch.setattr(model, 'time_ns', lambda: now, raising=False)
+    # Model a filesystem that gives both writes the same timestamp tick.
+    monkeypatch.setattr(model, 'stamp', lambda path: saved[Path(path).name][:])
+    cache = tmp_path / 'cache'
+    model.verified_inputs(source, identity, cache)
+    (source / 'weights').write_bytes(b'modified')
+    now += elapsed_ns
+    try:
+        snapshots = model.verified_inputs(source, identity, cache)
+    except ValueError as error:
+        assert str(error) == 'source changed: weights'
+    else:
+        assert snapshots['weights']['sha256'] == model.digest_file(source / 'weights'), (
+            'racy same-size rewrite was trusted by verified_inputs')
+
+
+@pytest.mark.parametrize('elapsed_ns', [0, 10_000_000_000])
+def test_check_stamps_catches_a_same_size_rewrite_within_one_tick(tmp_path, monkeypatch, elapsed_ns):
+    source, identity = _source(tmp_path)
+    saved = {path.name: model.stamp(path)[:3] + [20_000_000_000] * 2 for path in source.iterdir()}
+    now = 20_000_000_000
+    monkeypatch.setattr(model, 'time_ns', lambda: now, raising=False)
+    monkeypatch.setattr(model, 'stamp', lambda path: saved[Path(path).name][:])
+    snapshots = model.verified_inputs(source, identity, tmp_path / 'cache')
+    model.check_stamps(source, snapshots)
+    (source / 'weights').write_bytes(b'modified')
+    # The saved stamp must remain unsafe after the clock advances.
+    now += elapsed_ns
+    try:
+        model.check_stamps(source, snapshots)
+    except ValueError as error:
+        assert str(error) == 'source changed during export: weights'
+    else:
+        assert False, 'racy same-size rewrite was missed by check_stamps'
+
+
+def test_prepare_rejects_a_same_tick_rewrite_during_identity(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source, identity = _source(tmp_path)
+    identity['tensors'] = {'model.layers.0.w': 'weights'}
+    saved = {path.name: model.stamp(path)[:3] + [20_000_000_000] * 2 for path in source.iterdir()}
+    now = 20_000_000_000
+    monkeypatch.setattr(model, 'time_ns', lambda: now, raising=False)
+    monkeypatch.setattr(model, 'stamp', lambda path: saved[Path(path).name][:])
+    (tmp_path / 'plan.json').write_text('{}')
+    spec = {'plan_sha256': model.digest_file(tmp_path / 'plan.json'), 'image': 'x@sha256:' + '0' * 64,
+            'source': str(source), 'out': str(tmp_path / 'out')}
+    model.atomic_json('job.json', spec)
+
+    def source_identity(path):
+        (path / 'weights').write_bytes(b'modified')
+        return identity
+
+    parts = SimpleNamespace(source_identity=source_identity,
+                            BODY_LAYER=PRODUCER.BODY_LAYER, partition_owner=PRODUCER.partition_owner)
+    monkeypatch.setattr(model, 'verify_image', lambda image: 'id')
+    monkeypatch.setattr(model, 'producer_parts', lambda root: parts)
+    with pytest.raises(ValueError, match='source changed during preparation'):
+        model.main(['prepare', '--host', 'sparky'])
+    assert not model.prepared_path(spec, 'sparky').exists()
+
+
+def test_inside_rechecks_a_racy_memoized_hash(tmp_path, monkeypatch):
+    from types import ModuleType
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, 'path', sys.path[:])
+    source, identity = _source(tmp_path)
+    identity['tensors'] = {'model.layers.0.w': 'weights'}
+    saved = {path.name: model.stamp(path)[:3] + [20_000_000_000] * 2 for path in source.iterdir()}
+    now = 20_000_000_000
+    monkeypatch.setattr(model, 'time_ns', lambda: now, raising=False)
+    monkeypatch.setattr(model, 'stamp', lambda path: saved[Path(path).name][:])
+    snapshots = model.verified_inputs(source, identity, tmp_path / 'cache')
+    monkeypatch.setattr(model, 'verified_inputs', lambda *args: snapshots)
+    package = ModuleType('tessera')
+    parts = ModuleType('tessera.serving_parts')
+    package.serving_parts = parts
+    parts.source_inventory = lambda path: identity['tensors']
+    parts.sha256_file = model.digest_file
+
+    def merge(paths, destination, source):
+        (source / 'weights').write_bytes(b'modified')
+        try:
+            parts.sha256_file(source / 'weights')
+        except ValueError as error:
+            assert 'source changed' in str(error)
+        else:
+            pytest.fail('memoized_hash trusted a same-tick rewrite')
+        raise RuntimeError('memoized hash check complete')
+
+    parts.merge_serving_parts = merge
+    monkeypatch.setitem(sys.modules, 'tessera', package)
+    monkeypatch.setitem(sys.modules, 'tessera.serving_parts', parts)
+    model.atomic_json('barrier.json', [])
+    spec = {'source': str(source), 'source_identity': identity, 'count': 0, 'parts': str(tmp_path / 'parts')}
+    with pytest.raises(RuntimeError, match='memoized hash check complete'):
+        model.inside(spec, 'assemble', 0, str(tmp_path / 'out'))
 
 
 def test_mid_export_source_mutation_is_detected(tmp_path):
