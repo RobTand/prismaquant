@@ -25,12 +25,18 @@ from __future__ import annotations
 
 import math
 from fractions import Fraction
-import re
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
 import torch
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
+
+from .schemas import (
+    RETIRED_CODEBOOK_ARCHIVE,  # noqa: F401 -- compatibility re-export
+    RETIRED_CODEBOOK_FORMAT_RE,
+    RetiredFormatError,  # noqa: F401 -- compatibility re-export
+    retired_codebook_error,
+)
 
 from prismaquant.fp8_dynamic import (
     fp8_dynamic_activation_qdq_vllm,
@@ -1501,19 +1507,6 @@ def parse_family_rung(fmt: object):
     return family_hook(family, "parse_format_name")(fmt)
 
 
-# The retired Gridbook lane's codebook rungs (NVFP4_CB_K<k>, FP8_CB_K<k>).
-# They are no longer registered. A stale artifact that names one gets this
-# refusal, never a silent skip: RetiredFormatError is deliberately NOT a
-# KeyError, so a reader that tolerates unknown names with ``except KeyError``
-# still refuses a retired one.
-RETIRED_CODEBOOK_FORMAT_RE = re.compile(r"(?:NVFP4_CB_K|FP8_CB_K)\d+")
-RETIRED_CODEBOOK_ARCHIVE = "archive/gridbook_lane_2026-09-02"
-
-
-class RetiredFormatError(ValueError):
-    """A format name that belongs to a retired lane and is no longer served."""
-
-
 def get_format(name: str) -> FormatSpec:
     canonical = canonical_format_name(name)
     if canonical not in REGISTRY:
@@ -1539,15 +1532,7 @@ def get_format(name: str) -> FormatSpec:
             if spec is not None:
                 return spec
         if RETIRED_CODEBOOK_FORMAT_RE.fullmatch(canonical.upper()):
-            raise RetiredFormatError(
-                f"format {name!r} belongs to the retired Gridbook codebook "
-                f"lane (NVFP4-CB / FP8-CB), removed on 2026-09-02; its "
-                f"format, cost and render code was archived on 2026-09-25 "
-                f"(#1304). A cost table, layer config or selection that "
-                f"names it can no longer be priced, rendered or exported "
-                f"from this repository. See {RETIRED_CODEBOOK_ARCHIVE}/"
-                f"README.md."
-            )
+            raise retired_codebook_error(name)
         raise KeyError(f"Unknown format '{name}'. Available: "
                        f"{sorted((*REGISTRY.keys(), *FORMAT_ALIASES.keys()))}")
     return REGISTRY[canonical]

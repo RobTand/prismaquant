@@ -39,8 +39,8 @@ import torch.nn as nn
 
 from prismaquant import format_registry as fr
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
+from prismaquant.activation_index import ActivationIndex
 from prismaquant.measure_quant_cost import (
-    ActivationIndex,
     resolve_cost_target_name,
 )
 from prismaquant.production_weight_cache import (
