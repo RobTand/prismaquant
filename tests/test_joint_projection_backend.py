@@ -120,7 +120,7 @@ def test_serialized_backend_identity_is_complete_and_changes_probe_contract():
 
 
 def test_legacy_v1_signed_rows_require_fresh_recomputation():
-    from test_joint_aura_assignment_diagnostics import _row
+    from tests.joint_aura_assignment_support import _row
     from prismaquant.joint_aura_rows import validate_joint_aura_entry
     # This test uses the same valid row fixture as assignment diagnostics.
     row = _row("model.layers.0.mlp.down_proj", [1.0, 2.0])

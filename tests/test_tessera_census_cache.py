@@ -18,7 +18,7 @@ from prismaquant.tessera_census_cache import (
     load_selected_wire_records, seal_roster, uniform_assignment,
 )
 from prismaquant.tessera_joint_aura import STAGE
-from test_tessera_expert_projection import STACK, _declared, _projection, _record
+from tests.expert_projection_support import STACK, _declared, _projection, _record
 
 FMT = "TESSERA_E4M3_K1_R1024"
 DENSE = "model.layers.2.mlp.down_proj"

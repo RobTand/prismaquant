@@ -9,7 +9,7 @@ import pickle
 import pytest
 
 from prismaquant.aura_additivity_gate import additivity_gate, main, paired_assignment_report
-from test_joint_aura_assignment_diagnostics import UNIT_A, UNIT_B, _rebuild, _row
+from tests.joint_aura_assignment_support import UNIT_A, UNIT_B, _rebuild, _row
 
 
 def _payload(a, b):

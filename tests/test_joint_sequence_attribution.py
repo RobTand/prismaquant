@@ -19,7 +19,7 @@ from prismaquant import aura_provenance
 import prismaquant.aura_cost as aura
 from prismaquant import joint_aura as joint
 
-from test_joint_aura_assignment_diagnostics import UNIT_A, _row
+from tests.joint_aura_assignment_support import UNIT_A, _row
 from test_joint_aura_projection import _linear, _spec
 from test_joint_aura_streamed import _fixture as _streamed_fixture
 from test_joint_aura_streamed import _model_identity

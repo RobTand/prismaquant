@@ -31,6 +31,8 @@ from prismaquant.production_recache import (
     recache_production_weight_cache,
 )
 
+from tests.production_cache_support import _TinyChain
+
 
 def _normalized_production_cache_levers(value: str | None) -> dict[str, object]:
     """The `--production-cache-levers` string -> provenance dict contract.
@@ -1310,25 +1312,6 @@ def test_render_score_record_raises_on_activation_score_failure(monkeypatch):
             activations=torch.randn(2, 4),
             activation_max_abs=None, levers=NativeRenderLevers.resolve(gptq_default=True),
         )
-
-
-class _TinyChain(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.embed = nn.Embedding(4, 32)
-        self.l1 = nn.Linear(32, 32, bias=False)
-        self.l2 = nn.Linear(32, 32, bias=False)
-        with torch.no_grad():
-            self.embed.weight.zero_()
-            self.embed.weight[0, 0] = 1.0
-            self.embed.weight[1, 1] = 2.0
-            self.l1.weight.copy_(torch.eye(32))
-            self.l2.weight.fill_(1.0)
-
-    def forward(self, input_ids, use_cache=False):
-        x = self.embed(input_ids)
-        x = self.l1(x)
-        return self.l2(x)
 
 
 def test_resume_refuses_truncated_activation_max_abs_sidecar(tmp_path):

@@ -11,7 +11,7 @@ import json
 from prismaquant import allocator_candidates as ac
 from prismaquant.digests import DIRECT_UTF8_STRICT
 from prismaquant.model_profiles import DefaultProfile
-from test_joint_aura_assignment_diagnostics import _row
+from tests.joint_aura_assignment_support import _row
 
 LOW = "FP8_E4M3"
 HIGH = "FP8_E5M2"

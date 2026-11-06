@@ -16,7 +16,7 @@ from prismaquant import streamed_model_identity as identity
 from prismaquant import streaming_production_cache as streaming
 from prismaquant import union_production_cache as union
 from prismaquant.calibration_data import _dtype_from_name
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 from test_union_production_cache import _make_shard
 
 

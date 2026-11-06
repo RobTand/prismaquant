@@ -24,7 +24,7 @@ from prismaquant.tessera_formats import parse_tessera_format_name
 from prismaquant.tessera_hessian import HESSIAN_IDENTITY_FIELDS
 from prismaquant.tessera_campaign_table import STAGE
 from prismaquant.tessera_menu import assert_uniform_hessian_identity
-from test_tessera_expert_projection import STACK, _declared, _projection
+from tests.expert_projection_support import STACK, _declared, _projection
 
 
 from prismaquant import tessera_census_union as tool

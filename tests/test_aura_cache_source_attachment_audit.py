@@ -15,7 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from prismaquant import aura_cost, build_production_cache as builder
 from prismaquant import calibration_data, cost_streaming, gpu_guard, model_profiles
 from prismaquant.model_profiles import DefaultProfile
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 class _ReachedPricing(Exception):

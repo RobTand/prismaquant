@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from prismaquant import production_weight_cache as pwc
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 @pytest.mark.parametrize("mode", [

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from test_joint_aura_assignment_diagnostics import _row, _rebuild
+from tests.joint_aura_assignment_support import _row, _rebuild
 
 
 def fixture(names=None):
@@ -155,7 +155,7 @@ def test_handoff_refuses_changed_evidence(mutation):
 def test_handoff_carries_complete_original_projection_and_measured_wire_roster():
     from prismaquant import tessera_expert_projection as tep
     from prismaquant.tessera_joint_allocation import bind_allocation_payload
-    from test_tessera_expert_projection import _projection, _declared, STACK
+    from tests.expert_projection_support import _projection, _declared, STACK
 
     declared = _declared(experts=(0,), n=2, k=2)
     joint, data, prepared, metadata, kwargs = fixture(list(declared[STACK]))

@@ -25,7 +25,7 @@ from prismaquant import shipcard
 from prismaquant.footprint import assignment_serialization_sha256
 from prismaquant.layer_config import read_layer_config_metadata
 from prismaquant.serving_profiles import ResolvedServingLane
-from test_footprint import _write_safetensors
+from tests.safetensors_support import _write_safetensors
 
 
 # ---------------------------------------------------------------------------

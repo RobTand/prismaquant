@@ -9,9 +9,6 @@ real 27B exports is covered by the verification pass, not here.
 """
 from __future__ import annotations
 
-import json
-import struct
-
 import pytest
 
 import prismaquant.name_projection as npx
@@ -19,26 +16,8 @@ from prismaquant import footprint as fp
 from prismaquant import format_registry as fr
 from prismaquant.model_profiles.base import ModelProfile
 from prismaquant.model_profiles.qwen3 import Qwen3Profile
-def _write_safetensors(path, tensors):
-    """Write a minimal valid .safetensors file. tensors: {name: (dtype, shape)}.
 
-    Data is zero-filled; only the header (dtype/shape/data_offsets) matters for
-    the byte accounting, which reads spans, not values.
-    """
-    header = {}
-    off = 0
-    for name, (dtype, shape) in tensors.items():
-        nbytes = fp._ST_DTYPE_BYTES[dtype]
-        for d in shape:
-            nbytes *= d
-        header[name] = {"dtype": dtype, "shape": list(shape),
-                        "data_offsets": [off, off + nbytes]}
-        off += nbytes
-    blob = json.dumps(header).encode()
-    with open(path, "wb") as fh:
-        fh.write(struct.pack("<Q", len(blob)))
-        fh.write(blob)
-        fh.write(b"\x00" * off)
+from tests.safetensors_support import _write_safetensors
 
 
 def test_source_checkpoint_bytes_reads_spans(tmp_path):

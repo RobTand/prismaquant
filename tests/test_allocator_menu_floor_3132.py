@@ -24,7 +24,7 @@ import prismaquant.allocator as alloc
 from prismaquant import footprint as fp
 from prismaquant import format_registry as fr
 from prismaquant.allocator_solver import Candidate, solve_with_promotion
-from test_footprint import _write_safetensors
+from tests.safetensors_support import _write_safetensors
 
 # ---------------------------------------------------------------------------
 # Solver seam

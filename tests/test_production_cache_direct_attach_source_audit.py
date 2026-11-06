@@ -16,7 +16,7 @@ from prismaquant import export_native_compressed as exporter
 from prismaquant import model_profiles
 from prismaquant import validate_assignments_kl as validator
 from prismaquant.model_profiles import DefaultProfile
-from test_production_weight_cache import _TinyChain
+from tests.production_cache_support import _TinyChain
 
 
 class _ReachedNativePacker(Exception):

@@ -10,7 +10,7 @@ from prismaquant.cost_stage_checkpoint import unit_path
 from prismaquant.joint_price_step import (
     AuraUnitMeasurements, JointPriceStep, JointResumeContract, ProbeResumePolicy,
 )
-from test_joint_aura_assignment_diagnostics import UNIT_A, _row
+from tests.joint_aura_assignment_support import UNIT_A, _row
 
 RECORDED = [0.09054819587618113, -0.022860320983454585]
 FORMAT = "FP8_E4M3"

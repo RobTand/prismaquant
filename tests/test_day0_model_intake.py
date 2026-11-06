@@ -8,7 +8,7 @@ from threading import Thread
 
 import pytest
 
-from test_footprint import _write_safetensors
+from tests.safetensors_support import _write_safetensors
 from prismaquant.model_profiles.structure import ModelStructureSpec
 
 ROOT = Path(__file__).resolve().parents[1]
