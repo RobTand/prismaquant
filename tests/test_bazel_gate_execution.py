@@ -382,7 +382,8 @@ def test_inventory_warnings_and_nodes_are_collected_once_from_own_bep_outputs():
     assert calls == ['bytestream://remote.buildbuddy.io/own-output']
 
 
-@pytest.mark.parametrize('raw', [b'not a zip', inventory_zip({'budget_warnings': 'invalid'})])
+@pytest.mark.parametrize('raw', [b'not a zip', inventory_zip({'budget_warnings': 'invalid'})],
+                         ids=['not-a-zip', 'invalid-budget-warnings'])
 def test_malformed_inventory_is_an_evidence_failure(raw):
     with pytest.raises(gate.GateError, match='inventory'):
         gate.inventory_evidence(events(output_event()), lambda uri: raw)
