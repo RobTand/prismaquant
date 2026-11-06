@@ -566,12 +566,12 @@ def planning_history(tmp_path):
 
 
 @pytest.mark.parametrize('timed', [False, True])
-def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
+def test_fallback_planner_maps_measured_file_times_into_six_balanced_shards(
         tmp_path, planning_history, monkeypatch, timed):
     root, (_, head) = planning_history
-    tests = [f'//tests:test_pq_fallback_cost_{index}' for index in range(8)]
+    tests = [f'//tests:test_pq_fallback_cost_{index}' for index in range(12)]
     files = {'tests/' + f'test_pq_fallback_cost_{index}.py': seconds
-             for index, seconds in enumerate([40, 39, 38, 37, 4, 3, 2, 1])}
+             for index, seconds in enumerate([40, 39, 38, 37, 36, 35, 6, 5, 4, 3, 2, 1])}
     if timed:
         timing_file = root / selection.DURATIONS_PATH
         timing_file.parent.mkdir(parents=True)
@@ -585,13 +585,13 @@ def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
     document = selection.plan_revisions(root, tmp_path / 'private', base=head, head=head, mode='pr')
     row = document['architectures']['amd64']
     assert document['selection'] == 'fallback'
-    assert len(row['shards']) == 4
-    assert sorted(label for shard in row['shards'] for label in shard) == tests
+    assert len(row['shards']) == 6
+    assert sorted(label for shard in row['shards'] for label in shard) == sorted(tests)
     if timed:
         assert [sum(files[label[2:].replace(':', '/') + '.py'] for label in shard)
-                for shard in row['shards']] == [41] * 4
+                for shard in row['shards']] == [41] * 6
     else:
-        assert [len(shard) for shard in row['shards']] == [2] * 4
+        assert [len(shard) for shard in row['shards']] == [2] * 6
 
 
 @pytest.mark.parametrize('mode,fault', [
