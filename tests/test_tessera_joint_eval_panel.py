@@ -15,6 +15,239 @@ from prismaquant.tessera_joint_eval_panel import (
     validate_eval_draw_descriptor)
 
 
+def test_evaluation_descriptors_use_shared_sha256_grammar(monkeypatch, tmp_path):
+    import sys
+
+    consumer = sys.modules['prismaquant.tessera_joint_eval_panel']
+    digests = sys.modules['prismaquant.digests']
+    real_is_sha256hex = digests.is_sha256hex
+    calls = []
+
+    def record(value):
+        calls.append(value)
+        return real_is_sha256hex(value)
+
+    monkeypatch.setattr(digests, 'is_sha256hex', record, raising=False)
+    monkeypatch.setattr(consumer, 'is_sha256hex', record, raising=False)
+    ids = torch.arange(8, dtype=torch.int64, device='cpu').reshape(4, 2)
+    panel = make_panel(ids, artifact_sha256='a' * 64, seed=7, size=2)
+    fresh_ids = torch.arange(8, 12, dtype=torch.int64, device='cpu').reshape(2, 2)
+    draw = {'schema': DRAW_SCHEMA, 'status': STATUS,
+            'encoding_calibration_input_sha256': 'a' * 64,
+            'calibration_input': {'path': str(tmp_path / 'independent.safetensors'),
+                                  'sha256': 'b' * 64},
+            'shape': list(fresh_ids.shape),
+            'calibration_sha256': hashlib.sha256(fresh_ids.numpy().tobytes()).hexdigest()}
+    calls.clear()
+    assert consumer.validate_panel_descriptor(
+        panel, n_samples=4, seqlen=2, artifact_sha256='a' * 64) is panel
+    assert validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64) is draw
+    assert calls == [panel['eval_ids_sha256'],
+                     draw['encoding_calibration_input_sha256'],
+                     draw['calibration_sha256'], draw['calibration_input']['sha256']], (
+        'is_sha256hex did not record the owner calls')
+
+
+def _tiny_evaluation_descriptors(tmp_path):
+    ids = torch.arange(8, dtype=torch.int64, device='cpu').reshape(4, 2)
+    panel = make_panel(ids, artifact_sha256='a' * 64, seed=7, size=2)
+    draw = {'schema': DRAW_SCHEMA, 'status': STATUS,
+            'encoding_calibration_input_sha256': 'a' * 64,
+            'calibration_input': {'path': str(tmp_path / 'independent.safetensors'),
+                                  'sha256': 'b' * 64},
+            'shape': [2, 2], 'calibration_sha256': 'c' * 64}
+    return panel, draw
+
+
+@pytest.mark.parametrize('mode', ['0', '1'], ids=['certified', 'dev'])
+@pytest.mark.parametrize('site', ['panel', 'old encoding binding', 'token identity',
+                                  'artifact pin'])
+@pytest.mark.parametrize('kind', ['lowercase', 'str_subclass', 'uppercase', 'nonhex',
+                                  'newline', 'short', 'long', 'empty', 'bytes',
+                                  'none', 'integer'])
+def test_evaluation_sha256_grammar_controls(tmp_path, monkeypatch, mode, site, kind):
+    from prismaquant.tessera_joint_eval_panel import _draw_sha256, validate_panel_descriptor
+
+    class DigestText(str):
+        pass
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    values = {'lowercase': '0123456789abcdef' * 4,
+              'str_subclass': DigestText('0123456789abcdef' * 4),
+              'uppercase': 'A' * 64, 'nonhex': 'g' * 64,
+              'newline': 'a' * 64 + '\n', 'short': 'a' * 63, 'long': 'a' * 65,
+              'empty': '', 'bytes': b'a' * 64, 'none': None, 'integer': 123}
+    value = values[kind]
+    panel, draw = _tiny_evaluation_descriptors(tmp_path)
+    encoding_sha256 = 'a' * 64
+    if site == 'panel':
+        descriptor = panel
+        panel['eval_ids_sha256'] = value
+        error = 'joint evaluation indices, shape or hash descriptor differ'
+    else:
+        descriptor = draw
+        if site == 'old encoding binding':
+            draw['encoding_calibration_input_sha256'] = value
+            encoding_sha256 = value
+        elif site == 'token identity':
+            draw['calibration_sha256'] = value
+        else:
+            draw['calibration_input']['sha256'] = value
+        error = f'joint evaluation draw {site} requires a SHA256 digest'
+    frozen = copy.deepcopy(descriptor)
+
+    def validate():
+        if site == 'panel':
+            return validate_panel_descriptor(panel, n_samples=4, seqlen=2,
+                                             artifact_sha256='a' * 64)
+        return validate_eval_draw_descriptor(draw,
+                                             encoding_artifact_sha256=encoding_sha256)
+
+    if kind in {'lowercase', 'str_subclass'}:
+        assert validate() is descriptor
+        assert _draw_sha256(value, 'control') is value
+    else:
+        with pytest.raises(ValueError) as caught:
+            validate()
+        assert str(caught.value) == error
+    assert descriptor == frozen
+    if site == 'panel':
+        assert panel['eval_ids_sha256'] is value
+    elif site == 'old encoding binding':
+        assert draw['encoding_calibration_input_sha256'] is value
+    elif site == 'token identity':
+        assert draw['calibration_sha256'] is value
+    else:
+        assert draw['calibration_input']['sha256'] is value
+
+
+@pytest.mark.parametrize('mode', ['0', '1'], ids=['certified', 'dev'])
+@pytest.mark.parametrize('field', ['indices', 'shape'])
+def test_panel_structure_precedes_digest_and_seal(tmp_path, monkeypatch, mode, field):
+    from prismaquant.tessera_joint_eval_panel import validate_panel_descriptor
+
+    class UnreadableDigest(dict):
+        def __getitem__(self, key):
+            assert key != 'eval_ids_sha256', 'structure must precede digest access'
+            return super().__getitem__(key)
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    panel, _ = _tiny_evaluation_descriptors(tmp_path)
+    panel['calibration_input_sha256'] = 'b' * 64
+    if field == 'indices':
+        panel['selection']['indices'] = []
+    else:
+        panel['shape'] = [3, 2]
+    panel = UnreadableDigest(panel)
+    with pytest.raises(ValueError) as caught:
+        validate_panel_descriptor(panel, n_samples=4, seqlen=2, artifact_sha256='a' * 64)
+    assert str(caught.value) == 'joint evaluation indices, shape or hash descriptor differ'
+
+
+@pytest.mark.parametrize('stage', ['old binding', 'seal', 'token identity',
+                                   'closed input', 'artifact pin', 'shape', 'path'])
+def test_draw_validation_order_controls(tmp_path, monkeypatch, stage):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    _, draw = _tiny_evaluation_descriptors(tmp_path)
+    draw['calibration_input']['path'] = 'relative.safetensors'
+    error_type = ValueError
+    if stage == 'old binding':
+        draw['encoding_calibration_input_sha256'] = None
+        draw['calibration_sha256'] = None
+        error = 'joint evaluation draw old encoding binding requires a SHA256 digest'
+    elif stage == 'seal':
+        draw['encoding_calibration_input_sha256'] = 'd' * 64
+        draw['calibration_sha256'] = None
+        error_type = RuntimeError
+        error = ("joint evaluation draw descriptor: old encoding calibration binding differs: "
+                 f"expected {'a' * 64!r}, actual {'d' * 64!r}")
+    elif stage == 'token identity':
+        draw['calibration_sha256'] = None
+        draw['calibration_input'] = {}
+        error = 'joint evaluation draw token identity requires a SHA256 digest'
+    elif stage == 'closed input':
+        draw['calibration_input'] = {'sha256': None}
+        draw['shape'] = [0, 2]
+        error = 'joint evaluation draw requires a closed calibration_input reference'
+    elif stage == 'artifact pin':
+        draw['calibration_input']['sha256'] = None
+        draw['shape'] = [0, 2]
+        error = 'joint evaluation draw artifact pin requires a SHA256 digest'
+    elif stage == 'shape':
+        draw['shape'] = [0, 2]
+        error = 'joint evaluation draw requires positive integer rows and seqlen'
+    else:
+        error = ('joint evaluation draw calibration_input requires an absolute '
+                 'path without parent traversal')
+    frozen = copy.deepcopy(draw)
+    with pytest.raises(error_type) as caught:
+        validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64)
+    assert str(caught.value) == error
+    assert draw == frozen
+
+
+@pytest.mark.parametrize('mode', ['0', '1'], ids=['certified', 'dev'])
+@pytest.mark.parametrize('path', [None, b'/data/draw', 12, 'draw', '/data/sub/../draw',
+                                 '/absent/draw.safetensors'])
+def test_draw_path_controls(tmp_path, monkeypatch, mode, path):
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    _, draw = _tiny_evaluation_descriptors(tmp_path)
+    draw['calibration_input']['path'] = path
+    frozen = copy.deepcopy(draw)
+    if path == '/absent/draw.safetensors':
+        assert validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64) is draw
+    else:
+        with pytest.raises(ValueError) as caught:
+            validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64)
+        if isinstance(path, str):
+            error = ('joint evaluation draw calibration_input requires an absolute '
+                     'path without parent traversal')
+        else:
+            error = 'joint evaluation draw calibration_input requires a pinned path string'
+        assert str(caught.value) == error
+    assert draw == frozen
+
+
+@pytest.mark.parametrize('mode', ['0', '1'], ids=['certified', 'dev'])
+@pytest.mark.parametrize('site', ['panel', 'draw'])
+def test_evaluation_binding_seal_controls(tmp_path, monkeypatch, capsys, mode, site):
+    from prismaquant.tessera_joint_eval_panel import validate_panel_descriptor
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    panel, draw = _tiny_evaluation_descriptors(tmp_path)
+    if site == 'panel':
+        descriptor = panel
+        panel['calibration_input_sha256'] = 'd' * 64
+        kind = 'panel encoding calibration binding'
+        where = 'joint evaluation panel'
+    else:
+        descriptor = draw
+        draw['encoding_calibration_input_sha256'] = 'd' * 64
+        kind = 'old encoding calibration binding'
+        where = 'joint evaluation draw descriptor'
+    frozen = copy.deepcopy(descriptor)
+
+    def validate():
+        if site == 'panel':
+            return validate_panel_descriptor(panel, n_samples=4, seqlen=2,
+                                             artifact_sha256='a' * 64)
+        return validate_eval_draw_descriptor(draw, encoding_artifact_sha256='a' * 64)
+
+    if mode == '0':
+        with pytest.raises(RuntimeError) as caught:
+            validate()
+        assert str(caught.value) == (
+            f"{where}: {kind} differs: expected {'a' * 64!r}, actual {'d' * 64!r}")
+        assert capsys.readouterr().out == ''
+    else:
+        assert validate() is descriptor
+        assert capsys.readouterr().out == (
+            f"[DEV-MODE] seal {kind} differs ({where}): expected {'a' * 64}, "
+            f"actual {'d' * 64}; sealing is off (PQ #1147), "
+            'continuing with the stored data\n')
+    assert descriptor == frozen
+
+
 def test_legacy_full_draw_and_nested_deterministic_prefix():
     ids = torch.arange(512 * 4, dtype=torch.int64).reshape(512, 4)
     calibration = {'artifact_sha256': 'a' * 64, 'shape': [512, 4]}
