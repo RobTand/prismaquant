@@ -542,14 +542,83 @@ def test_two_targets_with_one_name_refuse_generation():
 
 
 def test_check_names_each_stale_build_file_and_the_fix(tmp_path, monkeypatch):
+    git(tmp_path, 'init', '-q')
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests/BUILD.bazel').write_text('old\n')
+    git(tmp_path, 'add', '.')
     monkeypatch.setattr(build_files, 'generate', lambda root: {'tests': 'new\n', '': 'root\n'})
     with pytest.raises(SystemExit) as stopped:
         build_files.main(['--check', '--root', str(tmp_path)])
     assert 'BUILD.bazel' in str(stopped.value) and 'tests/BUILD.bazel' in str(stopped.value)
     assert 'tools/bazel/generate.sh' in str(stopped.value)
     assert (tmp_path / 'tests/BUILD.bazel').read_text() == 'old\n'
+
+
+@pytest.mark.parametrize('fault', [None, 'retired', 'deleted_retired', 'untracked_expected',
+                                  'untracked_retired', 'ignored_retired'])
+def test_check_requires_exact_tracked_generated_outputs(indexed_repository, monkeypatch, fault):
+    root = indexed_repository
+    generated = {'': build_files.HEADER + '# root\n', 'tests': build_files.HEADER + '# tests\n'}
+    monkeypatch.setattr(build_files, 'generate', lambda root: generated)
+    write(root, {'BUILD.bazel': generated[''], 'tests/BUILD.bazel': generated['tests'],
+                 'tools/bazel/BUILD.bazel': '# handwritten\n',
+                 'manual/BUILD.bazel': '# handwritten\n'})
+    git(root, 'add', '.')
+    # The handwritten subtree is excluded even when an untracked file has the header.
+    write(root, {'tools/bazel/scratch/BUILD.bazel': build_files.HEADER})
+    path = 'retired/BUILD.bazel'
+    if fault in ('retired', 'deleted_retired', 'untracked_retired', 'ignored_retired'):
+        write(root, {path: build_files.HEADER + '# retired\n'})
+        if fault in ('retired', 'deleted_retired'):
+            git(root, 'add', path)
+        if fault == 'deleted_retired':
+            (root / path).unlink()
+        if fault == 'ignored_retired':
+            (root / '.gitignore').write_text('retired/\n')
+    if fault == 'untracked_expected':
+        path = 'tests/BUILD.bazel'
+        git(root, 'rm', '--cached', path)
+        # Declared outputs are owned even without their generated header.
+        generated['tests'] = '# declared output\n'
+        (root / path).write_text(generated['tests'])
+    if fault is None:
+        assert build_files.main(['--check', '--root', str(root)]) == 0
+    else:
+        with pytest.raises(SystemExit) as stopped:
+            build_files.main(['--check', '--root', str(root)])
+        assert path in str(stopped.value)
+        assert build_files.FIX in str(stopped.value)
+
+
+def test_check_fails_when_generation_errors(tmp_path, monkeypatch):
+    def fail(root):
+        raise build_files.GenerationError('invalid dependency evidence')
+    monkeypatch.setattr(build_files, 'generate', fail)
+    with pytest.raises(SystemExit, match='Cannot generate BUILD files: invalid dependency evidence'):
+        build_files.main(['--check', '--root', str(tmp_path)])
+
+
+@pytest.mark.parametrize('mode', ['pr', 'main'])
+def test_gate_planner_rejects_stale_generated_build_before_query(indexed_repository, monkeypatch, mode):
+    from tools.ci import bazel_generated, bazel_selection
+
+    root = indexed_repository
+    write(root, SMALL)
+    git(root, 'add', '.')
+    for package, text in build_files.generate(root).items():
+        write(root, {str(Path(package) / 'BUILD.bazel'): text})
+    git(root, 'add', '.')
+    git(root, '-c', 'commit.gpgsign=false', 'commit', '-qm', 'generated inputs')
+    head = git(root, 'rev-parse', 'HEAD').decode().strip()
+    (root / 'tests/BUILD.bazel').write_text(build_files.HEADER + '# stale\n')
+    monkeypatch.setattr(bazel_generated, 'commands', lambda: [[sys.executable,
+        str(ROOT / 'tools/bazel/build_files.py'), '--check', '--root', str(root)]])
+
+    def query(*args, **kwargs):
+        pytest.fail('stale generated BUILD reached the graph query')
+    monkeypatch.setattr(bazel_selection, 'query_revision', query)
+    with pytest.raises(RuntimeError, match='Generated BUILD files are stale: tests/BUILD.bazel'):
+        bazel_selection.plan_revisions(root, root / 'private', base=head, head=head, mode=mode)
 
 
 def test_committed_build_files_carry_the_generated_header():

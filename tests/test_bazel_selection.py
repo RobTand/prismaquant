@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from prismaquant.digests import bytes_sha256hex
+from tools.ci import bazel_generated
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('pq_bazel_selection', ROOT / 'tools/ci/bazel_selection.py')
@@ -599,8 +600,9 @@ def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
     ('pr', 'comparison_failure'), ('main', None),
 ])
 def test_revision_planner_binds_real_git_sources_and_retains_full_fallback(
-        tmp_path, planning_history, mode, fault):
+        tmp_path, planning_history, monkeypatch, mode, fault):
     root, (base, head) = planning_history
+    monkeypatch.setattr(bazel_generated, 'check_generated', lambda **kwargs: None)
     calls, hashed_sources = [], []
     rows = [
         {'rule': {'name': label, 'ruleClass': 'py_test'}} for label in sorted(TESTS)
