@@ -144,9 +144,16 @@ def progress_environment(spec: dict, environ) -> dict:
     if not path or not token:
         return {}
     directory = PurePosixPath(path).parent
+    covering = []
     for mount in spec["container"].get("mounts", []):
         target = PurePosixPath(mount["target"])
-        if (directory == target or target in directory.parents) and not mount.get("readonly", False):
+        if directory == target or target in directory.parents:
+            covering.append(mount)
+    if covering:
+        # A read-only mount wins a tie at the same target depth.
+        nearest = max(covering, key=lambda item: (
+            len(PurePosixPath(item["target"]).parts), bool(item.get("readonly", False))))
+        if not nearest.get("readonly", False):
             channel = {PATH_ENV: str(path), TOKEN_ENV: str(token)}
             phases = environ.get(PHASES_ENV)
             # A string, not a file: it needs no mount and it is what lets the
