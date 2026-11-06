@@ -12,6 +12,7 @@ import random
 import torch
 
 from .digests import bytes_sha256hex
+from .model_dtypes import _dtype_from_name
 from .source_read_plan import safetensors_prefix_length
 
 
@@ -250,15 +251,6 @@ def load_wikitext_calibration_windowed(
         seed=seed,
     )
 
-
-def _dtype_from_name(name: str) -> torch.dtype:
-    if name in {"bf16", "bfloat16"}:
-        return torch.bfloat16
-    if name in {"fp16", "float16"}:
-        return torch.float16
-    if name in {"fp32", "float32"}:
-        return torch.float32
-    raise ValueError(f"unsupported dtype {name!r}")
 
 
 def load_calibration(tokenizer, source: str, n_samples: int,
