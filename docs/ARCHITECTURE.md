@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-06, Remote Bazel PR fallback sharding, PQ #3335.
+Source: `tools/ci/bazel_selection.py`, `tools/ci/bazel_gate.py` and
+`tools/ci/remote_gate.py`, based on main `ef817b9d`.
+PR fallback uses four concurrent shards balanced by the recorded hosted test-file
+times, or by count without matching timings. The 55-minute shard request cap
+and 58-minute await deadline are unchanged. See `docs/bazel.md` for the timing
+source and scope. Known excluded manual rules are removed from impacts before
+manifest validation; hosted routing and unknown-target refusal remain enforced.
+
 As of: 2026-11-02, hosted CI description corrected, PQ #3216.
 Source: `.github/workflows/gate.yml` and `.github/workflows/ci.yml` at
 `f1335b03`. PRs use hosted `pr-gate`; the post-merge CPU suite remains on

@@ -283,6 +283,29 @@ def test_test_population_must_belong_to_full_build_population():
         gate.partition_population([LABEL], tests={LABEL, '//tests:foreign'})
 
 
+def test_full_partition_balances_measured_test_time_and_keeps_every_build_target():
+    tests = [f'//tests:test_{index}' for index in range(8)]
+    durations = dict(zip(tests, [40, 39, 38, 37, 4, 3, 2, 1]))
+    libraries = [f'//:library_{index}' for index in range(8)]
+    population = tests + libraries
+    shards = gate.partition_population(population, tests=tests, shard_count=4, durations=durations)
+    assert [sum(durations.get(label, 0) for label in shard) for shard in shards] == [41] * 4
+    assert sorted(label for shard in shards for label in shard) == sorted(population)
+    assert max(map(len, shards)) - min(map(len, shards)) <= 1
+    assert shards == gate.partition_population(reversed(population), tests=reversed(tests),
+                                               shard_count=4, durations=durations)
+
+
+def test_full_partition_uses_median_for_untimed_tests_and_count_without_timings():
+    tests = [f'//tests:test_{index}' for index in range(8)]
+    durations = dict.fromkeys(tests[:4], 40)
+    shards = gate.partition_population(tests, tests=tests, shard_count=4, durations=durations)
+    assert [len(shard) for shard in shards] == [2] * 4
+    assert [len(set(shard) & durations.keys()) for shard in shards] == [1] * 4
+    assert gate.partition_population(tests, tests=tests, shard_count=4, durations={}) == (
+        gate.partition_population(tests, tests=tests, shard_count=4))
+
+
 def test_full_shards_verify_only_test_statuses_but_build_failures_still_fail():
     population = [LABEL, '//prismaquant:library']
     shards = [[LABEL], ['//prismaquant:library']]

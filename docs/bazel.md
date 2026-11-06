@@ -129,18 +129,26 @@ with no cloud fallback. Remote Bazel runners keep their existing four-CPU
 cloud placement. Hosted pytest exception lanes stay on GitHub-hosted runners.
 
 Selected gates and post-merge records submit one Remote Bazel shard at a
-time. The gate's fail-closed `//...` fallback alone may submit at most two
+time. The gate's fail-closed `//...` PR fallback uses four shards and may submit four
 concurrent Remote Bazel runs per controller on the self-hosted pools, each with
-`--jobs=16`. The controller rejects concurrency above two, and rejects
+`--jobs=16`. The controller rejects concurrency above four, and rejects
 concurrency above one outside PR fallback. Post-merge and development runs
-remain serial. Mergify's `checks_timeout` and merge conditions stay unchanged.
+remain serial. The shard request cap remains 55 minutes and the controller's
+per-shard await deadline remains 58 minutes. Mergify's `checks_timeout` and merge
+conditions stay unchanged.
+
+Fallback shards balance the measured file times in `tools/ci/gate_durations.json`,
+mapped to Bazel test labels. These are hosted Python 3.12 JUnit totals, not remote
+scheduling measurements. Longest tests are placed first on the least-loaded
+shard, with the measured median used for untimed tests. Build-only targets are
+distributed by count. Without matching timings, all targets are balanced by count.
 
 Mergify's existing `max_parallel_checks: 2` and per-PR workflow concurrency
 bound gate overlap. There is no shared GitHub job concurrency group, because
 GitHub cancels an older pending job when a newer one queues, causing Mergify
-to see a failed check and dequeue it. The worst case for Bazel, lock or workflow
-changes is four concurrent Remote Bazel runs per repo: two batch-draft fallback
-controllers, each with two shards. Extra runs queue on the self-hosted executors
+to see a failed check and dequeue it. For Bazel, lock or workflow changes, two
+batch-draft fallback controllers with four shards each can submit eight Remote
+Bazel runs per repo. Extra runs queue on the self-hosted executors
 rather than fail; this appears as longer shards, not errors. This exception does
 not permit concurrent agent or development runs.
 

@@ -443,7 +443,7 @@ def test_manifest_preserves_mergify_scope_selection(
 
 @pytest.mark.parametrize('changed', ['uv.lock', 'prismaquant/core.py'])
 def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_path, changed):
-    population = {'tests': sorted(TESTS), 'used_sources': [changed]}
+    population = {'tests': sorted(TESTS), 'used_sources': [changed], 'excluded': []}
     base = {'hashes': tmp_path / 'base.json'}
     head = {'hashes': tmp_path / 'head.json', 'population': population}
 
@@ -468,7 +468,7 @@ def test_graph_comparison_uses_v42_results_and_keeps_wheel_selection_narrow(tmp_
 @pytest.mark.parametrize('fault', ['base_missing', 'diff_exit', 'invalid_output', 'output_missing'])
 def test_graph_comparison_errors_fall_back_to_the_complete_queried_head(tmp_path, fault):
     head = {'hashes': tmp_path / 'head.json',
-        'population': {'tests': sorted(TESTS), 'used_sources': ['prismaquant/core.py']}}
+        'population': {'tests': sorted(TESTS), 'used_sources': ['prismaquant/core.py'], 'excluded': []}}
     base = None if fault == 'base_missing' else {'hashes': tmp_path / 'base.json'}
 
     def failed_comparison(command, **kwargs):
@@ -506,6 +506,45 @@ def test_impacted_hosted_consumer_survives_query_to_manifest_routing():
     assert found['selection'] == 'impacted'
 
 
+@pytest.mark.parametrize('unknown', [False, True])
+def test_impacted_quarantined_rule_is_excluded_but_hosted_and_unknown_routes_are_preserved(
+        tmp_path, unknown):
+    hosted, quarantined = '//tests:hosted', '//tests:g3job/test_g3'
+    population = selection.query_population([
+        {'rule': {'name': '//tests:cpu', 'ruleClass': 'py_test'}},
+        {'rule': {'name': hosted, 'ruleClass': 'py_test', 'attribute': [
+            {'name': 'tags', 'stringListValue': ['manual', 'gate-lane-hosted']}]}},
+        {'rule': {'name': quarantined, 'ruleClass': 'py_test', 'attribute': [
+            {'name': 'tags', 'stringListValue': ['manual', 'gate-issue-3181']}]}},
+        {'sourceFile': {'name': '//tools:tessera_campaign_container.py'}},
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg',
+                  'ruleClass': 'py_library'}},
+    ], 'amd64')
+    impacted = ['//tests:cpu', hosted, quarantined]
+    if unknown:
+        impacted.append('//tests:unknown')
+
+    def compare(command, **kwargs):
+        Path(command[command.index('--output') + 1]).write_text('\n'.join(impacted) + '\n')
+        return SimpleNamespace(returncode=0)
+
+    decision = selection.compare_graphs({'hashes': tmp_path / 'base.json'},
+        {'hashes': tmp_path / 'head.json', 'population': population},
+        {'tools/tessera_campaign_container.py'}, set(), tmp_path,
+        java='java', jar=tmp_path / 'v42.jar', root=tmp_path, runner=compare)
+    if unknown:
+        with pytest.raises(selection.SelectionError, match='outside the queried population'):
+            selection.selection_manifest(decision, {'amd64': population},
+                hosted=population['hosted'], base='b' * 40, head='a' * 40, mode='pr')
+    else:
+        manifest = selection.selection_manifest(decision, {'amd64': population},
+            hosted=population['hosted'], base='b' * 40, head='a' * 40, mode='pr')
+        assert manifest['hosted'] == [hosted]
+        assert manifest['architectures']['amd64']['population'] == ['//tests:cpu']
+        assert manifest['architectures']['amd64']['tests'] == ['//tests:cpu']
+        assert manifest['selection'] == 'impacted'
+
+
 @pytest.fixture
 def planning_history(tmp_path):
     root = tmp_path / 'repo'
@@ -524,6 +563,35 @@ def planning_history(tmp_path):
             'commit', '--quiet', '-m', content.strip())
         revisions.append(git('rev-parse', 'HEAD'))
     return root, revisions
+
+
+@pytest.mark.parametrize('timed', [False, True])
+def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
+        tmp_path, planning_history, monkeypatch, timed):
+    root, (_, head) = planning_history
+    tests = [f'//tests:test_pq_fallback_cost_{index}' for index in range(8)]
+    files = {'tests/' + f'test_pq_fallback_cost_{index}.py': seconds
+             for index, seconds in enumerate([40, 39, 38, 37, 4, 3, 2, 1])}
+    if timed:
+        timing_file = root / selection.DURATIONS_PATH
+        timing_file.parent.mkdir(parents=True)
+        timing_file.write_text(json.dumps({'files': files}))
+    population = selection.query_population([
+        *[{'rule': {'name': label, 'ruleClass': 'py_test'}} for label in tests],
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
+    ], 'amd64')
+    monkeypatch.setattr(selection, 'query_revision', lambda *args, **kwargs: {'population': population})
+    # An empty source diff takes the full fallback without launching an impact query.
+    document = selection.plan_revisions(root, tmp_path / 'private', base=head, head=head, mode='pr')
+    row = document['architectures']['amd64']
+    assert document['selection'] == 'fallback'
+    assert len(row['shards']) == 4
+    assert sorted(label for shard in row['shards'] for label in shard) == tests
+    if timed:
+        assert [sum(files[label[2:].replace(':', '/') + '.py'] for label in shard)
+                for shard in row['shards']] == [41] * 4
+    else:
+        assert [len(shard) for shard in row['shards']] == [2] * 4
 
 
 @pytest.mark.parametrize('mode,fault', [
