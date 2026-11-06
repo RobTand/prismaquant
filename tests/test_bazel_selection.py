@@ -570,6 +570,7 @@ def planning_history(tmp_path):
 def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
         tmp_path, planning_history, monkeypatch, timed):
     root, (_, head) = planning_history
+    monkeypatch.setattr(bazel_generated, 'check_generated', lambda **kwargs: None)
     tests = [f'//tests:test_pq_fallback_cost_{index}' for index in range(8)]
     files = {'tests/' + f'test_pq_fallback_cost_{index}.py': seconds
              for index, seconds in enumerate([40, 39, 38, 37, 4, 3, 2, 1])}

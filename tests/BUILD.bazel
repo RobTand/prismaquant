@@ -6869,6 +6869,7 @@ pq_py_library(
     data = [
         "//:BUILD.bazel",
         "//:files",
+        "//tools/bazel:BUILD.bazel",
         "//tools/bazel:files",
         ":files",
         "BUILD.bazel",
@@ -6879,6 +6880,8 @@ pq_py_library(
         "//:prismaquant/allocator_cycle",
         "//:prismaquant/residency_map_cycle",
         "//:tools/__init__",
+        "//:tools/ci/bazel_generated",
+        "//:tools/ci/bazel_selection",
         ":fixtures/pq3017/native-v2/native_probe",
         ":fixtures/pq3017/run2/native_probe",
         "@pq_pip//pillow",
@@ -8632,8 +8635,10 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/digests",
+        "//:tools/__init__",
         "//:tools/ci/bazel_artifacts",
         "//:tools/ci/bazel_gate",
+        "//:tools/ci/bazel_generated",
         "//:tools/ci/bazel_selection",
         "//:tools/ci/check_no_secret_leak",
         "//:tools/ci/remote_gate",

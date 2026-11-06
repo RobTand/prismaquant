@@ -17,6 +17,7 @@ import urllib.request
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.ci.bazel_gate import GateError, partition_population
 from tools.ci import bazel_artifacts as artifacts
+from tools.ci import bazel_generated
 from tools.ci.bazel_artifacts import child_environment
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
@@ -286,6 +287,7 @@ def plan_revisions(root, directory, *, base, head, mode, java=None, jar=None,
 
     if git('rev-parse', 'HEAD').strip() != head:
         raise SelectionError('planner checkout has the wrong head')
+    bazel_generated.check_generated(root=root)
     # Query failure is fatal. A missing population can never become empty success.
     head_query = query_revision(root, directory / 'head', 'amd64',
                                 bazel=bazel, runner=runner)

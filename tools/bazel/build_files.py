@@ -34,7 +34,7 @@ It writes:
 - data for every file a module names by path.
 
 Run tools/bazel/generate.sh after adding a module, test or fixture. --check
-fails, naming each stale file, when a committed BUILD.bazel differs.
+fails, naming each stale file, when content or the tracked output inventory differs.
 --graph-json and --uncertain write the graph and the uncertain list instead.
 """
 from __future__ import annotations
@@ -1250,6 +1250,27 @@ def render_package(package, targets):
     return '\n'.join(lines)
 
 
+def generated_paths(root, expected, *, tracked):
+    """Owned outputs in the index or working tree, including ignored outputs."""
+    output = subprocess.run(['git', 'ls-files', '-z', '--cached' if tracked else '--others',
+                             '--', 'BUILD.bazel', '**/BUILD.bazel'],
+                            cwd=root, capture_output=True, check=True).stdout.decode()
+    paths = set()
+    for path in filter(None, output.split('\0')):
+        if path.startswith(HANDWRITTEN):
+            continue
+        source = root / path
+        if path in expected or (source.is_file() and source.read_bytes().startswith(HEADER.encode())):
+            paths.add(path)
+        elif tracked:
+            # A deleted retired output still belongs to the generator in Git.
+            indexed = subprocess.run(['git', 'show', ':' + path], cwd=root,
+                                     capture_output=True, check=True).stdout
+            if indexed.startswith(HEADER.encode()):
+                paths.add(path)
+    return paths
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n', 1)[0])
     parser.add_argument('--root', type=Path, default=ROOT)
@@ -1273,17 +1294,23 @@ def main(argv=None):
         generated = generate(args.root)
     except GenerationError as error:
         sys.exit(f'Cannot generate BUILD files: {error}')
-    stale = []
+    stale = set()
+    if args.check:
+        expected_paths = {str(Path(package) / 'BUILD.bazel') for package in generated}
+        tracked_generated_paths = generated_paths(args.root, expected_paths, tracked=True)
+        untracked_generated_paths = generated_paths(args.root, expected_paths, tracked=False)
+        if expected_paths != tracked_generated_paths or untracked_generated_paths:
+            stale.update(expected_paths ^ tracked_generated_paths | untracked_generated_paths)
     for package, text in sorted(generated.items()):
         path = args.root / package / 'BUILD.bazel'
         if path.exists() and path.read_text() == text:
             continue
         if args.check:
-            stale.append(str(path.relative_to(args.root)))
+            stale.add(str(path.relative_to(args.root)))
         else:
             path.write_text(text)
     if stale:
-        sys.exit('Generated BUILD files are stale: ' + ', '.join(stale) + f'\nFix: {FIX}')
+        sys.exit('Generated BUILD files are stale: ' + ', '.join(sorted(stale)) + f'\nFix: {FIX}')
     return 0
 
 

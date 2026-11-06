@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-06, generated BUILD queue checks, PQ #3332.
+Source: `tools/ci/bazel_selection.py` and `tools/bazel/build_files.py`, based on
+main `118c4b17`.
+Gate planning checks generated inputs after verifying exact HEAD and before
+querying the graph, outside selection fallback. The BUILD checker keeps content
+comparison and requires the expected output set to equal tracked generated
+outputs, with no untracked generated outputs. Handwritten `tools/bazel/` stays
+excluded.
+
 As of: 2026-11-06, Remote Bazel PR fallback sharding, PQ #3335.
 Source: `tools/ci/bazel_selection.py`, `tools/ci/bazel_gate.py` and
 `tools/ci/remote_gate.py`, based on main `ef817b9d`.
