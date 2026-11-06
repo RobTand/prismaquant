@@ -246,9 +246,22 @@ def residency_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
             "container an empty directory and every staged read would fall back "
             "to the pool")
     root = PurePosixPath(stage_root)
+    covering = [mount for mount in mounts
+                if (PurePosixPath(mount["target"]) == root
+                    or PurePosixPath(mount["target"]) in root.parents)]
+    needs_bind = True
+    if covering:
+        # The deepest target controls which host path the container sees.
+        mount = max(covering, key=lambda item: len(PurePosixPath(item["target"]).parts))
+        target = PurePosixPath(mount["target"])
+        exposed = PurePosixPath(mount["source"]) / root.relative_to(target)
+        needs_bind = exposed != root
+        if needs_bind and target == root:
+            raise RuntimeError(
+                f"the declared mount at stage root {stage_root} exposes a different "
+                f"host path {exposed}. Use the actual host stage at this target.")
     extra: list[dict] = []
-    if not any(PurePosixPath(m["target"]) == root or PurePosixPath(m["target"]) in root.parents
-               for m in mounts):
+    if needs_bind:
         extra.append({"source": stage_root, "target": stage_root, "readonly": True})
     return {RESIDENCY_MAP_ENV: str(inside)}, extra
 
