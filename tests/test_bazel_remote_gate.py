@@ -205,17 +205,18 @@ def test_shard_result_must_match_the_exact_requested_partition(field, value):
 
 class BoundedFallbackClient:
     """Own admitted IDs remain active until their own terminal evidence is read."""
-    def __init__(self, fail_first=False):
+    def __init__(self, fail_first=False, maximum=2):
         self.active = set()
         self.events = []
         self.fail_first = fail_first
+        self.maximum = maximum
 
     def call(self, method, body, **kwargs):
         if method == 'Run':
             index = json.loads(body['env']['PQ_BAZEL_SHARD'])['index']
             self.active.add(index)
             self.events.append(('submit', index))
-            assert len(self.active) <= 2, 'more than two admitted fallback shards'
+            assert len(self.active) <= self.maximum, 'too many admitted fallback shards'
             return {'invocation_id': f'parent-{index}'}
         if method == 'GetInvocation':
             index = int(body['selector']['invocation_id'].removeprefix('parent-'))
@@ -250,9 +251,22 @@ def test_fallback_may_admit_two_shards_and_checks_both_before_the_next_batch():
     assert not client.active
 
 
+def test_fallback_admits_four_shards_before_waiting_and_keeps_the_timeout_cap():
+    client = BoundedFallbackClient(maximum=4)
+    requests = fallback_requests(count=5)
+    assert all(request['timeout'] == '55m' for request in requests)
+    records = remote.submit_shards(client, requests, HEAD, concurrency=4, clock=lambda: 1)
+    assert client.events[:4] == [('submit', index) for index in range(4)]
+    assert client.events[4:12] == [event for index in range(4)
+                                  for event in [('terminal', index), ('evidence', index)]]
+    assert client.events[12:] == [('submit', 4), ('terminal', 4), ('evidence', 4)]
+    assert records == [verified_shard(index) for index in range(5)]
+
+
 @pytest.mark.parametrize('concurrency,mode,selection', [
-    (0, 'pr', 'fallback'), (3, 'pr', 'fallback'),
+    (0, 'pr', 'fallback'), (5, 'pr', 'fallback'),
     (2, 'pr', 'impacted'), (2, 'pr', 'irrelevant'), (2, 'main', 'fallback'),
+    (4, 'pr', 'impacted'), (4, 'main', 'fallback'),
 ])
 def test_concurrency_above_one_is_bounded_and_exclusive_to_pr_fallback(
         concurrency, mode, selection):
@@ -319,7 +333,7 @@ def controller_manifest(mode='pr', selection='fallback'):
     labels = [f'//tests:test_{index}' for index in range(4)]
     architectures = {}
     for architecture in ('amd64', 'arm64') if mode == 'main' else ('amd64',):
-        count = 2 if architecture == 'amd64' else 4
+        count = 4 if architecture == 'arm64' or mode == 'pr' and selection == 'fallback' else 2
         population = [] if selection == 'irrelevant' else labels
         architectures[architecture] = {'population': population, 'tests': population,
             'shards': [population[index::count] for index in range(count)] if population else []}
@@ -374,7 +388,7 @@ class ManifestClient:
 
 
 @pytest.mark.parametrize('mode,selection,maximum', [
-    ('pr', 'fallback', 2), ('pr', 'impacted', 1), ('main', 'fallback', 1),
+    ('pr', 'fallback', 4), ('pr', 'impacted', 1), ('main', 'fallback', 1),
 ])
 def test_manifest_controller_runs_exact_partitions_with_only_fallback_overlap(mode, selection, maximum):
     document = controller_manifest(mode, selection)
@@ -607,4 +621,4 @@ def test_manifest_and_aggregate_refusals_report_fixed_validation_phase(capsys, p
         assert client.events == []
     else:
         assert not client.active
-        assert len(client.references) == 2
+        assert len(client.references) == 4

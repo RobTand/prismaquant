@@ -15,6 +15,7 @@ import re
 import shutil
 import socket
 import ssl
+from statistics import median
 import subprocess
 import sys
 import tempfile
@@ -135,8 +136,8 @@ def hosted_assignment(plan, result, architecture):
         raise GateError('hosted assignment evidence is malformed') from None
 
 
-def partition_population(population, *, shard_count=8, tests=None):
-    """Sorted striding keeps full runs bounded without changing their population."""
+def partition_population(population, *, shard_count=8, tests=None, durations=None):
+    """Balance measured test time when available, otherwise stride by count."""
     labels = sorted(set(population))
     if not labels:
         raise GateError('full population is empty')
@@ -152,8 +153,21 @@ def partition_population(population, *, shard_count=8, tests=None):
         # Tests and their libraries often alternate in label order. Striding
         # that order as one list can put all tests into a single shard.
         shards = [[] for _ in range(count)]
-        for index, label in enumerate(sorted(tests) + sorted(set(labels) - tests)):
-            shards[index % count].append(label)
+        measured = {label: seconds for label, seconds in (durations or {}).items()
+                    if label in tests and seconds > 0}
+        if measured:
+            default = median(measured.values())
+            loads = [0.0] * count
+            for label in sorted(tests, key=lambda label: (-measured.get(label, default), label)):
+                index = min(range(count), key=lambda index: (loads[index], len(shards[index]), index))
+                shards[index].append(label)
+                loads[index] += measured.get(label, default)
+            for label in sorted(set(labels) - tests):
+                index = min(range(count), key=lambda index: (len(shards[index]), index))
+                shards[index].append(label)
+        else:
+            for index, label in enumerate(sorted(tests) + sorted(set(labels) - tests)):
+                shards[index % count].append(label)
         shards = [sorted(shard) for shard in shards]
     check_partition(labels, shards)
     return shards
