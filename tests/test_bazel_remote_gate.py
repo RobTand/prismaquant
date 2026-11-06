@@ -205,17 +205,18 @@ def test_shard_result_must_match_the_exact_requested_partition(field, value):
 
 class BoundedFallbackClient:
     """Own admitted IDs remain active until their own terminal evidence is read."""
-    def __init__(self, fail_first=False):
+    def __init__(self, fail_first=False, maximum=2):
         self.active = set()
         self.events = []
         self.fail_first = fail_first
+        self.maximum = maximum
 
     def call(self, method, body, **kwargs):
         if method == 'Run':
             index = json.loads(body['env']['PQ_BAZEL_SHARD'])['index']
             self.active.add(index)
             self.events.append(('submit', index))
-            assert len(self.active) <= 2, 'more than two admitted fallback shards'
+            assert len(self.active) <= self.maximum, 'too many admitted fallback shards'
             return {'invocation_id': f'parent-{index}'}
         if method == 'GetInvocation':
             index = int(body['selector']['invocation_id'].removeprefix('parent-'))
@@ -248,6 +249,18 @@ def test_fallback_may_admit_two_shards_and_checks_both_before_the_next_batch():
         ('evidence', 0), ('terminal', 1), ('evidence', 1),
         ('submit', 2), ('terminal', 2), ('evidence', 2)]
     assert not client.active
+
+
+def test_fallback_admits_four_shards_before_waiting_and_keeps_the_timeout_cap():
+    client = BoundedFallbackClient(maximum=4)
+    requests = fallback_requests(count=5)
+    assert all(request['timeout'] == '55m' for request in requests)
+    records = remote.submit_shards(client, requests, HEAD, concurrency=4, clock=lambda: 1)
+    assert client.events[:4] == [('submit', index) for index in range(4)]
+    assert client.events[4:12] == [event for index in range(4)
+                                  for event in [('terminal', index), ('evidence', index)]]
+    assert client.events[12:] == [('submit', 4), ('terminal', 4), ('evidence', 4)]
+    assert records == [verified_shard(index) for index in range(5)]
 
 
 @pytest.mark.parametrize('concurrency,mode,selection', [

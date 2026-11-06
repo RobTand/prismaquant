@@ -565,6 +565,30 @@ def planning_history(tmp_path):
     return root, revisions
 
 
+def test_fallback_planner_maps_measured_file_times_into_four_balanced_shards(
+        tmp_path, planning_history, monkeypatch):
+    root, (_, head) = planning_history
+    tests = [f'//tests:test_{index}' for index in range(8)]
+    files = {f'tests/test_{index}.py': seconds
+             for index, seconds in enumerate([40, 39, 38, 37, 4, 3, 2, 1])}
+    timing_file = root / 'tools/ci/gate_durations.json'
+    timing_file.parent.mkdir(parents=True)
+    timing_file.write_text(json.dumps({'files': files}))
+    population = selection.query_population([
+        *[{'rule': {'name': label, 'ruleClass': 'py_test'}} for label in tests],
+        {'rule': {'name': '@@rules_python++pip+pq_pip_numpy//:pkg', 'ruleClass': 'py_library'}},
+    ], 'amd64')
+    monkeypatch.setattr(selection, 'query_revision', lambda *args, **kwargs: {'population': population})
+    # An empty source diff takes the full fallback without launching an impact query.
+    document = selection.plan_revisions(root, tmp_path / 'private', base=head, head=head, mode='pr')
+    row = document['architectures']['amd64']
+    assert document['selection'] == 'fallback'
+    assert len(row['shards']) == 4
+    assert sorted(label for shard in row['shards'] for label in shard) == tests
+    assert [sum(files[label[2:].replace(':', '/') + '.py'] for label in shard)
+            for shard in row['shards']] == [41] * 4
+
+
 @pytest.mark.parametrize('mode,fault', [
     ('pr', None), ('pr', 'missing_base'), ('pr', 'hash_failure'),
     ('pr', 'comparison_failure'), ('main', None),
