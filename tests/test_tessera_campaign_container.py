@@ -625,6 +625,78 @@ def test_a_declared_mount_already_covering_the_stage_is_not_bound_twice(tmp_path
     assert sum(1 for m in mounts if f"dst={tmp_path}" in m) == 1
 
 
+def test_a_declared_mount_at_the_stage_root_from_another_source_is_refused(tmp_path, monkeypatch):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    map_path, stage = _residency_map(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    declared = _residency_spec(tmp_path)
+    declared["container"]["mounts"].append(
+        {"source": str(unrelated), "target": str(stage)})
+
+    try:
+        runner.residency_environment(
+            declared, {runner.RESIDENCY_MAP_ENV: str(map_path)})
+    except RuntimeError as error:
+        assert "stage root" in str(error)
+        assert str(stage) in str(error)
+        assert str(unrelated) in str(error)
+        assert "different host path" in str(error)
+    else:
+        assert False, "an exact stage-root mount from another source was not refused"
+
+
+def test_an_identity_parent_mount_preserves_stage_bytes_without_a_duplicate(tmp_path, monkeypatch):
+    from pathlib import PurePosixPath
+
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    map_path, stage = _residency_map(tmp_path)
+    (stage / "owned.bin").write_bytes(b"PB-owned bytes")
+    declared = _residency_spec(tmp_path)
+
+    env, added = runner.residency_environment(
+        declared, {runner.RESIDENCY_MAP_ENV: str(map_path)})
+
+    assert env == {runner.RESIDENCY_MAP_ENV: str(map_path)}
+    assert added == []
+    path = PurePosixPath(stage / "owned.bin")
+    covering = [mount for mount in declared["container"]["mounts"] + added
+                if PurePosixPath(mount["target"]) in path.parents]
+    mount = max(covering, key=lambda item: len(PurePosixPath(item["target"]).parts))
+    actual = Path(mount["source"]) / path.relative_to(mount["target"])
+    assert actual.read_bytes() == b"PB-owned bytes"
+
+
+@pytest.mark.parametrize("deepest_is_identity", [False, True])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_the_deepest_covering_mount_controls_the_stage_bind(tmp_path, monkeypatch,
+                                                         deepest_is_identity, reverse):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    monkeypatch.setattr(runner, "_stage_root_mounted", lambda root: True)
+    map_path, stage = _residency_map(tmp_path, tmp_path / "stages" / "prewarm")
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    broad = {"source": str(unrelated if deepest_is_identity else tmp_path),
+             "target": str(tmp_path)}
+    deep = {"source": str(stage.parent if deepest_is_identity else unrelated),
+            "target": str(stage.parent)}
+    mounts = [broad, deep]
+    if reverse:
+        mounts.reverse()
+    mounts.insert(0, {"source": str(map_path), "target": str(map_path), "readonly": True})
+    declared = {"container": {"mounts": mounts}, "env": {}}
+
+    env, added = runner.residency_environment(
+        declared, {runner.RESIDENCY_MAP_ENV: str(map_path)})
+
+    assert env == {runner.RESIDENCY_MAP_ENV: str(map_path)}
+    expected = [] if deepest_is_identity else [
+        {"source": str(stage), "target": str(stage), "readonly": True}]
+    assert added == expected, "the deepest covering mount must expose the actual host stage"
+
+
 def test_the_stage_root_is_mounted_by_fact_not_by_path(tmp_path):
     """A plain directory is not a mount; the check is ``ismount`` after a listing."""
 
