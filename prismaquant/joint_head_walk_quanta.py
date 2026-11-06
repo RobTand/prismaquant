@@ -39,8 +39,8 @@ from .schemas import Contract
 
 
 #: The schema one quantum descriptor carries. Bumped only by a change to the
-#: descriptor's key set; the journal schemas it banks under stay owned by
-#: ``tessera_joint_aura`` and ``cost_stage_checkpoint``.
+#: descriptor's key set; the journal schemas it banks under live in
+#: ``tessera_head_walk_schema`` and ``cost_stage_checkpoint``.
 QUANTUM_SCHEMA = "prismaquant.joint_head_walk_quanta.v1"
 
 
@@ -196,7 +196,7 @@ def join_head_walk_journals(receipts, *, dest, names) -> dict:
     """
     from .cost_stage_checkpoint import prepare_journal, write_unit
 
-    from . import tessera_joint_aura as bridge
+    from . import tessera_head_walk_schema as bridge
 
     stage = bridge.HEAD_WALK_STAGE
     _require(isinstance(receipts, (list, tuple)) and bool(receipts),

@@ -171,7 +171,7 @@ def preparation_read_manifest(entries: Sequence[Mapping], *, produced_by: Mappin
     preparation reports no per-phase progress, and a later phase would only
     reorder bytes the action reads before it writes anything.
     """
-    from .joint_layer_quanta import MANIFEST_SCHEMA_V2
+    from .prismabuild_data_schema import MANIFEST_SCHEMA_V2
 
     prefix = os.path.normpath(str(mount_prefix))
     rows = [dict(entry) for entry in entries]

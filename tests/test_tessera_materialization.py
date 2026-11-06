@@ -525,7 +525,8 @@ def test_real_allocator_routes_opt_in_request_before_strict_wire_gate(tmp_path, 
         assert Path(kwargs['cost_path']).is_file()
         assert not Path(kwargs['output_path']).exists()
         seen.append((path, kwargs))
-    monkeypatch.setattr(tm, 'write_selection_request', record)
+    from prismaquant import tessera_selection_request
+    monkeypatch.setattr(tessera_selection_request, 'write_selection_request', record)
     def both_paths():
         original_argv = list(sys.argv)
         sys.argv += ['--tessera-materialization-plan', str(tmp_path/'selection-request.json')]

@@ -8,7 +8,7 @@ workload. Output never enters a wire, cost row or anchor identity.
 import argparse
 from tools.pq_profile_digest import file_sha256hex
 from tools.pq_profile_artifact import publish_profile, validate_netdata_window
-from tools.pq_admitted_profile import PROFILE_LOCAL_ROOT
+from tools.pq_profile_paths import PROFILE_LOCAL_ROOT
 from tools.pq_profile_source import profile_source_owner
 import json
 import math

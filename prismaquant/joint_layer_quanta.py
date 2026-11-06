@@ -65,6 +65,7 @@ from .dev_mode import seal_check
 from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
+from .prismabuild_data_schema import MANIFEST_SCHEMA_V2
 from .joint_campaign_ledger import (
     require_quantum_digest,
     LAYER_QUANTUM_SCHEMA, new_quantum_record, quantum_id, roster_digest,
@@ -78,7 +79,6 @@ COVERAGE_SCHEMA = "prismaquant.joint_layer_quanta.coverage.v1"
 #: dispatcher cite one spelling.
 ADJOINT_CAPTURE_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 MANIFEST_SCHEMA_V1 = "prismaquant.prismabuild.data_manifest.v1"
-MANIFEST_SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
 #: A stage-A or executable quantum manifest's record of additions to the
 #: parent's layer extents and the source-coverage gate (PQ #898 / #900).
 SOURCE_COMPLETION_SCHEMA = "prismaquant.joint_layer_quanta.source_completion.v1"

@@ -6,6 +6,9 @@ import re
 import subprocess
 from pathlib import Path
 
+from .producer_package import producer_package_sha256
+
+
 def producer_git_commit() -> str | None:
     """Best-effort commit of the prismaquant tree this cost was computed by."""
     override = str(os.environ.get(
@@ -84,12 +87,3 @@ def checkpoint_git_commit() -> str:
             where=", ".join(drifted), refusal=refusal,
         )
     return commit
-
-
-def producer_package_sha256() -> str:
-    """Bind AURA to the complete producer package, including dependencies."""
-    from prismaquant.production_weight_cache import (
-        _production_cache_source_sha256,
-    )
-
-    return _production_cache_source_sha256()

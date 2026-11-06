@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import format_registry as fr
 from .allocator_candidates import check_format_applicability
-from .name_projection import strip_weight_leaf
+from .name_projection import block_id_from_qname, strip_weight_leaf
 from .serving_profiles import resolve_target_profile
 
 
@@ -53,19 +53,6 @@ class BlockPair:
     unit_b: str
     block_id: str
     omega_ij: dict[tuple[str, str], float]
-
-
-def block_id_from_qname(qname: str) -> str:
-    """Return the architectural block ID a quantizable Linear belongs to."""
-    parts = qname.split(".")
-    for idx, token in enumerate(parts):
-        if token == "layers" and idx + 1 < len(parts):
-            try:
-                int(parts[idx + 1])
-            except ValueError:
-                continue
-            return ".".join(parts[: idx + 2])
-    return qname
 
 
 def fused_group_key(profile, qname: str) -> str:
