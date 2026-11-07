@@ -66,7 +66,7 @@ def test_overlapping_submit_keeps_its_checked_manifest(tmp_path, monkeypatch,
 
     # Only the final external PB boundary is replaced. Planning, source proof,
     # demand admission, readset derivation and manifest publication stay real.
-    monkeypatch.setattr(dispatch, "_pbcampaign", delayed_external_reader)
+    monkeypatch.setattr(dispatch, "_flux_campaign", delayed_external_reader)
     assert dispatch.cmd_submit(args) == 0
     assert checked == [original, second]
     assert consumed[0] == original, (

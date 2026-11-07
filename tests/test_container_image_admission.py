@@ -344,32 +344,32 @@ def _direct_args(tmp_path: Path, container: dict) -> types.SimpleNamespace:
 def _direct_argv(tmp_path: Path, container: dict) -> list:
     args = _direct_args(tmp_path, container)
     spec = json.loads(Path(args.spec).read_text())
-    return campaign._pbrun_argv(args, manifest=tmp_path / "read.json",
+    return campaign._native_action_row(args, manifest=tmp_path / "read.json",
                                 inner=["--resume"], container_spec=spec)
 
 
 def test_a_direct_submission_declares_the_resolved_spec_image(tmp_path):
-    argv = _direct_argv(tmp_path, {"image": IMAGE})
-    embedded = _embedded_spec(argv)
-    assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
+    row = _direct_argv(tmp_path, {"image": IMAGE})
+    embedded = _embedded_spec(row["argv"])
+    assert row["container_images"] == [embedded["container"]["image"]]
 
 
 def test_a_direct_submission_with_an_archive_declares_no_image(tmp_path):
     container = {"image": IMAGE, "content_sha256": CONTENT_SHA,
                  "archive": {"path": "/mnt/shared/images/campaign.tar",
                              "sha256": ARCHIVE_SHA}}
-    argv = _direct_argv(tmp_path, container)
-    assert IMAGE_FLAG not in argv
-    assert _embedded_spec(argv)["container"]["archive"] == container["archive"]
+    row = _direct_argv(tmp_path, container)
+    assert "container_images" not in row
+    assert _embedded_spec(row["argv"])["container"]["archive"] == container["archive"]
 
 
 def test_a_direct_submission_without_a_container_declares_nothing(tmp_path):
     """The opaque pre-container spec shape some callers still pass."""
 
     args = _direct_args(tmp_path, {"image": IMAGE})
-    argv = campaign._pbrun_argv(args, manifest=tmp_path / "read.json",
+    argv = campaign._native_action_row(args, manifest=tmp_path / "read.json",
                                 inner=["--resume"], container_spec={"image": "x"})
-    assert IMAGE_FLAG not in argv
+    assert "container_images" not in argv
 
 
 # ---------------------------------------------------------------------------
@@ -428,9 +428,9 @@ def test_joint_and_direct_submission_keep_the_portable_reference(tmp_path):
     assert reference == spec["container_admission_reference"]
     assert _embedded_spec(argv)["container_admission_reference"] == reference
     args = _direct_args(tmp_path, spec["container"])
-    direct = campaign._pbrun_argv(args, manifest=tmp_path / "read.json",
+    direct = campaign._native_action_row(args, manifest=tmp_path / "read.json",
                                   inner=["--resume"], container_spec=spec)
-    assert _pbrun_option(direct, IMAGE_FLAG) == reference
+    assert direct["container_images"] == [reference]
 
 
 def test_explicit_archive_admission_keeps_the_joint_override_semantics():

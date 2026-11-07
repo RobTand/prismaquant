@@ -146,15 +146,15 @@ def test_prepare_records_its_identity_under_the_host_it_was_pinned_to(tmp_path, 
 
 def _campaign(monkeypatch, *, statuses, returncode=0):
     calls = []
-
-    def run(rows, workspace, stage, *, wait_s, detach=False):
-        rows = list(rows)
-        calls.append((stage, rows, detach))
-        header = 'key           status     transport  job  host    elapsed  rc  receipt  note'
-        lines = [header] + [f'{("%012x" % i)}  {s:<9}  pool       -    sparky  1.0      0   yes      -'
-                            for i, s in enumerate(statuses)]
-        return returncode, '\n'.join(lines) + '\n'
-    monkeypatch.setattr(common, 'run_pbcampaign', run)
+    def submit(rows, state, *, afterok=()):
+        calls.append((Path(state).name, list(rows), False))
+        return []
+    def collect(state, *, wait=False):
+        return [{'job_id': str(index + 1), 'status': status,
+                 'payload_exit': 0 if status == 'succeeded' else 7,
+                 'query_error': None} for index, status in enumerate(statuses)]
+    monkeypatch.setattr(common.campaign_rows, 'submit_rows', submit)
+    monkeypatch.setattr(common.campaign_rows, 'collect_rows', collect)
     return calls
 
 
@@ -162,21 +162,21 @@ def test_a_failed_partition_cannot_pass_the_assembly_barrier(tmp_path, monkeypat
     _campaign(monkeypatch, statuses=['failed'], returncode=1)
     with pytest.raises(ValueError, match='0 of 1 action'):
         common.run_stage([{}], tmp_path, 'encode', wait_s=1)
-    endings = json.loads((tmp_path / common.STATE / 'encode-endings.json').read_text())
-    assert endings['returncode'] == 1 and endings['rows'][0]['status'] == 'failed'
+    endings = json.loads((tmp_path / common.STATE / 'encode' / 'endings.json').read_text())
+    assert endings['rows'][0]['status'] == 'failed'
     assert not (tmp_path / 'barrier.json').exists()
 
 
 def test_a_stage_that_ran_fewer_rows_than_it_submitted_is_refused(tmp_path, monkeypatch):
-    _campaign(monkeypatch, statuses=['executed'])
+    _campaign(monkeypatch, statuses=['succeeded'])
     with pytest.raises(ValueError, match='1 of 2 action'):
         common.run_stage([{}, {}], tmp_path, 'encode', wait_s=1)
-    _campaign(monkeypatch, statuses=['executed', 'cache_hit'])
+    _campaign(monkeypatch, statuses=['succeeded', 'succeeded'])
     assert len(common.run_stage([{}, {}], tmp_path, 'encode', wait_s=1)) == 2
 
 
 def test_preparation_runs_on_every_named_host_and_they_must_agree(tmp_path, monkeypatch):
-    calls = _campaign(monkeypatch, statuses=['executed', 'executed'])
+    calls = _campaign(monkeypatch, statuses=['succeeded', 'succeeded'])
     spec = {'out': str(tmp_path / 'out'), 'prepare_hosts': ['sparklina', 'sparky'],
             'tags': ['gb10'], 'cpus': 1, 'mem_gb': 16, 'assembly_mem_gb': 4}
     for host, count in (('sparklina', 3), ('sparky', 3)):
@@ -258,7 +258,7 @@ def _listing(root):
 def test_a_dry_run_prints_rows_and_writes_nothing(dispatcher, tmp_path, capsys, monkeypatch):
     checkout = _checkout(tmp_path)
     before = _listing(tmp_path)
-    monkeypatch.setattr(common, 'run_pbcampaign', lambda *a, **k: pytest.fail('submitted'))
+    monkeypatch.setattr(common.campaign_rows, 'submit_rows', lambda *a, **k: pytest.fail('submitted'))
     assert dispatcher.main(['--shards', '3-4', '--dry-run', '--checkout', str(checkout)]) == 0
     rows = json.loads(capsys.readouterr().out)
     assert _listing(tmp_path) == before
@@ -280,17 +280,18 @@ def test_two_ladder_dispatches_with_different_probes_are_separate_trees(tmp_path
         probe = tmp_path / f'probe-{index}.py'
         probe.write_text(f'print({index})\n')
         workspace = tmp_path / f'ws{index}'
-        assert dispatch_ladder.main(['--shards', '1', '--workspace', str(workspace),
-                                     '--checkout', str(checkout), '--wrapper', str(probe)]) == 0
-        assert (workspace / dispatch_ladder.WRAPPER).read_text() == f'print({index})\n'
+        common.stage_workspace(workspace, common.encoder_workspace_files(
+            checkout, probe, dispatch_ladder.WRAPPER), message='fixture source')
+        assert (workspace / common.SOURCE / dispatch_ladder.WRAPPER).read_text() == f'print({index})\n'
+        assert subprocess.check_output(['git', '-C', str(workspace / common.SOURCE),
+            'show', 'HEAD:' + dispatch_ladder.WRAPPER], text=True) == f'print({index})\n'
     assert (checkout / dispatch_ladder.WRAPPER).read_text() == 'print("ladder")\n'
 
 
-def test_detached_submissions_are_read_off_the_json_lines():
-    text = ('pbcampaign: something on stderr\n'
-            '{"action_key": "' + 'b' * 64 + '", "status": "submitted"}\n'
-            '{"not": "a row"}\nnot json {\n')
-    assert common.detached_submissions(text) == [{'action_key': 'b' * 64, 'status': 'submitted'}]
+def test_ladder_gpu_refuses_before_staging(tmp_path):
+    with pytest.raises(ValueError, match='gpus'):
+        dispatch_ladder.main(['--shards', '1', '--workspace', str(tmp_path / 'w')])
+    assert not (tmp_path / 'w').exists()
 
 
 # --- the status screen --------------------------------------------------------
@@ -299,26 +300,24 @@ def test_status_with_nothing_recorded_says_so(tmp_path, capsys):
     assert status.main(['--workspace', str(tmp_path)]) == status.EXIT_NOTHING
 
 
-def test_status_asks_pbwait_for_the_recorded_keys(tmp_path, capsys):
-    common.atomic_json(tmp_path / common.STATE / 'export-submissions.json',
-                       {'returncode': 0, 'rows': [{'action_key': 'a' * 64},
-                                                  {'action_key': 'b' * 64}]})
-    fake = tmp_path / 'pbwait.py'
-    fake.write_text(
-        'import sys\n'
-        'assert sys.argv[1:3] == ["--wait-s", "0"], sys.argv\n'
-        'print("key           status     transport  host")\n'
-        'print(sys.argv[3][:12] + "  executed   pool       sparky")\n'
-        'print(sys.argv[4][:12] + "  waiting    pool       -")\n')
-    assert status.main(['--workspace', str(tmp_path), '--pbwait', str(fake)]) == status.EXIT_RUNNING
-    assert 'export: 2 recorded, 1 executed, 1 waiting' in capsys.readouterr().out
+def test_status_collects_the_saved_native_stage(tmp_path, capsys, monkeypatch):
+    state = common.stage_state(tmp_path, 'export')
+    common.atomic_json(state / 'manifest.json', {'rows': [{}, {}]})
+    queried = []
+    def collect(path, *, wait):
+        queried.append((path, wait))
+        return [{'status': 'succeeded'}, {'status': 'running'}]
+    monkeypatch.setattr(status, 'collect_rows', collect)
+    assert status.main(['--workspace', str(tmp_path)]) == status.EXIT_RUNNING
+    assert queried == [(state, False)]
+    assert 'export: 2 recorded, 1 running, 1 succeeded' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize('statuses,expected', [
-    (['executed', 'cache_hit'], status.EXIT_DONE),
-    (['executed', 'waiting'], status.EXIT_RUNNING),
-    (['failed', 'waiting'], status.EXIT_FAILED),
-    (['executed'], status.EXIT_FAILED),
+    (['succeeded', 'succeeded'], status.EXIT_DONE),
+    (['succeeded', 'running'], status.EXIT_RUNNING),
+    (['failed', 'running'], status.EXIT_FAILED),
+    (['succeeded'], status.EXIT_FAILED),
 ])
 def test_the_exit_status_is_the_worst_ending(statuses, expected):
     assert status.exit_status([{'status': s} for s in statuses], 2) == expected

@@ -13,7 +13,7 @@ does not list it refuses rather than silently dropping the option.
 These tests drive the real builders:
 
 * ``dispatch_tessera_campaign submit-export --dry-run`` end to end, through
-  ``cmd_submit_export`` and the real ``_pbrun_argv``: an old-pin contract
+  ``cmd_submit_export`` and the real ``_native_action_row``: an old-pin contract
   yields the argv the submitter built before this gate existed, byte for byte,
   and a v40 contract inserts the option after the exporter, naming the adopter
   in the PrismaQuant tree the container runs;
@@ -119,19 +119,18 @@ def _submit(tmp_path: Path, monkeypatch, contract: dict, *, gate: bool = True,
         monkeypatch.setattr(campaign, "export_inner_with_authority",
                             lambda inner, spec, *, cwd: list(inner))
     seen = []
-    real = campaign._pbrun_argv
-    monkeypatch.setattr(campaign, "_pbrun_argv",
+    real = campaign._native_action_row
+    monkeypatch.setattr(campaign, "_native_action_row",
                         lambda *a, **k: seen.append(real(*a, **k)) or seen[-1])
     code = campaign.main([
         "submit-export", "--plan", str(plan),
         "--assignment", str(run / "assignment.json"),
         "--allocation-cost", str(run / "cost.json"),
         "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
-        "--pbrun", "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
         "--timeout-s", "7200", "--manifest-dir", str(run / "manifests"),
         "--dry-run", "--", *inner])
     assert code == 0 and len(seen) == 1
-    return seen[0], producer.argv
+    return seen[0]["argv"], producer.argv
 
 
 def _relative(argv: list, root: Path) -> bytes:

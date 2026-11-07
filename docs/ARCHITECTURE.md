@@ -1,5 +1,60 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, native campaign and Tessera-fleet callers, unit 1 slice 2.
+Source: `prismaquant/{flux_jobs,tessera_campaign_rows}.py`,
+`tools/dispatch_tessera_campaign.py`, `tools/tessera_fleet/` and their direct
+caller tests, based on independently reviewed core `805568d53b601737f60e0190fe96dc81d4f48ac1`.
+Campaign census/capture/submit and fleet stages now use native submit/collect
+and saved-ID reconnect. Campaign `status` and the fleet status command query
+only IDs under `.flux-state/`; neither reads historical PB state. Exact row
+intent, detached source commit/tree, producer records and every native ID are
+kept separately from scientific outputs. Resume refuses changed intent,
+changed source identity and unknown submission; it never adopts by name or
+infers a cache hit. Native afterok edges bind saved producers from the current
+standing instance. Query errors remain unknown even when payload exit is known.
+Campaign merge re-collects native success for the exact submitted manifest
+before the existing coverage, Hessian, wire and checkpoint validation.
+An early scientific receipt cannot override a subsequent payload failure.
+
+Fleet workspaces keep actual committed detached bytes in `source/`, external
+workflow state in `.flux-state/`, and immutable per-stage spec/barrier sources.
+`initialize_git` stages the real copied files; an empty commit is insufficient.
+Payload source must be shared on every eligible host. Source remains immutable;
+job scratch comes from the existing native executor wrapper. The historical
+`prismabuild_row` name is retained solely as a scientific planner for the later
+capture-chain slice; it invokes no PB code. Existing pb-result.json scientific
+record names/schemas are retained, independently of native execution facts.
+
+The current CPU-only baseline and its resource/environment gates are unchanged.
+Strict data manifests/residency, produced-output authentication, pilots,
+GPU/container/device admission, unqualified application environments, priorities
+and unenforced progress-stall requirements explicitly refuse before any launch.
+A hard walltime does not replace a stall watchdog. Production campaign/export
+and ladder runs therefore remain held; numerical runtime pins and class
+placement attestations are preserved without claiming new qualification.
+Post-campaign commands retain explicit intent and read manifests but cannot
+launch those contracts. Their scientific environment comes from the versioned
+spec, never ambient shell settings. Joint-quanta, Stage A, capture-chain,
+canonical fluxcache and the Tessera repository remain for later serial slices.
+No format, serving lane, cache, ship gate, numerical, GPU or performance change.
+
+Rerunnable verification and all retained failures are under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-campaign/`; native records
+are under `pq-tessera/jobs/unit1-campaign-*/`. Targeted verification passed 384 tests plus 53 subtests and 21 source compile
+checks in job `ƒCAoBfemLT`; this includes the architecture and documentation
+checks. The earlier 363-test run is retained as `ƒC7LRxmMKD`. Caller proof controllers including `ƒC6UK3oZ43` and `ƒCAoBfemLT` verified exact known
+bytes, blocked native dependencies, exit-7 failure despite an early receipt,
+never-launched dependent, saved-ID resume and scratch absence. The latter also
+verified caller-level query failure and durable unknown-submit refusal. Final audit `ƒCBLEXQNWb` verified all 28 preceding native jobs, including
+resource leaves, perf affinity and scratch absence for every started job. Its
+own terminal records and scratch absence were collected separately. All 29
+submitted jobs are terminal and collected. Post-campaign read manifests use
+immutable publication, including on admission refusal. The complete job ledger
+and retained failures are recorded in the evidence report.
+The PB-importing root pytest fixture/plugins were excluded; scientific tests
+used the existing pinned Tessera interpreter. This is CPU caller qualification,
+not production activation. Independent parent review of this slice remains due.
+
 As of: 2026-11-07, native Flux executor core, migration unit 1.
 Source: `prismaquant/flux_jobs.py` and `tests/test_flux_jobs.py`, based on
 main `f6c99e8edb5e05fbf2d21d6240cd3df407ee7867`.
@@ -10,8 +65,8 @@ Launch/submission/result records bind a clean detached source commit, exact
 intent and current profile/config identity to native job facts. Ambiguous
 submission refuses reuse; query failure remains separate from payload exit.
 The profile qualifies CPU jobs only, at most four cores, 16 GiB and 30 minutes.
-Existing campaign, joint, Stage A, capture and fleet callers still use their
-current transports. Strict staged reads and authenticated output/pilot contracts
+At this core checkpoint campaign, joint, Stage A, capture and fleet callers
+still used their prior transports; the caller stamp above records the next slice. Strict staged reads and authenticated output/pilot contracts
 remain unqualified pending migration units 2 and 4. No result cache, scheduler,
 topology cutover, numerical, performance, serving or production claim follows.
 The rerunnable CPU proof and native records live under
@@ -29,7 +84,8 @@ incorrect native event spelling failed and remains recorded in
 `jobs/unit1-core-01`; it was corrected before subsequent verification.
 Memory leaves provide admission accounting, not a per-job cap at the declared
 GiB value. SIGKILL or node loss can prevent cleanup and require reconciliation.
-Parent review and the remaining migration/qualification units are still due.
+The core passed independent parent review; the remaining caller and
+qualification units are separate.
 
 As of: 2026-11-07, default-off scratch-traffic declaration uptake, PQ #2798.
 Source: `tools/tessera_campaign_container.py` and
@@ -12515,8 +12571,9 @@ callers now declare it through PB's admission contract:
   its own `--tag` and the image declaration is a separate envelope option.
 - `tools/dispatch_tessera_campaign.py` adds `container_images: [REF]` to every
   generated manifest row from the row's resolved container class (a class
-  override declares its own image) and the same flag to its direct
-  submit-joint/submit-aqua commands.
+  override declares its own image). Direct submit-joint/submit-aqua now retain
+  the same `container_images` intent under the native caller migration and
+  refuse launch until device/container and staging admission qualify.
 - `tools/tessera_campaign_container.admission_image_reference` is the one
   reader: it validates the spec with the launcher's `validate_container` and
   returns the image, or `None` for a spec that runs no container or binds a

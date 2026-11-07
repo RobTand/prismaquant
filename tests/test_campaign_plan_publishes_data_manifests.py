@@ -204,7 +204,7 @@ def test_check_refuses_a_subset_that_would_reach_the_fleet_cold(planned):
 def test_submit_re_derives_the_planned_bytes_and_refuses_drift(planned, monkeypatch):
     _, workspace = planned
     calls = []
-    monkeypatch.setattr(dispatch, "_pbcampaign",
+    monkeypatch.setattr(dispatch, "_flux_campaign",
                         lambda manifest, *, wait_s, receipts=None:
                         calls.append(manifest) or 0)
     before = _published(workspace)

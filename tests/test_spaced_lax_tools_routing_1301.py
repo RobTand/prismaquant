@@ -124,14 +124,17 @@ def test_container_wrapper_emits_transformed_spec_and_preserves_input(tmp_path):
 
 
 def test_campaign_submission_preserves_inline_spec_bytes_and_envelope(tmp_path):
-    from tools.dispatch_tessera_campaign import _pbrun_argv
+    from tools.dispatch_tessera_campaign import _native_action_row
 
-    args = SimpleNamespace(spec=tmp_path / "unused.json", pbrun="/published/pbrun.py",
-        demand="gpu=1,mem_gb=16", cpus=2, tag="gb10", priority=0,
-        timeout_s=None, container_arg=[])
+    args = SimpleNamespace(spec=tmp_path / "unused.json", demand="gpu=1,mem_gb=16",
+        cpus=2, tag="gb10", priority=0, timeout_s=None, container_arg=[])
     spec = {"env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
-    GOLDEN.call(lambda: _pbrun_argv(args, manifest=tmp_path / "manifest.json",
-        inner=["payload", "é"], container_spec=spec), tmp=tmp_path)
+    row = _native_action_row(args, manifest=tmp_path / "manifest.json",
+        inner=["payload", "é"], container_spec=spec)
+    encoded = row['argv'][row['argv'].index('--spec') + 1]
+    assert encoded == '{"container": {"image": "sha256:' + 'a' * 64 + '"}, "env": {"LABEL": "\\u00e9"}}'
+    assert row['demand'] == {'gpu': 1, 'mem_gb': 16, 'cpu': 2}
+    assert row['data_manifest'] == str(tmp_path / 'manifest.json')
 
 
 def test_campaign_row_embeds_the_resolved_container_spec():

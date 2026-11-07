@@ -505,7 +505,8 @@ def test_row_table_keeps_a_row_whose_exit_status_holds_a_space():
         "9bf8f58d174f  executed  pull       j-2    lina    12.0s    1 (action 137)   cas/b    killed\n"
         "6fea9fb2131e  cache_hit pull       -      -       -        -                cas/c    -\n"
     )
-    rows = dispatch._parse_row_table(table)
+    from prismaquant.pbwait_table import parse_pbwait_table
+    rows = parse_pbwait_table(table)
     assert [row["key"] for row in rows] == [
         "641c9bfbedd8", "9bf8f58d174f", "6fea9fb2131e"]
     assert rows[1]["rc"] == "1 (action 137)"
@@ -865,23 +866,15 @@ def test_submit_hands_the_fleet_the_admissible_rows_only(
     spec, workspace = _partition_workspace(tmp_path)
     assert dispatch.cmd_plan(_plan_args(spec, workspace)) == 0
 
-    seen: list[list[str]] = []
-
-    def fake_run(command, **kwargs):
-        seen.append(list(command))
-        return types.SimpleNamespace(returncode=0, stdout="")
-
-    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
-
+    seen = []
+    def native_boundary(manifest, *, wait_s, receipts=None):
+        seen.append(pathlib.Path(manifest))
+        return 0
+    monkeypatch.setattr(dispatch, '_flux_campaign', native_boundary)
     args = types.SimpleNamespace(workspace=workspace, wait_s=1)
     assert dispatch.cmd_submit(args) == 0
-
-    # The submission is picked out by name rather than by being the only
-    # subprocess the run makes.
-    submissions = [command for command in seen
-                   if any("pbcampaign" in str(word) for word in command)]
-    assert len(submissions) == 1
-    submitted = json.loads(pathlib.Path(submissions[0][-1]).read_text())
+    assert len(seen) == 1
+    submitted = json.loads(seen[0].read_text())
     assert [row["argv"][row["argv"].index("--units") + 1].split("/")[-1]
             for row in submitted] == ["row-0000.json", "row-0001.json",
                                       "row-0002.json"]

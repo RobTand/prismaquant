@@ -272,7 +272,7 @@ def test_every_submitted_row_carries_a_manifest(
 
     # ``monkeypatch`` restores the real helper; deleting the attribute instead
     # would leave the module without it for every later test in the process.
-    monkeypatch.setattr(dispatch, "_pbcampaign", _record)
+    monkeypatch.setattr(dispatch, "_flux_campaign", _record)
     # ``submit`` runs two independent gates: the demand check this campaign's
     # rows were planned under (#522) and the read-set gate under test here.
     # This fixture is a plan written by hand, with no spec to re-derive a

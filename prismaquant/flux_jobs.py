@@ -171,6 +171,15 @@ def _environment(record_dir, supplied):
     return environment
 
 
+def validate_job(*, checkout: Path, resources: FluxResources, environment=None):
+    """Preflight a whole caller stage before its first native submission."""
+    if not isinstance(resources, FluxResources):
+        raise TypeError('resources must be FluxResources')
+    source = _source_identity(Path(checkout).resolve())
+    _environment(Path('/mnt/shared/preflight-only'), environment)
+    return source
+
+
 def _shape(resources):
     return f'node/slot/[core={resources.cores}/perf=1;memory={resources.memory_gib}]'
 
@@ -306,6 +315,11 @@ def _validate_submission(submission):
     intent = json.loads((submission.record_dir / 'launch.json').read_bytes())
     if intent['profile']['uri'] != _URI or intent['profile']['broker_starttime'] != _checked(['getattr', 'broker.starttime']).strip():
         raise RuntimeError('Flux instance changed; saved job identity cannot be assumed')
+
+
+def validate_dependency(submission: FluxSubmission):
+    """Require a saved producer ID from the current standing instance."""
+    _validate_submission(submission)
 
 
 def _query(submission, name, args, errors, *, required=True, timeout=30):
