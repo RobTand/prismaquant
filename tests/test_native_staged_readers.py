@@ -47,7 +47,7 @@ def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatc
         sealed = read_staged_entry(resolver, source, resolver.staged_read(source), label='sealed', sealed=True)
         try:
             sealed.require_sealed()
-            assert bytes(sealed.view()) == raw
+            assert bytes(sealed) == raw
         finally:
             sealed.close()
     assert not source.exists()
