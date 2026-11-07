@@ -743,17 +743,17 @@ def test_stage_a_refuses_a_spec_that_opts_out_of_the_host_window(tmp_path, campa
 
 def test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed(
         tmp_path, campaign):
-    """PQ #1120 acceptance, on the installed PrismaBuild package: the sealed
-    environment of a Stage A row derives a ``spool_gb`` demand of its window
-    in whole GiB, and a box whose spool budget
-    holds one such window but not two claims one row and refuses the other.
+    """Preserve the declared spool ceiling while native accounting is held.
+
+    An unbound staged read must refuse before admission. This CPU planning
+    check does not establish native spool capacity or placement.
     """
     import subprocess
     argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
     variables = dict(env.split("=", 1) for env in _envelope_envs(argv))
     assert int(variables["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == SPOOL_WINDOW_BYTES
     from prismaquant.tessera_campaign_rows import validate_row
-    with pytest.raises(ValueError, match="strict staging/publication/pilot contract is unqualified"):
+    with pytest.raises(ValueError, match="data_manifest: strict staging is unqualified without a bound staged_input"):
         validate_row(argv)
 
 
@@ -1714,7 +1714,7 @@ def test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, ca
     variables = dict(item.split('=', 1) for item in _outer_env(argv))
     assert {key: int(variables[key]) for key in ceilings} == ceilings
     from prismaquant.tessera_campaign_rows import validate_row
-    with pytest.raises(ValueError, match="strict staging/publication/pilot contract is unqualified"):
+    with pytest.raises(ValueError, match="data_manifest: strict staging is unqualified without a bound staged_input"):
         validate_row(argv)
 
 
