@@ -17,6 +17,19 @@ topology cutover, numerical, performance, serving or production claim follows.
 The rerunnable CPU proof and native records live under
 `/mnt/shared/flux-migration/pq-tessera/evidence/unit1-core/` and
 `/mnt/shared/flux-migration/pq-tessera/jobs/unit1-core-*/`.
+CPU verification at code commit `392c7197390becb183ad96b1a070723f7a24b78b`:
+21 stdlib boundary tests and two compile checks passed in Flux job
+`ƒBwJ8JiQ3y`, bypassing the old PB-importing pytest conftest. Controller
+`ƒBwHDHv5ao` proved native dependency blocking, exact fixture bytes, failure,
+never-launched dependent, cancellation, saved-ID reconnect and query failure.
+An architecture-constrained portable child exercised Spark perf cores and
+scratch. Audit `ƒBx2CRSKwu` checked all 21 preceding job records and verified
+CPU affinity and scratch removal for every started job. The first proof's
+incorrect native event spelling failed and remains recorded in
+`jobs/unit1-core-01`; it was corrected before subsequent verification.
+Memory leaves provide admission accounting, not a per-job cap at the declared
+GiB value. SIGKILL or node loss can prevent cleanup and require reconciliation.
+Parent review and the remaining migration/qualification units are still due.
 
 As of: 2026-11-07, default-off scratch-traffic declaration uptake, PQ #2798.
 Source: `tools/tessera_campaign_container.py` and
