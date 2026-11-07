@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, default-off scratch-traffic declaration uptake, PQ #2798.
+Source: `tools/tessera_campaign_container.py` and
+`tools/dispatch_joint_quanta.py`, based on main `d92c37fe42`.
+The shared sealed-spec projection preserves complete ordered capacities and
+explicit traffic wire bytes. DEFAULT-OFF, UNQUALIFIED FEATURE HOLD.
+CPU verification covers declaration uptake only; no pipeline default,
+format, serving lane or ship gate changes.
+
 As of: 2026-11-06, Remote Bazel PR fallback uses six shards, PQ #3345.
 Source: `tools/ci/bazel_selection.py` and `tools/ci/remote_gate.py`, based on
 main `118c4b17`. PR fallback now plans six timing-balanced shards and the
@@ -9086,6 +9094,37 @@ the list itself. A row with no scratch seals the same request as before. The
 charge applies once PB #911 is published; the generation published on
 2026-09-23 (`c2bda68758a3`) predates it and carries the list as an ordinary
 variable. Gate: `tests/test_dispatch_joint_quanta.py`.
+
+Explicit scratch traffic is DEFAULT-OFF, UNQUALIFIED FEATURE HOLD
+(PQ #2798, 2026-11-07). `local_scratch_request_environment(spec)` projects
+only sealed `spec.env` through the existing capacity registry. Both dispatcher
+preflight and the Stage B outer envelope use that projection, with every
+capacity validated before traffic eligibility. Ordered roots and byte ceilings
+remain intact; produced spool and its host window remain separate charges.
+Without an explicit `PRISMABUILD_LOCAL_SCRATCH_IO` declaration, argv is unchanged.
+The coordinator environment cannot opt a row in.
+
+An explicit declaration must be a JSON string with exactly `schema`,
+`write_bytes`, `read_bytes`, `profile_contract` and `max_profile_age_s`.
+The schema is `prismabuild.local_scratch_io.v1`. Duplicate keys and nonfinite
+values refuse. Directional bytes are nonnegative integers excluding booleans,
+with at least one positive direction. The profile contract is a nonempty
+`[A-Za-z0-9_.-]+` token; age is positive, finite and representable as a float,
+excluding booleans. Traffic requires exactly one validated scratch pair.
+The projection preserves the original JSON string, including key order and
+spacing, in the Stage B outer environment and serialized spec. Traffic does
+not derive from capacity, merge roots, drop charges or select a transport.
+Stage A shares preflight validation but retains its spool-only outer envelope;
+a valid traffic declaration remains inside its spec.
+
+CPU tests establish declaration uptake, opt-out byte equality, complete
+capacity preservation and refusal behavior only. They establish no scheduler,
+profile, freshness, placement, GPU, serving or numerical qualification. A future
+Flux run may establish GPU execution and declaration preservation; it cannot
+qualify PB scheduler behavior. The feature remains unqualified for those uses,
+with no pre-batch GPU gate. Focused coverage is in
+`tests/test_dispatch_joint_quanta.py` and
+`tests/test_tessera_campaign_container.py`.
 
 One reader lease per read window (2026-09-23, `ws-sa/window-leases-997`,
 PQ #1000, part of #997). The strict exact-entry reader
