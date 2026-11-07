@@ -12,6 +12,10 @@ from prismaquant import flux_jobs as jobs
 
 
 class FluxJobsTests(unittest.TestCase):
+    def test_launch_encoding_keeps_exact_utf8_lax_identity_bytes(self):
+        self.assertEqual(jobs._json_bytes({'n': float('nan'), 'a': 'ƒ'}),
+                         b'{"a":"\xc6\x92","n":NaN}\n')
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=os.environ['OUT'])
         self.addCleanup(self.temporary.cleanup)
