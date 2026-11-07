@@ -68,7 +68,7 @@ def saved_stage(workspace, stage):
             for index in range(len(intent['rows']))]
 
 
-def campaign_row(workspace, spec, command, *, index=None, host=None, source=None):
+def model_export_row(workspace, spec, command, *, index=None, host=None, source=None):
     gpu = command == 'encode'
     argv = ['/usr/bin/python3', 'worker.py', command]
     if index is not None:
@@ -87,7 +87,7 @@ def campaign_row(workspace, spec, command, *, index=None, host=None, source=None
 
 def prepare_source_identity(spec, workspace, wait_s):
     """Prepare the source identity on every named host, and require agreement."""
-    rows = [campaign_row(workspace, spec, 'prepare', host=host) for host in spec['prepare_hosts']]
+    rows = [model_export_row(workspace, spec, 'prepare', host=host) for host in spec['prepare_hosts']]
     common.run_stage(rows, workspace, 'prepare', wait_s=wait_s)
     prepared = [model.read_json(model.prepared_path(spec, host)) for host in spec['prepare_hosts']]
     if any(row != prepared[0] for row in prepared[1:]):
@@ -138,7 +138,7 @@ def main(argv=None):
         setup = export_setup(args.source, model.read_json(args.plan))
         spec = {'cpus': args.cpus, 'mem_gb': args.mem_gb,
                 'assembly_mem_gb': args.assembly_mem_gb, 'tags': args.tags or ['gb10']}
-        setup['encode_rows'] = [campaign_row(args.workspace or Path('<workspace>'), spec,
+        setup['encode_rows'] = [model_export_row(args.workspace or Path('<workspace>'), spec,
                                             'encode', index=part['index'])
                                 for part in setup['partitions']]
         setup['execution_inputs'] = {'encoder_revision': args.encoder_revision,
@@ -184,14 +184,14 @@ def main(argv=None):
         common.initialize_git(workspace / common.SOURCE, message='PrismaQuant pinned export source')
     # The complete export requires a GPU and qualified container execution.
     # Refuse before even its CPU preparation, never partly start this workflow.
-    common.campaign_rows.validate_row(campaign_row(workspace, spec, 'encode', index=0))
+    common.campaign_rows.validate_row(model_export_row(workspace, spec, 'encode', index=0))
     if 'contract' not in spec:
         spec.update(prepare_source_identity(spec, workspace, args.wait_s))
         spec['contract'] = model.digest_json(spec)
         model.atomic_json(workspace / common.STATE / 'job.json', spec)
     print(f"export {spec['contract']}: {spec['count']} whole-layer actions", flush=True)
     encode_source = sealed_stage_source(workspace, 'encode', spec)
-    rows = [campaign_row(workspace, spec, 'encode', index=index, source=encode_source)
+    rows = [model_export_row(workspace, spec, 'encode', index=index, source=encode_source)
             for index in range(spec['count'])]
     common.run_stage(rows, workspace, 'encode', wait_s=args.wait_s,
                      afterok=saved_stage(workspace, 'prepare'))
@@ -199,7 +199,7 @@ def main(argv=None):
     # unreserved large validation stage on the submitting machine.
     parts = part_records(spec)
     assembly = sealed_stage_source(workspace, 'assemble', spec, barrier=parts)
-    common.run_stage([campaign_row(workspace, spec, 'assemble', source=assembly)],
+    common.run_stage([model_export_row(workspace, spec, 'assemble', source=assembly)],
                      workspace, 'assemble', wait_s=args.wait_s,
                      afterok=saved_stage(workspace, 'encode'))
     result = model.read_json(Path(spec['out']) / 'pb-result.json')

@@ -8,14 +8,13 @@ versioned binding. Native publication and pilot authority remain unqualified.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 from typing import Literal
-from .digests import DIRECT_ASCII_SPACED_LAX
+from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_LAX, bytes_sha256hex
 
 
 _PREFIX = Path('/home/rob/flux-vanilla/0.91.0-0.56.0')
@@ -73,14 +72,10 @@ class SubmissionUnknown(RuntimeError):
 
 
 def _json_bytes(value):
-    return (json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n').encode()
+    return DIRECT_UTF8_LAX.encoded(value) + b'\n'
 
 
-def _digest(data):
-    return hashlib.sha256(data).hexdigest()
-
-
-def _write_json(path, value):
+def _publish_flux_json(path, value):
     data = _json_bytes(value)
     temporary = path.with_name(path.name + '.tmp')
     with temporary.open('xb') as stream:
@@ -95,7 +90,7 @@ def _write_json(path, value):
         os.close(descriptor)
 
 
-def _run(args, *, timeout=30):
+def _flux_run(args, *, timeout=30):
     # Never inherit CLI plugins, job KVS namespaces, credentials, or PB context.
     return subprocess.run([_CLI, *args], text=True, capture_output=True,
                           env={'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
@@ -103,7 +98,7 @@ def _run(args, *, timeout=30):
 
 
 def _checked(args):
-    result = _run(args)
+    result = _flux_run(args)
     if result.returncode:
         raise RuntimeError(f'Flux query failed: {args[0]} {args[1] if len(args) > 1 else ""}')
     return result.stdout
@@ -111,7 +106,7 @@ def _checked(args):
 
 def _profile_identity():
     config_bytes, model_bytes = _CONFIG.read_bytes(), _MODEL.read_bytes()
-    if _digest(config_bytes) != _CONFIG_SHA or _digest(model_bytes) != _MODEL_SHA:
+    if bytes_sha256hex(config_bytes) != _CONFIG_SHA or bytes_sha256hex(model_bytes) != _MODEL_SHA:
         raise ValueError('unsupported Flux config/resource model; profile revision required')
     config, model = json.loads(config_bytes), json.loads(model_bytes)
     for section in ('resource', 'exec', 'sched-fluxion-resource', 'sched-fluxion-qmanager'):
@@ -129,7 +124,7 @@ def _profile_identity():
             'uri': _URI, 'broker_starttime': _checked(['getattr', 'broker.starttime']).strip()}
 
 
-def _git(checkout, *args):
+def _source_git(checkout, *args):
     result = subprocess.run(['git', '-C', str(checkout), *args], capture_output=True, text=True,
                             check=True, env={'PATH': '/usr/bin:/bin', 'HOME': '/home/rob',
                                              'GIT_OPTIONAL_LOCKS': '0'}, timeout=30)
@@ -137,19 +132,19 @@ def _git(checkout, *args):
 
 
 def _source_identity(checkout):
-    if Path(_git(checkout, 'rev-parse', '--show-toplevel')).resolve() != checkout:
+    if Path(_source_git(checkout, 'rev-parse', '--show-toplevel')).resolve() != checkout:
         raise ValueError('checkout must be the source root')
-    commit = _git(checkout, 'rev-parse', '--verify', 'HEAD^{commit}')
+    commit = _source_git(checkout, 'rev-parse', '--verify', 'HEAD^{commit}')
     if not re.fullmatch('[0-9a-f]{40}', commit):
         raise ValueError('source must resolve to a full commit')
-    if _git(checkout, 'status', '--porcelain', '--untracked-files=all', '--ignored'):
+    if _source_git(checkout, 'status', '--porcelain', '--untracked-files=all', '--ignored'):
         raise ValueError('source checkout must be clean, including ignored files')
-    if _git(checkout, 'branch', '--show-current'):
+    if _source_git(checkout, 'branch', '--show-current'):
         raise ValueError('source checkout must be detached at its immutable commit')
-    if any(line.startswith('160000 ') for line in _git(checkout, 'ls-files', '--stage').splitlines()):
+    if any(line.startswith('160000 ') for line in _source_git(checkout, 'ls-files', '--stage').splitlines()):
         raise ValueError('submodule source identity is not supported by this profile')
     return {'checkout': str(checkout), 'commit': commit,
-            'tree': _git(checkout, 'rev-parse', 'HEAD^{tree}')}
+            'tree': _source_git(checkout, 'rev-parse', 'HEAD^{tree}')}
 
 
 def _job_id(value):
@@ -283,15 +278,15 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if staged_input is not None:
         intent['staged_input'] = staged_input
     record_dir.mkdir(parents=True, exist_ok=False)
-    _write_json(record_dir / 'launch.json', intent)
-    launch_sha = _digest(_json_bytes(intent))
+    _publish_flux_json(record_dir / 'launch.json', intent)
+    launch_sha = bytes_sha256hex(_json_bytes(intent))
     # Publish unknown durably BEFORE handing the intent to Flux. A crash at
     # any subsequent point must not make this directory eligible for retry.
     receipt = {'schema': 'pq.flux.submission.v1', 'launch_sha256': launch_sha,
                'state': 'unknown', 'job_id': None}
-    _write_json(record_dir / 'submission.json', receipt)
+    _publish_flux_json(record_dir / 'submission.json', receipt)
     try:
-        result = _run(args)
+        result = _flux_run(args)
         (record_dir / 'submit.stdout').write_text(result.stdout)
         (record_dir / 'submit.stderr').write_text(result.stderr)
         if result.returncode:
@@ -300,7 +295,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     except (OSError, subprocess.SubprocessError, ValueError, SubmissionUnknown) as exc:
         raise SubmissionUnknown(f'submission unknown in {record_dir}; do not resubmit') from exc
     receipt.update(state='submitted', job_id=job_id)
-    _write_json(record_dir / 'submission.json', receipt)
+    _publish_flux_json(record_dir / 'submission.json', receipt)
     (record_dir / 'jobid').write_text(job_id + '\n')
     return FluxSubmission(job_id, record_dir, launch_sha)
 
@@ -310,7 +305,7 @@ def load_submission(record_dir: Path) -> FluxSubmission:
     record_dir = Path(record_dir).resolve()
     intent = json.loads((record_dir / 'launch.json').read_bytes())
     receipt = json.loads((record_dir / 'submission.json').read_bytes())
-    launch_sha = _digest(_json_bytes(intent))
+    launch_sha = bytes_sha256hex(_json_bytes(intent))
     if (not isinstance(intent, dict) or not isinstance(receipt, dict) or
             intent.get('schema') != 'pq.flux.launch.v1' or
             receipt.get('schema') != 'pq.flux.submission.v1' or
@@ -359,7 +354,7 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
 
 def _query(submission, name, args, errors, *, required=True, timeout=30):
     try:
-        result = _run(args, timeout=timeout)
+        result = _flux_run(args, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         errors.append(f'{name}: {type(exc).__name__}')
         return None
@@ -458,7 +453,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             (submission.record_dir / f'{name}.missing').write_text('No redirected payload stream observed.\n')
     result = ExecutionResult('unknown' if errors else status, submission.job_id, submission.record_dir,
                              payload_exit, '; '.join(errors) or None)
-    _write_json(submission.record_dir / 'result.json',
+    _publish_flux_json(submission.record_dir / 'result.json',
                 {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
     return result
 
@@ -470,7 +465,7 @@ def cancel_job(submission: FluxSubmission) -> ExecutionResult:
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         result = ExecutionResult('unknown', submission.job_id, submission.record_dir,
                                  query_error=f'cancel identity: {type(exc).__name__}: {exc}')
-        _write_json(submission.record_dir / 'cancel-result.json',
+        _publish_flux_json(submission.record_dir / 'cancel-result.json',
                     {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
         return result
     errors = []
@@ -479,6 +474,6 @@ def cancel_job(submission: FluxSubmission) -> ExecutionResult:
     if errors:
         result = ExecutionResult('unknown', result.job_id, result.record_dir, result.payload_exit,
                                  '; '.join([*errors, *([result.query_error] if result.query_error else [])]))
-        _write_json(submission.record_dir / 'cancel-result.json',
+        _publish_flux_json(submission.record_dir / 'cancel-result.json',
                     {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
     return result

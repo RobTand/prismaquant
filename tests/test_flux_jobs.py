@@ -30,7 +30,7 @@ class FluxJobsTests(unittest.TestCase):
             response = self.completed('ƒBqv3wNoLK\n')
         with patch.object(jobs, '_source_identity', return_value={'commit': 'a' * 40}), \
                 patch.object(jobs, '_profile_identity', return_value=self.profile), \
-                patch.object(jobs, '_run', return_value=response) as run:
+                patch.object(jobs, '_flux_run', return_value=response) as run:
             submission = jobs.submit_job(['/bin/echo', 'known'], checkout=self.checkout,
                                          resources=self.resources, record_dir=self.record, **kwargs)
         return submission, run
@@ -70,7 +70,7 @@ class FluxJobsTests(unittest.TestCase):
         for setting in ({'API_TOKEN': 'fixture'}, {'PB_ACTION_KEY': 'fixture'},
                         {'PQ_REQUIRE_STRICT_STAGING': '1'}, {'PQ_REQUIRE_AUTHENTICATED_OUTPUT': '1'},
                         {'PATH': '/tmp/custom'}, {'OMP_NUM_THREADS': '3'}, {'OUT': '/tmp/foreign'}):
-            with self.subTest(keys=list(setting)), patch.object(jobs, '_run') as run, self.assertRaises(ValueError):
+            with self.subTest(keys=list(setting)), patch.object(jobs, '_flux_run') as run, self.assertRaises(ValueError):
                 jobs.submit_job(['/bin/true'], checkout=self.checkout, resources=self.resources,
                                 record_dir=self.record, environment=setting)
             run.assert_not_called()
@@ -78,7 +78,7 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_invalid_intent_is_never_submitted(self):
         for argv in ('shell string', [], ['bad\0arg']):
-            with self.subTest(argv=argv), patch.object(jobs, '_run') as run, self.assertRaises(ValueError):
+            with self.subTest(argv=argv), patch.object(jobs, '_flux_run') as run, self.assertRaises(ValueError):
                 jobs.submit_job(argv, checkout=self.checkout, resources=self.resources, record_dir=self.record)
             run.assert_not_called()
         for dependencies in (('foo',), ('--help',), ('123', '123')):
@@ -92,7 +92,7 @@ class FluxJobsTests(unittest.TestCase):
     def test_lost_ack_is_durable_and_no_blind_resubmit(self):
         with patch.object(jobs, '_source_identity', return_value={'commit': 'a' * 40}), \
                 patch.object(jobs, '_profile_identity', return_value=self.profile), \
-                patch.object(jobs, '_run', side_effect=subprocess.TimeoutExpired('flux', 30)) as run:
+                patch.object(jobs, '_flux_run', side_effect=subprocess.TimeoutExpired('flux', 30)) as run:
             with self.assertRaises(jobs.SubmissionUnknown):
                 jobs.submit_job(['/bin/true'], checkout=self.checkout,
                                 resources=self.resources, record_dir=self.record)
@@ -130,7 +130,7 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_cancellation_query_failure_never_becomes_payload_failure(self):
         submission, _ = self.submit_fixture()
-        with patch.object(jobs, '_run', return_value=self.completed('', 1, 'fixture transport unavailable')) as run:
+        with patch.object(jobs, '_flux_run', return_value=self.completed('', 1, 'fixture transport unavailable')) as run:
             result = jobs.cancel_job(submission)
         self.assertEqual((result.status, result.payload_exit), ('unknown', None))
         self.assertIn('cancel identity:', result.query_error)
@@ -149,7 +149,7 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_instance_replacement_refuses_cancellation_of_reused_id(self):
         submission, _ = self.submit_fixture()
-        with patch.object(jobs, '_run', return_value=self.completed('new-generation\n')) as run:
+        with patch.object(jobs, '_flux_run', return_value=self.completed('new-generation\n')) as run:
             result = jobs.cancel_job(submission)
         self.assertEqual(result.status, 'unknown')
         self.assertIn('instance changed', result.query_error)
@@ -189,7 +189,7 @@ class FluxJobsTests(unittest.TestCase):
             if args[1] == 'wait-event':
                 return self.completed()
             self.fail('unexpected native query')
-        with patch.object(jobs, '_run', side_effect=run):
+        with patch.object(jobs, '_flux_run', side_effect=run):
             return jobs.collect_job(submission, wait=clean)
 
     def test_terminal_success_requires_positive_native_evidence(self):
@@ -252,14 +252,14 @@ class FluxJobsTests(unittest.TestCase):
         with patch.object(jobs, '_CONFIG', self.root / 'config'), patch.object(jobs, '_MODEL', self.root / 'model'):
             (self.root / 'config').write_text('{}')
             (self.root / 'model').write_text('{}')
-            with patch.object(jobs, '_run') as run, self.assertRaisesRegex(ValueError, 'profile revision'):
+            with patch.object(jobs, '_flux_run') as run, self.assertRaisesRegex(ValueError, 'profile revision'):
                 jobs._profile_identity()
             run.assert_not_called()
 
     def test_client_never_inherits_ambient_environment(self):
         with patch.dict(os.environ, {'PB_ACTION_KEY': 'fixture', 'API_TOKEN': 'fixture', 'FLUX_KVS_NAMESPACE': 'fixture'}), \
                 patch.object(subprocess, 'run', return_value=self.completed()) as run:
-            jobs._run(['resource', 'list'])
+            jobs._flux_run(['resource', 'list'])
         self.assertEqual(set(run.call_args.kwargs['env']), {'PATH', 'HOME', 'LD_LIBRARY_PATH', 'FLUX_URI'})
 
 

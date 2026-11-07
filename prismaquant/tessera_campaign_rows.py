@@ -779,7 +779,8 @@ def submit_rows(rows, state_dir, *, afterok=()):
               'sources': [identity for _, _, identity in prepared]}
     state.mkdir(parents=True, exist_ok=True)
     manifest = state / 'manifest.json'
-    data = (json.dumps(intent, sort_keys=True, indent=2) + '\n').encode()
+    from .digests import DIRECT_ASCII_INDENT2_LAX
+    data = DIRECT_ASCII_INDENT2_LAX.encoded(intent) + b'\n'
     try:
         with manifest.open('xb') as stream:
             stream.write(data)

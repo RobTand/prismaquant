@@ -41,7 +41,7 @@ def test_single_source_file_still_yields_24_layer_actions():
     tensors['model.embed_tokens.weight'] = 'model.safetensors'
     assert len(whole_layer_partitions(tensors, PRODUCER)) == 24
     spec = dict(cpus=1, mem_gb=16, assembly_mem_gb=4, tags=['gb10'])
-    rows = [dispatch_model.campaign_row('/checkout', spec, 'encode', index=i) for i in range(24)]
+    rows = [dispatch_model.model_export_row('/checkout', spec, 'encode', index=i) for i in range(24)]
     assert len({tuple(row['argv']) for row in rows}) == 24
     assert all(row['tags'] == ['gb10'] and row['demand']['gpu'] == 1 for row in rows)
     assert not any('here' in row for row in rows)

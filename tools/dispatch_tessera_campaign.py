@@ -1790,7 +1790,8 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if scope is not None:
         summary["campaign_scope"] = scope
     if args.dry_run:
-        print("[dry-run] " + json.dumps(row, sort_keys=True))
+        from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+        print("[dry-run] " + DIRECT_ASCII_SPACED_LAX.text(row))
         print(json.dumps(summary, indent=1))
         # Checked after the summary is printed, so a read set the fleet would
         # refuse still reports the size and the phase boundaries that make the

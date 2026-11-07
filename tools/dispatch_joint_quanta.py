@@ -2873,8 +2873,9 @@ class FakeGateway(Gateway):
         job_id = f"fake-flux-job-{self._counter:04d}"
         argv = row["argv"]
         kind = "stage-a" if "prismaquant.joint_adjoint_capture" in argv else "quantum"
+        from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
         saved = {"job_id": job_id, "record_dir": str(state_dir / "rows" / "00000"),
-                 "launch_sha256": _sha_bytes(json.dumps(row, sort_keys=True).encode())}
+                 "launch_sha256": _sha_bytes(DIRECT_ASCII_SPACED_LAX.encoded(row))}
         entry = {"kind": kind, "row": row, "job_id": job_id, "submission": saved,
                  "state_dir": str(state_dir), "afterok": list(afterok)}
         if kind == "quantum":
