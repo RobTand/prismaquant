@@ -136,7 +136,8 @@ def _submit(tmp_path: Path, monkeypatch, contract: dict, *, gate: bool = True,
 
 def _relative(argv: list, root: Path) -> bytes:
     """The argv as bytes, with the run's tmp root folded out so two runs compare."""
-    return "\0".join(argv).replace(str(root), "<run>").encode()
+    return "\0".join(argv).replace(str(root), "<run>").replace(
+        json.dumps(str(root))[1:-1], "<run>").encode()
 
 
 def test_an_old_pin_submits_the_argv_it_submitted_before_the_gate(tmp_path, monkeypatch):
