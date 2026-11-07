@@ -171,7 +171,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             # Sealed bounds before allocation: the held descriptor's size must
             # match the staged entry's, or no buffer is built.
             first = os.fstat(fd)
-            if first.st_size != size:
+            if first.st_size != staged.get('object_bytes', size):
                 raise LeaseRefused(f"{label}-changed-under-pin",
                                    kind="integrity")
             if delivery_receipt is not None:
@@ -189,12 +189,13 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             try:
                 remaining = size
                 offset = 0
+                object_offset = staged.get('object_offset', 0)
                 if sealed:
-                    remaining = 0 if raw.fill(fd) else size
+                    remaining = 0 if raw.fill(fd, source_offset=object_offset, require_eof=False) else size
                 else:
                     while remaining > 0:
                         try:
-                            moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+                            moved = os.preadv(fd, [view[offset:offset + remaining]], object_offset + offset)
                         except OSError as exc:
                             raise LeaseRefused(
                                 f"{label}-unreadable: {exc.strerror}",
@@ -205,8 +206,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
                         remaining -= moved
                 if remaining:
                     raise LeaseRefused(f"{label}-truncated", kind="integrity")
-                if os.pread(fd, 1, size):
-                    raise LeaseRefused(f"{label}-grew-during-read", kind="integrity")
+                window.check_fd(fd)
                 last = os.fstat(fd)
                 if (last.st_ino, last.st_size, last.st_mtime_ns) != (
                         first.st_ino, first.st_size, first.st_mtime_ns):
@@ -216,6 +216,10 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
                     raw.require_sealed()
                     if digest != staged.get("sha256"):
                         raise LeaseRefused(f"{label}-digest-mismatch", kind="integrity")
+                else:
+                    from .digests import bytes_sha256hex
+                    if bytes_sha256hex(raw) != staged['sha256']:
+                        raise LeaseRefused(f'{label}-digest-mismatch', kind='integrity')
             except BaseException:
                 if sealed:
                     raw.close()

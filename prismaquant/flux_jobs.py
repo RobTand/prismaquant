@@ -171,12 +171,15 @@ def _environment(record_dir, supplied):
     return environment
 
 
-def validate_job(*, checkout: Path, resources: FluxResources, environment=None):
+def validate_job(*, checkout: Path, resources: FluxResources, environment=None, staged_input=None):
     """Preflight a whole caller stage before its first native submission."""
     if not isinstance(resources, FluxResources):
         raise TypeError('resources must be FluxResources')
     source = _source_identity(Path(checkout).resolve())
     _environment(Path('/mnt/shared/preflight-only'), environment)
+    if staged_input is not None:
+        from .staged_launch import validate_binding
+        validate_binding(staged_input, placement=resources.placement)
     return source
 
 
@@ -236,7 +239,7 @@ sys.exit(128 - code if code < 0 else code)
 
 
 def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Path,
-               afterok=(), environment=None) -> FluxSubmission:
+               afterok=(), environment=None, staged_input=None) -> FluxSubmission:
     """Submit once. Existing records and lost acknowledgements require reconciliation.
 
     ``afterok`` contains saved native ID strings. ``host:NAME`` is reserved for
@@ -257,6 +260,12 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if len(set(dependencies)) != len(dependencies):
         raise ValueError('duplicate dependency ID')
     env = _environment(record_dir, environment)
+    command = list(argv)
+    if staged_input is not None:
+        from .staged_launch import validate_binding
+        validate_binding(staged_input, placement=resources.placement)
+        command = ['/usr/bin/python3', '-m', 'prismaquant.staged_launch',
+                   json.dumps(staged_input, sort_keys=True), *command]
     source, profile = _source_identity(checkout), _profile_identity()
     args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
             f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
@@ -265,11 +274,13 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if resources.placement != 'portable':
         args.append(f'--requires={resources.placement}')
     args.extend(f'--dependency=afterok:{value}' for value in dependencies)
-    args.extend(['/usr/bin/python3', '-c', _PAYLOAD, source['commit'], *argv])
+    args.extend(['/usr/bin/python3', '-c', _PAYLOAD, source['commit'], *command])
     intent = {'schema': 'pq.flux.launch.v1', 'source': source, 'profile': profile,
               'resources': asdict(resources), 'afterok': dependencies, 'argv': list(argv),
               'native_argv': args, 'record_dir': str(record_dir),
               'qualification': 'cpu-executor-only; strict-staging/publication/pilots unqualified'}
+    if staged_input is not None:
+        intent['staged_input'] = staged_input
     record_dir.mkdir(parents=True, exist_ok=False)
     _write_json(record_dir / 'launch.json', intent)
     launch_sha = _digest(_json_bytes(intent))
@@ -323,11 +334,16 @@ def validate_dependency(submission: FluxSubmission):
 
 
 def validate_launch(submission: FluxSubmission, *, argv, source, resources,
-                    afterok=(), environment=None):
+                    afterok=(), environment=None, staged_input=None):
     """Bind application intent to every saved execution setting on resume/merge."""
     if load_submission(submission.record_dir) != submission:
         raise ValueError('submission differs from saved launch and ID')
     launch = json.loads((submission.record_dir / 'launch.json').read_bytes())
+    if launch.get('staged_input') != staged_input:
+        raise ValueError('saved staged-input binding differs from application intent')
+    if staged_input is not None:
+        from .staged_launch import validate_binding
+        validate_binding(staged_input, placement=resources.placement)
     env = _environment(submission.record_dir, environment)
     prefix = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
               f'--resources-shape={_shape(resources)}']

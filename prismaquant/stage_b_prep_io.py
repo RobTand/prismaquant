@@ -346,6 +346,11 @@ def bind_staged_reads(*, manifest_sha256: str, allowed_tiers: str,
 
 def staged_reads() -> StagedPreparationReads | None:
     """The bound strict reads, or None when the process reads plainly."""
+    if _STAGED_READS is None:
+        from .staged_manifest import READ_ENV
+        digest = os.environ.get(READ_ENV)
+        if digest:
+            return bind_staged_reads(manifest_sha256=digest, allowed_tiers='ssd')
     return _STAGED_READS
 
 
@@ -366,7 +371,7 @@ def reset_staged_reads_for_tests() -> None:
 
 def read_input(path, *, sha256: str | None = None, where: str) -> bytes:
     """A declared input's bytes: off the stage when bound, else read plainly."""
-    reads = _STAGED_READS
+    reads = staged_reads()
     if reads is None:
         return Path(path).read_bytes()
     return reads.whole(path, sha256=sha256, where=where)

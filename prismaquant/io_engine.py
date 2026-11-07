@@ -241,20 +241,20 @@ class SealedBuffer:
         if target is not None:
             target[:] = payload
 
-    def fill(self, fd: int) -> bool:
+    def fill(self, fd: int, *, source_offset: int = 0, require_eof: bool = True) -> bool:
         """Read ``fd`` from offset 0 into the buffer; whether it held exactly ``size`` bytes."""
         offset = 0
         if self.size:
             view = memoryview(self._map)
             try:
                 while offset < self.size:
-                    got = os.preadv(fd, [view[offset:]], offset)
+                    got = os.preadv(fd, [view[offset:]], source_offset + offset)
                     if got <= 0:
                         break
                     offset += got
             finally:
                 view.release()
-        return offset == self.size and os.pread(fd, 1, self.size) == b""
+        return offset == self.size and (not require_eof or os.pread(fd, 1, source_offset + self.size) == b"")
 
     def seal(self) -> str:
         """Hash the bytes read, drop the writable mapping and seal; the SHA-256 hex."""
@@ -353,6 +353,17 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     """
     from .residency_map import residency_resolver
     from .staged_tier_policy import policy_is_active
+    if staged is not None and '_resolver' in staged:
+        from .staged_whole_file import read_staged_entry
+        started = time.monotonic()
+        owner = staged['_resolver']
+        raw = read_staged_entry(owner, path, staged, label='io-engine', sealed=sealed,
+                                max_bytes=limit)
+        if timing is not None:
+            timing['read_s'] = time.monotonic() - started
+        receipt = {'path': str(path), 'bytes': len(raw), 'sha256': staged['sha256'],
+                   'serving_tier': 'stage'}
+        return raw, receipt, declared_signature
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode):
         raise RuntimeError("PWC file receipt requires a regular file, not a symlink")
@@ -1454,6 +1465,29 @@ def read_stream(entries: Iterable[ReadEntry], *, budget: ReadBudget, ready=None,
     """:meth:`IOEngine.read_stream` on the process's one engine."""
     return ENGINE.read_stream(entries, budget=budget, ready=ready,
                               lease_counters=lease_counters)
+
+
+def copy_extent(source_fd, destination_fd, source_offset, length, *, chunk_bytes=8 << 20):
+    """Offline bounded copy on the caller thread, hashing the bytes written."""
+    digest = hashlib.sha256()
+    copied = 0
+    while copied < length:
+        raw = os.pread(source_fd, min(chunk_bytes, length - copied), source_offset + copied)
+        if not raw:
+            raise RuntimeError('source extent truncated while copying')
+        digest.update(raw)
+        view = memoryview(raw)
+        try:
+            written = 0
+            while written < len(view):
+                moved = os.write(destination_fd, view[written:])
+                if moved <= 0:
+                    raise RuntimeError('object publication short write')
+                written += moved
+        finally:
+            view.release()
+        copied += len(raw)
+    return digest.hexdigest()
 
 
 class FixedBudget:

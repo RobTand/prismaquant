@@ -717,12 +717,19 @@ def validate_row(row):
     from prismaquant.flux_jobs import validate_job
     allowed = {'argv', 'cwd', 'demand', 'env', 'tags', 'retry_safe', 'timeout_s',
                'progress_phases', 'container_images', 'data_manifest', 'residency',
-               'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot'}
+               'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot', 'staged_input'}
     if not isinstance(row, dict) or set(row) - allowed:
         raise ValueError('unsupported native row fields; requirements cannot be discarded')
-    for field in ('data_manifest', 'residency', 'produced_outputs', 'pilot'):
+    for field in ('produced_outputs', 'pilot'):
         if field in row:
             raise ValueError(f'{field}: strict staging/publication/pilot contract is unqualified (units 2/4)')
+    if 'data_manifest' in row:
+        from .staged_launch import validate_read_contract
+        if 'staged_input' not in row:
+            raise ValueError('data_manifest: strict staging is unqualified without a bound staged_input')
+        validate_read_contract(row['staged_input'], row['data_manifest'])
+    if 'residency' in row and (row['residency'] != 'stage' or 'staged_input' not in row):
+        raise ValueError('residency requires the validated immutable stage contract')
     if row.get('progress_phases'):
         raise ValueError('progress-stall enforcement is unqualified; a walltime is not a stall watchdog')
     if row.get('container_images') or 'gpu_memory_gb' in row:
@@ -738,7 +745,8 @@ def validate_row(row):
         raise ValueError('row argv must be a nonempty string list')
     # Applications with additional settings must qualify a finite versioned
     # environment contract. Nothing is read from the submitter's environment.
-    identity = validate_job(checkout=source, resources=resources, environment=row.get('env'))
+    identity = validate_job(checkout=source, resources=resources, environment=row.get('env'),
+                            staged_input=row.get('staged_input'))
     return source, resources, identity
 
 
@@ -792,10 +800,12 @@ def submit_rows(rows, state_dir, *, afterok=()):
             submission = flux_jobs.load_submission(record)
         else:
             submission = flux_jobs.submit_job(row['argv'], checkout=source, resources=resources,
-                record_dir=record, afterok=[p['job_id'] for p in producers], environment=row.get('env'))
+                record_dir=record, afterok=[p['job_id'] for p in producers], environment=row.get('env'),
+                staged_input=row.get('staged_input'))
         # Cross-check saved execution facts against the app intent on resume.
         flux_jobs.validate_launch(submission, argv=row['argv'], source=identity, resources=resources,
-                                  afterok=[p['job_id'] for p in producers], environment=row.get('env'))
+                                  afterok=[p['job_id'] for p in producers], environment=row.get('env'),
+                                  staged_input=row.get('staged_input'))
         submissions.append(submission)
     return submissions
 
@@ -820,7 +830,7 @@ def collect_rows(state_dir, *, wait=False):
             flux_jobs.validate_launch(submission, argv=row['argv'], source=identity,
                                       resources=_row_resources(row),
                                       afterok=[p['job_id'] for p in intent['producers']],
-                                      environment=row.get('env'))
+                                      environment=row.get('env'), staged_input=row.get('staged_input'))
             result = asdict(flux_jobs.collect_job(submission, wait=wait))
             result['record_dir'] = str(result['record_dir'])
         except (OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError) as exc:

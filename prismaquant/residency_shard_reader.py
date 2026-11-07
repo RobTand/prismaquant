@@ -60,6 +60,7 @@ hash is of the declared pool file. The declared file's identity fences still
 run; the bytes handed over are the stage's, admitted on the map.
 """
 from __future__ import annotations
+from pathlib import Path
 
 from .mount_facts import MountFacts, find_mount
 
@@ -1005,7 +1006,21 @@ class StagedShardReader:
                     "safetensors publishes no dtype table this reader can read")
             return
         try:
-            self._header, self._base, self._declared_size = _read_shard_header(self._path)
+            if self._strict:
+                if self._resolver is None:
+                    raise refuse_pool_bulk_read(self._declared, 'header-not-staged')
+                self._declared_size = self._resolver.source_size(self._declared)
+                prefix = self._staged_bytes(0, 8)
+                header_bytes = safetensors_prefix_length(
+                    prefix, self._declared_size, max_bytes=MAX_HEADER_BYTES,
+                    short_error='source shard has no staged header length',
+                    range_error='staged shard header length is out of range')
+                self._header = json.loads(self._staged_bytes(8, 8 + header_bytes))
+                if type(self._header) is not dict:
+                    raise ValueError('staged header is not an object')
+                self._base = 8 + header_bytes
+            else:
+                self._header, self._base, self._declared_size = _read_shard_header(self._path)
         except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as error:
             self._header = None
             if self._resolver is not None:
@@ -1140,7 +1155,7 @@ class StagedShardReader:
         try:
             fd, serving = window.open(key)
             info = os.fstat(fd)
-            if info.st_size != entry["bytes"]:
+            if info.st_size != entry.get('object_bytes', entry['bytes']):
                 raise LeaseRefused("lease-open-size-changed", kind="integrity")
         except (OSError, LeaseRefused) as error:
             try:
@@ -1218,7 +1233,9 @@ class StagedShardReader:
             return None
         fd, signature, entry, tier = row[2], row[3], row[4], row[5]
         try:
-            raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
+            raw = _read_span(fd, end - start, entry.get('object_offset', 0) + start - entry["offset"], self._shape)
+            if len(row) > 6:
+                row[6].check_fd(fd)
             if file_stat_signature(os.fstat(fd)) != signature:
                 raise ValueError("changed during its content read")
         except (OSError, ValueError) as error:
@@ -1241,6 +1258,18 @@ class StagedShardReader:
             else:
                 self._resolver.record_stage_range_read(self._declared, end - start)
         return tensor
+
+    def _staged_bytes(self, start, end):
+        row = self._range_for(start, end)
+        if row is None:
+            raise refuse_pool_bulk_read(self._declared, 'header-not-staged')
+        entry = row[4]
+        if entry['bytes'] > MAX_HEADER_BYTES + 8:
+            raise refuse_pool_bulk_read(self._declared, 'header-coverage-must-be-bounded')
+        from .staged_whole_file import read_staged_entry
+        raw = read_staged_entry(self._resolver, Path(self._declared), entry,
+                                label='safetensors-header', max_bytes=MAX_HEADER_BYTES + 8)
+        return raw[start - entry['offset']:end - entry['offset']]
 
 
 def staged_shard_opener(declared, pool_open):
