@@ -423,10 +423,6 @@
    "prismaquant/joint_cost_stage_a.py",
    "prismaquant/tessera_joint_aura.py"
   ],
-  "_is_hex64": [
-   "prismaquant/residency_map.py",
-   "tools/dispatch_joint_quanta.py"
-  ],
   "_is_number": [
    "prismaquant/prismasnap_validation.py",
    "prismaquant/schemas.py"
@@ -579,10 +575,6 @@
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py"
   ],
-  "_refuse": [
-   "prismaquant/joint_stage_b_head.py",
-   "prismaquant/staged_lease.py"
-  ],
   "_reject_duplicate_members": [
    "prismaquant/container_runtime_identity.py",
    "prismaquant/dsv4_campaign_completion.py",
@@ -640,8 +632,7 @@
   ],
   "_sdk": [
    "prismaquant/joint_forward_resume.py",
-   "prismaquant/stage_a_retirement.py",
-   "prismaquant/staged_lease.py"
+   "prismaquant/stage_a_retirement.py"
   ],
   "_seal": [
    "prismaquant/joint_catalog_extension.py",
