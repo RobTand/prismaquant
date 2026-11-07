@@ -23,7 +23,7 @@ import torch
 
 from .file_identity import file_stat_signature
 from .source_read_plan import safetensors_prefix_length
-from .residency_map import RANGE_HIT, RANGE_UNCOVERED, residency_resolver
+from .residency_map import RANGE_HIT, RANGE_UNCOVERED, RANGE_UNDECLARED, residency_resolver
 from .staged_tier_policy import (
     StagedRangeNotLanded,
     active_policy,
