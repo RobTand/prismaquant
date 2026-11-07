@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, parent review of integrated native staged inputs.
+Source: local reader head `176681e27cab45923d348cb27f91844c4a42e040`
+and parent corrections through `b52bd5450`.
+Canceled immutable coverage checks return a conclusive refusal. Native launch
+serialization reuses the digest owners' exact byte profiles; no receipt identity
+or admission policy changes. The shrink-only duplication gates remain intact.
+Parent Flux job `ƒDCd39x4SK` passed 413 targeted tests and 53 subtests with
+24 compile/import checks, then repeated the actual Spark warm, bound staged
+reader and cleanup chain. The previous policy failures, cancellation traceback
+and stale-refusal assertion failures are retained in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit2-parent/`.
+These scoped CPU checks do not qualify GPU work, a full suite or production.
+
 As of: 2026-11-07, unit2 immutable native staged-input reader, parent 635e945e4.
 Source: `prismaquant/{staged_manifest,staged_launch,residency_map,staged_lease,
 residency_shard_reader,staged_whole_file,stage_b_prep_io,io_engine,flux_jobs,
