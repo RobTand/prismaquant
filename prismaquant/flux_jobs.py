@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import subprocess
 from typing import Literal
+from .digests import DIRECT_ASCII_SPACED_LAX
 
 
 _PREFIX = Path('/home/rob/flux-vanilla/0.91.0-0.56.0')
@@ -265,7 +266,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
         command = ['/usr/bin/python3', '-m', 'prismaquant.staged_launch',
-                   json.dumps(staged_input, sort_keys=True), *command]
+                   DIRECT_ASCII_SPACED_LAX.text(staged_input), *command]
     source, profile = _source_identity(checkout), _profile_identity()
     args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
             f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
