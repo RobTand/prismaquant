@@ -29,7 +29,7 @@ def validate_read_contract(binding, filename, *, manifest=None):
     """Former data_manifest intent needs exact scientific entries, not a label."""
     import hashlib
     from .staged_manifest import read_document, MAX_BYTES, path, integer, digest
-    if filename != binding['read_contract_path']:
+    if os.fspath(filename) != binding['read_contract_path']:
         raise ValueError('row scientific manifest path differs from staged launch')
     if manifest is None:
         manifest = load_manifest(binding['path'], binding['sha256'])
