@@ -49,6 +49,8 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   header and exact owned payload, for independently published auxiliary IDs.
 - ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
   ``memoryview``).
+- ``chunks_sha256hex``: caller-ordered byte chunks as one unframed stream,
+  without collecting the chunks in memory.
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
   raises ``UnicodeEncodeError``.
 - ``newline_utf8_bytes`` / ``newline_utf8_sha256``: strings in caller order,
@@ -522,6 +524,14 @@ def git_blob_sha1hex(data: bytes | bytearray | memoryview) -> str:
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def chunks_sha256hex(chunks: Iterable[bytes | bytearray | memoryview]) -> str:
+    """Hash exactly the concatenation while the caller supplies each chunk."""
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def text_sha256hex(text: str) -> str:

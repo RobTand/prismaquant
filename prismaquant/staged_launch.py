@@ -5,8 +5,9 @@ import json
 import os
 from pathlib import Path
 import sys
+from .digests import bytes_sha256hex
 
-from .staged_manifest import (PATH_ENV, SHA_ENV, READ_ENV, load_manifest, publish_json)
+from .staged_manifest import (PATH_ENV, SHA_ENV, READ_ENV, load_staged_manifest, publish_staged_json)
 
 CACHE_HELPER = '/mnt/shared/flux-migration/caching/fluxcache.py'
 SCHEMA = 'prismaquant.staged_launch.v1'
@@ -15,7 +16,7 @@ SCHEMA = 'prismaquant.staged_launch.v1'
 def validate_binding(binding, *, placement=None):
     if not isinstance(binding, dict) or set(binding) != {'schema', 'path', 'sha256', 'read_contract_path', 'read_contract_sha256', 'allowed_tiers'} or binding['schema'] != SCHEMA or binding['allowed_tiers'] != 'ssd':
         raise ValueError('explicit versioned staged launch binding required')
-    manifest = load_manifest(binding['path'], binding['sha256'])
+    manifest = load_staged_manifest(binding['path'], binding['sha256'])
     if manifest.read_contract_sha256 != binding['read_contract_sha256']:
         raise ValueError('launch read contract differs from staged manifest')
     if manifest.lifetime['mode'] == 'host_local_cache' and placement is not None:
@@ -27,14 +28,13 @@ def validate_binding(binding, *, placement=None):
 
 def validate_read_contract(binding, filename, *, manifest=None):
     """Former data_manifest intent needs exact scientific entries, not a label."""
-    import hashlib
     from .staged_manifest import read_document, MAX_BYTES, path, integer, digest
     if os.fspath(filename) != binding['read_contract_path']:
         raise ValueError('row scientific manifest path differs from staged launch')
     if manifest is None:
-        manifest = load_manifest(binding['path'], binding['sha256'])
+        manifest = load_staged_manifest(binding['path'], binding['sha256'])
     raw, _ = read_document(filename, MAX_BYTES)
-    if hashlib.sha256(raw).hexdigest() != manifest.read_contract_sha256:
+    if bytes_sha256hex(raw) != manifest.read_contract_sha256:
         raise ValueError('data manifest digest differs from scientific read contract')
     data = read_contract_document(raw)
     # Only the published finite file/range read contract is qualified here.
@@ -86,7 +86,7 @@ def launch(binding, command):
                        'PRISMAQUANT_STAGED_ALLOWED_TIERS': binding['allowed_tiers']})
     if manifest.lifetime['mode'] == 'host_local_cache':
         members = Path(os.environ['TMPDIR']) / 'staged-members.json'
-        publish_json(members, manifest.members())
+        publish_staged_json(members, manifest.members())
         os.execv('/usr/bin/python3', ['/usr/bin/python3', CACHE_HELPER,
             '--root', manifest.lifetime['root'], 'run-set', '--members', str(members), '--', *command])
     os.execvpe(command[0], command, os.environ)

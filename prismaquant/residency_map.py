@@ -9,7 +9,7 @@ import socket
 import threading
 
 from .staged_manifest import (SCHEMA, PATH_ENV as ENV_VAR, SHA_ENV, READ_ENV,
-    ManifestRefused, load_manifest, read_document, open_regular, signature, decode_document)
+    ManifestRefused, load_staged_manifest, read_document, open_regular, signature, decode_document)
 
 RANGE_HIT, RANGE_UNCOVERED, RANGE_UNDECLARED, RANGE_REFUSED = 'hit', 'uncovered', 'undeclared', 'refused'
 ResidencyMapRefused = ManifestRefused
@@ -25,7 +25,7 @@ def residency_map_key(path, offset=0):
 
 class ResidencyResolver:
     def __init__(self, map_path, *, manifest_sha256, read_contract_sha256=None):
-        self.manifest = load_manifest(map_path, manifest_sha256)
+        self.manifest = load_staged_manifest(map_path, manifest_sha256)
         self._by_source = {}
         self._entries = {}
         for extent in self.manifest.extents:

@@ -11,7 +11,7 @@ import torch
 from safetensors.torch import save
 
 from prismaquant import io_engine, residency_map, residency_shard_reader, stage_b_prep_io
-from prismaquant.staged_manifest import ManifestRefused, load_manifest, publish_json, materialize
+from prismaquant.staged_manifest import ManifestRefused, load_staged_manifest, publish_staged_json, materialize
 from prismaquant.staged_tier_policy import staged_tier_policy_test_context, TierPolicyRefused
 from prismaquant.staged_whole_file import read_staged_entry, read_staged_whole_file
 from staged_native_fixtures import fixture, sha, bind
@@ -114,7 +114,7 @@ def test_manifest_refusal(tmp_path, fault):
     source, data, binding, _ = fixture(tmp_path)
     if fault == 'manifest-digest':
         with pytest.raises(ManifestRefused, match='digest mismatch'):
-            load_manifest(binding['path'], '0' * 64)
+            load_staged_manifest(binding['path'], '0' * 64)
         return
     row = data['entries'][0]
     if fault == 'null-digest': row['object']['sha256'] = None
@@ -125,9 +125,9 @@ def test_manifest_refusal(tmp_path, fault):
     else:
         second = copy.deepcopy(row); second['source']['sha256'] = '0' * 64; data['entries'].append(second)
     target = tmp_path / 'bad.json'
-    digest = publish_json(target, data)
+    digest = publish_staged_json(target, data)
     with pytest.raises(ManifestRefused):
-        load_manifest(target, digest)
+        load_staged_manifest(target, digest)
 
 
 def test_header_and_payload_gaps_refuse(tmp_path, monkeypatch):
@@ -158,7 +158,7 @@ def test_materializer_publishes_actual_hashes_and_no_partial_manifest(tmp_path):
         lifetime={'mode': 'retained_shared_phase', 'namespace': str(dest), 'reader_scopes': ['owned'],
                   'retention': 'until_all_readers_stopped_or_fenced'})
     digest = materialize([{'source': src, 'source_offset': 7, 'length': 12}], **kwargs)
-    manifest = load_manifest(out, digest)
+    manifest = load_staged_manifest(out, digest)
     obj = manifest.extents[0]
     assert Path(obj.object_path).read_bytes() == b'KNOWN-extent'
     assert obj.object_sha256 == sha(b'KNOWN-extent')
@@ -168,6 +168,15 @@ def test_materializer_publishes_actual_hashes_and_no_partial_manifest(tmp_path):
     with pytest.raises(ManifestRefused, match='digest mismatch'):
         materialize([{'source': src, 'source_offset': 0, 'length': 6, 'sha256': '0' * 64}], **kwargs)
     assert not bad.exists() and not list(dest.glob('.extent-*'))
+
+
+def test_offline_copy_hashes_known_multichunk_bytes(tmp_path):
+    source, target = tmp_path / 'source', tmp_path / 'object'
+    source.write_bytes(b'xx123456789yy')
+    with source.open('rb') as incoming, target.open('wb') as outgoing:
+        actual = io_engine.copy_extent(incoming.fileno(), outgoing.fileno(), 2, 9, chunk_bytes=3)
+    assert target.read_bytes() == b'123456789'
+    assert actual == '15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225'
 
 
 def test_window_fork_refusal_and_closed_descriptors(tmp_path, monkeypatch):
@@ -248,7 +257,7 @@ def test_static_launch_checks_never_stat_owner_local_objects(tmp_path, monkeypat
     from prismaquant.staged_launch import validate_binding, validate_read_contract
     source, data, binding, contract = fixture(tmp_path)
     life = data['lifetime'] = {'mode': 'host_local_cache', 'root': '/tmp/flux-vanilla/not-local', 'owner_host': 'sparky'}
-    filename = tmp_path / 'host.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    filename = tmp_path / 'host.json'; binding['path'] = str(filename); binding['sha256'] = publish_staged_json(filename, data)
     assert validate_binding(binding, placement='host:sparky').lifetime == life
     validate_read_contract(binding, contract)
     with pytest.raises(ValueError, match='owner placement'):
@@ -271,14 +280,14 @@ def test_legacy_scientific_manifest_exact_bytes_survive_without_sdk(tmp_path, mo
     wire = gzip.compress((json.dumps(original) + '\n').encode(), mtime=0)
     contract.write_bytes(wire)
     binding['read_contract_sha256'] = data['read_contract_sha256'] = sha(wire)
-    filename = tmp_path / 'legacy-staged.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    filename = tmp_path / 'legacy-staged.json'; binding['path'] = str(filename); binding['sha256'] = publish_staged_json(filename, data)
     validate_binding(binding)
     bind(monkeypatch, binding)
     assert load_sealed_manifest(sha(wire)) == original
     original['entries'][0]['sha256'] = None
     contract.write_bytes(gzip.compress(json.dumps(original).encode(), mtime=0))
     binding['read_contract_sha256'] = data['read_contract_sha256'] = sha(contract.read_bytes())
-    filename = tmp_path / 'null-legacy.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    filename = tmp_path / 'null-legacy.json'; binding['path'] = str(filename); binding['sha256'] = publish_staged_json(filename, data)
     with pytest.raises(ValueError): validate_binding(binding)
 
 
@@ -301,7 +310,7 @@ def test_host_local_map_cannot_be_replaced_by_ambient_context(tmp_path, monkeypa
     source, data, binding, _ = fixture(tmp_path)
     monkeypatch.setattr(residency_map.socket, 'gethostname', lambda: 'dl380g10')
     data['lifetime'] = {'mode': 'host_local_cache', 'root': str(tmp_path / 'cache'), 'owner_host': 'dl380g10'}
-    filename = tmp_path / 'host-manifest.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    filename = tmp_path / 'host-manifest.json'; binding['path'] = str(filename); binding['sha256'] = publish_staged_json(filename, data)
     validate_binding(binding, placement='host:dl380g10')
     monkeypatch.delenv('FLUXCACHE_MAP_FILE', raising=False)
     monkeypatch.setenv('PRISMABUILD_ACTION_KEY', 'a' * 64)
@@ -321,7 +330,7 @@ def test_materializer_reuses_only_verified_identical_publication(tmp_path):
         producer={'source_commit': '1'*40, 'receipt_sha256': '2'*64},
         lifetime={'mode': 'retained_shared_phase', 'namespace': str(dest), 'reader_scopes': ['owned'],
                   'retention': 'until_all_readers_stopped_or_fenced'})
-    manifest = load_manifest(out, digest)
+    manifest = load_staged_manifest(out, digest)
     assert len(manifest.extents) == 2 and len(manifest.members()) == 1
     assert (dest / sha(b'known')).read_bytes() == b'known'
 
@@ -345,9 +354,9 @@ def test_manifest_duplicate_fields_and_symlink_refuse(tmp_path):
     assert duplicate != raw
     filename = tmp_path / 'duplicate.json'; filename.write_bytes(duplicate)
     with pytest.raises(ManifestRefused, match='duplicate'):
-        load_manifest(filename, sha(duplicate))
+        load_staged_manifest(filename, sha(duplicate))
     alias = tmp_path / 'alias.json'; alias.symlink_to(binding['path'])
-    with pytest.raises(OSError): load_manifest(alias, binding['sha256'])
+    with pytest.raises(OSError): load_staged_manifest(alias, binding['sha256'])
 
 
 def test_manifest_object_set_cap_is_finite(tmp_path):
@@ -364,12 +373,12 @@ def test_manifest_object_set_cap_is_finite(tmp_path):
         row['object']['path'] = str(Path(original['object']['path']).with_name(f'object-{i}'))
         entries.append(row)
     data['entries'] = entries[:1024]
-    filename = tmp_path / 'max.json'; digest = publish_json(filename, data)
-    assert len(load_manifest(filename, digest).members()) == 1024
+    filename = tmp_path / 'max.json'; digest = publish_staged_json(filename, data)
+    assert len(load_staged_manifest(filename, digest).members()) == 1024
     data['entries'] = entries
-    filename = tmp_path / 'over.json'; digest = publish_json(filename, data)
+    filename = tmp_path / 'over.json'; digest = publish_staged_json(filename, data)
     with pytest.raises(ManifestRefused, match='1024'):
-        load_manifest(filename, digest)
+        load_staged_manifest(filename, digest)
 
 
 def test_prefetch_threads_share_one_resolver_and_owned_bytes(tmp_path, monkeypatch):

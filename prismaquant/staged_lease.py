@@ -72,14 +72,14 @@ def load_sealed_manifest(bound_manifest_sha256):
     from .staged_launch import read_contract_document
     from .staged_manifest import read_document, MAX_BYTES
     from .residency_map import residency_resolver
-    import hashlib
+    from .digests import bytes_sha256hex
     resolver = residency_resolver()
     filename = os.environ.get('PRISMAQUANT_READ_CONTRACT_PATH')
     if resolver is None or not filename:
         raise ReadsetUnbound('explicit scientific read-contract path required; no PB claim discovery')
     resolver.bind_manifest_sha256(bound_manifest_sha256)
     raw, _ = read_document(filename, MAX_BYTES)
-    if hashlib.sha256(raw).hexdigest() != bound_manifest_sha256:
+    if bytes_sha256hex(raw) != bound_manifest_sha256:
         raise ReadsetUnbound('scientific read-contract digest mismatch')
     return read_contract_document(raw)
 

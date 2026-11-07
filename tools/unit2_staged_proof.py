@@ -4,20 +4,16 @@ Run controller in an admitted Flux job from a clean detached shared checkout.
 All children use flux_jobs' single baseline resource/environment profile.
 """
 from __future__ import annotations
-import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+from prismaquant.digests import bytes_sha256hex as sha
 
 HELPER = '/mnt/shared/flux-migration/caching/fluxcache.py'
 BLOBS = (b'FIRST independently known staged bytes\x00\xff', b'SECOND independent metadata\n')
-
-
-def sha(raw):
-    return hashlib.sha256(raw).hexdigest()
 
 
 def helper(root, *args, ok=True):
@@ -98,7 +94,7 @@ def cleanup(plan):
 
 def controller():
     from prismaquant import tessera_campaign_rows as rows, flux_jobs
-    from prismaquant.staged_manifest import publish_json, SCHEMA
+    from prismaquant.staged_manifest import publish_staged_json, SCHEMA
     out = Path(os.environ['OUT'])
     phase = out / 'phase'; phase.mkdir()
     root = '/tmp/flux-vanilla/' + os.environ['FLUX_JOB_ID'] + '/cache'
@@ -112,14 +108,14 @@ def controller():
         extents.append({'source': {'path': source, 'bytes': len(raw), 'sha256': sha(raw)},
             'object': obj, 'source_offset': 0, 'object_offset': 13, 'length': len(raw), 'sha256': sha(raw)})
     contract = out / 'read-contract.json'
-    read_sha = publish_json(contract, {'schema': 'prismaquant.read_contract.v1', 'entries': [
+    read_sha = publish_staged_json(contract, {'schema': 'prismaquant.read_contract.v1', 'entries': [
         {'path': e['source']['path'], 'offset': 0, 'bytes': e['length'], 'sha256': e['sha256']} for e in extents]})
     manifest = out / 'staged.json'
-    manifest_sha = publish_json(manifest, {'schema': SCHEMA, 'phase_id': 'native-unit2-cpu-fixture',
+    manifest_sha = publish_staged_json(manifest, {'schema': SCHEMA, 'phase_id': 'native-unit2-cpu-fixture',
         'read_contract_sha256': read_sha, 'producer': {'source_commit': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
         'receipt_sha256': sha(b'CPU fixture publisher, no scientific authority')},
         'lifetime': {'mode': 'host_local_cache', 'root': root, 'owner_host': 'sparky'}, 'entries': extents})
-    plan = out / 'plan.json'; publish_json(plan, {'root': root, 'sources': source_paths, 'objects': objects})
+    plan = out / 'plan.json'; publish_staged_json(plan, {'root': root, 'sources': source_paths, 'objects': objects})
     binding = {'schema': 'prismaquant.staged_launch.v1', 'path': str(manifest), 'sha256': manifest_sha,
                'read_contract_path': str(contract), 'read_contract_sha256': read_sha, 'allowed_tiers': 'ssd'}
     checkout = Path.cwd()

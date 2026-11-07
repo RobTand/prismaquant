@@ -278,7 +278,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     intent = {'schema': 'pq.flux.launch.v1', 'source': source, 'profile': profile,
               'resources': asdict(resources), 'afterok': dependencies, 'argv': list(argv),
               'native_argv': args, 'record_dir': str(record_dir),
-              'qualification': 'cpu-executor-only; strict-staging/publication/pilots unqualified'}
+              'qualification': 'cpu-executor-only; finite-staged-v1; publication/pilots unqualified'}
     if staged_input is not None:
         intent['staged_input'] = staged_input
     record_dir.mkdir(parents=True, exist_ok=False)

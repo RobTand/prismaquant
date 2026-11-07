@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ import tempfile
 from types import MappingProxyType
 
 from .file_identity import file_stat_signature as signature
+from .digests import bytes_sha256hex, file_digest_sha256hex, DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.staged_input_manifest.v1'
 PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
@@ -122,9 +122,9 @@ class StagedManifest:
             e.object_sha256: e.object_bytes for e in self.extents}.items())]
 
 
-def load_manifest(filename, sha256):
+def load_staged_manifest(filename, sha256):
     raw, _ = read_document(filename, MAX_BYTES)
-    if hashlib.sha256(raw).hexdigest() != digest(sha256):
+    if bytes_sha256hex(raw) != digest(sha256):
         raise ManifestRefused('staged manifest digest mismatch')
     data = decode_document(raw)
     if not isinstance(data, dict) or set(data) != {'schema', 'read_contract_sha256', 'phase_id', 'producer', 'lifetime', 'entries'} or data['schema'] != SCHEMA:
@@ -189,9 +189,9 @@ def load_manifest(filename, sha256):
                           MappingProxyType(producer), MappingProxyType(life), tuple(extents))
 
 
-def publish_json(filename, data):
+def publish_staged_json(filename, data):
     filename = Path(filename)
-    raw = (json.dumps(data, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    raw = DIRECT_ASCII_LAX.encoded(data) + b'\n'
     fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=filename.parent)
     try:
         with os.fdopen(fd, 'wb') as stream:
@@ -204,7 +204,7 @@ def publish_json(filename, data):
             os.close(directory)
     finally:
         os.unlink(temporary)
-    return hashlib.sha256(raw).hexdigest()
+    return bytes_sha256hex(raw)
 
 
 def materialize(entries, *, destination, manifest_path, read_contract_sha256, phase_id, producer, lifetime):
@@ -245,7 +245,7 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
                 try:
                     first = signature(os.fstat(existing))
                     with os.fdopen(os.dup(existing), 'rb') as stream:
-                        existing_digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                        existing_digest = file_digest_sha256hex(stream)
                     if first[2] != size or existing_digest != actual or signature(os.fstat(existing)) != first:
                         raise ManifestRefused('existing publication conflicts with immutable object')
                 finally:
@@ -266,8 +266,8 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
     fd, temporary = tempfile.mkstemp(prefix='.manifest-', dir=Path(manifest_path).parent)
     os.close(fd); os.unlink(temporary)
     try:
-        sha = publish_json(temporary, data)
-        load_manifest(temporary, sha)
+        sha = publish_staged_json(temporary, data)
+        load_staged_manifest(temporary, sha)
         os.link(temporary, manifest_path)
         directory = os.open(Path(manifest_path).parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
