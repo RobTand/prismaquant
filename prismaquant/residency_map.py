@@ -188,22 +188,26 @@ class ResidencyResolver:
 
     def close(self):
         self._require_owner()
-        if self._windows:
-            raise RuntimeError('cannot close staged resolver with live reader windows; join readers first')
-        for fd, _ in self._fds.values():
-            os.close(fd)
-        for fd in self._pins:
-            os.close(fd)
-        self._pins.clear()
-        self._fds.clear()
-        self._closed = True
+        with self._lock:
+            self._require_owner()
+            if self._windows:
+                raise RuntimeError('cannot close staged resolver with live reader windows; join readers first')
+            for fd, _ in self._fds.values():
+                os.close(fd)
+            for fd in self._pins:
+                os.close(fd)
+            self._pins.clear()
+            self._fds.clear()
+            self._closed = True
 
     def retain_window(self):
+        self._require_owner()
         with self._lock:
             self._require_owner()
             self._windows += 1
 
     def release_window(self):
+        self._require_owner()
         with self._lock:
             self._windows -= 1
 
@@ -243,16 +247,21 @@ class ResidencyResolver:
 
 
 _RESOLVER = None
+_RESOLVER_LOCK = threading.RLock()
+_PROCESS_PID = os.getpid()
 
 
 def residency_resolver():
     global _RESOLVER
-    if _RESOLVER is None:
-        filename = os.environ.get(ENV_VAR)
-        if filename:
-            _RESOLVER = ResidencyResolver(filename, manifest_sha256=os.environ.get(SHA_ENV),
-                                          read_contract_sha256=os.environ.get(READ_ENV))
-    return _RESOLVER
+    if os.getpid() != _PROCESS_PID:
+        raise RuntimeError('global staged resolver from a forked child is refused')
+    with _RESOLVER_LOCK:
+        if _RESOLVER is None:
+            filename = os.environ.get(ENV_VAR)
+            if filename:
+                _RESOLVER = ResidencyResolver(filename, manifest_sha256=os.environ.get(SHA_ENV),
+                                              read_contract_sha256=os.environ.get(READ_ENV))
+        return _RESOLVER
 
 
 def bind_residency_manifest(digest):
@@ -273,6 +282,9 @@ def residency_report():
 
 def reset_residency_resolver_for_tests():
     global _RESOLVER
-    if _RESOLVER is not None and not _RESOLVER._closed:
-        _RESOLVER.close()
-    _RESOLVER = None
+    if os.getpid() != _PROCESS_PID:
+        raise RuntimeError('global staged resolver reset from a forked child is refused')
+    with _RESOLVER_LOCK:
+        if _RESOLVER is not None and not _RESOLVER._closed:
+            _RESOLVER.close()
+        _RESOLVER = None

@@ -181,6 +181,12 @@ def test_window_fork_refusal_and_closed_descriptors(tmp_path, monkeypatch):
             pid = os.fork()
             if pid == 0:
                 try:
+                    residency_map.residency_resolver()
+                except RuntimeError:
+                    pass
+                else:
+                    os._exit(8)
+                try:
                     window.open(key)
                 except RuntimeError:
                     os._exit(0)
@@ -364,3 +370,39 @@ def test_manifest_object_set_cap_is_finite(tmp_path):
     filename = tmp_path / 'over.json'; digest = publish_json(filename, data)
     with pytest.raises(ManifestRefused, match='1024'):
         load_manifest(filename, digest)
+
+
+def test_prefetch_threads_share_one_resolver_and_owned_bytes(tmp_path, monkeypatch):
+    raw = b'concurrent-known-bytes'
+    source, _, binding, _ = fixture(tmp_path, raw)
+    bind(monkeypatch, binding)
+    residency_map.reset_residency_resolver_for_tests()
+    start = threading.Barrier(2)
+    results, errors = [], []
+    def read():
+        try:
+            start.wait(30)
+            owner = residency_map.residency_resolver()
+            results.append((owner, read_staged_whole_file(source, sha(raw), label='prefetch')))
+        except BaseException as exc:
+            errors.append(exc)
+    with staged_tier_policy_test_context('ssd'):
+        threads = [threading.Thread(target=read) for _ in range(2)]
+        for thread in threads: thread.start()
+        for thread in threads:
+            thread.join(30)
+            assert not thread.is_alive()
+    assert not errors and len(results) == 2
+    assert results[0][0] is results[1][0]
+    assert [value for _, value in results] == [raw, raw]
+
+
+def test_io_missing_binding_refuses_even_when_canonical_bytes_exist(tmp_path, monkeypatch):
+    source, _, binding, _ = fixture(tmp_path)
+    bind(monkeypatch, binding)
+    canonical = tmp_path / 'undeclared-canonical'
+    canonical.write_bytes(b'canonical-must-not-be-read')
+    with staged_tier_policy_test_context('ssd'):
+        with pytest.raises(TierPolicyRefused, match='staged-not-serving'):
+            io_engine.load_file(canonical, 128, binding=sha(b'canonical-must-not-be-read'),
+                                decode=lambda *args: forbidden())
