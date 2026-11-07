@@ -327,14 +327,21 @@ def test_only_the_flag_binds_a_publication(tmp_path):
 
 
 def test_the_generator_refuses_the_flag_outside_an_action_before_writing(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, capsys):
     import regenerate_joint_quanta as regen
 
     monkeypatch.delenv("PRISMABUILD_ACTION_KEY", raising=False)
     io.reset_preparation_publications_for_tests()
-    campaign, receipt_path, _spans = prep_fixture(tmp_path)
     metadata = tmp_path / "metadata-generation"
-    assert regen.main(generator_args(tmp_path, campaign, receipt_path, metadata)
-                      + ["--produced-output"]) == 3
+    # Unavailable inputs prove the owning boundary refuses before source
+    # preparation as well as before output. No PB fixture is needed to ask
+    # for a contract native execution cannot authenticate.
+    argv = []
+    for flag in ('--plan', '--prepared', '--parent-manifest', '--derivation'):
+        argv += [flag, str(tmp_path / 'unavailable-input')]
+        if flag != '--derivation':
+            argv += [flag + '-sha256', 'a' * 64]
+    assert regen.main(argv + ['--metadata-root', str(metadata), '--produced-output']) == 3
+    assert 'unit4 native preparation publication authority' in capsys.readouterr().err
     assert not metadata.exists() or not any(
         path.is_file() for path in metadata.rglob("*"))

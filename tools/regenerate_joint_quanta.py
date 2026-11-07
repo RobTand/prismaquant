@@ -806,12 +806,9 @@ def main(argv=None) -> int:
                     help="with --data-manifest-sha256: the staged tiers a "
                          "read may come from (default ram,ssd)")
     ap.add_argument("--produced-output", action="store_true",
-                    help="PQ #1070: commit every file this run creates under "
-                         "--metadata-root as a PrismaBuild produced output of "
-                         "this admitted action. The action must declare the "
-                         "write-only template tools/stage_b_preparation_"
-                         "submission.py writes; refuses before the first "
-                         "write otherwise")
+                    help="request authenticated produced outputs; native "
+                         "publication authority is held for unit4, so this "
+                         "refuses before input preparation or writes")
     ap.add_argument("--metadata-root", type=Path, default=None,
                     help="PQ #884: explicit immutable control-metadata "
                          "generation root. Slice manifests land at "
@@ -903,6 +900,13 @@ def main(argv=None) -> int:
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
     args = ap.parse_args(argv)
+    if args.produced_output:
+        from prismaquant.stage_b_prep_io import (
+            PreparationPublicationRefused, bind_preparation_publication)
+        try:
+            bind_preparation_publication(args.metadata_root, required=True)
+        except PreparationPublicationRefused as exc:
+            return _fail(str(exc))
     if args.head_slices and not args.executable_readsets:
         return _fail("--head-slices needs --executable-readsets")
     if args.checkpoint_incoming_mode is not None and not args.executable_readsets:
@@ -1423,9 +1427,7 @@ def main(argv=None) -> int:
     from prismaquant.stage_b_prep_io import (
         PreparationPublicationRefused, bind_preparation_publication, publish_files)
     try:
-        # With --produced-output, inside the admitted PrismaBuild action, the
-        # files are produced outputs committed at their origin (PQ #1070);
-        # without it they are published directly, as before.
+        # The unqualified produced-output request refused at argument entry.
         publication = bind_preparation_publication(
             metadata_root, required=args.produced_output)
         # Publication order is the recoverability contract: every
