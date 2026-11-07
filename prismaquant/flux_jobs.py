@@ -290,7 +290,8 @@ def load_submission(record_dir: Path) -> FluxSubmission:
     intent = json.loads((record_dir / 'launch.json').read_bytes())
     receipt = json.loads((record_dir / 'submission.json').read_bytes())
     launch_sha = _digest(_json_bytes(intent))
-    if (intent.get('schema') != 'pq.flux.launch.v1' or
+    if (not isinstance(intent, dict) or not isinstance(receipt, dict) or
+            intent.get('schema') != 'pq.flux.launch.v1' or
             receipt.get('schema') != 'pq.flux.submission.v1' or
             receipt.get('launch_sha256') != launch_sha or intent.get('record_dir') != str(record_dir)):
         raise ValueError('invalid or modified Flux launch/submission receipt')
@@ -415,7 +416,14 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
 
 def cancel_job(submission: FluxSubmission) -> ExecutionResult:
     """Cancel the saved native ID and collect its actual terminal verdict."""
-    _validate_submission(submission)
+    try:
+        _validate_submission(submission)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        result = ExecutionResult('unknown', submission.job_id, submission.record_dir,
+                                 query_error=f'cancel identity: {type(exc).__name__}: {exc}')
+        _write_json(submission.record_dir / 'cancel-result.json',
+                    {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
+        return result
     errors = []
     _query(submission, 'cancel', ['cancel', submission.job_id], errors)
     result = collect_job(submission)

@@ -128,6 +128,28 @@ class FluxJobsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             jobs.load_submission(self.record)
 
+    def test_cancellation_query_failure_never_becomes_payload_failure(self):
+        submission, _ = self.submit_fixture()
+        with patch.object(jobs, '_run', return_value=self.completed('', 1, 'fixture transport unavailable')) as run:
+            result = jobs.cancel_job(submission)
+        self.assertEqual((result.status, result.payload_exit), ('unknown', None))
+        self.assertIn('cancel identity:', result.query_error)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [['getattr', 'broker.starttime']])
+
+    def test_instance_replacement_refuses_cancellation_of_reused_id(self):
+        submission, _ = self.submit_fixture()
+        with patch.object(jobs, '_run', return_value=self.completed('new-generation\n')) as run:
+            result = jobs.cancel_job(submission)
+        self.assertEqual(result.status, 'unknown')
+        self.assertIn('instance changed', result.query_error)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [['getattr', 'broker.starttime']])
+
+    def test_malformed_receipt_is_a_boundary_refusal(self):
+        self.submit_fixture()
+        (self.record / 'launch.json').write_text('[]')
+        with self.assertRaises(ValueError):
+            jobs.load_submission(self.record)
+
     def collect_fixture(self, *, finish=0, result=1, exception=None, malformed=None,
                         clean=True, allocated=True, status_rc=None):
         submission, _ = self.submit_fixture()
