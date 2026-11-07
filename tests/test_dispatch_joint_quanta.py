@@ -1670,6 +1670,46 @@ def test_scratch_io_2798_stage_a_keeps_spool_only_outer_envelope(tmp_path, campa
         stage_a_argv(manifest, campaign)
 
 
+@pytest.mark.parametrize("age,accepted", [
+    pytest.param(3600, True, id="integer"),
+    pytest.param(0.5, True, id="fractional"),
+    pytest.param(10**308, True, id="large-finite-integer"),
+    pytest.param(10**309, False, id="overflowing-integer"),
+    pytest.param(10**400, False, id="reported-overflow"),
+])
+def test_scratch_io_freshness_requires_float_representability(tmp_path, age, accepted):
+    import dispatch_joint_quanta as joint_dispatch
+    from tools import tessera_campaign_container as runner
+
+    declared = json.loads(joint_dispatch.SPEC_PATH.read_text())
+    root, maximum = runner.COTANGENT_SCRATCH_ENV
+    declared["container"]["mounts"].append({
+        "source": str(tmp_path), "target": str(tmp_path), "readonly": False})
+    declared["env"].update({root: str(tmp_path), maximum: "1024"})
+    wire = json.dumps({
+        "schema": "prismabuild.local_scratch_io.v1",
+        "write_bytes": 1, "read_bytes": 0,
+        "profile_contract": "prismabuild.local_scratch_io.buffered_seq_sync.v1",
+        "max_profile_age_s": age,
+    })
+    declared["env"]["PRISMABUILD_LOCAL_SCRATCH_IO"] = wire
+    path = tmp_path / "spec.json"
+    path.write_text(json.dumps(declared))
+    if accepted:
+        projected = runner.local_scratch_request_environment(declared)
+        assert projected[runner.LOCAL_SCRATCH_IO_ENV] == wire
+        joint_dispatch._container_wrap(
+            path, ["true"], progress=[("head", joint_dispatch.HEAD_PROGRESS_GRACE_S)])
+    else:
+        message = r"PRISMABUILD_LOCAL_SCRATCH_IO: max_profile_age_s.*positive finite"
+        with pytest.raises(ValueError, match=message):
+            runner.local_scratch_request_environment(declared)
+        with pytest.raises(joint_dispatch.DispatchRefused, match=message):
+            joint_dispatch._container_wrap(
+                path, ["true"], progress=[("head", joint_dispatch.HEAD_PROGRESS_GRACE_S)])
+    assert json.loads(path.read_text()) == declared
+
+
 # The remaining scratch tests predate the optional traffic declaration.
 
 
