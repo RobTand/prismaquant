@@ -9331,6 +9331,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
+        ":prismaquant/digests",
         ":prismaquant/io_engine_cycle",
     ],
 )
@@ -13786,6 +13787,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
         ":prismaquant/flux_jobs",
         ":prismaquant/io_engine_cycle",
     ],
