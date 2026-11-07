@@ -207,7 +207,7 @@ class StagedPreparationReads:
     ``--data-manifest-sha256``. Every read of a declared input goes through
     the process residency resolver, bound to that manifest digest, and a
     lifetime-pinned lease window (``staged_whole_file.read_staged_entry``).
-    The bytes read must hash to the map entry's digest, which PrismaBuild
+    The bytes read must hash to the immutable extent digest, which its publisher
     derives from the sealed manifest's declared digest, and to the caller's
     own pinned digest when it has one. A path the stage does not hold
     refuses. It is never read from the pool.
@@ -304,7 +304,7 @@ def bind_staged_reads(*, manifest_sha256: str, allowed_tiers: str,
     submitted with (``stage_b_preparation_submission`` seals it into the
     command line). This activates the strict tier policy with
     ``allowed_tiers`` and binds the process residency resolver to the
-    manifest. A process without ``PRISMABUILD_RESIDENCY_MAP`` was not
+    manifest. A process without an explicit staged-manifest path was not
     launched with ``--residency stage`` and refuses. A second call with
     the same digest adds its roots to the bound reads; another digest refuses.
     """

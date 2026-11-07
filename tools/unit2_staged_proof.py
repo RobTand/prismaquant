@@ -41,6 +41,26 @@ def consume(plan):
     from prismaquant.staged_whole_file import read_staged_whole_file
     resolver = residency_map.residency_resolver()
     assert resolver is not None and len(resolver._pins) == 2
+    original_map = os.environ['FLUXCACHE_MAP_FILE']
+    partial_map = Path(os.environ['TMPDIR']) / 'incomplete-map.json'
+    mapping = json.loads(Path(original_map).read_text())
+    mapping.pop(next(iter(mapping)))
+    partial_map.write_text(json.dumps(mapping))
+    os.environ['FLUXCACHE_MAP_FILE'] = str(partial_map)
+    try:
+        from prismaquant.staged_manifest import ManifestRefused
+        try:
+            residency_map.ResidencyResolver(resolver.manifest.filename, manifest_sha256=resolver.manifest.sha256)
+        except ManifestRefused as exc:
+            assert 'exact bound object set' in str(exc)
+        else:
+            raise AssertionError('incomplete inherited map was admitted')
+    finally:
+        os.environ['FLUXCACHE_MAP_FILE'] = original_map
+    no_pins = subprocess.run(['/usr/bin/python3', '-c',
+        'from prismaquant.residency_map import residency_resolver; residency_resolver()'],
+        capture_output=True, text=True)
+    assert no_pins.returncode != 0 and 'inherited run-set pin missing' in no_pins.stderr
     for filename, expected in zip(plan['sources'], BLOBS):
         assert read_staged_whole_file(Path(filename), sha(expected), label='native-proof') == expected
     entries = [io_engine.ReadEntry(str(i), filename, len(raw), len(raw), len(raw), sha(raw),
@@ -59,6 +79,8 @@ def consume(plan):
     assert not any(name == 'prismabuild' or name.startswith('prismabuild.') for name in sys.modules)
     report = {'known_bytes': [sha(raw) for raw in BLOBS], 'object_offsets': [13, 13],
               'pins': sorted(pinned), 'cleaner_exit': result.returncode, 'pb_imports': [],
+              'incomplete_inherited_map_refused': True,
+              'missing_inherited_pins_refused': True,
               'host': __import__('socket').gethostname(), 'report': resolver.report()}
     resolver.close()
     Path(os.environ['OUT'], 'reader-proof.json').write_text(json.dumps(report, indent=2))
@@ -98,7 +120,7 @@ def controller():
         'lifetime': {'mode': 'host_local_cache', 'root': root, 'owner_host': 'sparky'}, 'entries': extents})
     plan = out / 'plan.json'; publish_json(plan, {'root': root, 'sources': source_paths, 'objects': objects})
     binding = {'schema': 'prismaquant.staged_launch.v1', 'path': str(manifest), 'sha256': manifest_sha,
-               'read_contract_sha256': read_sha, 'allowed_tiers': 'ssd'}
+               'read_contract_path': str(contract), 'read_contract_sha256': read_sha, 'allowed_tiers': 'ssd'}
     checkout = Path.cwd()
     def row(mode, staged=False):
         value = {'argv': ['/usr/bin/python3','-m','tools.unit2_staged_proof',mode,str(plan)],

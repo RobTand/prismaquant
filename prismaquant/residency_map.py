@@ -1,7 +1,6 @@
 """One immutable staged-input resolver for every existing IO consumer."""
 from __future__ import annotations
 
-import hashlib
 import bisect
 import json
 import os
@@ -38,6 +37,7 @@ class ResidencyResolver:
         self._fds = {}
         self._pins = []
         self._closed = False
+        self._windows = 0
         self._stats = dict(bytes_from_stage=0, bytes_from_ram=0, bytes_from_pool=0,
                            hits=0, range_hits=0, misses=0, range_misses=0)
         self._fallbacks, self._serving = [], []
@@ -188,6 +188,8 @@ class ResidencyResolver:
 
     def close(self):
         self._require_owner()
+        if self._windows:
+            raise RuntimeError('cannot close staged resolver with live reader windows; join readers first')
         for fd, _ in self._fds.values():
             os.close(fd)
         for fd in self._pins:
@@ -195,6 +197,15 @@ class ResidencyResolver:
         self._pins.clear()
         self._fds.clear()
         self._closed = True
+
+    def retain_window(self):
+        with self._lock:
+            self._require_owner()
+            self._windows += 1
+
+    def release_window(self):
+        with self._lock:
+            self._windows -= 1
 
     def record_fallback(self, declared, reason):
         self._fallbacks.append({'path': str(declared), 'reason': reason})

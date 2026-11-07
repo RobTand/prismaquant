@@ -36,7 +36,7 @@ def fixture(tmp_path, payload=b'known-fixture\x00\xff', *, ranges=None):
     filename = tmp_path / 'staged.json'
     digest = publish_json(filename, data)
     binding = {'schema': 'prismaquant.staged_launch.v1', 'path': str(filename), 'sha256': digest,
-               'read_contract_sha256': contract_sha, 'allowed_tiers': 'ssd'}
+               'read_contract_path': str(contract), 'read_contract_sha256': contract_sha, 'allowed_tiers': 'ssd'}
     return source, data, binding, contract
 
 
@@ -46,5 +46,6 @@ def bind(monkeypatch, binding):
     monkeypatch.setenv(residency_map.ENV_VAR, binding['path'])
     monkeypatch.setenv('PRISMAQUANT_STAGED_MANIFEST_SHA256', binding['sha256'])
     monkeypatch.setenv('PRISMAQUANT_READ_CONTRACT_SHA256', binding['read_contract_sha256'])
+    monkeypatch.setenv('PRISMAQUANT_READ_CONTRACT_PATH', binding['read_contract_path'])
     residency_map.reset_residency_resolver_for_tests()
     return residency_map.residency_resolver()

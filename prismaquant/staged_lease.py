@@ -69,7 +69,19 @@ def resolve_sealed_readset(*, env=None):
 
 
 def load_sealed_manifest(bound_manifest_sha256):
-    return _authority_hold()
+    from .staged_launch import read_contract_document
+    from .staged_manifest import read_document, MAX_BYTES
+    from .residency_map import residency_resolver
+    import hashlib
+    resolver = residency_resolver()
+    filename = os.environ.get('PRISMAQUANT_READ_CONTRACT_PATH')
+    if resolver is None or not filename:
+        raise ReadsetUnbound('explicit scientific read-contract path required; no PB claim discovery')
+    resolver.bind_manifest_sha256(bound_manifest_sha256)
+    raw, _ = read_document(filename, MAX_BYTES)
+    if hashlib.sha256(raw).hexdigest() != bound_manifest_sha256:
+        raise ReadsetUnbound('scientific read-contract digest mismatch')
+    return read_contract_document(raw)
 
 
 def load_sealed_readset(bound_manifest_sha256):
@@ -104,6 +116,7 @@ class LeaseWindow:
         if self._entered or self._exited:
             raise RuntimeError('LeaseWindow cannot re-enter or nest')
         self.resolver._require_owner()
+        self.resolver.retain_window()
         self._entered = True
         return self
 
@@ -154,6 +167,7 @@ class LeaseWindow:
             finally:
                 self.close_fd(fd)
         self._exited = True
+        self.resolver.release_window()
         if failure:
             raise failure
         return False

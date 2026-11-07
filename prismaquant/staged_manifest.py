@@ -227,7 +227,18 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
                 raise ManifestRefused('source digest mismatch')
             os.fchmod(temp_fd, 0o444); os.fsync(temp_fd)
             target = destination / actual
-            os.link(temporary, target)
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                existing = open_regular(str(target))
+                try:
+                    first = signature(os.fstat(existing))
+                    with os.fdopen(os.dup(existing), 'rb') as stream:
+                        existing_digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                    if first[2] != size or existing_digest != actual or signature(os.fstat(existing)) != first:
+                        raise ManifestRefused('existing publication conflicts with immutable object')
+                finally:
+                    os.close(existing)
             directory = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(directory)

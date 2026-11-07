@@ -250,3 +250,71 @@ def test_static_launch_checks_never_stat_owner_local_objects(tmp_path, monkeypat
     binding['read_contract_sha256'] = '0' * 64
     with pytest.raises(ValueError, match='read contract'):
         validate_binding(binding)
+
+
+def test_legacy_scientific_manifest_exact_bytes_survive_without_sdk(tmp_path, monkeypatch):
+    import gzip
+    from prismaquant.staged_launch import validate_binding
+    from prismaquant.staged_lease import load_sealed_manifest
+    source, data, binding, contract = fixture(tmp_path)
+    row = data['entries'][0]
+    original = {'schema': 'prismaquant.prismabuild.data_manifest.v1',
+        'produced_by': {'tool': 'independent-publisher'}, 'mount_prefix': str(tmp_path),
+        'entries': [{'path': str(source), 'offset': 0, 'bytes': row['length'], 'sha256': row['sha256']}],
+        'entry_count': 1, 'total_bytes': row['length'], 'annotations': {'scientific_input': 'retained-exactly'}}
+    wire = gzip.compress((json.dumps(original) + '\n').encode(), mtime=0)
+    contract.write_bytes(wire)
+    binding['read_contract_sha256'] = data['read_contract_sha256'] = sha(wire)
+    filename = tmp_path / 'legacy-staged.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    validate_binding(binding)
+    bind(monkeypatch, binding)
+    assert load_sealed_manifest(sha(wire)) == original
+    original['entries'][0]['sha256'] = None
+    contract.write_bytes(gzip.compress(json.dumps(original).encode(), mtime=0))
+    binding['read_contract_sha256'] = data['read_contract_sha256'] = sha(contract.read_bytes())
+    filename = tmp_path / 'null-legacy.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    with pytest.raises(ValueError): validate_binding(binding)
+
+
+def test_close_requires_completed_windows(tmp_path, monkeypatch):
+    from prismaquant.staged_lease import acquire_entry_window
+    source, _, binding, _ = fixture(tmp_path)
+    resolver = bind(monkeypatch, binding)
+    with staged_tier_policy_test_context('ssd'):
+        window, key = acquire_entry_window(resolver, source, resolver.staged_read(source))
+        with window:
+            fd, _ = window.open(key)
+            with pytest.raises(RuntimeError, match='join readers first'): resolver.close()
+            assert os.pread(fd, 5, 13) == b'known'
+    resolver.close()
+    assert resolver._closed and resolver._fds == {} and resolver._pins == []
+
+
+def test_host_local_map_cannot_be_replaced_by_ambient_context(tmp_path, monkeypatch):
+    from prismaquant.staged_launch import validate_binding
+    source, data, binding, _ = fixture(tmp_path)
+    monkeypatch.setattr(residency_map.socket, 'gethostname', lambda: 'dl380g10')
+    data['lifetime'] = {'mode': 'host_local_cache', 'root': str(tmp_path / 'cache'), 'owner_host': 'dl380g10'}
+    filename = tmp_path / 'host-manifest.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    validate_binding(binding, placement='host:dl380g10')
+    monkeypatch.delenv('FLUXCACHE_MAP_FILE', raising=False)
+    monkeypatch.setenv('PRISMABUILD_ACTION_KEY', 'a' * 64)
+    monkeypatch.setenv('PRISMABUILD_READER_HELPER_ROOT', str(tmp_path))
+    with pytest.raises(ManifestRefused, match='inherited map/pins'):
+        residency_map.ResidencyResolver(filename, manifest_sha256=binding['sha256'])
+
+
+def test_materializer_reuses_only_verified_identical_publication(tmp_path):
+    source = tmp_path / 'source'; source.write_bytes(b'known-known')
+    dest = tmp_path / 'phase'; dest.mkdir()
+    src = {'path': str(source), 'bytes': 11, 'sha256': sha(b'known-known')}
+    out = tmp_path / 'manifest.json'
+    digest = materialize([{'source': src, 'source_offset': 0, 'length': 5},
+                          {'source': src, 'source_offset': 6, 'length': 5}],
+        destination=dest, manifest_path=out, read_contract_sha256='3'*64, phase_id='dedup',
+        producer={'source_commit': '1'*40, 'receipt_sha256': '2'*64},
+        lifetime={'mode': 'retained_shared_phase', 'namespace': str(dest), 'reader_scopes': ['owned'],
+                  'retention': 'until_all_readers_stopped_or_fenced'})
+    manifest = load_manifest(out, digest)
+    assert len(manifest.extents) == 2 and len(manifest.members()) == 1
+    assert (dest / sha(b'known')).read_bytes() == b'known'
