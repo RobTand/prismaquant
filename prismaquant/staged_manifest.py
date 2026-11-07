@@ -9,6 +9,9 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+from types import MappingProxyType
+
+from .file_identity import file_stat_signature as signature
 
 SCHEMA = 'prismaquant.staged_input_manifest.v1'
 PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
@@ -38,10 +41,6 @@ def integer(value, *, positive=False):
     if type(value) is not int or not (1 if positive else 0) <= value < (1 << 63):
         raise ManifestRefused('invalid bounded byte offset/length')
     return value
-
-
-def signature(info):
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
 def open_regular(filename):
@@ -173,7 +172,10 @@ def load_manifest(filename, sha256):
     for a, b in zip(extents, extents[1:]):
         if a.source_path == b.source_path and a.source_offset + a.length > b.source_offset:
             raise ManifestRefused('overlapping source extents')
-    return StagedManifest(str(filename), sha256, data['read_contract_sha256'], data['phase_id'], producer, life, tuple(extents))
+    if 'reader_scopes' in life:
+        life = {**life, 'reader_scopes': tuple(life['reader_scopes'])}
+    return StagedManifest(str(filename), sha256, data['read_contract_sha256'], data['phase_id'],
+                          MappingProxyType(producer), MappingProxyType(life), tuple(extents))
 
 
 def publish_json(filename, data):
@@ -206,6 +208,7 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
     rows = []
     for row in entries:
         src = row['source']
+        path(src['path']); integer(src['bytes'], positive=True); digest(src['sha256'])
         fd = open_regular(src['path'])
         temp_fd, temporary = tempfile.mkstemp(prefix='.extent-', dir=destination)
         try:
@@ -220,6 +223,8 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
                 raise ManifestRefused('source changed during materialization')
             if row.get('sha256') is not None and row['sha256'] != actual:
                 raise ManifestRefused('source extent digest mismatch')
+            if start == 0 and size == src['bytes'] and actual != src['sha256']:
+                raise ManifestRefused('source digest mismatch')
             os.fchmod(temp_fd, 0o444); os.fsync(temp_fd)
             target = destination / actual
             os.link(temporary, target)

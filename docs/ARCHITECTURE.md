@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, unit2 immutable native staged-input reader, parent 635e945e4.
+Source: `prismaquant/{staged_manifest,staged_launch,residency_map,staged_lease,
+residency_shard_reader,staged_whole_file,stage_b_prep_io,io_engine,flux_jobs,
+tessera_campaign_rows}.py` and direct CPU regression/proof tools.
+Native rows may bind an explicit `prismaquant.staged_launch.v1` path, SHA256,
+scientific read-contract SHA256 and finite SSD policy. Source/read bindings are
+retained and rechecked on resume and collection. Scheduling remains in the
+single fv1-model baseline profile. Arbitrary environments, GPU/container,
+progress-stall, pilot and authenticated publication requirements still refuse.
+The immutable `prismaquant.staged_input_manifest.v1` separates source identity,
+extent digest and object identity. An extent reads at object_offset + requested
+source offset - source_offset. Strict shard headers require bounded declared
+staged coverage; byte zero of a range object is never treated as a source header.
+Existing whole-file, shard, IO stream and owned-buffer consumers use the same
+resolver and descriptor windows. The reader has no PB SDK, dynamic maps,
+landing polls or claim-context injection. Offline materialization computes
+actual extent/object digests while copying on the IO caller thread, fsyncs and
+publishes with exclusive atomic links. Launch does not rehash entire sources.
+
+Host-local rows run the external canonical `fluxcache.py run-set` on the owner,
+with 1..1024 unique digest/length members. Worker-only opens validate the
+inherited object map and shared pin descriptors, retaining pin duplicates and
+object descriptors through reader lifetime. Static coordinator checks never
+stat Spark-local objects. The helper's same-owner host-local trust boundary
+applies; it is not adversarial-owner authentication. Shared phases have no
+retirement operation in the reader and remain retained until every named scope
+is stopped or fenced. Unknown scopes and native clean do not authorize deletion.
+No namespace, mount, quota, RAM or export reservation is provisioned here.
+
+Legacy source-stat requirements refuse at the IO boundary until source authority
+migrates. Historical SDK pin literals remain for unit4 build-time consumers.
+Source-generation, selected-result/pilot, produced-output and quality-prefill
+contracts remain explicit unit4 holds; removing the reader SDK completes none
+of those authority contracts. Tessera remains unit3. Serving pins, formats,
+ship gates and numerical behavior are unchanged, and GGUF is untouched.
+Admitted CPU evidence is recorded in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit2-reader/`; it supplies no
+GPU-feeding, RDMA throughput, numerical, serving or production qualification.
+
 As of: 2026-11-07, native joint, Stage A split and capture-chain caller slice.
 Source: `tools/dispatch_{joint_quanta,stage_a_split,capture_chain}.py`,
 `prismaquant/{joint_quantum_row,tessera_campaign_rows}.py` and direct caller tests,

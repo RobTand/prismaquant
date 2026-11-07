@@ -355,6 +355,8 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     from .staged_tier_policy import policy_is_active
     if staged is not None and '_resolver' in staged:
         from .staged_whole_file import read_staged_entry
+        if declared_signature is not None:
+            raise StagedReadRefused('legacy canonical stat requirement needs native source-authority migration')
         started = time.monotonic()
         owner = staged['_resolver']
         raw = read_staged_entry(owner, path, staged, label='io-engine', sealed=sealed,

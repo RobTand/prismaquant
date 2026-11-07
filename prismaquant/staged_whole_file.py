@@ -1,12 +1,7 @@
-"""Read one whole declared file off the stage, never the pool.
+"""Read declared extents into owned buffers under native staged windows.
 
-The whole-file counterpart of the range readers: a small input a PB action
-declared in its data manifest (a calibration draw, a sealed control slice, a
-pickled cache index) is opened through the residency resolver's
-lifetime-pinned window -- RAM first where offered and allowed, SSD otherwise
--- and read once into an owned buffer under sealed size and change fences.
-Extracted from ``calibration_data`` (PQ #1010) so every head input a Stage B
-quantum declares is served the way the calibration draw already was.
+Canonical sources are never opened by this reader. Every whole-entry read
+checks its declared digest, object bounds and descriptor identity.
 """
 from __future__ import annotations
 

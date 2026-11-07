@@ -18,7 +18,11 @@ from staged_native_fixtures import fixture, sha, bind
 
 
 @pytest.fixture(autouse=True)
-def reset():
+def reset(monkeypatch):
+    from prismaquant import staged_tier_policy
+    monkeypatch.setattr(staged_tier_policy, '_ACTIVE', None)
+    monkeypatch.setattr(staged_tier_policy, '_OWNER', None)
+    monkeypatch.setattr(staged_tier_policy, '_STACK', [])
     residency_map.reset_residency_resolver_for_tests()
     stage_b_prep_io.reset_staged_reads_for_tests()
     yield
@@ -35,6 +39,7 @@ def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatc
     raw = b'independently-known\x00\xff\n'
     source, data, binding, _ = fixture(tmp_path, raw)
     resolver = bind(monkeypatch, binding)
+    reads = stage_b_prep_io.bind_staged_reads(manifest_sha256=binding['read_contract_sha256'], allowed_tiers='ssd')
     with staged_tier_policy_test_context('ssd'):
         assert read_staged_whole_file(source, sha(raw), label='fixture') == raw
         got, receipt, _ = io_engine.read_file(source, len(raw), staged=resolver.staged_read(source))
@@ -42,7 +47,6 @@ def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatc
         value, _ = io_engine.load_file(source, len(raw), binding=sha(raw),
                                       decode=lambda raw, receipt, staged: (raw, None))
         assert value == raw
-        reads = stage_b_prep_io.bind_staged_reads(manifest_sha256=binding['read_contract_sha256'], allowed_tiers='ssd')
         assert reads.whole(source, where='metadata') == raw
         sealed = read_staged_entry(resolver, source, resolver.staged_read(source), label='sealed', sealed=True)
         try:
@@ -185,3 +189,64 @@ def test_window_fork_refusal_and_closed_descriptors(tmp_path, monkeypatch):
             assert os.pread(fd, 5, 13) == b'known'
         with pytest.raises(OSError): os.fstat(fd)
     assert not resolver._closed
+
+
+def test_staged_io_stream_closes_after_worker_completion(tmp_path, monkeypatch):
+    from prismaquant.staged_lease import LeaseWindow
+    raw = b'publication-boundary-oracle'
+    source, _, binding, _ = fixture(tmp_path, raw)
+    bind(monkeypatch, binding)
+    entered, release, finished, closing = (threading.Event() for _ in range(4))
+    real_read, real_exit = os.preadv, LeaseWindow.__exit__
+    fd_seen = []
+
+    def read(fd, buffers, offset):
+        fd_seen.append(fd)
+        entered.set()
+        assert release.wait(30)
+        got = real_read(fd, buffers, offset)
+        finished.set()
+        return got
+
+    def exited(window, *args):
+        assert finished.is_set()
+        return real_exit(window, *args)
+
+    monkeypatch.setattr(os, 'preadv', read)
+    monkeypatch.setattr(LeaseWindow, '__exit__', exited)
+    entry = io_engine.ReadEntry('owned', str(source), len(raw), len(raw), len(raw), sha(raw),
+        lambda buffer, receipt, staged: (bytes(buffer), None), 'group')
+    with staged_tier_policy_test_context('ssd'):
+        stream = io_engine.read_stream([entry], budget=io_engine.FixedBudget(buffer_bytes=4096, headroom=4096))
+        assert entered.wait(30)
+        result, errors = [], []
+        def consume():
+            try:
+                result.extend(item.value for item in stream.take('group'))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                closing.set()
+                stream.close()
+        thread = threading.Thread(target=consume)
+        thread.start()
+        release.set()
+        thread.join(30)
+        assert not thread.is_alive() and closing.is_set() and not errors
+        assert result == [raw]
+        for fd in fd_seen:
+            with pytest.raises(OSError): os.fstat(fd)
+
+
+def test_static_launch_checks_never_stat_owner_local_objects(tmp_path, monkeypatch):
+    from prismaquant.staged_launch import validate_binding, validate_read_contract
+    source, data, binding, contract = fixture(tmp_path)
+    life = data['lifetime'] = {'mode': 'host_local_cache', 'root': '/tmp/flux-vanilla/not-local', 'owner_host': 'sparky'}
+    filename = tmp_path / 'host.json'; binding['path'] = str(filename); binding['sha256'] = publish_json(filename, data)
+    assert validate_binding(binding, placement='host:sparky').lifetime == life
+    validate_read_contract(binding, contract)
+    with pytest.raises(ValueError, match='owner placement'):
+        validate_binding(binding, placement='portable')
+    binding['read_contract_sha256'] = '0' * 64
+    with pytest.raises(ValueError, match='read contract'):
+        validate_binding(binding)

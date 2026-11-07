@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import bisect
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,12 @@ def residency_map_key(path, offset=0):
 class ResidencyResolver:
     def __init__(self, map_path, *, manifest_sha256, read_contract_sha256=None):
         self.manifest = load_manifest(map_path, manifest_sha256)
+        self._by_source = {}
+        self._entries = {}
+        for extent in self.manifest.extents:
+            self._by_source.setdefault(extent.source_path, []).append(extent)
+            self._entries[(extent.source_path, extent.source_offset)] = extent
+        self._starts = {name: [e.source_offset for e in rows] for name, rows in self._by_source.items()}
         self._owner = os.getpid()
         self._lock = threading.RLock()
         self._fds = {}
@@ -38,7 +45,12 @@ class ResidencyResolver:
         self._map_signature = None
         if read_contract_sha256 is not None:
             self.bind_manifest_sha256(read_contract_sha256)
-        self._bind_lifetime()
+        try:
+            self._bind_lifetime()
+        except BaseException:
+            for fd in self._pins:
+                os.close(fd)
+            raise
 
     def _require_owner(self):
         if os.getpid() != self._owner:
@@ -91,7 +103,7 @@ class ResidencyResolver:
             raise ManifestRefused('scientific read contract differs from staged manifest')
 
     def source_size(self, declared):
-        rows = [e for e in self.manifest.extents if e.source_path == os.fspath(declared)]
+        rows = self._by_source.get(os.fspath(declared))
         if not rows:
             raise StagedReadRefused('source is not declared')
         return rows[0].source_bytes
@@ -105,9 +117,11 @@ class ResidencyResolver:
         self._require_owner()
         if type(start) is not int or type(end) is not int or not 0 <= start < end:
             raise ValueError('read span must be nonempty and bounded')
-        for e in self.manifest.extents:
-            if e.source_path != os.fspath(declared):
-                continue
+        name = os.fspath(declared)
+        rows = self._by_source.get(name, ())
+        index = bisect.bisect_right(self._starts.get(name, ()), start) - 1
+        if index >= 0:
+            e = rows[index]
             if declared_size is not None and declared_size != e.source_bytes:
                 raise StagedReadRefused('source length differs from manifest')
             if e.source_offset <= start and end <= e.source_offset + e.length:
@@ -120,6 +134,8 @@ class ResidencyResolver:
         return self.staged_range_outcome(declared, start, end, declared_size=declared_size)[0]
 
     def staged_read(self, declared, *, offset=0, expected_sha256=None):
+        if not self.stages(declared):
+            return None
         size = self.source_size(declared)
         entry = self.staged_range(declared, offset, size)
         if entry is None or offset != 0 or entry['offset'] != 0 or entry['bytes'] != size:
@@ -131,7 +147,7 @@ class ResidencyResolver:
         return entry
 
     def stages(self, declared):
-        return any(e.source_path == os.fspath(declared) for e in self.manifest.extents)
+        return os.fspath(declared) in self._by_source
 
     def declared_readset(self):
         result = {}
@@ -143,7 +159,8 @@ class ResidencyResolver:
         self._require_owner()
         key = entry['object_sha256']
         # Only resolver-issued entries can open through this owner.
-        if entry.get('_resolver') is not self or not any(self._answer(e) == entry for e in self.manifest.extents):
+        extent = self._entries.get((entry.get('declared_path'), entry.get('offset')))
+        if entry.get('_resolver') is not self or extent is None or self._answer(extent) != entry:
             raise StagedReadRefused('entry differs from immutable manifest')
         with self._lock:
             if key not in self._fds:

@@ -65,33 +65,25 @@ def clear_injected_sdk_for_tests():
 
 
 def resolve_sealed_readset(*, env=None):
-    from .residency_map import residency_resolver
-    resolver = residency_resolver()
-    if resolver is None:
-        raise ReadsetUnbound('explicit immutable staged manifest required')
-    return resolver.manifest.read_contract_sha256
+    raise ReadsetUnbound('unit4 legacy claim/CAS launch authority is unqualified; use explicit staged manifest')
 
 
 def load_sealed_manifest(bound_manifest_sha256):
+    return _authority_hold()
+
+
+def load_sealed_readset(bound_manifest_sha256):
     from .residency_map import residency_resolver
     resolver = residency_resolver()
     if resolver is None:
         raise ReadsetUnbound('explicit immutable staged manifest required')
     resolver.bind_manifest_sha256(bound_manifest_sha256)
-    return {'entries': [{'path': e.source_path, 'offset': e.source_offset,
-                         'bytes': e.length, 'sha256': e.sha256}
-                        for e in resolver.manifest.extents]}
-
-
-def load_sealed_readset(bound_manifest_sha256):
-    from .residency_map import residency_resolver
-    load_sealed_manifest(bound_manifest_sha256)
-    return residency_resolver().declared_readset()
+    return resolver.declared_readset()
 
 
 def load_sealed_read_order(bound_manifest_sha256):
-    return [(e['path'], e['offset'], e['offset'] + e['bytes'])
-            for e in load_sealed_manifest(bound_manifest_sha256)['entries']]
+    return [(path, start, end) for path, spans in load_sealed_readset(bound_manifest_sha256).items()
+            for start, end in spans]
 
 
 class LeaseWindow:

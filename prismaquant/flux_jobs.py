@@ -324,6 +324,9 @@ def _validate_submission(submission):
     if load_submission(submission.record_dir) != submission:
         raise ValueError('submission does not match saved launch and ID')
     intent = json.loads((submission.record_dir / 'launch.json').read_bytes())
+    if intent.get('staged_input') is not None:
+        from .staged_launch import validate_binding
+        validate_binding(intent['staged_input'], placement=intent['resources']['placement'])
     if intent['profile']['uri'] != _URI or intent['profile']['broker_starttime'] != _checked(['getattr', 'broker.starttime']).strip():
         raise RuntimeError('Flux instance changed; saved job identity cannot be assumed')
 
