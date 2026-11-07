@@ -16,7 +16,7 @@ from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import (
     TierPolicyRefused, activate_staged_tier_policy,
 )
-from prismaquant.staged_manifest import materialize, publish_json
+from prismaquant.staged_manifest import materialize, publish_staged_json
 from staged_native_fixtures import bind
 
 pytestmark = pytest.mark.own_process
@@ -74,7 +74,7 @@ def _deny_pool_opens(monkeypatch, root, *, names=(
 def _activate(tmp_path, monkeypatch, manifest, *, skip=(), corrupt=()):
     root = tmp_path / 'native-staged'; root.mkdir()
     contract = root / 'read-contract.json'
-    read_sha = publish_json(contract, {'schema': 'prismaquant.read_contract.v1', 'entries': manifest['entries']})
+    read_sha = publish_staged_json(contract, {'schema': 'prismaquant.read_contract.v1', 'entries': manifest['entries']})
     entries = []
     for entry in manifest['entries']:
         if entry['path'] in skip:
