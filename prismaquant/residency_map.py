@@ -9,7 +9,7 @@ import socket
 import threading
 
 from .staged_manifest import (SCHEMA, PATH_ENV as ENV_VAR, SHA_ENV, READ_ENV,
-    ManifestRefused, load_manifest, read_document, open_regular, signature)
+    ManifestRefused, load_manifest, read_document, open_regular, signature, decode_document)
 
 RANGE_HIT, RANGE_UNCOVERED, RANGE_UNDECLARED, RANGE_REFUSED = 'hit', 'uncovered', 'undeclared', 'refused'
 ResidencyMapRefused = ManifestRefused
@@ -67,7 +67,7 @@ class ResidencyResolver:
             if not filename:
                 raise ManifestRefused('host-local input requires canonical run-set inherited map/pins')
             raw, self._map_signature = read_document(filename, 256 << 10)
-            mapping = json.loads(raw)
+            mapping = decode_document(raw)
             required = {m['key'] for m in self.manifest.members()}
             if not isinstance(mapping, dict) or set(mapping) != required:
                 raise ManifestRefused('inherited map must cover the exact bound object set')

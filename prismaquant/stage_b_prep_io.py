@@ -1,35 +1,8 @@
-"""Stage B preparation as a PrismaBuild action: its reads and its outputs (PQ #1070).
+"""Stage B input preparation and retained output-authority boundaries.
 
-``tools/prepare_extended_joint_quanta.py`` and the generator it runs,
-``tools/regenerate_joint_quanta.py``, read the gzip parent manifest, the
-production pickle, the head walk's inputs and the source checkpoint's
-safetensors headers, and write the Stage B metadata generation: records,
-slices, manifests and the launch recipe. Before #1070 none of those reads
-was declared and every write went straight to the pool.
-
-This module gives both halves a PrismaBuild shape:
-
-* **Reads.** :func:`preparation_read_entries` lists what the preparation
-  reads as data-manifest entries, and :func:`preparation_read_manifest`
-  seals them. ``pbrun --data-manifest`` attaches the manifest, so the reads
-  are declared before the action is claimed. With the tools'
-  ``--data-manifest-sha256`` flag, :func:`bind_staged_reads` makes every
-  declared read come from PrismaBuild's stage through the residency reader,
-  its bytes checked against the entry's digest, and refuses a read the stage
-  does not hold instead of reading the pool (PQ #1092). Without the flag the
-  reads are plain file reads, as before.
-* **Writes.** :func:`build_preparation_template` is the write-only
-  produced-output template (#912) over the metadata root, submitted with
-  ``pbrun --produced-output-template``. With the tools' ``--produced-output``
-  flag, inside the admitted action, :func:`publish_files` files one prewrite
-  for the files a group creates, writes them first-writer as before, and
-  commits them at their origin (``produced_output.commit_origin_batch``).
-  Without the flag it writes exactly as before.
-
-What stays as it was: every output keeps its bytes and its path, a file
-already present with the same bytes is left alone, and one with other bytes
-still refuses. A file this action did not create belongs to the action that
-did, so only created files enter this action's batches.
+Immutable staged inputs use the existing resolver and whole-file reader.
+Read-set/template builders retain their scientific wire formats. Native
+produced-output authentication remains an explicit unit4 hold.
 """
 from __future__ import annotations
 
@@ -201,26 +174,11 @@ class PreparationReadRefused(ValueError):
 
 
 class StagedPreparationReads:
-    """This process's strict reads: the stage, or a refusal.
+    """Strict whole-file and header-prefix reads through the existing resolver.
 
-    Bound once per process by :func:`bind_staged_reads`, from the tools'
-    ``--data-manifest-sha256``. Every read of a declared input goes through
-    the process residency resolver, bound to that manifest digest, and a
-    lifetime-pinned lease window (``staged_whole_file.read_staged_entry``).
-    The bytes read must hash to the immutable extent digest, which its publisher
-    derives from the sealed manifest's declared digest, and to the caller's
-    own pinned digest when it has one. A path the stage does not hold
-    refuses. It is never read from the pool.
-
-    ``own_outputs`` are the roots this action writes (the metadata root). A
-    file under one was written by this run or by an earlier run of the same
-    generation. It is not a manifest input, so it is read where it is.
-
-    Not routed yet: the Stage B head walk
-    (``tessera_joint_aura.load_measured_anchor_input``, run by the
-    generator's ``--head-slices``) opens its inputs itself. Those reads still
-    come from the pool under this binding until PQ #1082 routes them. That
-    exemption is named here and in ``docs/ARCHITECTURE.md``, not silent.
+    Every declared input is read from an immutable staged extent and checked
+    against its digest. Own outputs retain their existing local read path.
+    Source-generation and produced-output authority remain separate unit4 work.
     """
 
     def __init__(self, resolver, *, manifest_sha256: str, own_outputs=()):
@@ -494,49 +452,10 @@ _BOUND: dict[str, PreparationPublication] = {}
 def bind_preparation_publication(metadata_root: str | os.PathLike | None, *,
                                  required: bool,
                                  env: Mapping[str, str] | None = None):
-    """This action's preparation publication, or None when not asked for.
-
-    ``required`` is the tools' ``--produced-output`` flag, which the
-    submission's command line carries. Without it the preparation writes as
-    before, wherever it runs: a test shard is a PrismaBuild action too, and
-    its launch context names no produced-output template. With it the
-    process must be an admitted action (``PRISMABUILD_ACTION_KEY``), its
-    declared template must be the write-only preparation template, and the
-    template's output prefix must be ``metadata_root``; anything else
-    refuses before the first write. Bound once per process: the preparation
-    and the generator it runs share it.
-    """
+    """Refuse unqualified native publication before consulting any context."""
     if not required:
         return None
-    source = dict(os.environ) if env is None else dict(env)
-    owner = source.get("PRISMABUILD_ACTION_KEY")
-    if not owner:
-        raise PreparationPublicationRefused(
-            "--produced-output needs an admitted PrismaBuild action: "
-            "PRISMABUILD_ACTION_KEY is unset")
-    if metadata_root is None:
-        raise PreparationPublicationRefused(
-            "--produced-output writes under --metadata-root, the prefix the "
-            "produced-output template declares")
-    root = os.path.normpath(os.path.abspath(os.fspath(metadata_root)))
-    bound = _BOUND.get(owner)
-    if bound is None:
-        from .stage_a_produced_output import (
-            BoundaryProducedBindingError, BoundaryProducedPublication)
-        try:
-            publication = BoundaryProducedPublication.bind_from_admitted_owner(
-                slot=PREPARATION_SLOT, env=source)
-        except BoundaryProducedBindingError as exc:
-            raise PreparationPublicationRefused(
-                f"this preparation is an admitted PrismaBuild action ({owner[:12]}) "
-                f"and cannot bind its produced output: {exc}") from exc
-        bound = PreparationPublication(publication)
-        _BOUND[owner] = bound
-    if os.path.realpath(bound.output_prefix) != os.path.realpath(root):
-        raise PreparationPublicationRefused(
-            f"the produced-output template declares {bound.output_prefix}, but "
-            f"this preparation writes under {root}")
-    return bound
+    raise PreparationPublicationRefused('unit4 native preparation publication authority is unqualified')
 
 
 def reset_preparation_publications_for_tests() -> None:

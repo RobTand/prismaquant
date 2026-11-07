@@ -325,30 +325,11 @@ class _StrictSliceProxy:
 
 
 class StagedShardReader:
-    """A ``safe_open`` handle whose payload comes off the stage when it can.
+    """Existing safe_open interface over immutable staged extents.
 
-    Drop-in at the ``_source_safe_open`` seam, including through
-    ``source_authentication.safe_open(opener, path, **kwargs)``, which calls the
-    opener with ``/proc/self/fd/<fd>`` rather than the declared path. The
-    declared path travels in the closure ``staged_shard_opener`` builds; the
-    handed path is what is opened and what the header is read from, and the two
-    are the same file.
-
-    Under the active allowed-tier policy no pool ``safe_open`` handle is
-    constructed at all — no pool mmap merely for header. Keys, metadata,
-    shapes and dtypes come from the existing bounded header reader
-    (``_read_shard_header``); payload comes from staged ranges or refuses.
-
-    Under active allowed-tier policy, concurrency is threads, never fork:
-    payload and lifecycle operations
-    (``get_tensor``, ``get_slice``, ``__enter__``, ``__exit__``) reject
-    inherited handle operations in a forked child, so a child cannot
-    drive reads through state the parent's release retires. ``keys``/
-    ``metadata`` stay available: stateless bounded-header metadata with
-    no retained descriptor. Raw descriptor escape past these operations
-    is unsupported (not policed here): a forked child must not perform
-    I/O on any inherited descriptor or mapping and should ``_exit``
-    without it.
+    Strict headers and payload both require declared coverage. Descriptors
+    remain in windows through the reader lifetime; tensors own their buffers.
+    Forked operations refuse. Threads share the owning reader lifetime.
     """
 
     def __init__(self, pool_open, path, declared, resolver, kwargs):
@@ -562,24 +543,7 @@ class StagedShardReader:
         return self._base + begin, self._base + end, dtype, tuple(shape)
 
     def _range_for(self, start, end):
-        """The bound staged range covering ``[start, end)``, or None.
-
-        Bound ranges are held open for the reader's life, so a layer's several
-        hundred tensors cost one resolver lookup and one open per staged range
-        rather than one per tensor.
-
-        Under the active allowed-tier policy the range is pinned for the
-        reader's life: one lifetime window per staged entry (never per
-        tensor), payload read through the held descriptor, the SDK's own
-        serving record registered at the successful actual open, and the
-        exact ref released after the bound descriptors close. A RAM leg
-        needs RAM-mover covers the composed map does not carry, so it
-        refuses fast and the SSD copy acquires honestly with its own
-        material and lifetime. A typed retiring refusal may select another
-        checked overlap through its own lease; other refusals propagate,
-        never becoming pool reads. Inactive policy keeps the legacy
-        stage-only open order.
-        """
+        """Retain a checked descriptor window per covering immutable extent."""
         for row in self._bound:
             if row[0] <= start and end <= row[1]:
                 return row
@@ -675,8 +639,7 @@ class StagedShardReader:
             reason = f"staged range is unreadable: {error.strerror}"
             self._resolver.record_fallback(self._declared, reason)
             raise refuse_pool_bulk_read(self._declared, reason)
-        # The open fence passed on a held descriptor: the SDK's own
-        # serving record is registered at this successful actual open.
+        # Record the actual held-descriptor open after its identity fence.
         tier = window.serving_tier or "stage"
         self._resolver.record_serving_tier(
             self._declared, tier,

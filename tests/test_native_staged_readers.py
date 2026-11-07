@@ -318,3 +318,49 @@ def test_materializer_reuses_only_verified_identical_publication(tmp_path):
     manifest = load_manifest(out, digest)
     assert len(manifest.extents) == 2 and len(manifest.members()) == 1
     assert (dest / sha(b'known')).read_bytes() == b'known'
+
+
+def test_source_result_and_publication_authority_cannot_use_ambient_pb_context(tmp_path, monkeypatch):
+    from prismaquant import staged_lease
+    monkeypatch.setenv('PRISMABUILD_ACTION_KEY', 'a'*64)
+    monkeypatch.setenv('PRISMABUILD_READER_HELPER_ROOT', str(tmp_path))
+    for operation in (staged_lease.client_sdk, staged_lease.resolve_context):
+        with pytest.raises(staged_lease.LeaseRefused, match='unit4 native'):
+            operation()
+    with pytest.raises(stage_b_prep_io.PreparationPublicationRefused, match='unit4 native'):
+        stage_b_prep_io.bind_preparation_publication(tmp_path, required=True)
+    assert stage_b_prep_io.bind_preparation_publication(tmp_path, required=False) is None
+
+
+def test_manifest_duplicate_fields_and_symlink_refuse(tmp_path):
+    _, _, binding, _ = fixture(tmp_path)
+    raw = Path(binding['path']).read_bytes()
+    duplicate = raw.replace(b'"source_offset":0', b'"source_offset":0,"source_offset":0')
+    assert duplicate != raw
+    filename = tmp_path / 'duplicate.json'; filename.write_bytes(duplicate)
+    with pytest.raises(ManifestRefused, match='duplicate'):
+        load_manifest(filename, sha(duplicate))
+    alias = tmp_path / 'alias.json'; alias.symlink_to(binding['path'])
+    with pytest.raises(OSError): load_manifest(alias, binding['sha256'])
+
+
+def test_manifest_object_set_cap_is_finite(tmp_path):
+    _, data, binding, _ = fixture(tmp_path)
+    original = data['entries'][0]
+    entries = []
+    for i in range(1025):
+        row = copy.deepcopy(original)
+        row['source']['bytes'] = 1025
+        row['source_offset'] = i
+        row['length'] = row['object']['bytes'] = 1
+        row['object_offset'] = 0
+        row['object']['sha256'] = f'{i:064x}'
+        row['object']['path'] = str(Path(original['object']['path']).with_name(f'object-{i}'))
+        entries.append(row)
+    data['entries'] = entries[:1024]
+    filename = tmp_path / 'max.json'; digest = publish_json(filename, data)
+    assert len(load_manifest(filename, digest).members()) == 1024
+    data['entries'] = entries
+    filename = tmp_path / 'over.json'; digest = publish_json(filename, data)
+    with pytest.raises(ManifestRefused, match='1024'):
+        load_manifest(filename, digest)

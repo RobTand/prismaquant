@@ -360,7 +360,7 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
         started = time.monotonic()
         owner = staged['_resolver']
         raw = read_staged_entry(owner, path, staged, label='io-engine', sealed=sealed,
-                                max_bytes=limit)
+                                max_bytes=limit, lease=lease)
         if timing is not None:
             timing['read_s'] = time.monotonic() - started
         receipt = {'path': str(path), 'bytes': len(raw), 'sha256': staged['sha256'],
@@ -559,7 +559,7 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
             if policy_is_active():
                 raise refuse_pool_bulk_read(str(path), str(refusal))
         else:
-            if resolver is not None:
+            if resolver is not None and '_resolver' not in staged:
                 if receipt.get("serving_tier") == "ram":
                     resolver.record_ram_read(path, receipt["bytes"])
                 else:

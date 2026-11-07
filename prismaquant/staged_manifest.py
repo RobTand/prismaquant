@@ -25,6 +25,17 @@ class ManifestRefused(ValueError):
     pass
 
 
+def decode_document(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ManifestRefused('duplicate document fields')
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique)
+
+
 def digest(value):
     if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
         raise ManifestRefused('immutable identity requires lowercase SHA256')
@@ -115,7 +126,7 @@ def load_manifest(filename, sha256):
     raw, _ = read_document(filename, MAX_BYTES)
     if hashlib.sha256(raw).hexdigest() != digest(sha256):
         raise ManifestRefused('staged manifest digest mismatch')
-    data = json.loads(raw)
+    data = decode_document(raw)
     if not isinstance(data, dict) or set(data) != {'schema', 'read_contract_sha256', 'phase_id', 'producer', 'lifetime', 'entries'} or data['schema'] != SCHEMA:
         raise ManifestRefused('unsupported staged manifest schema/fields')
     digest(data['read_contract_sha256'])

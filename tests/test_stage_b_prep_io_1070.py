@@ -318,11 +318,11 @@ def test_publish_files_without_a_publication_writes_as_before(tmp_path):
 def test_only_the_flag_binds_a_publication(tmp_path):
     root = tmp_path / "m"
     action = {"PRISMABUILD_ACTION_KEY": "a" * 64}
-    # A test shard is an admitted action too: no flag, no binding.
+    # Ambient executor context never authenticates native publication.
     assert io.bind_preparation_publication(root, required=False, env=action) is None
-    with pytest.raises(io.PreparationPublicationRefused, match="PRISMABUILD_ACTION_KEY"):
+    with pytest.raises(io.PreparationPublicationRefused, match="unit4 native preparation publication authority"):
         io.bind_preparation_publication(root, required=True, env={})
-    with pytest.raises(io.PreparationPublicationRefused, match="--metadata-root"):
+    with pytest.raises(io.PreparationPublicationRefused, match="unit4 native preparation publication authority"):
         io.bind_preparation_publication(None, required=True, env=action)
 
 

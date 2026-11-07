@@ -76,6 +76,7 @@ def consume(plan):
     assert pinned == {obj['sha256'] for obj in plan['objects']}, result.stdout
     assert all((Path(plan['root']) / 'objects' / key).exists() for key in pinned)
     assert resolver.report()['bytes_from_pool'] == 0
+    assert resolver.report()['bytes_from_stage'] == 136
     assert not any(name == 'prismabuild' or name.startswith('prismabuild.') for name in sys.modules)
     report = {'known_bytes': [sha(raw) for raw in BLOBS], 'object_offsets': [13, 13],
               'pins': sorted(pinned), 'cleaner_exit': result.returncode, 'pb_imports': [],

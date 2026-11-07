@@ -64,13 +64,13 @@ def validate_read_contract(binding, filename, *, manifest=None):
 def read_contract_document(raw):
     import gzip
     import io
-    from .staged_manifest import MAX_BYTES
+    from .staged_manifest import MAX_BYTES, decode_document
     if raw.startswith(b'\x1f\x8b'):
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
             raw = stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise ValueError('scientific read contract exceeds decompressed bound')
-    value = json.loads(raw)
+    value = decode_document(raw)
     if not isinstance(value, dict) or not isinstance(value.get('entries'), list) or not value['entries']:
         raise ValueError('scientific read contract must declare nonempty entries')
     return value
