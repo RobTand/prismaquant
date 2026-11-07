@@ -391,6 +391,11 @@ def local_scratch_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
+def local_scratch_request_environment(spec: dict) -> dict:
+    """Project only sealed spec capacities into the outer admission envelope."""
+    return local_scratch_environment(spec, spec.get("env", {}))
+
+
 def _forwarded_local_scratch_environment(spec: dict, environ) -> dict:
     """Forward every registered pair, never the outer admission control."""
     forwarded = local_scratch_environment(spec, environ)
