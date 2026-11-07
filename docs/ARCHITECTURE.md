@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, native campaign receipt review correction.
+Source: `prismaquant/flux_jobs.py`, `prismaquant/tessera_campaign_rows.py`
+and their boundary tests, based on `eadef29d96679b231016655409ea4f91765211a4`.
+Saved native launches are rechecked against complete placement, effective
+allowlisted environment, source, command, resources and dependency intent at
+resume and collection. A changed manifest cannot reuse another execution's
+success to pass the independent scientific merge gate. Production holds and
+the CPU-only qualification scope below remain in force.
+Flux review job `ƒCEzciD3ao` passed 387 tests, 53 subtests, 22 compile checks
+and the real caller lifecycle proof. The preceding failed regression run is
+retained. Review evidence is in `evidence/unit1-campaign/PARENT-REVIEW.md`
+under the shared migration directory.
+
 As of: 2026-11-07, native campaign and Tessera-fleet callers, unit 1 slice 2.
 Source: `prismaquant/{flux_jobs,tessera_campaign_rows}.py`,
 `tools/dispatch_tessera_campaign.py`, `tools/tessera_fleet/` and their direct

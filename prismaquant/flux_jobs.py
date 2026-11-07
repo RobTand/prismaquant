@@ -322,6 +322,21 @@ def validate_dependency(submission: FluxSubmission):
     _validate_submission(submission)
 
 
+def validate_launch(submission: FluxSubmission, *, argv, source, resources,
+                    afterok=(), environment=None):
+    """Bind application intent to every saved execution setting on resume/merge."""
+    if load_submission(submission.record_dir) != submission:
+        raise ValueError('submission differs from saved launch and ID')
+    launch = json.loads((submission.record_dir / 'launch.json').read_bytes())
+    env = _environment(submission.record_dir, environment)
+    prefix = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
+              f'--resources-shape={_shape(resources)}']
+    if (launch['argv'] != list(argv) or launch['source'] != source
+            or launch['resources'] != asdict(resources) or launch['afterok'] != list(afterok)
+            or launch['native_argv'][:len(prefix)] != prefix):
+        raise ValueError('saved execution differs from application intent')
+
+
 def _query(submission, name, args, errors, *, required=True, timeout=30):
     try:
         result = _run(args, timeout=timeout)

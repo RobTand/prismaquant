@@ -121,6 +121,43 @@ class NativeRowsTests(unittest.TestCase):
                 self.assertEqual(status.main(['--workspace', temporary]), status.EXIT_NOTHING)
                 collect.assert_not_called()
 
+    def test_collect_rejects_placement_drift_before_reading_native_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            row = self.row(tags=['gb10'])
+            identity = {'checkout': '/mnt/shared/source', 'commit': 'a' * 40}
+            (state / 'manifest.json').write_text(json.dumps({'schema': rows.NATIVE_ROWS_SCHEMA,
+                'rows': [row], 'sources': [identity], 'producers': []}))
+            record = state / 'rows' / '00000'
+            record.mkdir(parents=True)
+            (record / 'launch.json').write_text(json.dumps({'argv': ['/bin/true'],
+                'source': identity, 'resources': {'cores': 1, 'memory_gib': 1, 'gpus': 0,
+                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [], 'native_argv': []}))
+            submission = jobs.FluxSubmission('123', record, 'fixture')
+            with patch.object(jobs, 'load_submission', return_value=submission), \
+                    patch.object(jobs, 'collect_job') as collect:
+                result = rows.collect_rows(state)
+                self.assertEqual(result[0]['status'], 'unknown')
+                self.assertIn('application intent', result[0]['query_error'])
+                collect.assert_not_called()
+
+    def test_malformed_row_does_not_hide_the_next_saved_job(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            identity = {'checkout': '/mnt/shared/source', 'commit': 'a' * 40}
+            (state / 'manifest.json').write_text(json.dumps({'schema': rows.NATIVE_ROWS_SCHEMA,
+                'rows': [self.row(), self.row()], 'sources': [{}, identity], 'producers': []}))
+            first = jobs.FluxSubmission('123', state / 'rows' / '00000', 'first')
+            second = jobs.FluxSubmission('456', state / 'rows' / '00001', 'second')
+            with patch.object(jobs, 'load_submission', side_effect=[first, second]), \
+                    patch.object(jobs, 'validate_launch'), \
+                    patch.object(jobs, 'collect_job', return_value=jobs.ExecutionResult(
+                        'succeeded', second.job_id, second.record_dir, 0)) as collect:
+                result = rows.collect_rows(state)
+                self.assertEqual([(r['job_id'], r['status']) for r in result],
+                                 [('123', 'unknown'), ('456', 'succeeded')])
+                collect.assert_called_once_with(second, wait=False)
+
     def test_read_manifest_is_immutable_even_when_execution_refuses(self):
         with tempfile.TemporaryDirectory() as temporary:
             manifest = Path(temporary) / 'read-manifest.json'

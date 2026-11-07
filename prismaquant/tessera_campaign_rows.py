@@ -701,9 +701,24 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
 NATIVE_ROWS_SCHEMA = 'pq.tessera.native-rows.v1'
 
 
+def _row_resources(row):
+    from prismaquant.flux_jobs import FluxResources
+    demand = row['demand']
+    if set(demand) - {'cpu', 'mem_gb', 'gpu'}:
+        raise ValueError('unsupported resource demand')
+    tags = row.get('tags', [])
+    if not isinstance(tags, list) or len(tags) > 1:
+        raise ValueError('native baseline accepts one explicit placement constraint')
+    placement = tags[0] if tags else 'portable'
+    if placement in {'sparky', 'sparklina', 'dl380g10'}:
+        placement = 'host:' + placement
+    return FluxResources(demand['cpu'], demand['mem_gb'], demand.get('gpu', 0),
+                         row['timeout_s'], placement)
+
+
 def validate_row(row):
     """Admit one CPU row without dropping scientific or execution requirements."""
-    from prismaquant.flux_jobs import FluxResources, validate_job
+    from prismaquant.flux_jobs import validate_job
     allowed = {'argv', 'cwd', 'demand', 'env', 'tags', 'retry_safe', 'timeout_s',
                'progress_phases', 'container_images', 'data_manifest', 'residency',
                'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot'}
@@ -718,17 +733,7 @@ def validate_row(row):
         raise ValueError('container/device admission is unqualified')
     if row.get('priority', 0) != 0:
         raise ValueError('queue priority mapping is unqualified')
-    demand = row['demand']
-    if set(demand) - {'cpu', 'mem_gb', 'gpu'}:
-        raise ValueError('unsupported resource demand')
-    tags = row.get('tags', [])
-    if not isinstance(tags, list) or len(tags) > 1:
-        raise ValueError('native baseline accepts one explicit placement constraint')
-    placement = tags[0] if tags else 'portable'
-    if placement in {'sparky', 'sparklina', 'dl380g10'}:
-        placement = 'host:' + placement
-    resources = FluxResources(demand['cpu'], demand['mem_gb'], demand.get('gpu', 0),
-                              row['timeout_s'], placement)
+    resources = _row_resources(row)
     source = Path(row['cwd']).resolve()
     if not source.is_relative_to('/mnt/shared'):
         raise ValueError('payload source must be shared on every eligible worker')
@@ -748,7 +753,6 @@ def submit_rows(rows, state_dir, *, afterok=()):
     name adoption, stage scheduler or historical PB record is consulted.
     Dependencies are saved FluxSubmission objects, never discovered by name.
     """
-    from dataclasses import asdict
     import os
     from prismaquant import flux_jobs
     state = Path(state_dir).resolve()
@@ -794,11 +798,8 @@ def submit_rows(rows, state_dir, *, afterok=()):
             submission = flux_jobs.submit_job(row['argv'], checkout=source, resources=resources,
                 record_dir=record, afterok=[p['job_id'] for p in producers], environment=row.get('env'))
         # Cross-check saved execution facts against the app intent on resume.
-        launch = json.loads((record / 'launch.json').read_bytes())
-        if (launch['argv'] != row['argv'] or launch['source'] != identity
-                or launch['resources'] != asdict(resources)
-                or launch['afterok'] != [p['job_id'] for p in producers]):
-            raise ValueError('saved execution does not match row intent')
+        flux_jobs.validate_launch(submission, argv=row['argv'], source=identity, resources=resources,
+                                  afterok=[p['job_id'] for p in producers], environment=row.get('env'))
         submissions.append(submission)
     return submissions
 
@@ -814,20 +815,20 @@ def collect_rows(state_dir, *, wait=False):
     results = []
     for index, row in enumerate(intent['rows']):
         record = state / 'rows' / f'{index:05d}'
+        submission = None
         try:
             submission = flux_jobs.load_submission(record)
-            launch = json.loads((record / 'launch.json').read_bytes())
-            if (launch['argv'] != row['argv'] or launch['source'] != intent['sources'][index]
-                    or launch['afterok'] != [p['job_id'] for p in intent['producers']]
-                    or launch['resources']['cores'] != row['demand']['cpu']
-                    or launch['resources']['memory_gib'] != row['demand']['mem_gb']
-                    or launch['resources']['gpus'] != row['demand'].get('gpu', 0)
-                    or launch['resources']['walltime_s'] != row['timeout_s']):
-                raise ValueError('saved launch differs from stage intent')
+            identity = intent['sources'][index]
+            if str(Path(row['cwd']).resolve()) != identity['checkout']:
+                raise ValueError('row source differs from saved source')
+            flux_jobs.validate_launch(submission, argv=row['argv'], source=identity,
+                                      resources=_row_resources(row),
+                                      afterok=[p['job_id'] for p in intent['producers']],
+                                      environment=row.get('env'))
             result = asdict(flux_jobs.collect_job(submission, wait=wait))
             result['record_dir'] = str(result['record_dir'])
-        except (OSError, ValueError, RuntimeError) as exc:
-            result = {'status': 'unknown', 'job_id': None, 'record_dir': str(record),
+        except (OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError) as exc:
+            result = {'status': 'unknown', 'job_id': submission.job_id if submission else None, 'record_dir': str(record),
                       'payload_exit': None, 'query_error': str(exc)}
         results.append(result)
     return results

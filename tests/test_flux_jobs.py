@@ -136,6 +136,17 @@ class FluxJobsTests(unittest.TestCase):
         self.assertIn('cancel identity:', result.query_error)
         self.assertEqual([call.args[0] for call in run.call_args_list], [['getattr', 'broker.starttime']])
 
+    def test_saved_launch_requires_exact_placement_and_effective_environment(self):
+        environment = {'XDG_RUNTIME_DIR': '/run/user/1000'}
+        submission, _ = self.submit_fixture(environment=environment)
+        intent = dict(argv=['/bin/echo', 'known'], source={'commit': 'a' * 40},
+                      resources=self.resources, environment=environment)
+        jobs.validate_launch(submission, **intent)
+        with self.assertRaisesRegex(ValueError, 'application intent'):
+            jobs.validate_launch(submission, **{**intent, 'environment': {}})
+        with self.assertRaisesRegex(ValueError, 'application intent'):
+            jobs.validate_launch(submission, **{**intent, 'resources': jobs.FluxResources(2, 3, 0, 60, 'gb10')})
+
     def test_instance_replacement_refuses_cancellation_of_reused_id(self):
         submission, _ = self.submit_fixture()
         with patch.object(jobs, '_run', return_value=self.completed('new-generation\n')) as run:
