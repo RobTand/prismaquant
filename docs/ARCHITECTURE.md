@@ -1,5 +1,23 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, native Flux executor core, migration unit 1.
+Source: `prismaquant/flux_jobs.py` and `tests/test_flux_jobs.py`, based on
+main `f6c99e8edb5e05fbf2d21d6240cd3df407ee7867`.
+The opt-in stdlib/CLI module owns submit, collect, cancel and saved-ID reconnect.
+Its versioned fv1-model baseline profile requests fixed core/perf and GiB memory
+leaves, finite walltime, a clean allowlisted environment and job-ID scratch.
+Launch/submission/result records bind a clean detached source commit, exact
+intent and current profile/config identity to native job facts. Ambiguous
+submission refuses reuse; query failure remains separate from payload exit.
+The profile qualifies CPU jobs only, at most four cores, 16 GiB and 30 minutes.
+Existing campaign, joint, Stage A, capture and fleet callers still use their
+current transports. Strict staged reads and authenticated output/pilot contracts
+remain unqualified pending migration units 2 and 4. No result cache, scheduler,
+topology cutover, numerical, performance, serving or production claim follows.
+The rerunnable CPU proof and native records live under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-core/` and
+`/mnt/shared/flux-migration/pq-tessera/jobs/unit1-core-*/`.
+
 As of: 2026-11-07, default-off scratch-traffic declaration uptake, PQ #2798.
 Source: `tools/tessera_campaign_container.py` and
 `tools/dispatch_joint_quanta.py`, based on main `d92c37fe42`.
