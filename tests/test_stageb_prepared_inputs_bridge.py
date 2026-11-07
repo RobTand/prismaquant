@@ -485,11 +485,11 @@ def test_generator_dispatch_waits_for_delayed_leased_render(shared_bridge_path, 
     wire = Path(block["manifest_path"]).read_bytes()
     digest = hashlib.sha256(wire).hexdigest()
     submitted = next(row for row in gateway.submitted
-                     if block["manifest_path"] in row["argv"])
-    argv = submitted["argv"]
+                     if block["manifest_path"] in row["row"]["argv"])
+    application_row = submitted["row"]
+    argv = application_row["argv"]
     assert digest in " ".join(argv)
-    phases = [argv[i + 1].split("=", 1)[0]
-              for i, word in enumerate(argv) if word == "--progress-phase"]
+    phases = [phase.split("=", 1)[0] for phase in application_row["progress_phases"]]
     assert phases == block["phases"]
 
     rl, pool_mod, map_mod = strict._pb()

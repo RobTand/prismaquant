@@ -8759,6 +8759,7 @@ pq_py_library(
         ":prismaquant/export_partition",
         ":prismaquant/file_identity",
         ":prismaquant/fixed_head",
+        ":prismaquant/flux_jobs",
         ":prismaquant/fp8_dynamic",
         ":prismaquant/gguf_formats",
         ":prismaquant/gguf_kl_evaluator",
@@ -9293,6 +9294,13 @@ pq_py_library(
     name = "prismaquant/fixed_head",
     srcs = [
         "prismaquant/fixed_head.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/flux_jobs",
+    srcs = [
+        "prismaquant/flux_jobs.py",
     ],
 )
 
@@ -12060,7 +12068,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":tools/dispatch_stage_a_split",
-        ":tools/dispatch_tessera_campaign",
     ],
 )
 
@@ -12079,6 +12086,7 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
+        ":prismaquant/flux_jobs",
         ":prismaquant/glm_kda_capture_kernel",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
@@ -12086,11 +12094,8 @@ pq_py_library(
         ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_regime",
         ":prismaquant/matmul_arithmetic",
-        ":prismaquant/pbwait_table",
         ":prismaquant/readset_coverage",
-        ":prismaquant/residency_map_cycle",
         ":prismaquant/source_read_plan",
-        ":prismaquant/stage_a_produced_output",
         ":tools/__init__",
         ":tools/tessera_campaign_container",
     ],
@@ -12109,6 +12114,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
+        ":prismaquant/flux_jobs",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/stage_a_chain_split",
         ":prismaquant/stage_a_forward_split",
@@ -12133,11 +12139,13 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
-        ":prismaquant/pbwait_table",
         ":prismaquant/tessera_campaign_selection",
         ":tools/__init__",
         ":tools/pq_admitted_profile_cycle",
         ":tools/tessera_campaign_container",
+        ":tools/tessera_fleet/__init__",
+        ":tools/tessera_fleet/model_worker",
+        ":tools/tessera_fleet/status",
         "@pq_pip//tessera_quant",
         "@pq_pip//torch",
     ],
@@ -13609,7 +13617,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
-        ":prismaquant/pbwait_table",
+        ":prismaquant/activation_fair_pricing_cycle",
         ":tools/__init__",
         ":tools/tessera_fleet/__init__",
         ":tools/tessera_fleet/model_worker",
@@ -13640,6 +13648,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/flux_jobs",
         ":tools/__init__",
         ":tools/tessera_fleet/__init__",
         ":tools/tessera_fleet/common",
@@ -13669,7 +13678,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
-        ":prismaquant/pbwait_table",
+        ":prismaquant/activation_fair_pricing_cycle",
         ":tools/__init__",
         ":tools/tessera_fleet/__init__",
         ":tools/tessera_fleet/common",

@@ -135,10 +135,8 @@ def _row_ceiling(tmp_path, monkeypatch):
     """Dispatch the spill row under the 183 GiB spec; return the sealed ceilings."""
     _dispatch, argv = _dispatch_row(tmp_path, monkeypatch, bound=_sealed_bound(),
                                     spec=_spill_spec(183 * GIB, regime=REGIME))
-    outer = argv[:argv.index("--")]
-    sealed = dict(outer[i + 1].split("=", 1) for i, word in enumerate(outer[:-1])
-                  if word == "--env" and "=" in outer[i + 1])
-    inner = json.loads(argv[argv.index("--spec") + 1])["env"]
+    sealed = argv["env"]
+    inner = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])["env"]
     return int(sealed[SPILL_ENV[1]]), int(inner[SPILL_ENV[1]])
 
 

@@ -47,12 +47,14 @@ def _offline_tier_policy():
 
 
 def _identity_template_validator(monkeypatch):
-    """PrismaBuild's ``produced_output`` template check, as the identity."""
+    """Legacy template math as a scientific fixture, with no native authority."""
     import prismaquant.stage_a_produced_output as produced
+    import dispatch_joint_quanta as dispatch
 
     monkeypatch.setattr(produced, "_produced_output_module", lambda: SimpleNamespace(
         TEMPLATE_SCHEMA_V1="fixture.produced-output-template.v1",
         validate_template=dict))
+    monkeypatch.setattr(dispatch, "build_stage_a_produced_template", produced.build_boundary_template)
 
 
 def _layout(tmp_path, monkeypatch):
@@ -133,7 +135,7 @@ def test_a_dry_run_publishes_no_handoff_template(tmp_path, monkeypatch, capsys):
         assert hashlib.sha256(path.read_bytes()).hexdigest() == \
             row["handoff_template_sha256"]
         assert json.loads(path.read_text()) == row["handoff_template_document"]
-        assert submitted[quantum_id]["argv"] == row["argv"]
+        assert submitted[quantum_id]["row"] == row["row"]
 
 
 def test_a_dry_run_derives_a_consumers_readset_without_publishing_it(
@@ -172,13 +174,13 @@ def test_a_dry_run_derives_a_consumers_readset_without_publishing_it(
     capsys.readouterr()
     assert _run(dispatch, gateway, records, receipt_path, out) == 0
     assert hashlib.sha256(path.read_bytes()).hexdigest() == readset["sha256"]
-    assert band._by_id(gateway)["layer-002"]["argv"] == rows["layer-002"]["argv"]
+    assert band._by_id(gateway)["layer-002"]["row"] == rows["layer-002"]["row"]
 
 
 def _complete_producer(bound, gateway):
     published = band._emit(bound[3])
     band._complete(bound[3], published)
-    gateway.mark_terminal(band._by_id(gateway)["layer-003"]["action_key"])
+    gateway.mark_terminal(band._by_id(gateway)["layer-003"]["job_id"])
 
 
 def test_a_manifest_handed_as_bytes_is_checked_against_its_digest(tmp_path):

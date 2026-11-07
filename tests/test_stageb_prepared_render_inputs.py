@@ -346,16 +346,15 @@ def test_dispatch_main_accepts_complete_prepared_input_contract(
         f"(exit {code}: {refused.strip()}); every executable row still "
         "refuses before submission")
     assert len(gateway.submitted) == 1
-    argv = gateway.submitted[0]["argv"]
+    application_row = gateway.submitted[0]["row"]
+    argv = application_row["argv"]
     wire = Path(bound["executable_readset"]["manifest_path"]).read_bytes()
     digest = hashlib.sha256(wire).hexdigest()
     assert digest in " ".join(argv)
-    manifest_at = argv[argv.index("--data-manifest") + 1]
+    manifest_at = application_row["data_manifest"]
     assert hashlib.sha256(Path(manifest_at).read_bytes()).hexdigest() == (
         digest)
-    declared = [argv[i + 1].split("=", 1)[0]
-                for i, word in enumerate(argv)
-                if word == "--progress-phase"]
+    declared = [phase.split("=", 1)[0] for phase in application_row["progress_phases"]]
     assert "render-00" in declared and "render-01" in declared
     assert declared.index("render-00") + 1 == declared.index(
         "replay-00-p0")

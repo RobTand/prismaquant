@@ -1367,7 +1367,7 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
     record_path.write_text(json.dumps(record))
     argv = quantum_argv(record, record_path=record_path,
                         output_root=tmp_path / "campaign-root")
-    inner = argv[argv.index("--") + 1:]
+    inner = argv["argv"]
     payload = inner[inner.index("prismaquant.joint_cost_quantum") - 2:]
     assert payload[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     assert payload[payload.index("--allowed-tiers") + 1] == STAGED_ALLOWED_TIERS
@@ -1385,7 +1385,7 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
             "prepared_sha256": campaign["prepared_sha256"],
             "phases": [{"name": "head", "bytes": 0, "cumulative_bytes": 0}]}}).encode())
     argv = stage_a_argv(manifest, campaign)
-    inner = argv[argv.index("--") + 1:]
+    inner = argv["argv"]
     payload = inner[inner.index("prismaquant.joint_adjoint_capture") - 2:]
     assert payload[:3] == ["python3", "-m", "prismaquant.joint_adjoint_capture"]
     assert payload[payload.index("--allowed-tiers") + 1] == STAGED_ALLOWED_TIERS

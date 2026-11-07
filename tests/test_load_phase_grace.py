@@ -201,9 +201,7 @@ def test_a_declared_reader_count_below_one_refuses():
 
 
 def _graces(argv):
-    return {name: int(value) for name, value in (
-        argv[i + 1].split("=", 1) for i, word in enumerate(argv)
-        if word == "--progress-phase")}
+    return {name: int(value) for name, value in (item.split("=", 1) for item in argv["progress_phases"])}
 
 
 def _stamps(argv):
@@ -234,7 +232,7 @@ def test_a_filtered_dispatch_counts_only_its_own_rows(tmp_path, monkeypatch):
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--quantum", "layer-003") == 0
     assert sorted(_by_id(gateway)) == ["layer-003"]
-    argv = _by_id(gateway)["layer-003"]["argv"]
+    argv = _by_id(gateway)["layer-003"]["row"]
     phase_bytes = _checkpoint_bytes(bound[3])
     assert phase_bytes > 0
     expected = 300 + -(-phase_bytes // FLOOR)
@@ -257,12 +255,12 @@ def test_an_unfiltered_dispatch_counts_every_row_it_publishes(tmp_path, monkeypa
     assert len(rows) == len(bound) > 1
     loads = 0
     for row in rows.values():
-        graces = _graces(row["argv"])
+        graces = _graces(row["row"])
         if "checkpoint-load" not in graces:
             continue
         loads += 1
         assert graces["checkpoint-load"] == HEAD_PROGRESS_GRACE_S
-        (stamp,) = _load_stamps(row["argv"])
+        (stamp,) = _load_stamps(row["row"])
         assert (stamp["mode"], stamp["readers"]) == ("blanket", len(bound))
     assert loads > 0
 
@@ -283,11 +281,11 @@ def test_a_resubmitted_row_keeps_the_link_it_was_first_submitted_with(
     _, _bound, records, receipt_path, out = _dispatch_layout(tmp_path, monkeypatch)
     gateway = dispatch.FakeGateway()
     assert _main(dispatch, gateway, records, receipt_path, out) == 0
-    first = _by_id(gateway)["layer-003"]["argv"]
+    first = _by_id(gateway)["layer-003"]["row"]
     gateway.submitted = []
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--quantum", "layer-003") == 0
-    assert _by_id(gateway)["layer-003"]["argv"] == first
+    assert _by_id(gateway)["layer-003"]["row"] == first
     assert _load_stamps(first)[0]["readers"] == 4
 
 
@@ -300,7 +298,7 @@ def test_a_floor_document_at_the_dispatch_count_derives_every_row(
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--checkpoint-load-floor", str(floor)) == 0
     stamps = [stamp for row in _by_id(gateway).values()
-              for stamp in _load_stamps(row["argv"])]
+              for stamp in _load_stamps(row["row"])]
     assert stamps and {s["mode"] for s in stamps} == {"derived"}
     assert {s["floor_document"]["path"] for s in stamps} == {str(floor)}
 

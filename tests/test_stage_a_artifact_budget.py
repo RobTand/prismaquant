@@ -496,12 +496,12 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
 
     plain = stage_a_argv(manifest, campaign)
-    assert "--artifact-budget-bytes" not in plain
+    assert "--artifact-budget-bytes" not in plain["argv"]
 
     threaded = stage_a_argv(manifest, campaign,
                             artifact_budget_bytes=RUN_640_GIB)
-    assert "--artifact-budget-bytes" in threaded
-    assert str(RUN_640_GIB) in threaded
+    assert "--artifact-budget-bytes" in threaded["argv"]
+    assert str(RUN_640_GIB) in threaded["argv"]
 
     for bad in (True, 0, -5, "8 GiB"):
         with pytest.raises(DispatchRefused):
@@ -525,7 +525,7 @@ def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
 
     threaded = stage_a_argv(manifest, campaign,
                             artifact_budget_bytes=f" {RUN_640_GIB} ")
-    assert threaded[threaded.index("--artifact-budget-bytes") + 1] == str(
+    assert threaded["argv"][threaded["argv"].index("--artifact-budget-bytes") + 1] == str(
         RUN_640_GIB)
 
 

@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-07, native joint, Stage A split and capture-chain caller slice.
+Source: `tools/dispatch_{joint_quanta,stage_a_split,capture_chain}.py`,
+`prismaquant/{joint_quantum_row,tessera_campaign_rows}.py` and direct caller tests,
+based on parent `c481bedbb8f6df6c8758daf0c5c2b5fa558c9915`.
+The joint builders return neutral application rows preserving source/read/plan,
+calibration and handoff bindings, demands, priorities, container pins, progress
+requirements and durable-output declarations. One profile in `flux_jobs.py`
+continues to render resources and the finite clean environment.
+`Gateway` and the split/capture submitters reuse native row submit/collect and
+saved-ID launch validation. Native records bind exact source, argv, full resources,
+effective environment and dependency IDs. Joint dispatch records scientific intent
+before submission and can reconnect a saved ID after the event-log publication gap.
+Old PB state and ambiguous submission refuse. Split/capture attempts have explicit
+native schemas; only a known terminal failure permits an explicit retry, retaining
+all earlier IDs, records and terminal evidence. Both native success and independent
+scientific content/coverage barriers remain required. An early success artifact
+cannot qualify a late-failing or incomplete producer. Native afterok edges use saved
+producer IDs. The shared planner is `campaign_row`; all live callers use that name.
+
+Real CPU fixture proofs drove Gateway dependencies/failure/resume/unknown,
+Stage A prep/quantum ordering and source pins, the seeded scientific capture chain
+with actual output gates, and retained-failure capture retry. Each proof's 12 payload jobs
+and controllers are terminal and collected, with exact known bytes and job-ID scratch
+absence. Recovery checks bind row cwd to the recorded source. Split/capture
+pointers must match the core submission descriptor before resume. Production
+joint receipt reuse also requires a saved native Stage A producer.
+Scripts and final test/audit verdicts are recorded under
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit1-joint/`.
+This transport proof does not qualify scientific GPU payloads. Strict staged inputs,
+produced-output authentication, native pilot authority, GPU/container admission,
+application settings and unenforced stall requirements still refuse before launch.
+The retained pilot verifier has positive fake-evidence coverage; production Gateway
+refuses unavailable native result authority without consulting the PB SDK.
+Units 2/3/4 still own staged readers, canonical fluxcache, source-generation/output
+authority and Tessera. No cache, scheduler, service, format, ship gate, numerical or
+performance change is claimed. Generated Bazel targets are refreshed from the
+integrated source and checked by the final admitted audit. These development
+results are not a CI verdict. Parent independent review remains required.
+
 As of: 2026-11-07, native campaign receipt review correction.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/tessera_campaign_rows.py`
 and their boundary tests, based on `eadef29d96679b231016655409ea4f91765211a4`.
@@ -33,9 +72,7 @@ Fleet workspaces keep actual committed detached bytes in `source/`, external
 workflow state in `.flux-state/`, and immutable per-stage spec/barrier sources.
 `initialize_git` stages the real copied files; an empty commit is insufficient.
 Payload source must be shared on every eligible host. Source remains immutable;
-job scratch comes from the existing native executor wrapper. The historical
-`prismabuild_row` name is retained solely as a scientific planner for the later
-capture-chain slice; it invokes no PB code. Existing pb-result.json scientific
+job scratch comes from the existing native executor wrapper. The shared scientific planner is now named `campaign_row`. Existing pb-result.json scientific
 record names/schemas are retained, independently of native execution facts.
 
 The current CPU-only baseline and its resource/environment gates are unchanged.
@@ -47,8 +84,8 @@ and ladder runs therefore remain held; numerical runtime pins and class
 placement attestations are preserved without claiming new qualification.
 Post-campaign commands retain explicit intent and read manifests but cannot
 launch those contracts. Their scientific environment comes from the versioned
-spec, never ambient shell settings. Joint-quanta, Stage A, capture-chain,
-canonical fluxcache and the Tessera repository remain for later serial slices.
+spec, never ambient shell settings. The joint/Stage A/capture caller stamp above supersedes their earlier transport.
+Canonical fluxcache and the Tessera repository remain for later serial slices.
 No format, serving lane, cache, ship gate, numerical, GPU or performance change.
 
 Rerunnable verification and all retained failures are under

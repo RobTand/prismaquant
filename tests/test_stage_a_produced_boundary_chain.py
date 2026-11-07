@@ -1469,18 +1469,12 @@ def test_the_sdk_loads_one_generation_even_when_the_install_lacks_it():
         sdk_submodule("produced_output")
 
 
-def test_the_dispatcher_seals_the_template_the_client_supports(
+def test_dispatcher_retains_supplied_template_and_refuses_new_native_authority(
         tmp_path, monkeypatch):
-    """The seal rides the SUBMISSION, and only on a client that has it.
+    """Keep the owning template's geometry and the caller's supplied declaration.
 
-    An admitted produced-output owner needs the template on the queue row
-    AND the matching declaration in the sealed request -- which is the
-    submitting client's job, not a payload flag's. The deployed pbrun does
-    it behind --produced-output-template; an older one does not, so the
-    refusal is conditional on the client in hand rather than blanket. The
-    derived template is checked here too: the durable origin class maximum
-    is the configured artifact max, and the window comes from the actual
-    maximum group.
+    Native template authoring refuses without consulting a retired executor.
+    The legacy owner calculation remains independently checked for unit 4.
     """
 
     import sys
@@ -1489,14 +1483,19 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
     from prismaquant.staged_lease import set_lease_helper_root
     set_lease_helper_root(str(pb_repo))
     from dispatch_joint_quanta import (
-        ProducedOutputDeclarationUnsupported, build_stage_a_produced_template,
+        DispatchRefused, build_stage_a_produced_template,
         stage_a_argv)
 
     artifact_max = 640 * (1 << 30)          # a PLANNING figure, passed in
-    template = build_stage_a_produced_template(
+    from prismaquant.stage_a_produced_output import build_boundary_template
+    intent = dict(
         output_prefix="/home/rob/stage-a-out", tier=TIER,
         artifact_max_bytes=artifact_max,
         group_size=64, max_entry_tensor_bytes=16 << 20)
+    with pytest.raises(__import__("dispatch_joint_quanta").ProducedOutputDeclarationUnsupported) as refused:
+        build_stage_a_produced_template(**intent)
+    assert refused.value.intent == intent
+    template = build_boundary_template(**intent)
     assert template["durable_maxima"]["payload_max_bytes"] == artifact_max, (
         "the configured artifact max is the single source of the durable "
         "origin class maximum")
@@ -1505,19 +1504,13 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
         "2 tokens) for the current and the next group -- never derived "
         "from the retained origin peak", template["working_demands"])
 
-    # The deployed client seals it; an older one does not, and the
-    # dispatcher asks the client in hand rather than assuming either.
     import dispatch_joint_quanta as djq
     document = tmp_path / "produced-output-template.json"
     document.write_text(json.dumps(template, sort_keys=True))
-
-    monkeypatch.setattr(djq, "_pbrun_seals_produced_output", lambda *a: False)
-    with pytest.raises(ProducedOutputDeclarationUnsupported,
-                       match="carries no --produced-output-template"):
+    with pytest.raises(DispatchRefused, match="template is not a file"):
         stage_a_argv(Path("/nonexistent/manifest.json"), {},
-                     produced_output_template=document)
+                     produced_output_template=tmp_path / "absent-template.json")
 
-    monkeypatch.setattr(djq, "_pbrun_seals_produced_output", lambda *a: True)
     monkeypatch.setattr(djq, "_stage_manifest_binding", lambda *a, **k: {
         "data_manifest_sha256": "a" * 64, "read_manifest_sha256": "b" * 64,
         "phases": ["head"]})
@@ -1544,18 +1537,8 @@ def test_the_dispatcher_seals_the_template_the_client_supports(
                         {"plan_path": str(plan), "plan_sha256": "c" * 64,
                          "prepared_path": "/q", "prepared_sha256": "d" * 64},
                         produced_output_template=document)
-    assert "--produced-output-template" in argv, argv
-    flag = argv.index("--produced-output-template")
-    assert argv[flag + 1] == str(document)
-    assert flag < argv.index("--"), (
-        "the seal is an ENVELOPE option the client acts on, never a payload "
-        "flag the capture would merely read", argv)
-    assert "--produced-output-template" not in argv[argv.index("--"):]
-
-    # pbrun derives the bounded window's tier demand from the template, so
-    # the dispatcher must not restate it.
-    demands = [argv[i + 1] for i, word in enumerate(argv) if word == "--demand"]
-    assert not any("stage" in value for value in demands), demands
+    assert argv["produced_outputs"] == {"template": str(document)}
+    assert "--produced-output-template" not in argv["argv"]
 
 
 def test_the_pinned_candidate_provenance_is_immutable():

@@ -495,10 +495,10 @@ def test_executable_row_parts_propagate_manifest_phases(tmp_path,
     argv_legacy = dispatch.quantum_argv(
         legacy, record_path=record_path, output_root=tmp_path)
     # The quantum receives its slice file, never a receipt (PQ #993).
-    assert argv_legacy[argv_legacy.index("--adjoint-slice") + 1] == str(adjoint_path)
-    assert argv_legacy[argv_legacy.index("--data-manifest") + 1].endswith(
+    assert argv_legacy["argv"][argv_legacy["argv"].index("--adjoint-slice") + 1] == str(adjoint_path)
+    assert argv_legacy["data_manifest"].endswith(
         "slice.gz")
-    assert argv_legacy[argv_legacy.index("--allowed-tiers") + 1] == (
+    assert argv_legacy["argv"][argv_legacy["argv"].index("--allowed-tiers") + 1] == (
         dispatch.STAGED_ALLOWED_TIERS)
 
 

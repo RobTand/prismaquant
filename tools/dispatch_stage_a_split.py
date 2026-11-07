@@ -1,53 +1,10 @@
-"""Dispatch one Stage A chain split round as plain PrismaBuild rows (PQ #738).
+"""Seal scientific Stage A rounds and dispatch native Flux rows.
 
-A split round (``prismaquant.stage_a_chain_split``) runs as a prep row, one
-quantum row per sample range, a join row per stride checkpoint the round
-seals, and a band row per joined checkpoint. Until ``pbcampaign`` carries
-the residency fields (PB #1082) the rows are plain ``pbrun`` submissions,
-``--tag gb10 --priority -10`` and never a host. ``seal --priority`` sets
-another band for every row of a round, and ``round.json`` records it. ``pbrun --after`` does not
-order them: it defers a consumer on a producer's write-only template and
-builds the consumer's manifest from the batches it committed, and a prep
-commits nothing. So this tool orders the rows by what they leave on disk:
-
-* **seal** writes the round directory from one clean checkout: every row's
-  produced-output template, and ``round.json``, which holds every row's full
-  ``pbrun`` argv and the digest of every input it names. Nothing reaches
-  PrismaBuild.
-* **plan** prints the sealed rows after checking the pins (the dry run).
-* **submit** runs rows, each only once the rows before it have finished:
-  the quanta once the prep's receipt and resume record are on disk and its
-  PrismaBuild ending is ``executed`` with exit 0; a join once every quantum
-  has; a band once its join has. Each submission's argv and ``pbrun``
-  output land in ``submissions/``.
-* **compare** holds each quantum's payload digests at its digest layer
-  (``split/quanta/<label>.digests.json``, written as the layer rolls) to a
-  baseline: the tripwire for a numeric defect, minutes into a round.
-
-**seal-forward** seals a fresh run's forward split
-(``prismaquant.stage_a_forward_split``) the same way, from a forward package
-(``build_stagea_split_package.py forward``): a prep row that mints the run's
-generation, one quantum row per calibration partition range, each capturing
-its partitions' boundaries through every layer and their tail cotangents,
-and one CPU join row that publishes the tail checkpoint and the chain state.
-The quanta wait for the prep's record and its ``executed`` ending; the join
-waits for every quantum. After the join the run is a chain resume at its
-tail checkpoint, and the chain split rounds above roll it from the top.
-
-Every row runs the checkout the round was sealed from: ``plan_chain_resume``
-requires the running implementation to be the one the latest resume record
-stamps, so the prep, the quanta and the joins must be one tree. Only the
-prep declares an implementation switch.
-
-The Stage A rows are built by ``dispatch_joint_quanta.stage_a_argv``: the
-full residency path (``--residency stage --residency-ram auto``, the paced
-produced-output spool), with two per-row numbers. A quantum's spool window
-is two planes of its own batches, and its template's stage window funds at
-most the groups it can hold across two consecutive boundaries. The reader
-declaration (``--residency-prefetch-depth-gib``, ``--residency-read-mb-s``)
-is derived from each row's manifest: the depth is the furthest source byte
-the chain's prefetch reaches past the phase it reads, and the rate is an
-estimate recorded with its derivation.
+The prep, partition quanta, joins and bands keep their exact source/read pins,
+resident-input, durable-output, memory and progress requirements. Native IDs
+and launch records are separate from scientific receipts. Both native success
+and the existing content barriers must pass before reuse. Unsupported production
+contracts refuse before any row launches. Old PB round/submission schemas refuse.
 """
 from __future__ import annotations
 
@@ -55,6 +12,7 @@ import argparse
 import gzip
 import json
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -67,8 +25,8 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-ROUND_SCHEMA = "prismaquant.stage_a.split_round.v1"
-FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v1"
+ROUND_SCHEMA = "prismaquant.stage_a.split_round.v2"
+FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v2"
 ROUND_NAME = "round.json"
 PRIORITY = "-10"
 _PRIORITY = re.compile(r"-?\d+")
@@ -94,7 +52,17 @@ def _write_json(path: Path, value) -> None:
     from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(DIRECT_ASCII_INDENT2_LAX.text(value) + "\n")
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w") as stream:
+        stream.write(DIRECT_ASCII_INDENT2_LAX.text(value) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def implementation_sha256(checkout) -> str:
@@ -231,35 +199,29 @@ def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
     import dispatch_joint_quanta as dispatch
 
     dispatch.SPEC_PATH = Path(spec)
-    argv = dispatch.stage_a_argv(
+    row = dispatch.stage_a_argv(
         Path(manifest), campaign, tag=tag, prefetch_override=Path(prefetch_override),
         artifact_budget_bytes=artifact_budget_bytes,
         produced_output_template=Path(template_path), batch_range=batch_range)
-    first = argv.index("--")
-    inner = argv.index("--", first + 1)
-    envelope, payload = argv[:first], argv[inner + 1:]
+    payload = row["argv"]
     if "--forward-recovery" in payload or "--chain-seed" in payload:
         raise SplitDispatchRefused("a split row takes no forward recovery and no seed")
-    head = [*envelope[:2], "--cwd", str(checkout), *envelope[2:], "--priority", priority,
-            "--residency-prefetch-depth-gib", str(reader["depth"]["declared_gib"]),
-            "--residency-read-mb-s", str(reader["rate"]["read_mb_s"])]
-    tags = [head[i + 1] for i, word in enumerate(head) if word == "--tag"]
-    if tags != [tag] or "--host-class" in head or "--measurement" in head:
-        raise SplitDispatchRefused(f"a split row carries exactly the tag {tag}: {tags}")
-    return {"name": name, "kind": kind,
-            "argv": [*head, *argv[first:inner + 1], *payload, *payload_extra],
-            "data_manifest": _pin(manifest), "template": _pin(template_path),
-            "reader": reader}
+    if row["tags"] != [tag]:
+        raise SplitDispatchRefused("a split row carries exactly its declared placement tag")
+    row.update(cwd=str(checkout), priority=int(priority),
+               residency={**row["residency"], "prefetch_depth_gib": reader["depth"]["declared_gib"],
+                          "read_mb_s": reader["rate"]["read_mb_s"]})
+    row["argv"] = [*payload, *payload_extra]
+    return {"name": name, "kind": kind, "row": row,
+            "data_manifest": _pin(manifest), "template": _pin(template_path), "reader": reader}
 
 
 def _cpu_row(*, name, kind, checkout, tag, python, module_argv, mem_gb=8, cpus=2,
              priority=PRIORITY) -> dict:
-    import dispatch_joint_quanta as dispatch
-
     return {"name": name, "kind": kind,
-            "argv": [sys.executable, str(dispatch.PBRUN), "--cwd", str(checkout),
-                     "--tag", tag, "--priority", priority, "--demand", f"mem_gb={mem_gb}",
-                     "--cpus", str(cpus), "--detach", "--", str(python), *module_argv]}
+            "row": {"argv": [str(python), *module_argv], "cwd": str(checkout),
+                    "tags": [tag], "priority": int(priority), "demand": {"cpu": cpus, "mem_gb": mem_gb, "gpu": 0},
+                    "timeout_s": 1800, "env": {}}}
 
 
 def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_override,
@@ -268,7 +230,7 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
                template_prefix, tier, priority=PRIORITY) -> dict:
     """Write ``round_dir`` (templates and ``round.json``); submit nothing.
 
-    ``priority`` is the PrismaBuild priority band of every row (an integer
+    ``priority`` is the requested queue priority band of every row (an integer
     string, ``-10`` by default).
     """
     from prismaquant.joint_adjoint_checkpoints import adjoint_space
@@ -529,26 +491,109 @@ def submission_path(round_dir, name) -> Path:
     return Path(round_dir) / "submissions" / f"{name}.json"
 
 
-def pb_ending(round_dir, name) -> dict:
-    """A submitted row's PrismaBuild ending: refuses unless it executed with exit 0."""
+NATIVE_SUBMISSION_SCHEMA = "prismaquant.split.native-submission.v1"
+
+
+def _attempt_state(round_dir, name, saved) -> Path:
+    from dataclasses import asdict
+    from prismaquant.flux_jobs import load_submission
+    if (not isinstance(saved, dict) or saved.get("schema") != NATIVE_SUBMISSION_SCHEMA
+            or saved.get("name") != name):
+        raise ValueError("old or invalid submission state cannot resume as Flux")
+    if not re.fullmatch(r"attempt-[1-9]\d*", saved["attempt"]):
+        raise ValueError("invalid native attempt name")
+    expected = Path(round_dir).resolve() / "native" / name / saved["attempt"]
+    if Path(saved["state_dir"]) != expected:
+        raise ValueError("native attempt path differs")
+    if "submissions" in saved:
+        submission = load_submission(expected / "rows" / "00000")
+        descriptor = {**asdict(submission), "record_dir": str(submission.record_dir)}
+        if saved["submissions"] != [descriptor]:
+            raise ValueError("saved submission descriptor differs from native record")
+    return expected
+
+
+def native_result(round_dir, name, *, wait=False) -> dict:
+    """Collect the saved ID, validating the exact application and launch intent."""
+    from prismaquant.tessera_campaign_rows import collect_rows
     path = submission_path(round_dir, name)
-    if not path.is_file():
-        raise SplitDispatchRefused(f"row {name} was never submitted")
-    detach = json.loads(path.read_text()).get("detach")
-    if not detach:
-        raise SplitDispatchRefused(f"row {name}'s submission printed no detach line")
-    done = Path(detach["done"])
-    if not done.is_file():
-        failed = Path(detach["failed"])
-        raise SplitDispatchRefused(
-            f"row {name} ({detach['action_key'][:12]}) has "
-            f"{'failed' if failed.is_file() else 'not finished'}")
-    record = json.loads(done.read_text())
-    returncode = (record.get("detail") or {}).get("returncode")
-    if record.get("status") != "executed" or returncode != 0:
-        raise SplitDispatchRefused(
-            f"row {name} ended {record.get('status')} with exit {returncode}")
-    return record
+    try:
+        saved = json.loads(path.read_text())
+        expected = _attempt_state(round_dir, name, saved)
+        document = json.loads((Path(round_dir) / ROUND_NAME).read_bytes())
+        entry, = [entry for entry in document["rows"] if entry["name"] == name]
+        if saved["row"] != entry["row"]:
+            raise ValueError("submission differs from sealed scientific row")
+        intent = json.loads((expected / "manifest.json").read_bytes())
+        if intent["rows"] != [saved["row"]]:
+            raise ValueError("saved row differs from native manifest")
+        results = collect_rows(expected, wait=wait)
+        if len(results) != 1:
+            raise ValueError("one row requires exactly one native result")
+        return results[0]
+    except (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
+        raise SplitDispatchRefused(f"row {name}: native state unavailable or unknown: {exc}") from exc
+
+
+def native_ending(round_dir, name) -> dict:
+    result = native_result(round_dir, name)
+    if result["status"] != "succeeded" or result["payload_exit"] != 0 or result["query_error"]:
+        raise SplitDispatchRefused(f"row {name} is {result['status']}; downstream reuse refused")
+    return result
+
+
+def saved_submission(round_dir, name):
+    from prismaquant.flux_jobs import load_submission
+    native_ending(round_dir, name)
+    saved = json.loads(submission_path(round_dir, name).read_text())
+    return load_submission(Path(saved["state_dir"]) / "rows" / "00000")
+
+
+def submit_row(round_dir, entry, *, afterok=()) -> dict:
+    """Persist an attempt before launch; reattach only the same exact row."""
+    from dataclasses import asdict
+    from prismaquant.tessera_campaign_rows import submit_rows
+    path = submission_path(round_dir, entry["name"])
+    if path.exists():
+        saved = json.loads(path.read_text())
+        try:
+            _attempt_state(round_dir, entry["name"], saved)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+            raise SplitDispatchRefused(f"row {entry['name']}: native identity refused: {exc}") from exc
+        if saved.get("schema") != NATIVE_SUBMISSION_SCHEMA or saved.get("row") != entry["row"]:
+            raise SplitDispatchRefused("old or changed submission intent cannot resume as Flux")
+    else:
+        attempt = 1
+        while path.with_name(f"{entry['name']}.attempt-{attempt}.json").exists():
+            attempt += 1
+        saved = {"schema": NATIVE_SUBMISSION_SCHEMA, "name": entry["name"],
+                 "row": entry["row"], "attempt": f"attempt-{attempt}",
+                 "state_dir": str(Path(round_dir).resolve() / "native" / entry["name"] / f"attempt-{attempt}")}
+        _write_json(path, saved)
+    try:
+        submissions = submit_rows([entry["row"]], saved["state_dir"], afterok=afterok)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise SplitDispatchRefused(f"row {entry['name']}: native submission refused or unknown: {exc}") from exc
+    saved["submissions"] = [{**asdict(item), "record_dir": str(item.record_dir)} for item in submissions]
+    _write_json(path, saved)
+    return saved
+
+
+def retire_attempt(round_dir, name) -> None:
+    """Only explicit terminal failures permit a new attempt; retain all evidence."""
+    result = native_result(round_dir, name)
+    if result["status"] not in {"failed", "canceled", "dependency-failed"} or result["query_error"]:
+        raise SplitDispatchRefused(f"row {name} is {result['status']}; cannot retry")
+    path = submission_path(round_dir, name)
+    saved = json.loads(path.read_text())
+    saved["terminal_result"] = result
+    _write_json(path, saved)
+    path.rename(path.with_name(f"{name}.{saved['attempt']}.json"))
+    descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 _PREP_RECEIPT = re.compile(r"resume-(\d{3,})\.json")
@@ -580,7 +625,7 @@ def require_ready(document, round_dir, row) -> None:
             raise SplitDispatchRefused("the run's chain state is not the one the round pins")
         return
     if kind == "quantum":
-        pb_ending(round_dir, "prep")
+        native_ending(round_dir, "prep")
         receipt = _latest_prep_receipt(split_root(space) / "preps")
         stamp = None if receipt is None else receipt["resume"].get("split")
         if (stamp is None or (stamp["from"], stamp["through"], stamp["ranges"])
@@ -591,20 +636,20 @@ def require_ready(document, round_dir, row) -> None:
         return
     if kind == "join":
         for label in document["labels"]:
-            pb_ending(round_dir, label)
+            native_ending(round_dir, label)
             receipt = quantum_directory(space) / f"{label}.json"
             if not receipt.is_file():
                 raise SplitDispatchRefused(f"quantum {label} left no receipt")
         return
     if kind == "band":
-        pb_ending(round_dir, f"join-{row['boundary']:03d}")
+        native_ending(round_dir, f"join-{row['boundary']:03d}")
         if not (checkpoint_directory(space, row["boundary"]) / "checkpoint.json").is_file():
             raise SplitDispatchRefused(f"checkpoint {row['boundary']} is not joined")
         return
     if kind == "band-set":
         for other in document["rows"]:
             if other["kind"] == "band":
-                pb_ending(round_dir, other["name"])
+                native_ending(round_dir, other["name"])
         return
     if kind.startswith("forward-"):
         return _require_forward_ready(document, round_dir, space, kind)
@@ -623,7 +668,7 @@ def _require_forward_ready(document, round_dir, space, kind) -> None:
         if prep_record_path(space).exists():
             raise SplitDispatchRefused(f"{prep_record_path(space)} exists: prepped once")
         return
-    pb_ending(round_dir, "forward-prep")
+    native_ending(round_dir, "forward-prep")
     try:
         prep = read_prep_record(space)
     except ForwardSplitRefused as exc:
@@ -635,31 +680,31 @@ def _require_forward_ready(document, round_dir, space, kind) -> None:
     if kind != "forward-join":
         raise SplitDispatchRefused(f"unknown row kind {kind}")
     for label in document["labels"]:
-        pb_ending(round_dir, label)
+        native_ending(round_dir, label)
         if not (forward_root(space) / f"{label}.json").is_file():
             raise SplitDispatchRefused(f"forward quantum {label} left no receipt")
 
 
-def submission_result(name, argv, completed) -> dict:
-    """Build the last detach object and unchanged subprocess result fields.
+def row_predecessors(document, row):
+    kind = row["kind"]
+    if kind in {"prep", "forward-prep"}:
+        return []
+    if kind == "quantum":
+        return ["prep"]
+    if kind == "forward-quantum":
+        return ["forward-prep"]
+    if kind in {"join", "forward-join"}:
+        return document["labels"]
+    if kind == "band":
+        return [f"join-{row['boundary']:03d}"]
+    if kind == "band-set":
+        return [item["name"] for item in document["rows"] if item["kind"] == "band"]
+    raise SplitDispatchRefused(f"unknown row kind {kind}")
 
-    Callers retain their path lookup, writer, persistence and refusal policy.
-    """
-    detach = None
-    for line in (completed.stdout or "").splitlines():
-        try:
-            value = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(value, dict) and "action_key" in value:
-            detach = value
-    result = {"name": name, "argv": argv, "returncode": completed.returncode,
-              "stdout": completed.stdout, "stderr": completed.stderr, "detach": detach}
-    return result
 
-
-def submit(round_dir, names, *, run=subprocess.run) -> list[dict]:
-    """Submit the named rows in order, each once its predecessors finished."""
+def submit(round_dir, names) -> list[dict]:
+    """Submit/resume exact native attempts after independent scientific barriers."""
+    from prismaquant.tessera_campaign_rows import validate_row
     round_dir = Path(round_dir)
     document = load_round(round_dir)
     if checkout_commit(document["checkout"]) != document["commit"]:
@@ -667,23 +712,21 @@ def submit(round_dir, names, *, run=subprocess.run) -> list[dict]:
     if implementation_sha256(document["checkout"]) != document["implementation_sha256"]:
         raise SplitDispatchRefused("the checkout is not the sealed implementation")
     rows = {row["name"]: row for row in document["rows"]}
+    try:
+        for entry in document["rows"]:
+            validate_row(entry["row"])
+    except (ValueError, KeyError) as exc:
+        raise SplitDispatchRefused(str(exc)) from exc
     results = []
     for name in names:
         if name not in rows:
             raise SplitDispatchRefused(f"the round has no row {name}")
         row = rows[name]
-        if submission_path(round_dir, name).exists():
-            raise SplitDispatchRefused(f"row {name} was already submitted")
-        require_ready(document, round_dir, row)
-        completed = run(row["argv"], capture_output=True, text=True)
-        result = submission_result(name, row["argv"], completed)
-        _write_json(submission_path(round_dir, name), result)
-        detach = result["detach"]
-        results.append(result)
-        if completed.returncode != 0 or detach is None:
-            raise SplitDispatchRefused(
-                f"row {name} was not submitted (exit {completed.returncode}): "
-                f"{(completed.stderr or '').strip()[-400:]}")
+        # Existing saved attempts still pass the exact intent validation in submit_rows.
+        if not submission_path(round_dir, name).exists():
+            require_ready(document, round_dir, row)
+        producers = [saved_submission(round_dir, p) for p in row_predecessors(document, row)]
+        results.append(submit_row(round_dir, row, afterok=producers))
     return results
 
 
@@ -752,7 +795,7 @@ def main(argv=None) -> int:
     seal.add_argument("--python", required=True, help="the CPU rows' interpreter")
     seal.add_argument("--tag", default="gb10")
     seal.add_argument("--priority", default=PRIORITY,
-                      help="every row's PrismaBuild priority band (default %(default)s)")
+                      help="every row's queue priority intent (default %(default)s; nonzero native priority is unqualified)")
     forward = sub.add_parser("seal-forward",
                              help="write a forward split's round directory; submit nothing")
     for flag in ("--round-dir", "--checkout", "--forward-package", "--campaign-record",
@@ -813,13 +856,13 @@ def main(argv=None) -> int:
         elif args.command == "plan":
             document = load_round(args.round_dir)
             for row in document["rows"]:
-                print(json.dumps({"name": row["name"], "argv": row["argv"]}))
+                print(json.dumps({"name": row["name"], "row": row["row"]}))
         elif args.command == "status":
             document = load_round(args.round_dir)
             for row in document["rows"]:
                 try:
-                    pb_ending(args.round_dir, row["name"])
-                    state = "executed"
+                    native_ending(args.round_dir, row["name"])
+                    state = "succeeded"
                 except SplitDispatchRefused as exc:
                     state = str(exc)
                 print(f"{row['name']}: {state}")
@@ -828,7 +871,7 @@ def main(argv=None) -> int:
             names = [label for name in args.rows
                      for label in (document["labels"] if name == "quanta" else [name])]
             for result in submit(args.round_dir, names):
-                print(json.dumps({"name": result["name"], "detach": result["detach"]}))
+                print(json.dumps({"name": result["name"], "submissions": result["submissions"]}))
         else:
             document = load_round(args.round_dir)
             report = compare_digests(document, args.baseline)

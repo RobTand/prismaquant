@@ -616,7 +616,7 @@ def row_is_bounded(argv: list[str], *, where: str = "campaign row") -> bool:
                 'streaming', 'units', 'calibration_cache', 'calibration_cache_sha256')))
 
 
-def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
+def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
          progress_phases: tuple[tuple[str, int], ...] = CAMPAIGN_PROGRESS_PHASES,
          module: str = "prismaquant.tessera_campaign",
          row_class_name: str = DEFAULT_ROW_CLASS) -> dict:
@@ -626,9 +626,7 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
     the CPU count and the container; the default class supplies exactly the
     spec-level values, so a row built for it is byte-identical to the row this
     function returned before classes existed.  Nothing about the class is
-    written into the row. The historical function name is retained for the
-    capture-chain slice that follows; this planner never invokes PB. Native
-    callers retain the whole intent and refuse unqualified requirements.
+    written into the row. Native callers retain the whole intent and refuse unqualified requirements.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
@@ -695,9 +693,7 @@ def prismabuild_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int 
     return row
 
 
-# Native execution of the application-owned row intent. The legacy
-# prismabuild_row name above remains for the serial capture-chain migration;
-# it only plans scientific work and never invokes a transport.
+# Native execution of the application-owned scientific row intent.
 NATIVE_ROWS_SCHEMA = 'pq.tessera.native-rows.v1'
 
 

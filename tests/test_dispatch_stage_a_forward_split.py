@@ -199,7 +199,6 @@ def sealed(tmp_path, monkeypatch):
                            "temp_max_bytes": BUDGET},
         "working_demands": {TIER: {"minimum_gib": 2, "window_gib": 48}},
         "permitted_tiers": [TIER]})
-    monkeypatch.setattr(dispatch_joint_quanta, "_pbrun_seals_produced_output", lambda *a: True)
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: "1" * 64)
     document = seal_forward_round(
@@ -213,7 +212,7 @@ def sealed(tmp_path, monkeypatch):
 
 
 def _payload(row):
-    return row["argv"][row["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
+    return row["row"]["argv"][row["row"]["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
 
 
 def _flag(argv, flag):
@@ -221,7 +220,7 @@ def _flag(argv, flag):
 
 
 def _envelope(row):
-    return row["argv"][:row["argv"].index("--")]
+    return row["row"]
 
 
 def test_a_sealed_forward_round_names_every_row(sealed):
@@ -242,45 +241,26 @@ def test_a_sealed_forward_round_names_every_row(sealed):
     templates = set()
     for name in ["forward-prep", *labels]:
         envelope = _envelope(rows[name])
-        assert [envelope[i + 1] for i, word in enumerate(envelope) if word == "--tag"] == [
-            "gb10"]
-        assert _flag(envelope, "--priority") == "-10"
-        assert _flag(envelope, "--data-manifest") == rows[name]["data_manifest"]["path"]
+        assert envelope["tags"] == ["gb10"]
+        assert str(envelope["priority"]) == "-10"
+        assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
         assert "--host-class" not in envelope and "--measurement" not in envelope
-        templates.add(json.loads(Path(_flag(
-            envelope, "--produced-output-template")).read_text())["template_id"])
+        templates.add(json.loads(Path(envelope["produced_outputs"]["template"]).read_text())["template_id"])
         # A forward walk reads up: two layers ahead of the one it reads.
         depth = rows[name]["reader"]["depth"]
         if name != "forward-prep":
             ahead = {row["reading"]: row["ahead"] for row in depth["rows"]}
             assert ahead["forward-001"] == ["forward-002", "forward-003"]
     assert len(templates) == 3
-    join = rows["forward-join"]["argv"]
-    assert "--data-manifest" not in join and "gpu" not in _flag(join, "--demand")
-    assert join[join.index("--", join.index("--detach")) + 1:] == [
+    join = rows["forward-join"]["row"]["argv"]
+    assert rows["forward-join"]["row"]["demand"] == {"gpu": 0, "cpu": 2, "mem_gb": 8}
+    assert join == [
         "/venv/bin/python", "-m", "prismaquant.stage_a_forward_split",
         "--output-root", str(sealed["root"]),
         "--receipt", str(sealed["round"] / "joins" / "forward-join.json")]
 
 
-class _FakePbrun:
-    def __init__(self, tmp_path):
-        self.root = tmp_path / "queue"
-        self.submitted = []
-
-    def __call__(self, argv, **kw):
-        import subprocess
-
-        key = hashlib.sha256(json.dumps(argv).encode()).hexdigest()
-        self.submitted.append(key)
-        line = json.dumps({"action_key": key, "status": "submitted",
-                           "done": str(self.root / "done" / f"{key}.json"),
-                           "failed": str(self.root / "failed" / f"{key}.json")})
-        return subprocess.CompletedProcess(argv, 0, stdout=line + "\n", stderr="")
-
-    def finish(self, key, returncode=0):
-        _json(self.root / "done" / f"{key}.json",
-              {"status": "executed", "detail": {"returncode": returncode}})
+from native_dispatch_fixture import FakeNative
 
 
 def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
@@ -289,15 +269,15 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
 
     round_dir, root, space = sealed["round"], sealed["root"], sealed["space"]
     labels = sealed["document"]["labels"]
-    fake = _FakePbrun(tmp_path)
+    fake = FakeNative(monkeypatch)
 
     def go(*names):
-        return submit(round_dir, list(names), run=fake)
+        return submit(round_dir, list(names))
 
-    with pytest.raises(SplitDispatchRefused, match="forward-prep was never submitted"):
+    with pytest.raises(SplitDispatchRefused, match="native state unavailable"):
         go(labels[0])
     go("forward-prep")
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go(labels[0])
     fake.finish(fake.submitted[-1])
     with pytest.raises(SplitDispatchRefused, match="no forward split prep"):
@@ -305,7 +285,7 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
     _write_split_receipt(space, _run(root, monkeypatch, forward_split={
         "role": "prep", "ranges": RANGES}))
     go(*labels)
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go("forward-join")
     for key, samples in zip(fake.submitted[-2:], RANGES):
         fake.finish(key)
@@ -318,12 +298,12 @@ def test_each_forward_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkey
     assert chain_state_path(space).is_file()
 
 
-def test_a_failed_forward_prep_holds_the_quanta(sealed, tmp_path):
-    fake = _FakePbrun(tmp_path)
-    submit(sealed["round"], ["forward-prep"], run=fake)
+def test_a_failed_forward_prep_holds_the_quanta(sealed, tmp_path, monkeypatch):
+    fake = FakeNative(monkeypatch)
+    submit(sealed["round"], ["forward-prep"])
     fake.finish(fake.submitted[-1], returncode=3)
-    with pytest.raises(SplitDispatchRefused, match="ended executed with exit 3"):
-        submit(sealed["round"], [sealed["document"]["labels"][0]], run=fake)
+    with pytest.raises(SplitDispatchRefused, match="failed"):
+        submit(sealed["round"], [sealed["document"]["labels"][0]])
 
 
 def test_the_forward_readahead_depth_looks_up_the_walk():

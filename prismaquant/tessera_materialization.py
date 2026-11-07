@@ -1,7 +1,7 @@
 """Materialize selected expert wires between sampled allocation and export.
 
 A selection request is deliberately not a layer config. Each census anchor
-stack is one independent PB action, using campaign calibration, render cache,
+stack is one independent scientific row, using campaign calibration, render cache,
 producer identities and the shared journal. Only finalization can publish the
 packed allocation, after the ordinary receipt and priced-input gates pass.
 """
@@ -145,7 +145,7 @@ def plan(request_path, census_path, workspace, spec_path, *, anchor_batch_size=1
                    'campaign_argv': ['--max-act-rows', str(provenance['max_act_rows'])]}
     rows = []
     for index, group in enumerate(groups):
-        row = campaign_rows.prismabuild_row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
+        row = campaign_rows.campaign_row(spec, ['run', '--plan', str(plan_path), '--group', str(index),
                                      '--anchor-batch-size', str(anchor_batch_size)],
             mem_gb=campaign_rows.row_memory_gb(memory_spec,
                                             list(group['assignment']), census),

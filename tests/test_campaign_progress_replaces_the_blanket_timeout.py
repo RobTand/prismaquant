@@ -39,7 +39,7 @@ def spec():
 # -- the seal --------------------------------------------------------------
 
 def test_a_row_seals_no_deadline_of_its_own(tmp_path):
-    row = campaign_rows.prismabuild_row(spec(), ["--units", "/mnt/shared/units.json"],
+    row = campaign_rows.campaign_row(spec(), ["--units", "/mnt/shared/units.json"],
                         mem_gb=48, timeout_s=None)
     assert "timeout_s" not in row
     assert row["progress_phases"] == ["startup=3600", "pricing=900",
@@ -47,7 +47,7 @@ def test_a_row_seals_no_deadline_of_its_own(tmp_path):
 
 
 def test_an_explicitly_asked_for_deadline_is_still_sealed():
-    row = campaign_rows.prismabuild_row(spec(), [], mem_gb=48, timeout_s=86400)
+    row = campaign_rows.campaign_row(spec(), [], mem_gb=48, timeout_s=86400)
     assert row["timeout_s"] == 86400
     # Both, and they compose: the hard deadline caps the cost, the phases end
     # a row that stops early.
@@ -57,7 +57,7 @@ def test_an_explicitly_asked_for_deadline_is_still_sealed():
 def test_nonpricing_rows_do_not_promise_anchor_progress():
     """Census/capture exit before the pricing journal reporter is available."""
 
-    row = campaign_rows.prismabuild_row(spec(), [], mem_gb=48, timeout_s=7200,
+    row = campaign_rows.campaign_row(spec(), [], mem_gb=48, timeout_s=7200,
                         progress_phases=())
     assert row["timeout_s"] == 7200
     assert "progress_phases" not in row

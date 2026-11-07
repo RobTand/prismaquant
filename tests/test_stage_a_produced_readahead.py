@@ -271,17 +271,22 @@ def test_the_window_the_dispatcher_seals_is_the_group_count_the_owner_derives():
     _src, pb_repo = chain._pb_source()
     from prismaquant.staged_lease import set_lease_helper_root
     set_lease_helper_root(str(pb_repo))
-    from dispatch_joint_quanta import build_stage_a_produced_template
+    from dispatch_joint_quanta import (
+        build_stage_a_produced_template, ProducedOutputDeclarationUnsupported)
     from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
     from prismaquant.stage_a_produced_output import (
-        boundary_group_ceiling_bytes)
+        boundary_group_ceiling_bytes, build_boundary_template)
 
     geometry = {"group_size": 64, "max_entry_tensor_bytes": 16 << 20}
     for groups in (2, 56):
-        template = build_stage_a_produced_template(
+        intent = dict(
             output_prefix="/home/rob/stage-a-out", tier=chain.TIER,
             artifact_max_bytes=640 * (1 << 30), concurrent_groups=groups,
             **geometry)
+        with pytest.raises(ProducedOutputDeclarationUnsupported) as refused:
+            build_stage_a_produced_template(**intent)
+        assert refused.value.intent == intent
+        template = build_boundary_template(**intent)
         assert template["working_demands"][chain.TIER]["window_gib"] == (
             2 * groups), "the production group is 2 tokens"
         publication = SimpleNamespace(

@@ -66,6 +66,9 @@ def _offline_tier_policy(monkeypatch):
 
     with source_bound():
         _pin_published_helper_root(monkeypatch)
+        import dispatch_joint_quanta as dispatch
+        from prismaquant.stage_a_produced_output import build_boundary_template
+        monkeypatch.setattr(dispatch, "build_stage_a_produced_template", build_boundary_template)
         deactivate_staged_tier_policy_for_tests()
         yield
         deactivate_staged_tier_policy_for_tests()
@@ -441,7 +444,6 @@ def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
     spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
                                 "env": {}}))
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
-    monkeypatch.setattr(dispatch, "_pbrun_seals_produced_output", lambda *a: True)
     bound, receipt = _campaign(tmp_path, run_identity_extra=run_identity_extra)
     plan = Path(bound[0]["campaign"]["plan_path"])
     plan.write_text(json.dumps({"execution": {"boundary_storage": {
@@ -473,13 +475,12 @@ def _main(dispatch, gateway, records, receipt_path, out, *extra):
 
 
 def _inner(argv):
-    tail = argv[argv.index("--") + 1:]
+    tail = argv["argv"]
     return tail[tail.index("--", tail.index("--spec")) + 1:]
 
 
 def _phases(argv):
-    return [argv[i + 1].split("=", 1)[0] for i, word in enumerate(argv)
-            if word == "--progress-phase"]
+    return [item.split("=", 1)[0] for item in argv["progress_phases"]]
 
 
 def _by_id(gateway):
@@ -518,12 +519,12 @@ def test_band_serial_publishes_producers_then_their_consumers(
     assert '"band_serial_pending": "layer-002"' in printed
     assert '"band_serial_pending": "layer-000"' in printed
     for quantum_id, layer in (("layer-003", 3), ("layer-001", 1)):
-        argv = rows[quantum_id]["argv"]
+        argv = rows[quantum_id]["row"]
         inner = _inner(argv)
         assert "--emit-adjoint-handoff" in inner
         assert "--adjoint-handoff" not in inner
-        template_path = Path(argv[argv.index("--produced-output-template") + 1])
-        assert argv.index("--produced-output-template") < argv.index("--")
+        template_path = Path(argv["produced_outputs"]["template"])
+        assert "--produced-output-template" not in argv["argv"]
         template = json.loads(template_path.read_text())
         # The template names the producer's handoff directory under
         # --output-root, where the file itself lives (PQ #1200). The fixture
@@ -545,7 +546,7 @@ def test_band_serial_publishes_producers_then_their_consumers(
     # is still running.
     published = _emit(bound[3])
     _complete(bound[3], published)
-    first.mark_terminal(rows["layer-003"]["action_key"])
+    first.mark_terminal(rows["layer-003"]["job_id"])
 
     # Run 2 continues the same state file; the gateway keeps what it knows.
     second = first
@@ -554,13 +555,13 @@ def test_band_serial_publishes_producers_then_their_consumers(
     rows2 = _by_id(second)
     assert sorted(rows2) == ["layer-001", "layer-002"]
     # A resubmitted producer is the same sealed action: identical argv.
-    assert rows2["layer-001"]["argv"] == rows["layer-001"]["argv"]
-    consumer = rows2["layer-002"]["argv"]
+    assert rows2["layer-001"]["row"] == rows["layer-001"]["row"]
+    consumer = rows2["layer-002"]["row"]
     inner = _inner(consumer)
     assert inner[inner.index("--adjoint-handoff") + 1] == published["path"]
     assert inner[inner.index("--adjoint-handoff-sha256") + 1] == published["sha256"]
     assert "--emit-adjoint-handoff" not in inner  # layer 1 is another band
-    staged = Path(consumer[consumer.index("--data-manifest") + 1])
+    staged = Path(consumer["data_manifest"])
     digest = hashlib.sha256(staged.read_bytes()).hexdigest()
     assert inner[inner.index("--data-manifest-sha256") + 1] == digest
     assert staged.parent == out / "layer-quanta" / "band-serial"
@@ -568,8 +569,7 @@ def test_band_serial_publishes_producers_then_their_consumers(
     assert phases[:3] == ["head", HANDOFF_LOAD_PHASE, "own-002-source"]
     assert "checkpoint-load" not in phases
     assert not any(name.startswith("chain-") for name in phases)
-    grace = dict(consumer[i + 1].split("=", 1) for i, word in enumerate(consumer)
-                 if word == "--progress-phase")
+    grace = dict(item.split("=", 1) for item in consumer["progress_phases"])
     assert int(grace[HANDOFF_LOAD_PHASE]) == dispatch.HEAD_PROGRESS_GRACE_S
     # The quantum re-derives the staged bytes from what it is given.
     handoff = load_quantum_handoff(published["path"], published["sha256"],
@@ -593,10 +593,10 @@ def test_band_serial_publishes_producers_then_their_consumers(
     third.submitted = []
     assert _main(dispatch, third, records, receipt_path, out) == 0
     rows3 = _by_id(third)
-    assert rows3["layer-002"]["argv"] == consumer
-    assert rows3["layer-001"]["argv"] == rows["layer-001"]["argv"]
+    assert rows3["layer-002"]["row"] == consumer
+    assert rows3["layer-001"]["row"] == rows["layer-001"]["row"]
     assert "layer-000" in rows3  # never submitted, so plain chain mode
-    assert "--adjoint-handoff" not in _inner(rows3["layer-000"]["argv"])
+    assert "--adjoint-handoff" not in _inner(rows3["layer-000"]["row"])
 
 
 @pytest.mark.parametrize("defect", ["not-executed", "gapped", "foreign-identity",
@@ -608,7 +608,7 @@ def test_a_consumer_waits_until_its_producer_published_a_whole_handoff(
     band = ("--band-serial", "--handoff-tier", TIER)
     gateway = dispatch.FakeGateway()
     assert _main(dispatch, gateway, records, receipt_path, out, *band) == 0
-    key = _by_id(gateway)["layer-003"]["action_key"]
+    key = _by_id(gateway)["layer-003"]["job_id"]
     published = _emit(bound[3])
     _complete(bound[3], published)
     status = Path(bound[3]["output_space"]["root"]) / "status.json"
@@ -642,7 +642,7 @@ def test_a_fused_batch_one_regime_runs_band_serial(tmp_path, monkeypatch):
                  "--band-serial", "--handoff-tier", TIER) == 0
     rows = _by_id(gateway)
     assert sorted(rows) == ["layer-001", "layer-003"]
-    assert all("--emit-adjoint-handoff" in _inner(row["argv"]) for row in rows.values())
+    assert all("--emit-adjoint-handoff" in _inner(row["row"]) for row in rows.values())
 
 
 def test_a_producer_that_published_no_handoff_leaves_its_consumer_on_the_chain(
@@ -653,8 +653,8 @@ def test_a_producer_that_published_no_handoff_leaves_its_consumer_on_the_chain(
         tmp_path, monkeypatch)
     gateway = dispatch.FakeGateway()
     assert _main(dispatch, gateway, records, receipt_path, out) == 0
-    key = _by_id(gateway)["layer-003"]["action_key"]
-    assert "--emit-adjoint-handoff" not in _inner(_by_id(gateway)["layer-003"]["argv"])
+    key = _by_id(gateway)["layer-003"]["job_id"]
+    assert "--emit-adjoint-handoff" not in _inner(_by_id(gateway)["layer-003"]["row"])
     _complete(bound[3], None)
     gateway.mark_terminal(key)
     gateway.submitted = []
@@ -662,7 +662,7 @@ def test_a_producer_that_published_no_handoff_leaves_its_consumer_on_the_chain(
     # fresh consumer of a handoff-less producer is chain as well.
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--band-serial", "--handoff-tier", TIER) == 0
-    argv = _by_id(gateway)["layer-002"]["argv"]
+    argv = _by_id(gateway)["layer-002"]["row"]
     assert "--adjoint-handoff" not in _inner(argv)
     assert _phases(argv)[:2] == ["head", "checkpoint-load"]
 
@@ -672,21 +672,20 @@ def test_a_fresh_consumer_of_a_handoff_less_producer_runs_the_chain(
     dispatch, bound, records, receipt_path, out = _dispatch_layout(
         tmp_path, monkeypatch)
     state = out / "layer-quanta" / "campaign-state.json"
-    state.parent.mkdir(parents=True)
-    # Layer 3 ran (in chain mode) before band-serial dispatch existed.
-    state.write_text(json.dumps({"event": "quantum-submitted",
-                                 "quantum_id": "layer-003",
-                                 "identity_sha256": bound[3]["identity_sha256"],
-                                 "action_key": "fake-old"}) + "\n")
-    _complete(bound[3], None)
+    # A native chain producer can precede a fresh band-serial consumer.
     gateway = dispatch.FakeGateway()
-    gateway.mark_terminal("fake-old")
+    assert _main(dispatch, gateway, records, receipt_path, out,
+                 "--quantum", "layer-003") == 0
+    producer = _by_id(gateway)["layer-003"]
+    _complete(bound[3], None)
+    gateway.mark_terminal(producer["job_id"])
+    gateway.submitted.clear()
     assert _main(dispatch, gateway, records, receipt_path, out,
                  "--band-serial", "--handoff-tier", TIER) == 0
     rows = _by_id(gateway)
     assert "layer-003" not in rows
-    assert "--adjoint-handoff" not in _inner(rows["layer-002"]["argv"])
-    assert _phases(rows["layer-002"]["argv"])[:2] == ["head", "checkpoint-load"]
+    assert "--adjoint-handoff" not in _inner(rows["layer-002"]["row"])
+    assert _phases(rows["layer-002"]["row"])[:2] == ["head", "checkpoint-load"]
 
 
 @pytest.mark.parametrize("case", ["no-tier", "legacy-rows", "batched-regime",
@@ -708,7 +707,7 @@ def test_band_serial_refuses_what_it_cannot_run(tmp_path, monkeypatch, capsys, c
     gateway = dispatch.FakeGateway()
     if case == "foreign-handoff":
         assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
-        key = _by_id(gateway)["layer-003"]["action_key"]
+        key = _by_id(gateway)["layer-003"]["job_id"]
         # Layer 1's handoff (band 2) named as layer 3's: layer 2 refuses it.
         _complete(bound[3], _emit(bound[1]))
         gateway.mark_terminal(key)
@@ -740,7 +739,7 @@ def test_a_band_runs_in_one_kda_kernel_mode(tmp_path, monkeypatch, capsys,
     flags = ("--band-serial", "--handoff-tier", TIER)
     gateway = dispatch.FakeGateway()
     assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
-    key = _by_id(gateway)["layer-003"]["action_key"]
+    key = _by_id(gateway)["layer-003"]["job_id"]
     _complete(bound[3], _emit(bound[3], kernel=producer_kernel))
     gateway.mark_terminal(key)
     gateway.submitted = []
@@ -771,11 +770,11 @@ def test_an_unset_spec_binds_the_producers_mode(tmp_path, monkeypatch, producer_
     spec = json.loads(Path(dispatch.SPEC_PATH).read_text())
     assert "PRISMAQUANT_STAGE_B_KDA_KERNEL" not in spec.get("env", {})
     assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
-    key = _by_id(gateway)["layer-003"]["action_key"]
+    key = _by_id(gateway)["layer-003"]["job_id"]
     published = _emit(bound[3], kernel=producer_kernel)
     _complete(bound[3], published)
     gateway.mark_terminal(key)
     gateway.submitted = []
     assert _main(dispatch, gateway, records, receipt_path, out, *flags) == 0
-    inner = _inner(_by_id(gateway)["layer-002"]["argv"])
+    inner = _inner(_by_id(gateway)["layer-002"]["row"])
     assert inner[inner.index("--adjoint-handoff") + 1] == published["path"]

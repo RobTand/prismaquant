@@ -29,34 +29,7 @@ BOOKEND = 900
 REFUSED = (ChainDispatchRefused, chain.CaptureChainRefused, ValueError)
 
 
-class _Fleet:
-    """``pbcampaign --detach`` and ``pbwait`` as the dispatcher sees them."""
-
-    def __init__(self, root):
-        self.root = Path(root)
-        self.submitted = []
-        self.waited = []
-
-    def __call__(self, command, capture_output=True, text=True):
-        if Path(command[1]).name == "pbwait.py":
-            self.waited.append(command[-1])
-            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
-        assert command[2] == "--detach"
-        rows = json.loads(Path(command[3]).read_text())
-        assert len(rows) == 1
-        key = f"{len(self.submitted) + 1:064x}"
-        detach = {"action_key": key, "done": str(self.root / f"{key}.done"),
-                  "failed": str(self.root / f"{key}.failed"),
-                  "withdrawn": str(self.root / f"{key}.withdrawn"), "published_unix": 0.0}
-        self.submitted.append(rows[0])
-        return subprocess.CompletedProcess(command, 0, stdout=json.dumps(detach) + "\n",
-                                           stderr="")
-
-    def end(self, round_dir, name, *, returncode=0):
-        detach = json.loads(dispatch.submission_path(round_dir, name).read_text())["detach"]
-        self.root.mkdir(parents=True, exist_ok=True)
-        Path(detach["done"]).write_text(json.dumps(
-            {"status": "executed", "detail": {"returncode": returncode}}))
+from native_dispatch_fixture import FakeNative
 
 
 @pytest.fixture
@@ -71,7 +44,7 @@ def sealed(tmp_path, monkeypatch):
     document = dispatch.seal(spec, tmp_path, ranges="0:1,1:2",
                              boundary_storage=_boundary_policy(fixture.boundaries),
                              timeout_s=TIMEOUT, bookend_timeout_s=BOOKEND)
-    return fixture, spec, document, dispatch.round_directory(tmp_path), _Fleet(tmp_path / "pb")
+    return fixture, spec, document, dispatch.round_directory(tmp_path), FakeNative(monkeypatch)
 
 
 def test_the_sealed_rows_run_in_chain_order_at_priority_minus_ten(sealed):
@@ -162,11 +135,11 @@ def test_each_row_is_submitted_only_after_its_predecessor_ended_and_left_its_out
     fixture, _spec, _document, round_dir, fleet = sealed
 
     def submit(**options):
-        return [result["name"] for result in dispatch.submit(round_dir, run=fleet, **options)]
+        return [result["name"] for result in dispatch.submit(round_dir, **options)]
 
     assert submit() == ["prep"]
-    with pytest.raises(ChainDispatchRefused, match="row prep .* has not finished"):
-        submit()
+    assert submit() == ["prep"]
+    assert len(fleet.submitted) == 1
     fleet.end(round_dir, "prep")
     # PrismaBuild says exit 0, but the prep left no record: not ready.
     with pytest.raises(ChainDispatchRefused, match="no readable capture chain prep"):
@@ -180,9 +153,9 @@ def test_each_row_is_submitted_only_after_its_predecessor_ended_and_left_its_out
     fixture.quantum((0, 1))
     assert submit() == ["capture-001-002"]
     fleet.end(round_dir, "capture-001-002", returncode=1)
-    with pytest.raises(ChainDispatchRefused, match="ended executed with exit 1"):
+    with pytest.raises(ChainDispatchRefused, match="failed"):
         submit()
-    with pytest.raises(ChainDispatchRefused, match="already ended with exit 0"):
+    with pytest.raises(ChainDispatchRefused, match="cannot retry a producer|cannot retry"):
         submit(retry="capture-000-001")
     assert submit(retry="capture-001-002") == ["capture-001-002"]
     assert (round_dir / "submissions" / "capture-001-002.attempt-1.json").is_file()
@@ -196,32 +169,31 @@ def test_each_row_is_submitted_only_after_its_predecessor_ended_and_left_its_out
     chain.join(fixture.root, census_path=fixture.census)
     dispatch.require_outputs(document, document["rows"][-1])
     assert submit() == []
-    assert [row["priority"] for row in fleet.submitted] == [-10] * 5
+    assert len(fleet.submitted) == 5
 
 
-def test_wait_walks_the_chain_and_stops_at_a_row_without_its_outputs(sealed):
+def test_wait_walks_the_chain_and_stops_at_a_row_without_its_outputs(sealed, monkeypatch):
     fixture, _spec, _document, round_dir, fleet = sealed
-
-    def waiting(command, capture_output=True, text=True):
-        completed = fleet(command, capture_output=capture_output, text=text)
-        if Path(command[1]).name == "pbwait.py":
-            name = json.loads(next(
-                path.read_text() for path in sorted((round_dir / "submissions").iterdir())
-                if json.loads(path.read_text())["detach"]["action_key"] == command[-1]))["name"]
-            fleet.end(round_dir, name)
-            if name == "prep":
+    original = fleet.collect
+    waited = []
+    def waiting(state_dir, *, wait=False):
+        if wait:
+            job_id = fleet.states[str(state_dir)].job_id
+            fleet.finish(job_id)
+            waited.append(job_id)
+            if len(waited) == 1:
                 fixture.prepare()
-        return completed
-
+        return original(state_dir, wait=wait)
+    from prismaquant import tessera_campaign_rows
+    monkeypatch.setattr(tessera_campaign_rows, "collect_rows", waiting)
     with pytest.raises(ChainDispatchRefused, match="capture layers 0:1"):
-        dispatch.submit(round_dir, wait_s=5, run=waiting)
-    assert [Path(p).stem for p in sorted((round_dir / "submissions").iterdir())] == [
-        "capture-000-001", "prep"]
-    assert len(fleet.waited) == 2
+        dispatch.submit(round_dir, wait=True)
+    assert len(waited) == 2
+    assert len(fleet.submitted) == 2
 
 
 def test_a_round_refuses_a_changed_census(sealed):
     fixture, _spec, _document, round_dir, fleet = sealed
     fixture.census.write_text(fixture.census.read_text() + " ")
     with pytest.raises(ChainDispatchRefused, match="census changed"):
-        dispatch.submit(round_dir, run=fleet)
+        dispatch.submit(round_dir)

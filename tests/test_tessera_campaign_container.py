@@ -30,7 +30,7 @@ def spec():
 
 
 def test_container_row_keeps_row_arguments_and_declared_runtime():
-    row = campaign_rows.prismabuild_row(spec(), ["--units", "/mnt/shared/units.json"],
+    row = campaign_rows.campaign_row(spec(), ["--units", "/mnt/shared/units.json"],
                         mem_gb=48, timeout_s=600)
     assert row["argv"][:3] == ["python3", "-m", "tools.tessera_campaign_container"]
     cut = row["argv"].index("--")
@@ -203,7 +203,7 @@ def test_spec_refuses_mounts_that_hide_the_sealed_source(tmp_path, target):
 def test_host_rows_remain_direct():
     data = spec()
     del data["container"]
-    assert campaign_rows.prismabuild_row(data, [], mem_gb=40, timeout_s=60)["argv"] == [
+    assert campaign_rows.campaign_row(data, [], mem_gb=40, timeout_s=60)["argv"] == [
         "python3", "-u", "-m", "prismaquant.tessera_campaign"]
 
 
@@ -217,7 +217,7 @@ def test_materialization_row_preserves_its_subcommand_and_resource_demand(contai
         del data['container']
     arguments = ['run', '--plan', '/mnt/shared/plan.json', '--group', '0',
                  '--anchor-batch-size', '2']
-    row = campaign_rows.prismabuild_row(data, arguments, module='prismaquant.tessera_materialization',
+    row = campaign_rows.campaign_row(data, arguments, module='prismaquant.tessera_materialization',
                         mem_gb=48, timeout_s=600)
     command = ['python3', '-u', '-m', 'prismaquant.tessera_materialization', *arguments]
     if container:

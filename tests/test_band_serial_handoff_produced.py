@@ -68,6 +68,11 @@ def pb_source(monkeypatch):
     src, pb_repo = chain._pb_source()
     from prismaquant.staged_lease import set_lease_helper_root
     set_lease_helper_root(str(pb_repo))
+    # Positive owner geometry remains a legacy scientific fixture. Native
+    # template authority refuses in production until unit 4.
+    import dispatch_joint_quanta as dispatch
+    from prismaquant.stage_a_produced_output import build_boundary_template
+    monkeypatch.setattr(dispatch, "build_stage_a_produced_template", build_boundary_template)
     return src, pb_repo
 
 

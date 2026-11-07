@@ -1,35 +1,17 @@
-"""Dispatch a streamed calibration capture as a layer chain (PQ #1885).
+"""Seal and dispatch a streamed calibration capture as native Flux rows.
 
-``prismaquant.capture_layer_chain`` cuts the streamed capture into a prep
-row, one quantum row per layer range and a join row. Each quantum reads the
-boundary its predecessor wrote, so the rows run one after another, and
-``pbrun --after`` cannot order them: a prep or a quantum commits no produced
-output for a consumer to wait on. This tool orders them by what they leave
-on disk, as ``dispatch_stage_a_split`` does for the Stage A split:
-
-* **seal** writes ``<workspace>/capture-chain/round.json`` from the campaign
-  spec: every row's PrismaBuild row (built by
-  ``tessera_campaign_rows.prismabuild_row``, so the class, container, environment
-  and demand are the capture row's), at priority -10 (``--priority``: a chain
-  that feeds a gate is campaign work and runs at 0) with an explicit
-  ``timeout_s``. The prep and the join run no forward and claim no GPU.
-  A quantum's progress phase (``capture``, reporting each layer whose units
-  are journalled) is declared only when asked for (``--progress-grace-s``),
-  and ``pbrun`` refuses it unless the fleet announces the progress contract.
-* **plan** prints the sealed rows.
-* **submit** submits the next unsubmitted row, detached, once the row before
-  it ended ``executed`` with exit 0 and its outputs check: the prep's sealed
-  record and complete owner, each quantum's sealed fragment and complete
-  owner. ``--wait-s`` waits for each submitted row through ``pbwait`` and
-  walks the whole chain. ``--retry NAME`` re-submits a row whose last
-  submission did not finish with exit 0; its record is kept beside the new one.
+Prep, layer quanta and join retain the campaign class, source/read bindings,
+resource demands, storage, progress and priority intent. Every predecessor
+must have native success and independently verified scientific outputs.
+Resume validates the same saved launch; only an explicit terminal failure
+permits a requested retry, with the earlier attempt retained. Unsupported
+production requirements refuse before the prep launches.
 """
 from __future__ import annotations
 
 import argparse
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,22 +24,23 @@ if str(TOOLS) not in sys.path:
 from dispatch_stage_a_split import (  # noqa: E402
     SplitDispatchRefused,
     _write_json,
-    pb_ending,
+    native_ending,
+    native_result,
+    saved_submission,
+    submit_row,
+    retire_attempt,
     submission_path,
-    submission_result,
 )
-from dispatch_tessera_campaign import PBCAMPAIGN  # noqa: E402
 from prismaquant.tessera_campaign_rows import (  # noqa: E402
-    load_spec, prismabuild_row, row_memory_gb,
+    load_spec, campaign_row, row_memory_gb,
 )
 
-ROUND_SCHEMA = "prismaquant.capture_chain_round.v1"
+ROUND_SCHEMA = "prismaquant.capture_chain_round.v2"
 ROUND_NAME = "round.json"
 #: The agent band, as ``dispatch_tessera_campaign --priority``: agent and
 #: post-campaign work never displaces campaign rows. A gate-critical chain
 #: passes ``--priority 0`` (PQ #1918).
 PRIORITY = -10
-PBWAIT = PBCAMPAIGN.parent / "pbwait.py"
 #: The phase a capture chain quantum reports its journalled layers in.
 QUANTUM_PROGRESS_PHASE = "capture"
 
@@ -72,7 +55,7 @@ def round_directory(workspace) -> Path:
 
 def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_timeout_s,
          bookend_mem_gb=16, progress_phases=(), priority=PRIORITY) -> dict:
-    """Write the chain's rows once; nothing reaches PrismaBuild."""
+    """Write the chain's rows once; nothing is submitted."""
     from prismaquant.capture_layer_chain import (parse_layer_ranges, range_label,
                                                  require_layer_tiling)
     from prismaquant.streamed_boundary_artifacts import check_boundary_storage
@@ -106,7 +89,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
         argv = ["--out", str(round_dir / "out" / f"{name}-unused.pkl"),
                 "--cache-dir", str(round_dir / "cache" / name), *common,
                 "--capture-chain", kind, *extra]
-        row = prismabuild_row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
+        row = campaign_row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
         row["priority"] = priority
         if not gpu:
             row["demand"] = {**row["demand"], "gpu": 0}
@@ -178,10 +161,10 @@ def require_outputs(document, entry) -> None:
         raise ChainDispatchRefused(str(exc)) from exc
 
 
-def _pb_ending(round_dir, name) -> dict:
-    """``dispatch_stage_a_split.pb_ending``, refusing as this tool refuses."""
+def _native_ending(round_dir, name) -> dict:
+    """Native completion barrier, with this caller's refusal type."""
     try:
-        return pb_ending(round_dir, name)
+        return native_ending(round_dir, name)
     except ChainDispatchRefused:
         raise
     except SplitDispatchRefused as exc:
@@ -193,67 +176,46 @@ def require_capture_ready(round_dir, document, index) -> None:
     if index == 0:
         return
     before = document["rows"][index - 1]
-    _pb_ending(round_dir, before["name"])
+    _native_ending(round_dir, before["name"])
     require_outputs(document, before)
 
 
 require_ready = require_capture_ready
 
 
-def _submit_row(round_dir, entry, *, run) -> dict:
-    manifest = Path(round_dir) / "manifests" / f"{entry['name']}.json"
-    _write_json(manifest, [entry["row"]])
-    command = [sys.executable, str(PBCAMPAIGN), "--detach", str(manifest)]
-    completed = run(command, capture_output=True, text=True)
-    result = submission_result(entry["name"], command, completed)
-    _write_json(submission_path(round_dir, entry["name"]), result)
-    detach = result["detach"]
-    if completed.returncode != 0 or detach is None:
-        raise ChainDispatchRefused(
-            f"row {entry['name']} was not submitted (exit {completed.returncode}): "
-            f"{(completed.stderr or '').strip()[-400:]}")
-    return result
-
-
-def _retire_attempt(round_dir, name) -> None:
-    """Keep a failed submission's record beside the retry's."""
-    path = submission_path(round_dir, name)
-    attempt = 1
-    while path.with_name(f"{name}.attempt-{attempt}.json").exists():
-        attempt += 1
-    path.rename(path.with_name(f"{name}.attempt-{attempt}.json"))
-
-
-def submit_capture_chain(round_dir, *, wait_s=None, retry=None, run=subprocess.run) -> list[dict]:
-    """Submit the next row (with ``wait_s``, every remaining row) in chain order."""
+def submit_capture_chain(round_dir, *, wait=False, retry=None) -> list[dict]:
+    """Submit/resume in order, binding native IDs and independent output barriers."""
+    from prismaquant.tessera_campaign_rows import validate_row
     round_dir = Path(round_dir)
     document = load_round(round_dir)
     names = [entry["name"] for entry in document["rows"]]
-    if retry is not None:
-        if retry not in names:
-            raise ChainDispatchRefused(f"the chain has no row {retry}")
-        if not submission_path(round_dir, retry).exists():
-            raise ChainDispatchRefused(f"row {retry} was never submitted")
-        try:
-            _pb_ending(round_dir, retry)
-        except ChainDispatchRefused:
-            _retire_attempt(round_dir, retry)
-        else:
-            raise ChainDispatchRefused(f"row {retry} already ended with exit 0")
-    results = []
-    for index, entry in enumerate(document["rows"]):
-        if submission_path(round_dir, entry["name"]).exists():
-            continue
-        require_ready(round_dir, document, index)
-        results.append(_submit_row(round_dir, entry, run=run))
-        if wait_s is None:
-            break
-        key = results[-1]["detach"]["action_key"]
-        run([sys.executable, str(PBWAIT), "--wait-s", str(wait_s), key],
-            capture_output=True, text=True)
-        _pb_ending(round_dir, entry["name"])
-        require_outputs(document, entry)
-    return results
+    # Refuse unsupported downstream requirements before even the prep launches.
+    try:
+        for entry in document["rows"]:
+            validate_row(entry["row"])
+        if retry is not None:
+            if retry not in names:
+                raise ChainDispatchRefused(f"the chain has no row {retry}")
+            if any(submission_path(round_dir, name).exists() for name in names[names.index(retry) + 1:]):
+                raise ChainDispatchRefused("cannot retry a producer with submitted downstream rows")
+            retire_attempt(round_dir, retry)
+        results = []
+        for index, entry in enumerate(document["rows"]):
+            existed = submission_path(round_dir, entry["name"]).exists()
+            if not existed:
+                require_ready(round_dir, document, index)
+            producers = [] if index == 0 else [saved_submission(round_dir, names[index - 1])]
+            saved = submit_row(round_dir, entry, afterok=producers)
+            result = native_result(round_dir, entry["name"], wait=wait)
+            if not existed or result["status"] == "running":
+                results.append(saved)
+            if not wait and result["status"] == "running":
+                break
+            _native_ending(round_dir, entry["name"])
+            require_outputs(document, entry)
+        return results
+    except (ValueError, KeyError, SplitDispatchRefused) as exc:
+        raise ChainDispatchRefused(str(exc)) from exc
 
 
 submit = submit_capture_chain
@@ -281,8 +243,8 @@ def main(argv=None) -> int:
     planning.add_argument("--workspace", required=True)
     submitting = sub.add_parser("submit", help="submit the next row once its predecessor finished")
     submitting.add_argument("--workspace", required=True)
-    submitting.add_argument("--wait-s", type=float, default=None,
-                            help="wait for each row through pbwait and walk the whole chain")
+    submitting.add_argument("--wait", action="store_true",
+                            help="wait for native completion and walk the whole chain")
     submitting.add_argument("--retry", default=None, help="re-submit this row after a failure")
     args = ap.parse_args(argv)
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
@@ -303,10 +265,10 @@ def main(argv=None) -> int:
             for entry in document["rows"]:
                 print(DIRECT_ASCII_SPACED_LAX.text({"name": entry["name"], "row": entry["row"]}))
         else:
-            for result in submit(round_directory(args.workspace), wait_s=args.wait_s,
+            for result in submit(round_directory(args.workspace), wait=args.wait,
                                  retry=args.retry):
                 print(DIRECT_ASCII_SPACED_LAX.text(
-                    {"name": result["name"], "detach": result["detach"]}))
+                    {"name": result["name"], "submissions": result["submissions"]}))
     except SplitDispatchRefused as exc:
         print(f"[capture-chain] refused: {exc}", file=sys.stderr)
         return 2

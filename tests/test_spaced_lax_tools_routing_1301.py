@@ -35,7 +35,10 @@ def test_state_append_preserves_existing_bytes_and_nonfinite_event(tmp_path, mon
     path.parent.mkdir()
     path.write_bytes(b"previous event\n")
     _append_state(path, {"quantum_id": "q-é", "values": [float("nan"), {}, []]})
-    GOLDEN.value(path.read_bytes())
+    assert path.read_bytes() == (
+        b'previous event\n{"quantum_id": "q-\\u00e9", '
+        b'"schema": "prismaquant.joint.native-event.v1", '
+        b'"unix": 1234.5, "values": [NaN, {}, []]}\n')
 
 
 def test_state_encoding_failure_does_not_append_a_partial_event(tmp_path):
@@ -138,7 +141,7 @@ def test_campaign_submission_preserves_inline_spec_bytes_and_envelope(tmp_path):
 
 
 def test_campaign_row_embeds_the_resolved_container_spec():
-    from prismaquant.tessera_campaign_rows import prismabuild_row
+    from prismaquant.tessera_campaign_rows import campaign_row
 
     spec = {"cwd": "/work", "python": "python3", "cpus": 2, "tags": ["gb10"],
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
@@ -147,7 +150,7 @@ def test_campaign_row_embeds_the_resolved_container_spec():
     # The serializer oracle predates campaign argument admission. Only the
     # input flag changes; all serialized bytes and row obligations stay checked.
     expected['argv'][-2] = '--model'
-    assert prismabuild_row(spec, ["--model", "é"], mem_gb=16,
+    assert campaign_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
 

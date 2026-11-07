@@ -66,25 +66,14 @@ def _write_spec(path: Path, container: dict) -> Path:
 def _embedded_spec(argv: list) -> dict:
     """The spec document the submission actually seals inside its argv."""
 
-    return json.loads(argv[argv.index("--spec") + 1])
+    command = argv["argv"] if isinstance(argv, dict) else argv
+    return json.loads(command[command.index("--spec") + 1])
 
 
-def _pbrun_option(argv: list, flag: str) -> str:
-    """One pbrun option's value, refused inside the payload instead.
-
-    A declaration the payload carries is invisible to PB, so "present but
-    after the separator" must fail exactly like "absent".
-    """
-
-    separator = argv.index("--")
-    assert flag in argv[:separator], (
-        f"{flag} is absent from the pbrun envelope of {argv[0]}")
-    return argv[argv.index(flag) + 1]
-
-
-# ---------------------------------------------------------------------------
-# dispatch_joint_quanta: stage A and the quanta
-# ---------------------------------------------------------------------------
+def _declared_image(row, flag):
+    assert flag == IMAGE_FLAG
+    image, = row["container_images"]
+    return image
 
 
 @pytest.fixture
@@ -155,7 +144,7 @@ def _quantum_record(tmp_path: Path) -> Path:
 def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
     argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
-    assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
+    assert _declared_image(argv, IMAGE_FLAG) == embedded["container"]["image"]
 
 
 def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
@@ -164,7 +153,7 @@ def test_quantum_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec)
     argv = joint.quantum_argv(record, record_path=record_path,
                               output_root=tmp_path / "out")
     embedded = _embedded_spec(argv)
-    assert _pbrun_option(argv, IMAGE_FLAG) == embedded["container"]["image"]
+    assert _declared_image(argv, IMAGE_FLAG) == embedded["container"]["image"]
 
 
 def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
@@ -192,14 +181,14 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
     embedded = _embedded_spec(argv)
     assert reads["spec"] == 1
     assert embedded["container"]["image"] == IMAGE
-    assert _pbrun_option(argv, IMAGE_FLAG) == IMAGE
+    assert _declared_image(argv, IMAGE_FLAG) == IMAGE
 
 
 def test_a_repository_manifest_digest_is_declared_exactly(tmp_path, monkeypatch):
     spec = _write_spec(tmp_path / "spec.json", {"image": REPO_IMAGE})
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
     argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    assert _pbrun_option(argv, IMAGE_FLAG) == REPO_IMAGE
+    assert _declared_image(argv, IMAGE_FLAG) == REPO_IMAGE
 
 
 def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
@@ -211,7 +200,7 @@ def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
     spec = _write_spec(tmp_path / "spec.json", container)
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
     argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
-    assert IMAGE_FLAG not in argv
+    assert "container_images" not in argv
     embedded = _embedded_spec(argv)
     assert embedded["container"]["archive"] == container["archive"]
     assert embedded["container"]["content_sha256"] == CONTENT_SHA
@@ -254,8 +243,8 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
     assert code == 0
     plan_out = json.loads(capsys.readouterr().out)
     assert [row["kind"] for row in plan_out["rows"]] == ["stage-a"]
-    argv = plan_out["rows"][0]["argv"]
-    assert _pbrun_option(argv, IMAGE_FLAG) == _embedded_spec(argv)["container"]["image"]
+    argv = plan_out["rows"][0]["row"]
+    assert _declared_image(argv, IMAGE_FLAG) == _embedded_spec(argv)["container"]["image"]
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +262,7 @@ def _base_spec(**extra) -> dict:
 
 
 def _row(spec: dict, **kwargs) -> dict:
-    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.campaign_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 

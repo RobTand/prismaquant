@@ -42,7 +42,7 @@ def test_plan_reuses_partial_seed_and_prices_unstarted_row(tmp_path, monkeypatch
             'python': 'python', 'env': {}}
     monkeypatch.setattr(campaign_rows, 'load_spec', lambda _: spec)
     monkeypatch.setattr(campaign_rows, 'row_memory_gb', lambda *a, **k: 1)
-    monkeypatch.setattr(campaign_rows, 'prismabuild_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': 1}})
+    monkeypatch.setattr(campaign_rows, 'campaign_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': 1}})
     # ``plan`` also derives every published row's data manifest, from the
     # shards the model directory holds. This fixture's model is a bare path;
     # the seed gates are what is under test, and the read set is covered by
@@ -86,7 +86,7 @@ def test_plan_derives_demand_from_the_seeded_argv(tmp_path, monkeypatch):
         return 1
     monkeypatch.setattr(campaign_rows, 'load_spec', lambda _: spec)
     monkeypatch.setattr(campaign_rows, 'row_memory_gb', memory_gb)
-    monkeypatch.setattr(campaign_rows, 'prismabuild_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': kw['mem_gb']}})
+    monkeypatch.setattr(campaign_rows, 'campaign_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': kw['mem_gb']}})
     monkeypatch.setattr(d, 'planned_data_manifests',
                         lambda workspace, plan, selections, rows: (rows, []))
     args = SimpleNamespace(spec='unused', workspace=str(workspace), calibration_cache=None,

@@ -120,7 +120,6 @@ def sealed(tmp_path, monkeypatch, request):
         "permitted_tiers": [TIER]})
     band_request = _json(tmp_path / "request.json", {"params": {}})
     earlier = _json(tmp_path / "band-005.json", {"band": {"boundary": 5}})
-    monkeypatch.setattr(dispatch_joint_quanta, "_pbrun_seals_produced_output", lambda *a: True)
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: TWO)
     document = seal_round(
@@ -138,7 +137,7 @@ def sealed(tmp_path, monkeypatch, request):
 
 
 def _payload(row):
-    return row["argv"][row["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
+    return row["row"]["argv"][row["row"]["argv"].index("prismaquant.joint_adjoint_capture") + 1:]
 
 
 def _flag(argv, flag):
@@ -146,7 +145,7 @@ def _flag(argv, flag):
 
 
 def _envelope(row):
-    return row["argv"][:row["argv"].index("--")]
+    return row["row"]
 
 
 def test_a_sealed_round_names_every_row_and_its_order(sealed):
@@ -180,22 +179,21 @@ def test_a_sealed_round_names_every_row_and_its_order(sealed):
     templates = set()
     for name in ["prep", *labels]:
         envelope = _envelope(rows[name])
-        assert [envelope[i + 1] for i, word in enumerate(envelope) if word == "--tag"] == [
-            "gb10"]
-        assert _flag(envelope, "--priority") == "-10"
-        assert _flag(envelope, "--residency") == "stage"
-        assert _flag(envelope, "--residency-ram") == "auto"
-        assert _flag(envelope, "--data-manifest") == rows[name]["data_manifest"]["path"]
-        template = json.loads(Path(_flag(envelope, "--produced-output-template")).read_text())
+        assert envelope["tags"] == ["gb10"]
+        assert str(envelope["priority"]) == "-10"
+        assert envelope["residency"]["tier"] == "stage"
+        assert envelope["residency"]["ram"] == "auto"
+        assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
+        template = json.loads(Path(envelope["produced_outputs"]["template"]).read_text())
         templates.add(template["template_id"])
         assert template["output_prefix"] == str(sealed["space"])
         assert template["durable_maxima"]["payload_max_bytes"] == BUDGET
         assert "--host-class" not in envelope and "--measurement" not in envelope
     assert len(templates) == 3
     # CPU rows: no GPU, no manifest; the join writes its receipt into the round.
-    join = rows["join-002"]["argv"]
-    assert "--data-manifest" not in join and "gpu" not in _flag(join, "--demand")
-    assert join[join.index("--", join.index("--detach")) + 1:] == [
+    join = rows["join-002"]["row"]["argv"]
+    assert rows["join-002"]["row"]["demand"] == {"gpu": 0, "cpu": 2, "mem_gb": 8}
+    assert join == [
         "/venv/bin/python", "-m", "prismaquant.stage_a_chain_split",
         "--output-root", str(sealed["root"]), "--boundary", "2",
         "--receipt", str(sealed["round"] / "joins" / "join-002.json")]
@@ -211,14 +209,14 @@ def test_a_sealed_priority_reaches_every_row(sealed):
     assert load_round(sealed["round"])["priority"] == "0"
     for row in document["rows"]:
         envelope = _envelope(row)
-        assert envelope.count("--priority") == 1, row["name"]
-        assert _flag(envelope, "--priority") == "0", row["name"]
+        assert "priority" in envelope, row["name"]
+        assert str(envelope["priority"]) == "0", row["name"]
 
 
 def test_the_default_priority_is_recorded(sealed):
     assert sealed["document"]["priority"] == "-10"
     for row in sealed["document"]["rows"]:
-        assert _flag(_envelope(row), "--priority") == "-10", row["name"]
+        assert str(_envelope(row)["priority"]) == "-10", row["name"]
 
 
 @pytest.mark.parametrize("priority", ["high", "", "1.5", "0 "])
@@ -238,13 +236,11 @@ def test_a_quantum_seals_its_own_windows(sealed):
 
     rows = {row["name"]: row for row in sealed["document"]["rows"]}
     for label, samples in zip(sealed["document"]["labels"], RANGES):
-        envs = dict(value.split("=", 1) for flag, value in zip(
-            _envelope(rows[label]), _envelope(rows[label])[1:]) if flag == "--env")
+        envs = _envelope(rows[label])["env"]
         assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == (
             dispatch_joint_quanta.stage_a_spool_window_bytes(sealed["campaign"], samples))
     # The prep writes nothing; it is sized as the widest quantum.
-    envs = dict(value.split("=", 1) for flag, value in zip(
-        _envelope(rows["prep"]), _envelope(rows["prep"])[1:]) if flag == "--env")
+    envs = _envelope(rows["prep"])["env"]
     assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == (
         dispatch_joint_quanta.stage_a_spool_window_bytes(sealed["campaign"], RANGES[1]))
     assert rows["prep"]["window"] == rows[sealed["document"]["labels"][1]]["window"]
@@ -255,26 +251,7 @@ def test_a_quantum_seals_its_own_windows(sealed):
     assert (second["groups"], second["window_gib"]) == (min(24, 4 * (1 + N_PROBES)), 40)
 
 
-class _FakePbrun:
-    """Records each submission and answers with a detach line."""
-
-    def __init__(self, tmp_path):
-        self.root = tmp_path / "queue"
-        self.submitted = []
-
-    def __call__(self, argv, **kw):
-        import subprocess
-
-        key = hashlib.sha256(json.dumps(argv).encode()).hexdigest()
-        self.submitted.append(key)
-        line = json.dumps({"action_key": key, "status": "submitted",
-                           "done": str(self.root / "done" / f"{key}.json"),
-                           "failed": str(self.root / "failed" / f"{key}.json")})
-        return subprocess.CompletedProcess(argv, 0, stdout=line + "\n", stderr="")
-
-    def finish(self, key, returncode=0):
-        _json(self.root / "done" / f"{key}.json",
-              {"status": "executed", "detail": {"returncode": returncode}})
+from native_dispatch_fixture import FakeNative
 
 
 def test_each_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
@@ -282,19 +259,19 @@ def test_each_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
 
     round_dir, root, space = sealed["round"], sealed["root"], sealed["space"]
     labels = sealed["document"]["labels"]
-    fake = _FakePbrun(tmp_path)
+    fake = FakeNative(monkeypatch)
 
     def go(*names):
-        return submit(round_dir, list(names), run=fake)
+        return submit(round_dir, list(names))
 
-    with pytest.raises(SplitDispatchRefused, match="row prep was never submitted"):
+    with pytest.raises(SplitDispatchRefused, match="native state unavailable"):
         go(labels[0])
-    with pytest.raises(SplitDispatchRefused, match="never submitted"):
+    with pytest.raises(SplitDispatchRefused, match="native state unavailable"):
         go("join-002")
     go("prep")
-    with pytest.raises(SplitDispatchRefused, match="already submitted"):
-        go("prep")
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    assert go("prep")[0]["submissions"][0]["job_id"] == fake.submitted[0]
+    assert len(fake.submitted) == 1
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go(labels[0])
     fake.finish(fake.submitted[-1])
     # PrismaBuild says the prep executed, but it left no receipt yet.
@@ -313,7 +290,7 @@ def test_each_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
     _json(Path(paths["results"]), {"schema": "results"})
     _json(Path(paths["counters"]), {"schema": "counters"})
     go(*labels)
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go("join-002")
     for key, samples in zip(fake.submitted[-2:], RANGES):
         fake.finish(key)
@@ -322,28 +299,28 @@ def test_each_row_waits_for_the_rows_it_follows(sealed, tmp_path, monkeypatch):
         _write_split_receipt(space, _quantum(root, monkeypatch, samples,
                                              implementation=TWO))
     go("join-002")
-    with pytest.raises(SplitDispatchRefused, match="has not finished"):
+    with pytest.raises(SplitDispatchRefused, match="running"):
         go("band-002")
     fake.finish(fake.submitted[-1])
     with pytest.raises(SplitDispatchRefused, match="not joined"):
         go("band-002")
     submissions = json.loads((round_dir / "submissions" / "prep.json").read_text())
-    assert submissions["detach"]["action_key"] == fake.submitted[0]
+    assert submissions["submissions"][0]["job_id"] == fake.submitted[0]
 
 
-def test_a_failed_prep_holds_the_quanta(sealed, tmp_path):
-    fake = _FakePbrun(tmp_path)
-    submit(sealed["round"], ["prep"], run=fake)
+def test_a_failed_prep_holds_the_quanta(sealed, tmp_path, monkeypatch):
+    fake = FakeNative(monkeypatch)
+    submit(sealed["round"], ["prep"])
     fake.finish(fake.submitted[-1], returncode=3)
-    with pytest.raises(SplitDispatchRefused, match="ended executed with exit 3"):
-        submit(sealed["round"], [sealed["document"]["labels"][0]], run=fake)
+    with pytest.raises(SplitDispatchRefused, match="failed"):
+        submit(sealed["round"], [sealed["document"]["labels"][0]])
 
 
-def test_a_changed_input_refuses_every_row(sealed, tmp_path):
+def test_a_changed_input_refuses_every_row(sealed, tmp_path, monkeypatch):
     manifest = Path(sealed["document"]["rows"][1]["data_manifest"]["path"])
     manifest.write_bytes(manifest.read_bytes() + b"\n")
     with pytest.raises(SplitDispatchRefused, match="changed since the round was sealed"):
-        submit(sealed["round"], ["prep"], run=_FakePbrun(tmp_path))
+        submit(sealed["round"], ["prep"])
 
 
 def test_the_digest_tripwire(sealed, tmp_path):

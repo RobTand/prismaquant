@@ -168,9 +168,8 @@ def test_dispatch_main_accepts_a_spill_sealed_row(tmp_path, monkeypatch, capsys)
         # (test_readset_coverage_1095).
         _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
-    argv = gateway.submitted[0]["argv"]
-    declared = [argv[i + 1].split("=", 1)[0]
-                for i, word in enumerate(argv) if word == "--progress-phase"]
+    argv = gateway.submitted[0]["row"]
+    declared = [item.split("=", 1)[0] for item in argv["progress_phases"]]
     assert declared.index("render-00") + 1 == declared.index("spill-p0")
     assert declared[-1] == "render-01"
     assert not any(name.startswith("replay-") for name in declared)

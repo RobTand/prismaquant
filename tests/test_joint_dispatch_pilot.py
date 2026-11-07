@@ -166,7 +166,7 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
         selector = PilotSelector(action_key, published, 1)
         row_argv = dispatch.quantum_argv(
             record, record_path=record_path, output_root=tmp_path / "out")
-        command = row_argv[row_argv.index("--") + 1:]
+        command = row_argv["argv"]
         # This review input is supplied independently of the result and
         # counter bytes. Its source/entry/environment are the planned ones.
         descriptor = {"id": "pbrun.checkout-snapshot", "sha256": "9" * 64, "bytes": 1234}
@@ -215,7 +215,7 @@ def test_matching_producer_pilots_admit_and_stamp_the_fanout(
     state = tmp_path / "out" / "layer-quanta" / "campaign-state.json"
     events = [json.loads(line) for line in state.read_text().splitlines()]
     for event in events:
-        admission = event["pilot_admission"]
+        admission = (event["metadata"] if event["event"] == "native-intent" else event)["pilot_admission"]
         assert admission["mode"] == "verified"
         assert admission["gpu_envelope_fraction"] == 0.5
         assert len(admission["action_key"]) == 64
@@ -423,8 +423,11 @@ def test_override_is_explicit_and_persistent(tmp_path, campaign, records_dir):
                       extra=["--force-unverified-pilot"]), _gateway=gateway) == 0
     state = tmp_path / "out" / "layer-quanta" / "campaign-state.json"
     events = [json.loads(line) for line in state.read_text().splitlines()]
-    assert len(events) == 3
-    assert all(event["pilot_admission"]["mode"] == "override" for event in events)
+    intents = [event for event in events if event["event"] == "native-intent"]
+    submissions = [event for event in events if event["event"] == "quantum-submitted"]
+    assert len(intents) == len(submissions) == 3
+    assert all(event["metadata"]["pilot_admission"]["mode"] == "override" for event in intents)
+    assert all(event["pilot_admission"]["mode"] == "override" for event in submissions)
 
 
 @pytest.mark.parametrize("fault", ["entry", "plan", "prepared", "adjoint", "regime"])
@@ -482,38 +485,11 @@ def test_replaced_record_shape_refuses(tmp_path, campaign, records_dir, monkeypa
     assert not gateway.submitted
 
 
-def test_real_sdk_capture_binder_proves_wrapper_then_reads_command(
-        tmp_path, installed_client_sdk):
-    from prismabuild import core, movement_actions
+def test_native_capture_authority_refuses_legacy_sdk_requests():
+    from prismaquant.joint_dispatch_pilot import PilotRefused
     from tools import dispatch_joint_quanta as dispatch
-
-    code = tmp_path / "closure.py"
-    code.write_text("# reviewed test closure\n")
-    command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-               json.dumps({"env": {}, "container": {"image": "sha256:" + "0" * 64}}),
-               "--", "python3", "-m", "prismaquant.joint_cost_quantum",
-               "--quantum", "/absent/original.json", "--quantum-sha256", "a" * 64,
-               "--plan", "/plan", "--plan-sha256", "b" * 64,
-               "--prepared", "/prepared", "--prepared-sha256", "c" * 64,
-               "--adjoint-slice", "/slice", "--adjoint-slice-sha256", "d" * 64,
-               "--data-manifest-sha256", "e" * 64,
-               "--allowed-tiers", "ram,stage", "--resume", "--output-root", "/out"]
-    request = core.seal_action({
-        "schema": core.ACTION_SCHEMA_V2,
-        "task": {"definition_id": "tests/pilot-binding", "definition_version": "v1",
-                 "task_class": "generation", "determinism": "deterministic",
-                 "artifact_family": "generic", "artifact_kind": "generic",
-                 "argv": movement_actions.standard_capture_argv(
-                     command, "pbrun_result.txt", path_prefix="/tools"),
-                 "working_directory": ".", "result_path": "pbrun_result.txt"},
-        "inputs": [], "code_closure": core.build_code_closure(tmp_path, ["closure.py"]),
-        "params": {"command": command},
-        "environment": {"variables": {"PATH": "/tools:/usr/bin:/bin"}, "toolchain": {}},
-        "execution_scope": {"portability": "portable", "platform_key": None,
-                            "host_class": None}})
-    assert installed_client_sdk.bind_standard_capture_command(request) == request["task"]["argv"]
-    parsed = dispatch._sealed_quantum_command({"request": request})
-    assert parsed["--quantum-sha256"] == "a" * 64
+    with pytest.raises(PilotRefused, match="native capture result authority is unavailable"):
+        dispatch._sealed_quantum_command({"request": {"params": {"command": ["foreign"]}}})
 
 
 def test_legacy_unbound_result_refuses(tmp_path, campaign, records_dir, monkeypatch):

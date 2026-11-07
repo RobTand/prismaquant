@@ -75,16 +75,15 @@ def _dispatch(tmp_path, monkeypatch, capsys, *, replay_mode, ceilings,
         _coverage=lambda rows: [])
     assert code == 0, capsys.readouterr().err
     (row,) = gateway.submitted
-    return dispatch, manifest, row["argv"]
+    return dispatch, manifest, row["row"]
 
 
 def _graces(argv):
-    return {name: int(value) for name, value in (
-        argv[i + 1].split("=", 1) for i, word in enumerate(argv)
-        if word == "--progress-phase")}
+    return {name: int(value) for name, value in (item.split("=", 1) for item in argv["progress_phases"])}
 
 
 def _stamps(argv):
+    argv = argv["argv"]
     flag = "--progress-grace-derivation"
     return json.loads(argv[argv.index(flag) + 1]) if flag in argv else []
 

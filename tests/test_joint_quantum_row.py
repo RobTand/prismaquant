@@ -107,17 +107,23 @@ def test_row_demand_counts_the_existing_native_and_prefetch_workers(reader, sour
     assert (default.memory_gib, default.gpu_gib, default.cpus) == ("104", "80", 10)
 
 
-def test_pb_envelope_keeps_progress_options_environment_duplicates_and_separator():
-    envelope = row.QuantumPBEnvelope("/manifest.gz", [("head", 45), ("handoff-load", 91)],
+def test_native_row_preserves_exact_scientific_and_resource_intent():
+    intent = row.QuantumRow("/manifest.gz", [("head", 45), ("handoff-load", 91)],
         row.QuantumRowDemand("7.5", "3", 4), ["gb10", "native-image"], -5,
         ["python3", "launcher.py", "--spec", "{}", "--", "payload"],
-        [("SCRATCH", "a"), ("SCRATCH", "b")], "/template.json", "repo@sha256:image")
-    assert envelope.argv(python="/python", pbrun="/pbrun.py", container_image_flag="--container-image",
-                         dev_mode_assignment="PRISMAQUANT_DEV_MODE=1") == [
-        "/python", "/pbrun.py", "--tag", "gb10", "--tag", "native-image",
-        "--data-manifest", "/manifest.gz", "--residency", "stage", "--residency-ram", "auto",
-        "--progress-phase", "head=45", "--progress-phase", "handoff-load=91",
-        "--priority", "-5", "--demand", "gpu=1,mem_gb=7.5", "--gpu-memory-gb", "3", "--cpus", "4",
-        "--produced-output-template", "/template.json", "--container-image", "repo@sha256:image",
-        "--env", "SCRATCH=a", "--env", "SCRATCH=b", "--env", "PRISMAQUANT_DEV_MODE=1",
-        "--detach", "--", "python3", "launcher.py", "--spec", "{}", "--", "payload"]
+        [("SCRATCH", "a")], "/template.json", "repo@sha256:image").row(checkout="/source")
+    assert intent == {
+        "argv": ["python3", "launcher.py", "--spec", "{}", "--", "payload"], "cwd": "/source",
+        "demand": {"gpu": 1, "mem_gb": 7.5, "cpu": 4}, "gpu_memory_gb": 3,
+        "tags": ["gb10", "native-image"], "priority": -5, "env": {"SCRATCH": "a"},
+        "retry_safe": True, "data_manifest": "/manifest.gz",
+        "residency": {"tier": "stage", "ram": "auto"},
+        "progress_phases": ["head=45", "handoff-load=91"],
+        "produced_outputs": {"template": "/template.json"},
+        "container_images": ["repo@sha256:image"]}
+
+
+def test_conflicting_environment_intent_refuses():
+    with pytest.raises(ValueError, match="conflicting"):
+        row.QuantumRow("/m", [], row.QuantumRowDemand("1", "1", 1), [], 0, ["true"],
+                       [("A", "a"), ("A", "b")]).row(checkout="/source")

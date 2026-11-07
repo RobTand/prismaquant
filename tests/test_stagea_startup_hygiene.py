@@ -131,7 +131,7 @@ def test_a_wait_below_every_grace_submits(tmp_path, monkeypatch, campaign, env):
     _spec(monkeypatch, tmp_path, env)
     manifest = _adjoint_manifest(tmp_path, campaign)
     argv = dispatch.stage_a_argv(manifest, campaign)
-    assert "--progress-phase" in argv
+    assert argv["progress_phases"] == ["head=1800", "chain-000=900", "chain-001=900"]
 
 
 def test_the_wait_bound_reads_the_sealed_spec_with_the_reader_rules():

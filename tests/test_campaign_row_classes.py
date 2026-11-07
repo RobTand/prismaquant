@@ -70,7 +70,7 @@ def base_spec(**extra) -> dict:
 
 
 def build(spec, **kwargs) -> dict:
-    return campaign_rows.prismabuild_row(spec, ["--model", "/models/example"], mem_gb=34,
+    return campaign_rows.campaign_row(spec, ["--model", "/models/example"], mem_gb=34,
                          timeout_s=None, **kwargs)
 
 
@@ -293,7 +293,7 @@ def test_a_weights_only_class_may_not_run_the_campaign_module():
 def test_a_weights_only_row_may_not_carry_a_hessian_aware_flag():
     for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.campaign_row(rocm_spec(), ["--model", "/models/example",
                                         flag, "/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
@@ -308,7 +308,7 @@ def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
     """``--flag=value`` is the same flag as ``--flag value``."""
     for flag in campaign_rows.HESSIAN_AWARE_FLAGS:
         try:
-            campaign_rows.prismabuild_row(rocm_spec(), ["--model", "/models/example",
+            campaign_rows.campaign_row(rocm_spec(), ["--model", "/models/example",
                                         f"{flag}=/some/path"],
                           mem_gb=4, timeout_s=None,
                           module="prismaquant.example_encode",
@@ -321,7 +321,7 @@ def test_a_weights_only_row_may_not_carry_an_attached_hessian_aware_value():
 
 def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
     """The gate is a property of the class, not of the flag list."""
-    row = campaign_rows.prismabuild_row(base_spec(), ["--model", "/models/example",
+    row = campaign_rows.campaign_row(base_spec(), ["--model", "/models/example",
                                       "--calibration-census", "/c.json"],
                         mem_gb=34, timeout_s=None)
     assert "--calibration-census" in row["argv"]

@@ -60,7 +60,7 @@ def _build(tmp_path, campaign, env, *, roots=(SPILL_ROOT,), **fields):
 
 
 def _sealed(argv):
-    return json.loads(argv[argv.index("--spec") + 1])
+    return json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
 
 
 def test_a_pinned_spec_refuses_and_names_the_pins_and_the_reason_field(

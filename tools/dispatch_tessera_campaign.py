@@ -473,7 +473,7 @@ def cmd_census(args) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
     census_path = workspace / "census.json"
     manifest = workspace / "census-manifest.json"
-    row = campaign_rows.prismabuild_row(
+    row = campaign_rows.campaign_row(
         spec,
         ["--model", spec["model"],
          "--out", str(workspace / "census-unused.pkl"),
@@ -506,7 +506,7 @@ def cmd_capture(args) -> int:
     if census.get("model") != spec["model"]:
         raise RuntimeError("capture census and spec name different models")
     manifest = workspace / "capture-manifest.json"
-    row = campaign_rows.prismabuild_row(spec, ["--model", spec["model"],
+    row = campaign_rows.campaign_row(spec, ["--model", spec["model"],
         "--out", str(workspace / "capture-unused.pkl"),
         "--cache-dir", str(workspace / "capture-cache"),
         "--calibration-census", str(census_path),
@@ -1162,7 +1162,7 @@ def cmd_plan(args) -> int:
         # spec's argv alone priced that row at its stream window instead
         # (PQ #1686).
         row_spec = {**spec, "campaign_argv": argv}
-        row = campaign_rows.prismabuild_row(spec, argv,
+        row = campaign_rows.campaign_row(spec, argv,
                    mem_gb=campaign_rows.row_memory_gb(row_spec, members, census, selected_source=selected_source),
                    timeout_s=(None if args.timeout_s is None else int(args.timeout_s)))
         if part is not None:

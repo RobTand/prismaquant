@@ -108,7 +108,7 @@ def _plan(selection, monkeypatch):
     def row(spec, argv, **kwargs):
         calls.append((argv, kwargs))
         return dict(argv=argv, **kwargs)
-    monkeypatch.setattr(campaign_rows, 'prismabuild_row', row)
+    monkeypatch.setattr(campaign_rows, 'campaign_row', row)
     result = tm.plan(selection.request, selection.census, selection.workspace, selection.spec)
     return selection.workspace / 'plan.json', result, calls
 
