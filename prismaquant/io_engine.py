@@ -8,9 +8,9 @@ Stage B's retained-window replay, and it has two layers.
 
 **One file, read once.** :func:`load_file` is the read every ProductionWeight
 Cache shard takes (moved here from ``production_weight_cache``): the tier
-comes from PrismaBuild's residency map (``residency_map.residency_resolver``
-and ``staged_lease``, reused, not restated), the staged copy is read under its
-reader lease, the bytes are hashed once and held to the map's digest, and the
+comes from the immutable staged manifest (``residency_map.residency_resolver``
+and ``staged_lease``). The staged copy is read under its descriptor window,
+the bytes are hashed once and held to the extent's digest, and the
 caller's decoder turns them into a value. A staged copy that fails any fence
 falls back to the declared file unless the allowed-tier policy is active, in
 which case the read refuses. :func:`pin_group` pins a set of staged files under

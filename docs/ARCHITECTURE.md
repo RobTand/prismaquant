@@ -4,8 +4,9 @@ As of: 2026-11-07, unit2 immutable native staged-input reader, parent 635e945e4.
 Source: `prismaquant/{staged_manifest,staged_launch,residency_map,staged_lease,
 residency_shard_reader,staged_whole_file,stage_b_prep_io,io_engine,flux_jobs,
 tessera_campaign_rows}.py` and direct CPU regression/proof tools.
-Native rows may bind an explicit `prismaquant.staged_launch.v1` path, SHA256,
-scientific read-contract SHA256 and finite SSD policy. Source/read bindings are
+Native rows may bind explicit staged-manifest and scientific read-contract
+paths, their separate SHA256 values and a finite SSD policy through
+`prismaquant.staged_launch.v1`. Source/read bindings are
 retained and rechecked on resume and collection. Scheduling remains in the
 single fv1-model baseline profile. Arbitrary environments, GPU/container,
 progress-stall, pilot and authenticated publication requirements still refuse.
