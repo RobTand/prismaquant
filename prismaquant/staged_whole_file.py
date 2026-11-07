@@ -89,9 +89,8 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     The whole-file counterpart to the checkpoint shared-state staged read:
     the bound map entry (whole file at offset 0, digest-bound to the
     caller's independently pinned ``expected_sha256``) is opened through a
-    lifetime-pinned window — RAM first where offered and allowed, honest
-    SSD re-acquire otherwise, never the pool — and read once into an owned
-    buffer with the same sealed size/change fences. The descriptor closes
+    lifetime-pinned SSD window and read once into an owned buffer with
+    sealed size/change fences. The descriptor closes
     and the exact ref releases before the caller decodes: no raw fd or
     mapping escapes, and the returned bytes outlive the lease.
     """

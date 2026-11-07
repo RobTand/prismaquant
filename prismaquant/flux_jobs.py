@@ -1,8 +1,8 @@
 """Native Flux CPU executor, baseline fv1-model profile v1.
 
-This is not a campaign scheduler or a result cache. Strict staged reads and
-PB-authenticated publication/pilot contracts are deliberately unsupported.
-Callers own their pinned numerical runtime and scientific input/output gates.
+Callers own campaign scheduling, pinned numerical runtimes and scientific
+input/output gates. Finite immutable staged inputs are admitted through the
+versioned binding. Native publication and pilot authority remain unqualified.
 """
 
 from __future__ import annotations
