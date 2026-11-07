@@ -109,7 +109,7 @@ def test_whole_entry_refuses_without_canonical_read(tmp_path, monkeypatch, fault
     assert not source.exists()
 
 
-@pytest.mark.parametrize('fault', ['manifest-digest', 'null-digest', 'overlap', 'object-bounds', 'source-bounds', 'zero', 'source-conflict'])
+@pytest.mark.parametrize('fault', ['manifest-digest', 'null-digest', 'overlap', 'object-bounds', 'source-bounds', 'zero', 'source-conflict', 'producer-type'])
 def test_manifest_refusal(tmp_path, fault):
     source, data, binding, _ = fixture(tmp_path)
     if fault == 'manifest-digest':
@@ -122,6 +122,7 @@ def test_manifest_refusal(tmp_path, fault):
     elif fault == 'object-bounds': row['object_offset'] = row['object']['bytes']
     elif fault == 'source-bounds': row['source_offset'] = 1
     elif fault == 'zero': row['length'] = 0
+    elif fault == 'producer-type': data['producer']['source_commit'] = int('1' * 40)
     else:
         second = copy.deepcopy(row); second['source']['sha256'] = '0' * 64; data['entries'].append(second)
     target = tmp_path / 'bad.json'

@@ -133,7 +133,9 @@ def load_staged_manifest(filename, sha256):
     if not isinstance(data['phase_id'], str) or not data['phase_id'] or len(data['phase_id']) > 256:
         raise ManifestRefused('phase identity required')
     producer = data['producer']
-    if not isinstance(producer, dict) or set(producer) != {'source_commit', 'receipt_sha256'} or not re.fullmatch('[0-9a-f]{40}', str(producer['source_commit'])):
+    if (not isinstance(producer, dict) or set(producer) != {'source_commit', 'receipt_sha256'} or
+            not isinstance(producer['source_commit'], str) or
+            not re.fullmatch('[0-9a-f]{40}', producer['source_commit'])):
         raise ManifestRefused('producer source and receipt identity required')
     digest(producer['receipt_sha256'])
     life = data['lifetime']
