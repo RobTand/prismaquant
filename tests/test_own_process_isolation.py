@@ -51,7 +51,7 @@ def _session(tmp_path, *files, extra=(), environ=None):
             env.pop(name, None)
         else:
             env[name] = value
-    argv = [sys.executable, "-m", "pytest", "-q", "--no-header",
+    argv = [sys.executable, "-s", "-m", "pytest", "-q", "--no-header",
             "-p", "no:cacheprovider", "-c", str(ROOT / "pytest.ini"),
             "--rootdir", str(ROOT), "--basetemp", str(tmp_path / "base"),
             f"--junitxml={junit}", "-k", "not deselected", *extra,

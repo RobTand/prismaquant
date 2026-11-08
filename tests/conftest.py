@@ -644,7 +644,7 @@ def _own_process_bound_args(config) -> list[str]:
     argv = []
     timeout = getattr(config.option, "timeout", None)
     if timeout:
-        argv.append(f"--timeout={timeout}")
+        argv += ["-p", "pytest_timeout", f"--timeout={timeout}"]
     if PRISMABUILD_TEST_BOUND_PLUGIN in (getattr(config.option, "plugins", None)
                                         or ()):
         argv += ["-p", PRISMABUILD_TEST_BOUND_PLUGIN]
@@ -716,7 +716,7 @@ def _run_own_process(config, nodeids: tuple[str, ...]) -> dict:
                     launcher, measure_args, measure_env = _own_process_measure_args(
                         config, root, key)
                     env.update(measure_env)
-                argv = [sys.executable, *launcher, "-q", "--no-header",
+                argv = [sys.executable, "-s", *launcher, "-q", "--no-header",
                         "-p", "no:cacheprovider",
                         "--rootdir", str(config.rootpath),
                         "--basetemp", str(root / f"{key}.tmp")]
