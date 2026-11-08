@@ -1687,12 +1687,9 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     ``progress`` is the row's ``--progress-phase`` list; the same parse is
     checked against it (:func:`require_staged_wait_below_grace`).
 
-    ``spool_max_bytes`` replaces the spec's produced-spool byte bound (the
-    Stage A row's two-plane window, :func:`stage_a_spool_window_bytes`), in
-    the one parse that is sealed. It replaces only a well-formed bound: a
-    spec that declares a spool root with no bound, or with one that is not a
-    positive decimal byte count, is left as it is, so the row's spool check
-    (:func:`produced_spool_row_environment`) refuses it as before.
+    ``spool_max_bytes`` is an unused historical parameter. Spool bounds now
+    belong to the launch-bound produced declaration. The row's environment
+    check refuses retired produced-service settings.
 
     A declared produced spool must carry a valid application byte bound.
     The existing spool and IO owners enforce that bound and reader lifetime.
@@ -2233,10 +2230,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         payload += ["--artifact-budget-bytes", str(artifact_budget_bytes)]
     progress = [(phase, HEAD_PROGRESS_GRACE_S if phase == "head"
                  else CHUNK_PROGRESS_GRACE_S) for phase in binding["phases"]]
-    # The spool's window is the plan's two cotangent planes, not the spec's
-    # bound (PQ #1110): the chain reads its own planes back from it. The
-    # wrapper also seals the host window opt-in, so placement charges that
-    # window to the box (PQ #1120).
+    # The native produced declaration owns spool bounds. Retired produced
+    # service environment settings are refused before publishing this row.
     wrapped, container_image = _container_wrap(
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
