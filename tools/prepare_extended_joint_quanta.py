@@ -297,7 +297,7 @@ def prepare(args):
     check_stage_b_spec(args.spec, spec, policy)
     replay_mode = stage_b_replay_mode(spec)
     root = args.metadata_root.resolve()
-    # With --produced-output, inside the admitted PrismaBuild action, every
+    # With --produced-output, inside the admitted native launch, every
     # file below is a produced output committed at its origin (PQ #1070);
     # without it each is published directly, as before.
     publication = bind_preparation_publication(root, required=getattr(args, 'produced_output', False))
@@ -361,7 +361,7 @@ def prepare(args):
         # The generator files its groups under this action's publication.
         generator.append('--produced-output')
     generator += strict
-    if regenerate(generator) != 0:
+    if regenerate(generator, finalize_publication=False) != 0:
         raise ValueError('generator refused; no launch package published')
     launch = ['python3', 'tools/dispatch_joint_quanta.py', '--records', str(root/'records'),
         '--output-root', plan['output_root'], *proof_argv,
@@ -375,7 +375,7 @@ def prepare(args):
         'schema': 'prismaquant.extended_stage_b_launch.v1',
         'catalog_extension': extension, 'resource_policy': plan['stage_b_resource_policy'],
         'generator_argv': generator, 'coordinator_argv': launch,
-        'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}),
+        'requires': 'reviewed source checkout; all GPU work through native Flux admission'}),
         'launch recipe')])
     if publication is not None:
         publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')

@@ -2185,8 +2185,8 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
 
     The payload binds plan/prepared/read digests, tier policy, resume, prefetch
     and artifact-budget overrides. Demand and spool windows retain their existing
-    derivations, including per-range windows. The produced-output template is
-    explicit intent; native authentication is unqualified and refuses at launch."""
+    derivations, including per-range windows. The immutable produced declaration
+    is bound in argv and authenticated again by the native producer."""
     if produced_declaration is not None:
         if not Path(produced_declaration).is_file():
             raise DispatchRefused(

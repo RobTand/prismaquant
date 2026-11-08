@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, composed preparation publication ownership.
+Source: `tools/{prepare_extended_joint_quanta,regenerate_joint_quanta}.py`,
+based on `063b1972f615b2409f5485f8344a0a488175b8ef`.
+Standalone regeneration finalizes its produced index after its records. The
+enclosing preparation defers that step, publishes its launch recipe, then
+finalizes the shared publication once. Exclusive index publication remains
+immutable. CPU metadata proofs do not qualify the production source/runtime.
+
 As of: 2026-11-08, Unit4B joined lifecycle and scientific consumer migration under review.
 Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
 based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.

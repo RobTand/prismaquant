@@ -46,6 +46,8 @@ def test_the_generator_commits_every_file_it_writes(tmp_path, monkeypatch):
         assert regen.main(argv) == 0
         publication = io._BOUND[producer['launch_sha256']]
         assert [batch['kind'] for batch in publication.batches] == ['manifests', 'records']
+        index_path = Path(producer['record_dir']) / 'produced' / 'index.json'
+        assert index_path.is_file()
         entries = [entry for batch in publication.batches
             for entry in read_bound_document(batch['ref'])['entries']]
         written = _files_under(metadata)
@@ -57,6 +59,42 @@ def test_the_generator_commits_every_file_it_writes(tmp_path, monkeypatch):
         before = list(publication.batches)
         assert regen.main(argv) == 0
         assert publication.batches == before and _files_under(metadata) == written
+    finally:
+        io.reset_preparation_publications_for_tests()
+
+
+def test_composed_generator_defers_finalization_until_launch_recipe(tmp_path, monkeypatch):
+    import regenerate_joint_quanta as regen
+    from prismaquant.stage_a_produced_output import decode_produced_document
+    campaign, receipt_path, _ = prep_fixture(tmp_path)
+    metadata = tmp_path / 'metadata-generation'
+    _, _, declaration = write_submission(tmp_path, campaign, receipt_path, metadata)
+    producer = admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    try:
+        argv = generator_args(tmp_path, campaign, receipt_path, metadata) + ['--produced-output']
+        assert regen.main(argv, finalize_publication=False) == 0
+        publication = io._BOUND[producer['launch_sha256']]
+        index_path = Path(producer['record_dir']) / 'produced' / 'index.json'
+        assert not index_path.exists()
+        generated = _files_under(metadata)
+        assert generated and (metadata / 'records' / 'records.json').is_file()
+        launch = metadata / 'launch.json'
+        payload = b'{"known": "enclosing preparation launch"}\n'
+        assert io.publish_files(publication, 'launch', [(launch, payload, 'launch')]) == [launch]
+        publication.finalize(Path(producer['record_dir']) / 'produced-result.json')
+        index = decode_produced_document(index_path.read_bytes())
+        assert index['groups'] == [publication.publication._groups[key]
+                                  for key in sorted(publication.publication._groups)]
+        entries = [entry for binding in index['groups']
+                   for entry in read_bound_document(binding)['entries']]
+        expected = {**generated, str(launch): payload}
+        assert {entry['path'] for entry in entries} == set(expected)
+        for entry in entries:
+            raw = expected[entry['path']]
+            assert Path(entry['path']).read_bytes() == raw
+            assert entry['sha256'] == hashlib.sha256(raw).hexdigest()
+            assert entry['bytes'] == len(raw)
     finally:
         io.reset_preparation_publications_for_tests()
 

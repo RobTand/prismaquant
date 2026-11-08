@@ -776,7 +776,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     return sealed
 
 
-def main(argv=None) -> int:
+def main(argv=None, *, finalize_publication=True) -> int:
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
@@ -1429,7 +1429,7 @@ def main(argv=None) -> int:
     from prismaquant.stage_b_prep_io import (
         PreparationPublicationRefused, bind_preparation_publication, publish_files)
     try:
-        # The unqualified produced-output request refused at argument entry.
+        # Argument entry authenticates the launch-bound publication request.
         publication = bind_preparation_publication(
             metadata_root, required=args.produced_output)
         # Publication order is the recoverability contract: every
@@ -1516,7 +1516,7 @@ def main(argv=None) -> int:
         records.append((out / "derivation.json", _pretty(produced["derivation"]),
                         "derivation"))
         publish_files(publication, "records", records)
-        if publication is not None:
+        if publication is not None and finalize_publication:
             publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
     except (ValueError, OSError, PreparationPublicationRefused) as exc:
         return _fail(str(exc))
