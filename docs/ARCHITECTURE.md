@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, failed staged-shard setup ownership.
+Source: `prismaquant/residency_shard_reader.py`, based on `9401b7e3f`.
+An entered reader window stays with shard setup until its checked descriptor
+row is registered. Native integrity and read-shape errors close that window
+before propagating; successfully registered rows stay with the reader's normal
+exit. Cleanup errors cannot replace the original failure. This preserves the
+existing immutable input contract and grants no production qualification.
+
 As of: 2026-11-08, whole-input native object offsets.
 Source: `prismaquant/{perturbed_x_cache,tessera_joint_aura}.py`, based on
 `5b0261b5e`. Verified activation and exact-entry reads honor immutable object

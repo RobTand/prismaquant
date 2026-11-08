@@ -628,33 +628,28 @@ class StagedShardReader:
             info = os.fstat(fd)
             if info.st_size != entry.get('object_bytes', entry['bytes']):
                 raise LeaseRefused("lease-open-size-changed", kind="integrity")
-        except (OSError, LeaseRefused) as error:
+            tier = window.serving_tier or "stage"
+            self._resolver.record_serving_tier(
+                self._declared, tier,
+                pin_id=str(serving.get("pin_id") or ""),
+                range_ref=str(serving.get("range_ref") or ""))
+            if not self._bound:
+                self._shape = _read_shape(window.stage_path(key)
+                                          or entry["stage_path"])
+            row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
+                   file_stat_signature(info), entry, tier, window)
+            self._bound.append(row)
+        except BaseException as error:
             try:
                 window.__exit__(None, None, None)
-            except (LeaseRefused, RuntimeError):
-                pass
-            if isinstance(error, LeaseRefused):
-                self._resolver.record_fallback(self._declared, str(error))
-                raise
-            reason = f"staged range is unreadable: {error.strerror}"
-            self._resolver.record_fallback(self._declared, reason)
-            raise refuse_pool_bulk_read(self._declared, reason)
-        # Record the actual held-descriptor open after its identity fence.
-        tier = window.serving_tier or "stage"
-        self._resolver.record_serving_tier(
-            self._declared, tier,
-            pin_id=str(serving.get("pin_id") or ""),
-            range_ref=str(serving.get("range_ref") or ""))
-        if not self._bound:
-            # Every range of one declared shard is staged under the same
-            # root, so the mount's read shape is read once per reader, not
-            # per tensor — from the path actually opened (the RAM copy for
-            # a RAM window), never an assumed tier.
-            self._shape = _read_shape(window.stage_path(key)
-                                      or entry["stage_path"])
-        row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
-               file_stat_signature(info), entry, tier, window)
-        self._bound.append(row)
+            except BaseException as cleanup:
+                error.add_note(f"staged window cleanup also failed: {cleanup}")
+            if isinstance(error, OSError):
+                reason = f"staged range is unreadable: {error.strerror}"
+                self._resolver.record_fallback(self._declared, reason)
+                raise refuse_pool_bulk_read(self._declared, reason) from error
+            self._resolver.record_fallback(self._declared, str(error))
+            raise
         return row
 
     def _drop(self, row) -> None:
