@@ -9,10 +9,9 @@ root filed a template under one root that named the other.
 
 The fixture is ``test_band_serial_dispatch``'s two-band campaign, whose
 records name ``<tmp>/run`` while every dispatch here passes
-``--output-root <tmp>/out``. PrismaBuild's template validator is replaced by
-the identity, so these tests run where no published PrismaBuild is visible;
-``test_band_serial_dispatch`` and ``test_band_serial_handoff_produced``
-validate the same template through PrismaBuild on the fleet.
+``--output-root <tmp>/out``. The existing native application declaration
+validator is real. FakeGateway replaces only submission; these tests grant
+no native execution or production qualification.
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +28,7 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 import test_band_serial_dispatch as band  # noqa: E402
+from staged_native_fixtures import native_staged_state
 from prismaquant.joint_quantum_handoff import handoff_root
 from prismaquant.joint_quantum_row import HANDOFF_LOAD_PHASE
 from prismaquant.readset_coverage import load_manifest  # noqa: E402
@@ -38,28 +37,12 @@ BAND = ("--band-serial", "--handoff-tier", band.TIER)
 
 
 @pytest.fixture(autouse=True)
-def _offline_tier_policy():
-    """Run outside campaign scope with no staged-tier policy (PQ #845)."""
-    from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
-    deactivate_staged_tier_policy_for_tests()
+def _offline_tier_policy(native_staged_state):
+    """Own offline scientific fixture state without an executor SDK."""
     yield
-    deactivate_staged_tier_policy_for_tests()
-
-
-def _identity_template_validator(monkeypatch):
-    """Legacy template math as a scientific fixture, with no native authority."""
-    import prismaquant.stage_a_produced_output as produced
-    import dispatch_joint_quanta as dispatch
-
-    monkeypatch.setattr(produced, "_produced_output_module", lambda: SimpleNamespace(
-        TEMPLATE_SCHEMA_V1="fixture.produced-output-template.v1",
-        validate_template=dict))
-    monkeypatch.setattr(dispatch, "build_stage_a_produced_template", produced.build_boundary_template)
 
 
 def _layout(tmp_path, monkeypatch):
-    monkeypatch.setattr(band, "_pin_published_helper_root",
-                        _identity_template_validator)
     return band._dispatch_layout(tmp_path, monkeypatch)
 
 

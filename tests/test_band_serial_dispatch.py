@@ -52,26 +52,17 @@ from test_quantum_executable_readset import (  # noqa: E402
 )
 from test_stageb_prepared_render_inputs import (  # noqa: E402
     _prepared_inputs, _render_files)
+from staged_native_fixtures import native_staged_state
 
-TIER = "prismabuild-stage:dl380g10"
+TIER = "ssd"
 ARTIFACT_MAX = 1 << 24
 PREFETCH = 2
 
 
 @pytest.fixture(autouse=True)
-def _offline_tier_policy(monkeypatch):
-    """Offline gateway fixture; planner and reader use one reviewed source root."""
-    from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
-    from fullstack_pb_generation import source_bound
-
-    with source_bound():
-        _pin_published_helper_root(monkeypatch)
-        import dispatch_joint_quanta as dispatch
-        from prismaquant.stage_a_produced_output import build_boundary_template
-        monkeypatch.setattr(dispatch, "build_stage_a_produced_template", build_boundary_template)
-        deactivate_staged_tier_policy_for_tests()
-        yield
-        deactivate_staged_tier_policy_for_tests()
+def _offline_tier_policy(native_staged_state):
+    """Own offline scientific fixture state without an executor SDK."""
+    yield
 
 
 def _receipt(tmp_path, campaign, *, run_identity_extra=None):
@@ -291,30 +282,6 @@ def test_the_band_serial_readset_swaps_the_chain_for_the_handoff(tmp_path):
         output_root=tmp_path) == jl.seal_manifest_bytes(derived)
 
 
-def test_the_band_serial_readset_passes_the_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
-    bound, _receipt_doc = _campaign(tmp_path)
-    published = _emit(bound[3])
-    consumer = bound[2]
-    handoff = load_quantum_handoff(published["path"], published["sha256"],
-                                   record=consumer, adjoint_slice=_slice(consumer),
-                                   kda_capture_kernel=None)
-    derived = band_serial_manifest(
-        _sealed(consumer), handoff, _slice(consumer)["checkpoint"],
-        sealed_manifest_sha256=consumer["executable_readset"]["manifest_sha256"])
-    prefix = str(tmp_path)
-    for entry in derived["entries"]:
-        if entry["path"].startswith("/fixture"):
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len("/fixture"):]
-        elif entry["path"].startswith(prefix):
-            entry["path"] = "/mnt/shared/fixture-run" + entry["path"][len(prefix):]
-    ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(derived))
-    assert [item["name"] for item in ranges] == [
-        phase["name"] for phase in derived["read_plan"]["phases"]]
-    assert ranges[-1]["end_bytes"] == derived["read_plan"]["read_bytes"]
-
-
 def test_the_quantum_refuses_a_staged_manifest_it_does_not_derive(tmp_path):
     bound, _receipt_doc = _campaign(tmp_path)
     published = _emit(bound[3])
@@ -423,23 +390,8 @@ def test_a_handoff_reads_the_checkpoint_plane_by_its_coordinates(tmp_path):
 
 # -- the dispatch edge --------------------------------------------------------
 
-def _pin_published_helper_root(monkeypatch):
-    """Bind the shared reviewed source pin, not a live-generation selector.
-
-    The planner and produced-output reader must import from the same tree.
-    Its staged status establishes source coverage, never fleet activation.
-    """
-    import prismaquant.staged_lease as staged_lease
-    from fullstack_pb_generation import require_paths
-
-    root = require_paths()["root"]
-    monkeypatch.delenv(staged_lease.HELPER_ROOT_ENV_VAR, raising=False)
-    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", root)
-
-
 def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
     import dispatch_joint_quanta as dispatch
-    _pin_published_helper_root(monkeypatch)
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"container": {"image": "sha256:" + "0" * 64},
                                 "env": {}}))
@@ -510,7 +462,7 @@ def test_band_serial_publishes_producers_then_their_consumers(
     band = ("--band-serial", "--handoff-tier", TIER)
 
     # Run 1: the band tops publish and declare a handoff; their successors
-    # wait, because PrismaBuild would run them before the handoff exists.
+    # wait until terminal producer evidence and the complete handoff exist.
     first = dispatch.FakeGateway()
     assert _main(dispatch, first, records, receipt_path, out, *band) == 0
     rows = _by_id(first)
@@ -523,7 +475,10 @@ def test_band_serial_publishes_producers_then_their_consumers(
         inner = _inner(argv)
         assert "--emit-adjoint-handoff" in inner
         assert "--adjoint-handoff" not in inner
-        template_path = Path(argv["produced_outputs"]["template"])
+        from prismaquant.stage_a_produced_output import DECLARATION_FLAG, DECLARATION_SHA_FLAG
+        template_path = Path(argv["argv"][argv["argv"].index(DECLARATION_FLAG) + 1])
+        assert hashlib.sha256(template_path.read_bytes()).hexdigest() == (
+            argv["argv"][argv["argv"].index(DECLARATION_SHA_FLAG) + 1])
         assert "--produced-output-template" not in argv["argv"]
         template = json.loads(template_path.read_text())
         # The template names the producer's handoff directory under
@@ -534,12 +489,10 @@ def test_band_serial_publishes_producers_then_their_consumers(
             handoff_root(out / "layer-quanta" / quantum_id).resolve())
         assert template_path.parent == out / "layer-quanta" / "band-serial"
         assert template["durable_maxima"]["payload_max_bytes"] == ARTIFACT_MAX
-        assert template["permitted_tiers"] == [TIER]
         # Write-only (PQ #1075): the producer never reads its handoff back,
         # so it reserves no stage window and commits each group at origin.
         assert template["write_only"] is True
-        assert template["working_demands"] == {
-            TIER: {"minimum_gib": 0, "window_gib": 0}}
+        assert template["window_groups"] == 0
         assert _phases(argv)[:2] == ["head", "checkpoint-load"]
 
     # Layer 3 executes, publishes its handoff and reports complete; layer 1

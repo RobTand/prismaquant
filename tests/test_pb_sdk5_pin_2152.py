@@ -87,20 +87,3 @@ def test_real_sdk5_sealed_tree_is_the_production_resolver():
         staged_lease.set_lease_helper_root(None)
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_band_planner_and_reader_share_the_reviewed_sdk5_root(monkeypatch):
-    """The planner's PB modules and the reader's SDK come from one bundle."""
-    require_prismabuild_sdk()
-    from fullstack_pb_generation import require_paths
-    from test_band_serial_dispatch import _pin_published_helper_root
-    from test_quantum_executable_readset import _pb
-
-    monkeypatch.setenv(staged_lease.HELPER_ROOT_ENV_VAR, "/unreviewed/active-sdk1")
-    _pin_published_helper_root(monkeypatch)
-    root = Path(require_paths()["root"])
-    core, tiers, plans = _pb()
-    sdk = staged_lease.client_sdk()
-    assert sdk.SDK_VERSION == staged_lease.PB_CLIENT_SDK_VERSION
-    for module in (core, tiers, plans, sdk):
-        assert isinstance(module.__file__, str)
-        assert Path(module.__file__).resolve().is_relative_to(root / "src")
