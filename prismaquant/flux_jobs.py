@@ -523,7 +523,8 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                       and native['exception_occurred'] is False
                       and not any(e.get('severity') == 0 for e in exceptions)):
                     status = 'succeeded'
-                elif native['result'] in (2, 8):
+                elif (native['result'] in (2, 8) or
+                      (native['exception_occurred'] and raw_status.returncode != 0)):
                     status = 'failed'
                 else:
                     errors.append('status: inconsistent native result')

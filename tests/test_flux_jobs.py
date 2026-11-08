@@ -236,6 +236,18 @@ class FluxJobsTests(unittest.TestCase):
         result = self.collect_fixture(finish=7 << 8, result=2, status_rc=7)
         self.assertEqual((result.status, result.payload_exit, result.query_error), ('failed', 7, None))
 
+    def test_completed_payload_with_late_fatal_exception_stays_failed(self):
+        for cleanup_ok in (True, False):
+            with self.subTest(cleanup_ok=cleanup_ok):
+                self.record = self.root / f'late-fatal-{cleanup_ok}'
+                result = self.collect_fixture(finish=0, result=1, exception='exec',
+                                              status_rc=125, cleanup_ok=cleanup_ok)
+                self.assertEqual((result.status, result.payload_exit), ('failed', 0))
+                if cleanup_ok:
+                    self.assertIsNone(result.query_error)
+                else:
+                    self.assertIn('scratch:', result.query_error)
+
     def test_other_native_status_id_never_authorizes_selected_job(self):
         result = self.collect_fixture(wrong_id=True)
         self.assertEqual(result.status, 'unknown')
