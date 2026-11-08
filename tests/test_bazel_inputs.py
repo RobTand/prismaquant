@@ -98,13 +98,14 @@ def test_a_fully_deselected_file_passes_and_a_failed_node_fails():
 
 def test_shards_partition_the_collected_tests(tmp_path):
     module = tmp_path / 'test_many.py'
-    module.write_text(''.join(f'def test_{index}():\n    pass\n' for index in range(7)))
+    module.write_text('import sys\nassert sys.flags.no_user_site\n' +
+                      ''.join(f'def test_{index}():\n    pass\n' for index in range(7)))
     (tmp_path / 'bazel_shard.py').write_text(python_runner.SHARD_PLUGIN)
     seen = []
     for index in range(3):
         environment = dict(os.environ, PQ_BAZEL_SHARD_INDEX=str(index), PQ_BAZEL_TOTAL_SHARDS='3',
                            PYTHONPATH=str(tmp_path))
-        result = subprocess.run([sys.executable, '-m', 'pytest', str(module), '-p', 'bazel_shard',
+        result = subprocess.run([sys.executable, '-s', '-m', 'pytest', str(module), '-p', 'bazel_shard',
                                  '-q', '--collect-only', '--rootdir=' + str(tmp_path), '-p', 'no:cacheprovider'],
                                 cwd=tmp_path, env=environment, capture_output=True, text=True, check=True)
         seen.append({line for line in result.stdout.splitlines() if '::test_' in line})
