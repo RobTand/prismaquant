@@ -1,15 +1,19 @@
-"""Whole-entry payload fences and exact release using real PB material."""
+"""Whole-entry payload fences and exact native descriptor release."""
 from __future__ import annotations
 
 import errno
 import hashlib
 import os
+from pathlib import Path
 
 import pytest
 
-from test_strict_reader_tier_enforcement import (
-    _forget_state, _leased_fixture, _pins_live, _stage_root, _stage_whole,
-)
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.residency_map import StagedReadRefused
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+
+
+pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
 @pytest.mark.parametrize("manifest", [False, True])
@@ -24,9 +28,10 @@ def test_checkpoint_owned_payload_transaction(tmp_path, monkeypatch, manifest, f
     path = tmp_path / "pool" / "payload.bin"
     path.parent.mkdir()
     path.write_bytes(blob)
-    staged = _stage_whole(_stage_root(tmp_path), path)
-    resolver, consumer, _mover = _leased_fixture(
-        tmp_path, monkeypatch, {"payload": (path, staged, None)})
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, [path]))
+    staged = Path(resolver.staged_read(path)['stage_path'])
+    staged.chmod(0o600)
+    path.unlink()
     events, held = [], []
     label = "checkpoint-manifest" if manifest else "shared-state"
     entry = {"name": checkpoints.CHECKPOINT_MANIFEST_NAME if manifest else "state",
@@ -34,7 +39,7 @@ def test_checkpoint_owned_payload_transaction(tmp_path, monkeypatch, manifest, f
              "sha256": hashlib.sha256(blob).hexdigest()}
     real_open = staged_lease.LeaseWindow.open
     real_exit = staged_lease.LeaseWindow.__exit__
-    real_preadv, real_pread = os.preadv, os.pread
+    real_preadv = os.preadv
     real_serving, real_account = resolver.record_serving_tier, resolver.record_stage_read
 
     def opened(window, key):
@@ -44,6 +49,8 @@ def test_checkpoint_owned_payload_transaction(tmp_path, monkeypatch, manifest, f
         fd, serving = real_open(window, key)
         held.append(fd)
         events.append("open")
+        with pytest.raises(RuntimeError, match='live reader windows'):
+            resolver.close()
         if fault == "changed-before-read":
             os.truncate(staged, len(blob) - 1)
         return fd, serving
@@ -62,27 +69,24 @@ def test_checkpoint_owned_payload_transaction(tmp_path, monkeypatch, manifest, f
         if fault == "unreadable":
             raise OSError(errno.EIO, "injected payload I/O failure")
         moved = real_preadv(fd, buffers, offset, *args, **kwargs)
+        if fault == "grew-during-read":
+            with staged.open('ab') as stream:
+                stream.write(b'x')
         if fault == "changed-under-pin":
             before = staged.stat()
             os.utime(staged, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
         return moved
 
-    def pread(fd, size, offset):
-        if fd in held and offset == len(blob) and size == 1:
-            events.append("probe")
-            if fault == "grew-during-read":
-                return b"x"
-        return real_pread(fd, size, offset)
-
     def exited(window, *args):
         events.append("exit")
-        result = real_exit(window, *args)
-        for fd in held:
-            with pytest.raises(OSError):
-                os.fstat(fd)
-        assert _pins_live(tmp_path, consumer) == []
-        events.append("closed-and-released")
-        return result
+        try:
+            return real_exit(window, *args)
+        finally:
+            for fd in held:
+                with pytest.raises(OSError):
+                    os.fstat(fd)
+            assert resolver._windows == 0
+            events.append("closed-and-released")
 
     def accounted(*args, **kwargs):
         assert events[-1] == "closed-and-released"
@@ -94,25 +98,32 @@ def test_checkpoint_owned_payload_transaction(tmp_path, monkeypatch, manifest, f
     monkeypatch.setattr(resolver, "record_serving_tier", serving)
     monkeypatch.setattr(resolver, "record_stage_read", accounted)
     monkeypatch.setattr(os, "preadv", preadv)
-    monkeypatch.setattr(os, "pread", pread)
+    with staged_tier_policy_test_context('ssd'):
+        _check_transaction(checkpoints, staged_lease, resolver, path, entry, blob,
+                           events, fault, label)
+    assert resolver.report()["bytes_from_pool"] == 0
+    assert resolver._windows == 0
+
+
+def _check_transaction(checkpoints, staged_lease, resolver, path, entry, blob,
+                       events, fault, label):
     if fault is None:
         raw = checkpoints._read_shared_state_payload(path, entry)
         assert type(raw) is bytearray
         assert raw == blob
-        assert events == ["open", "serving", "fill", "probe", "exit",
+        assert events == ["open", "serving", "fill", "exit",
                           "closed-and-released", "account"]
         assert resolver.report()["bytes_from_stage"] == len(blob)
     else:
-        reason = ("unpublished" if fault == "open-refused" else
-                  f"{label}-changed-under-pin" if fault == "changed-before-read" else
-                  f"{label}-{fault}")
-        with pytest.raises(staged_lease.LeaseRefused) as failure:
+        changed = fault in {'changed-before-read', 'changed-under-pin', 'grew-during-read'}
+        reason = ('object changed during reader lifetime' if changed else
+                  'unpublished' if fault == 'open-refused' else f'{label}-{fault}')
+        with pytest.raises(StagedReadRefused if changed else staged_lease.LeaseRefused) as failure:
             checkpoints._read_shared_state_payload(path, entry)
-        assert failure.value.reason.startswith(reason)
-        assert failure.value.kind == ("availability" if fault in {
-            "unreadable", "open-refused"} else "integrity")
+        assert str(failure.value).startswith(reason)
+        if not changed:
+            assert failure.value.kind == ("availability" if fault in {
+                "unreadable", "open-refused"} else "integrity")
         assert events[-2:] == ["exit", "closed-and-released"]
         assert "account" not in events
         assert resolver.report()["bytes_from_stage"] == 0
-    assert resolver.report()["bytes_from_pool"] == 0
-    assert _pins_live(tmp_path, consumer) == []

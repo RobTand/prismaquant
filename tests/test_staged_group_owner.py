@@ -1,28 +1,52 @@
 """Both real group consumers update the same lease-owner accounting."""
 import hashlib
+import os
 from pathlib import Path
 
+import pytest
 import torch
 
-from test_strict_reader_tier_enforcement import (
-    _count_sdk_calls, _exact_entries, _forget_state, _leased_fixture, _pb,
-    _pins_live, _read_exact, _stage_root, _stage_whole,
-)
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+
+
+pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
 def test_engine_and_activation_group_reads_share_exact_process_counters(tmp_path, monkeypatch):
     from prismaquant import io_engine, staged_lease
+    from prismaquant.perturbed_x_cache import (
+        write_exact_activation_cache_entry, prefetch_exact_activation_cache_entries)
 
     monkeypatch.setenv("PRISMAQUANT_LAYER_READ_THREADS", "1")
-    refs, tensors = _exact_entries(tmp_path, 4)
-    root = _stage_root(tmp_path)
-    resolver, consumer, _mover = _leased_fixture(
-        tmp_path, monkeypatch,
-        {str(i): (Path(ref.path), _stage_whole(root, Path(ref.path)), None)
-         for i, ref in enumerate(refs)})
-    calls = _count_sdk_calls(monkeypatch, _pb()[0])
+    directory = tmp_path / 'entries'
+    directory.mkdir()
+    tensors = [torch.arange(32, dtype=torch.float32).reshape(8, 4) + 100 * i
+               for i in range(4)]
+    refs = [write_exact_activation_cache_entry(directory, f'entry-{i}', tensor,
+        identity={'session': 'strict-tier-session', 'slot': f'entry-{i}',
+                  'kind': 'boundary', 'coordinates': {'batch': 0, 'boundary': 0, 'probe': None}},
+        max_tensor_bytes=128, max_file_bytes=128 + 65536)
+        for i, tensor in enumerate(tensors)]
+    wire = {ref.path: Path(ref.path).read_bytes() for ref in refs}
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, wire))
+    # Removing every canonical entry makes accidental pool reads observable.
+    for ref in refs:
+        Path(ref.path).unlink()
     before = staged_lease.exact_lease_counters()
     live = []
+    descriptors = []
+    real_open = staged_lease.LeaseWindow.open
+
+    def observed(window, key):
+        fd, serving = real_open(window, key)
+        descriptors.append(fd)
+        assert resolver._windows == 1
+        return fd, serving
+
+    monkeypatch.setattr(staged_lease.LeaseWindow, 'open', observed)
+    policy = staged_tier_policy_test_context('ssd')
+    policy.__enter__()
     try:
         assignments = io_engine.pin_group([(ref.path, ref.sha256) for ref in refs], live)
         assert len(live) == 1 and len(assignments) == len(refs)
@@ -31,23 +55,31 @@ def test_engine_and_activation_group_reads_share_exact_process_counters(tmp_path
                 Path(ref.path), ref.file_bytes,
                 staged=assignments[ref.path][2], lease=assignments[ref.path])
             assert hashlib.sha256(raw).hexdigest() == ref.sha256 == receipt["sha256"]
-            assert raw == Path(ref.path).read_bytes()
+            assert raw == wire[ref.path]
+            with pytest.raises(OSError):
+                os.fstat(descriptors[-1])
         # Per-entry descriptor closure must leave the borrowed group pinned.
-        assert len(_pins_live(tmp_path, consumer)) == 1
+        assert resolver._windows == 1 and not live[0]._fds
+        with pytest.raises(RuntimeError, match='live reader windows'):
+            resolver.close()
     finally:
         io_engine.unpin(live)
-    assert _pins_live(tmp_path, consumer) == []
+        policy.__exit__(None, None, None)
+    assert resolver._windows == 0
     engine = staged_lease.exact_lease_counters()
     assert {key: engine[key] - before[key] for key in engine} == {
         "windows_batched": 1, "entries_batched": 4, "entries_single": 0,
         "batch_fallbacks": 0}
-    actual = _read_exact(refs)
+    with staged_tier_policy_test_context('ssd'):
+        with prefetch_exact_activation_cache_entries(refs, max_tensor_bytes=4 * 128,
+                expected_session='strict-tier-session', release_file_pages=False) as window:
+            actual = {ref: window._tensors[ref].clone() for ref in refs}
     for ref, expected in zip(refs, tensors):
         assert torch.equal(actual[ref], expected)
     activation = staged_lease.exact_lease_counters()
     assert {key: activation[key] - engine[key] for key in activation} == {
         "windows_batched": 1, "entries_batched": 4, "entries_single": 0,
         "batch_fallbacks": 0}
-    assert calls == {"acquire_for": 2, "release": 2, "covers_for_keys": 2}
+    assert len(descriptors) == 8
     assert resolver.report()["bytes_from_pool"] == 0
-    assert _pins_live(tmp_path, consumer) == []
+    assert resolver._windows == 0
