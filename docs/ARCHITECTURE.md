@@ -1,18 +1,22 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-08, R1 native runtime content authority under review.
+As of: 2026-11-08, R1 native runtime v3 content authority under review.
 Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
 based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
 `measure_runtime` and `validate_runtime` retain their public signatures and use
-`prismaquant.flux_result_runtime.v2`; old runtime evidence is refused.
+`prismaquant.flux_result_runtime.v3`; old v1/v2 runtime evidence is refused.
 The finite declared distribution roster measures complete durable package,
 metadata and bundled-library contents, including nested code/data and empty files.
 Actual directory census detects additions/removals outside RECORD. Declared
 import roots must agree with independent import resolution and loaded owners.
-The host-interpreter contract measures stdlib/dynload, the executable and mapped
+The host-interpreter contract measures standard/platform stdlib and dynload,
+authenticates the actual executable, records interpreter flags, and measures mapped
 libpython/external libraries. Other loaded implementations have individually
 measured file owners and an exact observed roster. New imports/mappings change
 identity or refuse; this does not claim a closure for arbitrary future code.
+Existing loaded bytecode caches are separately measured. Custom loaders and
+unverifiable mapping owners, including the current x86 Btrfs device-alias case,
+refuse. The positive native CPU proof uses a scoped verified static interpreter.
 Original-source declarations include safetensors, numpy, sympy and mpmath beside
 torch, transformers and Tessera. Descriptor streaming, finite file/root/count/byte
 budgets, pre/post file identity and final roster/import/mapping checks refuse

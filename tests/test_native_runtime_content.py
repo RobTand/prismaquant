@@ -168,7 +168,10 @@ def test_file_and_roster_races_refuse(runtime_layout, monkeypatch, axis):
                 with target.open('ab') as writer:
                     writer.write(b'extra')
             elif axis == 'same-size-write':
+                previous = target.stat()
                 target.write_bytes(b'!' * target.stat().st_size)
+                os.utime(target, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
+                assert nr._runtime_stat(target) != nr.file_stat_signature(previous)
             elif axis == 'add':
                 (root / 'reviewpkg/new.py').write_bytes(b'new file')
             elif axis == 'remove':
@@ -204,10 +207,11 @@ def test_bounded_stream_hash_allocates_chunks_and_refuses_growth():
     assert file_digest_sha256hex(Bounded(b''), max_bytes=0) == hashlib.sha256(b'').hexdigest()
 
 
-def test_old_runtime_evidence_is_not_restamped(runtime_layout):
+@pytest.mark.parametrize('schema', ['prismaquant.flux_result_runtime.v1', 'prismaquant.flux_result_runtime.v2'])
+def test_old_runtime_evidence_is_not_restamped(runtime_layout, schema):
     runtime = observe()
     old = copy.deepcopy(runtime)
-    old['schema'] = 'prismaquant.flux_result_runtime.v1'
+    old['schema'] = schema
     with pytest.raises(ValueError, match='schema'):
         nr.validate_runtime(old)
 
@@ -312,3 +316,59 @@ def test_claimed_interpreter_must_be_the_actual_executable(runtime_layout, monke
     monkeypatch.setattr(sys, 'executable', str(runtime_layout['root'] / 'support/libpython.so'))
     with pytest.raises(ValueError, match='actual executing owner'):
         observe()
+
+
+def test_aggregate_directory_count_is_bounded_across_small_roots(runtime_layout, monkeypatch):
+    runtime = observe()
+    assert len(runtime['stdlib']) == 1
+    # Each tree fits separately. Their combined known directory/file census
+    # exceeds eleven before any native file needs to be streamed.
+    for root in [runtime_layout['root'] / 'reviewpkg', runtime_layout['root'] / 'reviewpkg-1.dist-info', runtime_layout['root'] / 'stdlib']:
+        files, directories = nr._runtime_tree(str(root))
+        assert len(files) + len(directories) <= 11
+    monkeypatch.setattr(nr, 'MAX_RUNTIME_ENTRIES', 11)
+    with pytest.raises(ValueError, match='aggregate directory/file count'):
+        observe()
+
+
+def test_nonzero_per_file_ceiling_refuses_known_bytes(tmp_path, monkeypatch):
+    path = tmp_path / 'library.so'
+    path.write_bytes(b'0123456789abcdef')
+    expected = nr._runtime_stat(path)
+    assert nr._runtime_file(str(path), expected)['sha256'] == hashlib.sha256(b'0123456789abcdef').hexdigest()
+    monkeypatch.setattr(nr, 'MAX_RUNTIME_FILE_BYTES', 15)
+    with pytest.raises(ValueError, match='byte bound'):
+        nr._runtime_file(str(path), expected)
+
+
+def test_directory_replacement_during_hash_refuses(runtime_layout, monkeypatch):
+    observe()
+    root = runtime_layout['root']
+    original = nr.file_digest_sha256hex
+    fired = False
+    def replace(handle, **kwargs):
+        nonlocal fired
+        result = original(handle, **kwargs)
+        if not fired and os.readlink(f'/proc/self/fd/{handle.fileno()}').endswith('/reviewpkg/numerics.py'):
+            fired = True
+            old = root / 'reviewpkg/data'
+            replacement = root / 'replacement-data'
+            replacement.mkdir()
+            (replacement/'empty.bin').write_bytes(b'')
+            (replacement/'table.bin').write_bytes(b'\x01\x03\x05\x07')
+            assert old.stat().st_ino != replacement.stat().st_ino
+            old.rename(root/'held-original-data')
+            replacement.rename(old)
+        return result
+    monkeypatch.setattr(nr, 'file_digest_sha256hex', replace)
+    with pytest.raises(ValueError, match='roster changed'):
+        observe()
+    assert fired
+
+
+def test_imported_spec_and_file_must_have_same_actual_owner(runtime_layout, monkeypatch):
+    module = runtime_layout['numerics']
+    assert nr._runtime_module_location(module)['origin'].endswith('/reviewpkg/numerics.py')
+    monkeypatch.setattr(module, '__file__', str(runtime_layout['root'] / 'support/libblas.so'))
+    with pytest.raises(ValueError, match='file/spec owner differs'):
+        nr._runtime_module_location(module)

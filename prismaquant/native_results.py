@@ -27,7 +27,7 @@ _contract = Contract(ValueError, 'native result: ')
 SELECTION_SCHEMA = 'prismaquant.flux_result_selection.v1'
 PUBLICATION_SCHEMA = 'prismaquant.flux_result_publication.v1'
 PRODUCER_SCHEMA = 'prismaquant.flux_result_producer.v1'
-RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v2'
+RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v3'
 ANNOUNCEMENT_SCHEMA = 'prismaquant.flux_result_announcement.v1'
 ANNOUNCEMENT_PREFIX = b'FLUX_RESULT_PUBLICATION '
 SELECTION_KEYS = frozenset({'schema', 'job_id', 'record_dir', 'launch_sha256', 'publication',
@@ -383,14 +383,14 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
         package['roots'] = {root: list(trees[root][0]) for root in package['roots']}
     value = {'schema': RUNTIME_SCHEMA, 'python': {'path': executable, **files[executable],
         'version': version, 'implementation': sys.implementation.name,
-        'cache_tag': sys.implementation.cache_tag}, 'dependencies': packages,
+        'cache_tag': sys.implementation.cache_tag, 'flags': list(sys.flags)}, 'dependencies': packages,
         'stdlib': {root: list(trees[root][0]) for root in standard_roots}, 'imports': imported,
         'libraries': list(libraries), 'files': files}
     return validate_runtime(value)
 
 
 def validate_runtime(value):
-    """Validate v2 evidence structurally; equality requires independent measurement."""
+    """Validate v3 evidence structurally; equality requires independent measurement."""
     _result_fields(value, {'schema', 'python', 'dependencies', 'stdlib', 'imports',
                            'libraries', 'files'}, 'runtime')
     _contract.require(value['schema'] == RUNTIME_SCHEMA, 'runtime schema differs')
@@ -406,12 +406,15 @@ def validate_runtime(value):
         total += row['bytes']
     _contract.require(total <= MAX_RUNTIME_BYTES, 'runtime aggregate byte bound')
     python = _result_fields(value['python'], {'path', 'sha256', 'bytes', 'version',
-        'implementation', 'cache_tag'}, 'interpreter')
+        'implementation', 'cache_tag', 'flags'}, 'interpreter')
     path(python['path'])
     _contract.require(files.get(python['path']) == {k: python[k] for k in ('sha256', 'bytes')}
                       and python['bytes'] > 0, 'interpreter content binding differs')
     for key in ('version', 'implementation', 'cache_tag'):
         _contract.string(python[key], where=f'interpreter {key}')
+    _contract.require(isinstance(python['flags'], list) and 0 < len(python['flags']) <= 64
+        and all(type(flag) in (int, bool) and -1 <= flag < (1 << 31) for flag in python['flags']),
+        'invalid finite interpreter flags')
     used = {python['path']}
     roots = {}
 
