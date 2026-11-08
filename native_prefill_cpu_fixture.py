@@ -1,5 +1,6 @@
 """Finite CPU transport fixture; the arithmetic is not a model-quality probe."""
 import argparse
+import gzip  # Staged authentication also imports it; freeze one phase runtime.
 import hashlib
 import json
 import os

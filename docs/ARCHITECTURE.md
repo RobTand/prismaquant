@@ -11,8 +11,9 @@ unverified target while still visiting independently authenticated siblings.
 Complete staged admission still precedes submission and any record publication.
 Value adoption, original-launch authentication, failure precedence and the
 declared parent DAG remain unchanged. The two-sibling native regression at the
-prior head is retained; the correction's native proof remains required before
-dependent scientific-driver work.
+prior head is retained. Dependent scientific-driver work requires the corrected
+native proof. The CPU fixture freezes the same standard-library import roster
+for staged and unstaged children; measured runtime equality remains mandatory.
 
 As of: 2026-11-08, native prefill child documents and scientific value body.
 Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
