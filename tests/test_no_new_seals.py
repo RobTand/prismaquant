@@ -106,6 +106,8 @@ RESOURCE = "resource"
 # ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
 # keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
+    ("tools/dispatch_joint_quanta.py", "Gateway.status"): (
+        1, STRUCTURE, "the saved native handle names the exact persisted job and launch receipt"),
     ("prismaquant/aura_checkpoint_journal.py", "_decode_unit"): (
         1, INTEGRITY, "a unit checkpoint's envelope digest against its payload bytes"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed"): (
