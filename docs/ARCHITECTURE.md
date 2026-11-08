@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native Flux profile v2.
+Source: `prismaquant/flux_jobs.py`, based on `a79b37acb`. The migration lead
+qualified the exact config revision making `exec.sdexec-constrain-resources`
+explicitly false. The config hash changes to `ff9384f0...`; the resource model,
+broker generation, performance-core/memory rendering and CPU-only bounds stay
+pinned. Unknown config/model bytes still refuse. The archived single-key delta
+and both old-profile refusals are retained in migration Job69. Native proof of
+the revised profile is separate from prefill or scientific qualification.
+
 As of: 2026-11-08, finite native prefill measured admission, slice3b.
 Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
 `614dad302`. Manifest v2 binds immutable phase rosters and explicit native
