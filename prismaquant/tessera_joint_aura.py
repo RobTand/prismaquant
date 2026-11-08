@@ -186,6 +186,11 @@ def _read_verified_wire_blob(cell):
               else resolver.staged_read(wire, expected_sha256=expected))
     from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
     strict = policy_is_active()
+    if staged is not None and '_resolver' in staged:
+        from .staged_whole_file import read_staged_buffer
+        blob = bytes(read_staged_buffer(resolver, wire, staged,
+                                       label='wire', expected_bytes=size))
+        return blob, bytes_sha256hex(blob)
     if staged is not None and not strict:
         # The ram copy first, the stage copy second, the declared path last.
         # PrismaBuild's ram tier (#640) promotes a staged range onto a tmpfs

@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, whole-input native object offsets.
+Source: `prismaquant/{perturbed_x_cache,tessera_joint_aura}.py`, based on
+`5b0261b5e`. Verified activation and exact-entry reads honor immutable object
+offsets while retaining their canonical stat, content, tensor and budget gates.
+Native wire reads use the existing bounded staged buffer owner. Prefix/trailer
+bytes outside the declared extent never enter its decoded content.
+
 As of: 2026-11-08, independent native reader positions.
 Source: `prismaquant/residency_map.py`, based on `307a7a61b`.
 The staged resolver retains its original object witness and checks every

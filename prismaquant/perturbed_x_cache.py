@@ -900,6 +900,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     strict = policy_is_active()
     source, source_before = path, before
     source_signature = signature
+    source_offset = 0
     window = None
     tier = None
     if strict:
@@ -908,6 +909,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
                 path, expected_sha256, declared_size=before.st_size))
         source_signature = file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
+        source_offset = _staged.get('object_offset', 0)
     else:
         # The declared file: pool bytes when a map is bound (PQ #1026).
         from .residency_map import residency_resolver
@@ -941,6 +943,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         # owned scratch copies. Every bounded read retains guard/stat/advice.
         block_bytes = 16*1024**2
         with os.fdopen(descriptor, 'rb', buffering=0, closefd=False) as handle:
+            handle.seek(source_offset)
             while consumed < len(raw):
                 check('before_verified_capture_read',
                       source_page_cache_bytes + max_storage_bytes + scratch)
@@ -961,7 +964,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
                         _advise_activation_descriptor(descriptor, source, source_before,
                                                       offset=advised, length=end-advised)
                         advised = end
-            if handle.read(1):
+            if source_offset == 0 and source_before.st_size == before.st_size and handle.read(1):
                 raise RuntimeError('verified activation file grew during loading')
         unchanged(descriptor)
         if digest.hexdigest() != expected_sha256:
@@ -2052,7 +2055,7 @@ def _exact_entry_prechecks(ref, *, expected_session, session_for_reference, path
 
 
 def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
-                      owned, release_file_pages):
+                      owned, release_file_pages, source_offset=0):
     """Read, hash and deserialize one entry; returns its verified tensor.
 
     ``lease_fd`` is the pinned descriptor under the strict policy (read, not
@@ -2065,6 +2068,7 @@ def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
     opener = (source.open("rb", buffering=0) if lease_fd is None
               else os.fdopen(lease_fd, "rb", buffering=0, closefd=False))
     with opener as handle:
+        handle.seek(source_offset)
         while consumed < ref.file_bytes:
             view = memoryview(raw)[consumed:min(
                 ref.file_bytes, consumed + _ENTRY_READ_BLOCK_BYTES)]
@@ -2076,7 +2080,7 @@ def _read_exact_entry(ref, *, path, signature, source, source_before, lease_fd,
             finally:
                 view.release()
             consumed += size
-        if handle.read(1):
+        if source_offset == 0 and source_before.st_size == ref.file_bytes and handle.read(1):
             raise RuntimeError("exact activation entry size changed")
     if running.hexdigest() != ref.sha256 or _activation_file_signature(path) != signature:
         raise RuntimeError("exact activation entry checksum changed")
@@ -2227,7 +2231,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
             window._tensors[ref] = _read_exact_entry(
                 ref, path=path, signature=signature, source=source,
                 source_before=source_before, lease_fd=lease_fd, owned=buffer,
-                release_file_pages=release_file_pages)
+                release_file_pages=release_file_pages,
+                source_offset=0 if lease_window is None else _staged.get('object_offset', 0))
         _record_served_bytes(lease_resolver, path, tier, ref.file_bytes)
         if lease_window is not None:
             # Entry verified: descriptor closed, exact ref released
@@ -2255,7 +2260,9 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                     ref, path=path, signature=signature,
                     source=Path(lease_window.stage_path(key) or path),
                     source_before=os.fstat(lease_fd), lease_fd=lease_fd,
-                    owned=buffer, release_file_pages=release_file_pages)
+                    owned=buffer, release_file_pages=release_file_pages,
+                    source_offset=lease_window.entries[key].get('object_offset', 0))
+                lease_window.check_fd(lease_fd)
         finally:
             lease_window.close_fd(lease_fd)
         _record_served_bytes(entry_resolver, path, tier, ref.file_bytes)
