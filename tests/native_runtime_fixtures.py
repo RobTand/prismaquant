@@ -54,7 +54,7 @@ def runtime_layout(tmp_path, monkeypatch):
     libraries = [root / 'support/libpython.so', root / 'support/libblas.so']
     monkeypatch.setattr(nr, '_runtime_libraries',
                         lambda: {str(p): nr._runtime_stat(p) for p in sorted(libraries)})
-    monkeypatch.setattr(nr.sysconfig, 'get_path', lambda name: str(root / 'stdlib'))
+    monkeypatch.setattr(nr, '_runtime_standard_roots', lambda: [str(root / 'stdlib')])
     yield dict(root=root, contents=contents, package=package, numerics=numerics,
                imported=imported, real_imports=real_imports, real_libraries=real_libraries)
     sys.modules.pop('reviewpkg.numerics', None)

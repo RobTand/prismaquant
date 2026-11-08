@@ -14,7 +14,8 @@ from prismaquant import native_results as nr
 def test_measured_interpreter_is_the_actual_executable():
     measured = subprocess.run([sys.executable, '-s', '-B', '-c',
         'import runpy; runpy.run_path("tests/native_runtime_observer.py", run_name="__main__")'],
-        check=True, capture_output=True, text=True)
+        check=False, capture_output=True, text=True)
+    assert measured.returncode == 0, measured.stderr
     runtime = json.loads(measured.stdout)
     assert nr.validate_runtime(runtime) == runtime
     executable = Path(sys.executable).resolve(strict=True)

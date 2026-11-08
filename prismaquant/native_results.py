@@ -107,6 +107,16 @@ def _runtime_path(filename):
     return str(Path(filename).resolve(strict=True))
 
 
+def _runtime_standard_roots():
+    roots = {_runtime_path(sysconfig.get_path('stdlib')),
+             _runtime_path(sysconfig.get_path('platstdlib'))}
+    dynload = sysconfig.get_config_var('DESTSHARED')
+    if dynload and Path(dynload).exists():
+        roots.add(_runtime_path(dynload))
+    # A child is already fully enumerated with its parent.
+    return sorted(p for p in roots if not any(Path(q) in Path(p).parents for q in roots))
+
+
 def _runtime_stat(filename):
     info = os.stat(filename, follow_symlinks=False)
     if not stat.S_ISREG(info.st_mode):
@@ -303,14 +313,18 @@ def _runtime_distribution(name):
 
 def _runtime_owners(packages, imported):
     for package in packages.values():
+        roots = [Path(p) for p in package['roots']]
+        def installed(filename):
+            location = Path(filename)
+            return any(location == root or root in location.parents for root in roots)
         for name, owner in package['imports'].items():
-            root = Path(owner['origin']).parent if owner['locations'] else Path(owner['origin'])
             for module, observed in imported.items():
                 if module == name or module.startswith(name + '.'):
-                    origin = Path(observed['origin'])
-                    if (origin != root and root not in origin.parents or
-                            any(Path(p) != root and root not in Path(p).parents
-                                for p in observed['locations'])):
+                    # Packages can publish aliases across their own roots,
+                    # e.g. pytest's py.path -> _pytest._py.path. Every such
+                    # root is fully measured; a foreign distribution is not.
+                    if (not installed(observed['origin']) or
+                            any(not installed(p) for p in observed['locations'])):
                         raise ValueError('native runtime already imported foreign dependency owner')
                     if module == name and (observed['origin'] != owner['origin'] or
                                            observed['locations'] != owner['locations']):
@@ -330,18 +344,20 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
         raise ValueError('native runtime requires finite unique dependency names')
     # Resolve the modules used by the measurement itself before taking its
     # loaded roster. sysconfig may lazily load its platform data module.
-    stdlib = _runtime_path(sysconfig.get_path('stdlib'))
+    standard_roots = _runtime_standard_roots()
     executable = _runtime_path(sys.executable)
+    if _runtime_path('/proc/self/exe') != executable:
+        raise ValueError('native runtime interpreter differs from actual executing owner')
     version = platform.python_version()
     packages = {name: _runtime_distribution(name) for name in sorted(dependencies)}
     imported, libraries = _runtime_imports(), _runtime_libraries()
     _runtime_owners(packages, imported)
-    roots = {root for p in packages.values() for root in p['roots']} | {stdlib}
+    roots = {root for p in packages.values() for root in p['roots']} | set(standard_roots)
     if len(roots) > MAX_RUNTIME_ROOTS:
         raise ValueError('native runtime root count exceeds bound')
     trees, signatures, directories = {}, {}, set()
     for root in sorted(roots):
-        trees[root] = _runtime_tree(root, stdlib=root == stdlib)
+        trees[root] = _runtime_tree(root, stdlib=root in standard_roots)
         directories.update(str(Path(root) / member) for member in trees[root][1])
         for relative, signature in trees[root][0].items():
             signatures[str(Path(root) / relative)] = signature
@@ -356,7 +372,7 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
         raise ValueError('native runtime aggregate file count/byte budget exceeded')
     files = {p: _runtime_file(p, sig) for p, sig in sorted(signatures.items())}
     for root, before in trees.items():
-        if _runtime_tree(root, stdlib=root == stdlib) != before:
+        if _runtime_tree(root, stdlib=root in standard_roots) != before:
             raise ValueError('native runtime file/directory roster changed during measurement')
     if any(_runtime_stat(p) != sig for p, sig in signatures.items()):
         raise ValueError('native runtime member changed after streaming read')
@@ -368,7 +384,7 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
     value = {'schema': RUNTIME_SCHEMA, 'python': {'path': executable, **files[executable],
         'version': version, 'implementation': sys.implementation.name,
         'cache_tag': sys.implementation.cache_tag}, 'dependencies': packages,
-        'stdlib': {stdlib: list(trees[stdlib][0])}, 'imports': imported,
+        'stdlib': {root: list(trees[root][0]) for root in standard_roots}, 'imports': imported,
         'libraries': list(libraries), 'files': files}
     return validate_runtime(value)
 
@@ -417,7 +433,7 @@ def validate_runtime(value):
             _contract.require(root not in roots or roots[root] == members, 'conflicting runtime roots')
             roots[root] = members
     trees(value['stdlib'])
-    _contract.require(len(value['stdlib']) == 1, 'one measured stdlib required')
+    _contract.require(0 < len(value['stdlib']) <= MAX_RUNTIME_ROOTS, 'finite measured stdlib required')
     deps = _contract.mapping(value['dependencies'], where='dependencies')
     _contract.require(len(deps) <= MAX_RUNTIME_DEPENDENCIES, 'dependency roster exceeds bound')
     for name, package in deps.items():

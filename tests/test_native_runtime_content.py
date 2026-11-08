@@ -220,3 +220,95 @@ def test_nested_dependency_code_changes_runtime_identity(runtime_layout):
     (runtime_layout['root'] / 'reviewpkg/numerics.py').write_bytes(b'def answer(): return 43\n')
     changed = observe()
     assert changed != original, 'runtime seal missed changed numerical implementation'
+
+
+def test_declared_distribution_alias_uses_only_its_fully_measured_roots(runtime_layout, monkeypatch):
+    root = runtime_layout['root']
+    helper = root / 'reviewhelper.py'
+    raw = b'answer = 84\n'
+    helper.write_bytes(raw)
+    with (root / 'reviewpkg-1.dist-info/RECORD').open('ab') as record:
+        record.write(b'reviewhelper.py,,\n')
+    monkeypatch.delitem(sys.modules, 'reviewhelper', raising=False)
+    module = importlib.import_module('reviewhelper')
+    monkeypatch.setitem(sys.modules, 'reviewhelper', module)
+    assert module.answer == 84
+    runtime_layout['imported']['reviewpkg.helper_alias'] = nr._runtime_module_location(module)
+    runtime = observe()
+    assert runtime['files'][str(helper)]['sha256'] == hashlib.sha256(raw).hexdigest()
+    assert runtime['imports']['reviewpkg.helper_alias']['origin'] == str(helper)
+    assert str(helper) in runtime['dependencies']['reviewpkg']['roots']
+    runtime_layout['imported']['reviewpkg.helper_alias']['origin'] = str(root / 'support/libblas.so')
+    with pytest.raises(ValueError, match='foreign'):
+        observe()
+    sys.modules.pop('reviewhelper', None)
+
+
+def test_actual_descriptor_stream_peak_is_bounded_below_native_file_size(tmp_path):
+    import tracemalloc
+    path = tmp_path / 'large-native.so'
+    pattern = b'native library bytes\x00' * 4096
+    expected = hashlib.sha256()
+    size = 0
+    with path.open('wb') as stream:
+        while size < 64 << 20:
+            stream.write(pattern); expected.update(pattern); size += len(pattern)
+    signature = nr._runtime_stat(path)
+    tracemalloc.start()
+    try:
+        binding = nr._runtime_file(str(path), signature)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert binding == {'bytes':size,'sha256':expected.hexdigest()}
+    assert size > 64 << 20
+    assert peak < 24 << 20, peak
+
+
+def test_growth_during_bounded_descriptor_read_refuses(runtime_layout, monkeypatch):
+    observe()
+    target = runtime_layout['root'] / 'reviewpkg/numerics.py'
+    original = nr.file_digest_sha256hex
+    def grow(handle, **kwargs):
+        class GrowingHandle:
+            fired = False
+            def read(self, size=-1):
+                chunk = handle.read(size)
+                if not self.fired and chunk:
+                    self.fired = True
+                    with target.open('ab') as writer: writer.write(b'grew during read')
+                return chunk
+        if os.readlink(f'/proc/self/fd/{handle.fileno()}') == str(target):
+            return original(GrowingHandle(), **kwargs)
+        return original(handle, **kwargs)
+    monkeypatch.setattr(nr, 'file_digest_sha256hex', grow)
+    with pytest.raises(ValueError, match='ceiling'):
+        observe()
+
+
+def test_unsupported_loader_refuses_real_imported_owner(runtime_layout, monkeypatch):
+    module = runtime_layout['numerics']
+    assert nr._runtime_module_location(module)['origin'].endswith('/reviewpkg/numerics.py')
+    monkeypatch.setattr(module.__spec__, 'loader', object())
+    with pytest.raises(ValueError, match='unsupported imported loader'):
+        nr._runtime_module_location(module)
+
+
+def test_existing_loaded_bytecode_is_separately_bound(runtime_layout):
+    original = observe()
+    cache = runtime_layout['root'] / 'reviewpkg/__pycache__/numerics.cpython-312.pyc'
+    cache.parent.mkdir()
+    cache.write_bytes(b'known executable cache bytes')
+    runtime_layout['imported']['reviewpkg.numerics']['cached'] = str(cache)
+    before = observe()
+    assert before != original
+    assert before['files'][str(cache)]['sha256'] == hashlib.sha256(b'known executable cache bytes').hexdigest()
+    cache.write_bytes(b'changed executable cache bytes')
+    assert observe() != before
+
+
+def test_claimed_interpreter_must_be_the_actual_executable(runtime_layout, monkeypatch):
+    observe()
+    monkeypatch.setattr(sys, 'executable', str(runtime_layout['root'] / 'support/libpython.so'))
+    with pytest.raises(ValueError, match='actual executing owner'):
+        observe()
