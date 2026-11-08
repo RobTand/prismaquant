@@ -109,10 +109,6 @@
   "hashlib:tools/publish_artifact.py::_replay_frozen_digests",
   "hashlib:tools/publish_artifact.py::_scan_file",
   "hashlib:tools/publish_artifact.py::main",
-  "hashlib:tools/pwc_window_load_bench.py::_leaves",
-  "hashlib:tools/pwc_window_load_bench.py::run_quantum",
-  "hashlib:tools/pwc_window_load_bench.py::run_setup",
-  "hashlib:tools/pwc_window_load_bench.py::run_window",
   "hashlib:tools/qualify_t4_overlay.py::decoder_provenance",
   "hashlib:tools/rebind_t4_qualified_results.py::sha",
   "hashlib:tools/regenerate_joint_quanta.py::_build_head_slices",
@@ -247,7 +243,6 @@
   "sorted-json:tools/prismasnap.py::_print",
   "sorted-json:tools/profile_stage_b_head.py::main",
   "sorted-json:tools/publish_artifact.py::_freeze_artifact",
-  "sorted-json:tools/pwc_window_load_bench.py::run_window",
   "sorted-json:tools/qualify_t4_overlay.py::main",
   "sorted-json:tools/qualify_t4_overlay.py::main.commit_task",
   "sorted-json:tools/qualify_t4_overlay.py::main.read_task",
@@ -324,8 +319,7 @@
   ],
   "_classify": [
    "prismaquant/full_engine_resource_report.py",
-   "tools/chain_roll_bench.py",
-   "tools/pwc_window_load_bench.py"
+   "tools/chain_roll_bench.py"
   ],
   "_cmd_show": [
    "prismaquant/shipcard_cli.py",
@@ -365,7 +359,6 @@
   ],
   "_finite": [
    "prismaquant/anchored_shape.py",
-   "prismaquant/quality_prefill_pb_adapter.py",
    "tools/exl3_grouped_down_replay.py",
    "tools/kl_ab.py"
   ],
@@ -412,8 +405,7 @@
    "prismaquant/artifact_collection_legacy.py",
    "prismaquant/cluster_campaign.py",
    "prismaquant/joint_retained_window_plan.py",
-   "prismaquant/measured_runtime_prices.py",
-   "prismaquant/quality_prefill_pb_adapter.py"
+   "prismaquant/measured_runtime_prices.py"
   ],
   "_io_counters": [
    "prismaquant/joint_cost_quantum.py",
@@ -483,8 +475,7 @@
    "prismaquant/aura_cost.py",
    "prismaquant/expert_empirical_cost.py",
    "prismaquant/fisher_col_weights.py",
-   "prismaquant/glm53_stock_harvest.py",
-   "tools/pwc_window_load_bench.py"
+   "prismaquant/glm53_stock_harvest.py"
   ],
   "_manifest": [
    "tools/band_serial_handoff_live_pair.py",
@@ -545,7 +536,6 @@
   ],
   "_positive": [
    "prismaquant/boundary_control.py",
-   "prismaquant/quality_prefill_pb_adapter.py",
    "prismaquant/tessera_anchored_surface.py"
   ],
   "_producer_identity": [
@@ -633,10 +623,6 @@
    "prismaquant/quality_prefill_contract.py",
    "prismaquant/stage_a_chain_resume.py"
   ],
-  "_sequence": [
-   "prismaquant/quality_prefill_contract.py",
-   "prismaquant/quality_prefill_pb_adapter.py"
-  ],
   "_sha": [
    "prismaquant/joint_cost_read_schedule.py",
    "prismaquant/measured_runtime_prices.py",
@@ -648,7 +634,6 @@
    "prismaquant/artifact_collection.py",
    "prismaquant/cluster_campaign.py",
    "prismaquant/prepriced_cost.py",
-   "prismaquant/quality_prefill_pb_adapter.py",
    "tools/derive_retained_window_budget.py",
    "tools/kl_ab.py"
   ],
@@ -688,8 +673,7 @@
   ],
   "_text": [
    "prismaquant/artifact_collection.py",
-   "prismaquant/cluster_campaign.py",
-   "prismaquant/quality_prefill_pb_adapter.py"
+   "prismaquant/cluster_campaign.py"
   ],
   "_verify_source": [
    "prismaquant/tessera_materialization.py",
@@ -732,7 +716,6 @@
    "prismaquant/dsv4_campaign_completion.py",
    "prismaquant/joint_layer_quanta.py",
    "prismaquant/quality_prefill_contract.py",
-   "prismaquant/quality_prefill_pb_adapter.py",
    "tools/dsv4_wikitext_inputs.py",
    "tools/full_kl_teacher_payload.py"
   ],
