@@ -27,7 +27,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256_normalized,
 )
 from .digests import bytes_sha256hex, text_sha256hex
-from .file_identity import file_stat_signature, open_directory
+from .file_identity import file_stat_signature, open_nofollow_directory as open_directory
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"

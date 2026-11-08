@@ -29,7 +29,7 @@ def file_stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]
             value.st_mtime_ns, value.st_ctime_ns)
 
 
-def open_directory(filename, *, create=False, identity=None):
+def open_nofollow_directory(filename, *, create=False, identity=None):
     """Hold a canonical directory without following any symlink component."""
     filename = os.fspath(filename)
     if not isinstance(filename, str) or not filename.startswith('/') or '\0' in filename or os.path.normpath(filename) != filename:

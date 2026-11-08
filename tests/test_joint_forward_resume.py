@@ -365,6 +365,7 @@ def _chained_pair(tmp_path, monkeypatch):
     from pathlib import Path
     import hashlib
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
+    from prismaquant.streamed_boundary_artifacts import _write_new_file
     from prismaquant import joint_forward_resume as recovery
     from produced_native_fixtures import selected_publications, recovery_publication
     register = selected_publications(monkeypatch)
@@ -381,9 +382,10 @@ def _chained_pair(tmp_path, monkeypatch):
             for batch in range(5):
                 path = directory / f'boundary-{batch}-{boundary}-at-{boundary}.pt'
                 raw = f'known byte fixture {generation} {boundary} {batch}'.encode()
-                path.write_bytes(raw)
+                identity = _write_new_file(path, raw)
                 refs[boundary, batch] = SimpleNamespace(path=str(path),
                     file_bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(),
+                    writer_file_identity=identity,
                     metadata_json=json.dumps({'identity': {'session': session}}))
         selection, pub, selected = recovery_publication(tmp_path / name,
             refs, state, register, job_id=job_id)

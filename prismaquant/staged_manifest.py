@@ -11,7 +11,7 @@ import tempfile
 from types import MappingProxyType
 
 from .file_identity import file_stat_signature as signature
-from .file_identity import open_directory as _open_directory
+from .file_identity import open_nofollow_directory as _open_directory
 from .digests import bytes_sha256hex, file_digest_sha256hex, DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.staged_input_manifest.v1'
