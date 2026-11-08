@@ -60,6 +60,11 @@ ORIGINAL_RUNTIME_KEYS = frozenset({
     'model_class', 'profile', 'config', 'versions', 'container_content_sha256',
     'arithmetic', 'material_pipeline', 'native_runtime',
 })
+# Explicit numerical/decoder closure. Other currently loaded implementations
+# are individually observed by native_results, not claimed as full trees.
+ORIGINAL_RUNTIME_DEPENDENCIES = (
+    'mpmath', 'numpy', 'safetensors', 'sympy', 'tessera-quant', 'torch', 'transformers',
+)
 ORIGINAL_RESOURCE_KEYS = frozenset({
     'schema', 'cpu_bytes', 'material_bytes', 'source_cache_bytes', 'source_prefetch',
     'copy_bytes', 'gpu_bytes', 'native_bytes', 'serialization_bytes', 'artifact_bytes',
@@ -430,7 +435,7 @@ def _environment_matches(runtime):
     _same(runtime['tessera_source_sha256'],
           _production_cache_source_sha256(Path(tessera.__file__).resolve().parent),
           'executing Tessera module tree')
-    _same(runtime['native_runtime'], measure_runtime(dependencies=('torch', 'transformers', 'tessera-quant')),
+    _same(runtime['native_runtime'], measure_runtime(dependencies=ORIGINAL_RUNTIME_DEPENDENCIES),
           'executing measured native runtime')
     modeling = runtime['modeling_source']
     from .digests import file_sha256hex
@@ -493,7 +498,7 @@ def original_source_runtime(runner, owner):
             'tensor_dtypes': {name: str(dtype) for name, dtype in sorted(runner.context.buffer_dtypes.items())},
             'scale_inv_map': {name: list(coordinate) for name, coordinate
                               in sorted(runner.context.fp8_scale_inv_map.items())}},
-        'native_runtime': measure_runtime(dependencies=('torch', 'transformers', 'tessera-quant')),
+        'native_runtime': measure_runtime(dependencies=ORIGINAL_RUNTIME_DEPENDENCIES),
     }
     return validate_original_source_runtime(value, value)
 

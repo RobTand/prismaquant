@@ -25,6 +25,7 @@ from prismaquant.stage_a_selected_row_diagnostic import prepare_original_diagnos
 from test_capture_original_material import _bound, material, _forget_state  # noqa: F401
 from test_original_source_identity import original_runner  # noqa: F401
 from test_original_streaming_bootstrap_2010 import original_model  # noqa: F401
+from native_runtime_fixtures import runtime_layout, nonqualifying_runtime  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
@@ -38,7 +39,7 @@ def _digest(raw):
 
 
 @pytest.fixture
-def authority_case(original_runner, original_model, tmp_path, monkeypatch):
+def authority_case(original_runner, original_model, tmp_path, monkeypatch, nonqualifying_runtime):
     state, material = original_runner, original_model
     owner, runner = state['owner'], state['runner']
     # Native source fixture remains the existing real Llama material/decoder;
@@ -419,7 +420,7 @@ def test_native_runtime_is_measured_and_independently_selected(authority_case):
     observed = authority_case['packet']['runtime']
     binding = _bound(authority_case['tmp'] / 'independent-producer-runtime.json', copy.deepcopy(observed))
     assert sg._validate_original_source_runtime(observed, binding) == observed
-    assert observed['native_runtime'] == measure_runtime(dependencies=('torch', 'transformers', 'tessera-quant'))
+    assert observed['native_runtime'] == measure_runtime(dependencies=sg.ORIGINAL_RUNTIME_DEPENDENCIES)
     changed = copy.deepcopy(observed)
     changed['native_runtime']['python']['sha256'] = '0' * 64
     with pytest.raises(RuntimeError, match='observed original source runtime'):

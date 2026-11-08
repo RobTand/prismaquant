@@ -18,17 +18,17 @@ def test_measured_interpreter_is_the_actual_executable():
     assert runtime['python']['bytes'] == len(raw)
     assert runtime['python']['sha256'] == hashlib.sha256(raw).hexdigest()
     package = runtime['dependencies']['pytest']
-    assert b'Name: pytest' in Path(package['metadata']['path']).read_bytes()
+    assert b'Name: pytest' in Path(package['metadata']).read_bytes()
     for role in ('metadata', 'record'):
-        raw = Path(package[role]['path']).read_bytes()
-        assert package[role]['bytes'] == len(raw)
-        assert package[role]['sha256'] == hashlib.sha256(raw).hexdigest()
+        raw = Path(package[role]).read_bytes()
+        assert runtime['files'][package[role]]['bytes'] == len(raw)
+        assert runtime['files'][package[role]]['sha256'] == hashlib.sha256(raw).hexdigest()
     import pytest as installed
-    entry = package['modules']['pytest/__init__.py']
+    entry = package['imports']['pytest']
     raw = Path(installed.__file__).read_bytes()
-    assert entry['path'] == str(Path(installed.__file__).resolve())
-    assert entry['bytes'] == len(raw)
-    assert entry['sha256'] == hashlib.sha256(raw).hexdigest()
+    assert entry['origin'] == str(Path(installed.__file__).resolve())
+    assert runtime['files'][entry['origin']]['bytes'] == len(raw)
+    assert runtime['files'][entry['origin']]['sha256'] == hashlib.sha256(raw).hexdigest()
 
 
 @pytest.mark.parametrize('raw', [b'{"x":1,"x":2}', b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}'])
