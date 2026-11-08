@@ -574,7 +574,7 @@ def test_child_local_staged_refusal_keeps_healthy_envelope_and_common_population
     binding, phase, root, submission = phase_records_fixture(tmp_path, staged=staged)
     prefill.read_task_envelope(submission['children'][0]['envelope'])
     prefill.read_task_envelope(submission['children'][1]['envelope'])
-    Path(staged['read_contract_path']).write_bytes(b'changed owned read contract')
+    (stage / 'native-read-contract.json').write_bytes(b'changed owned read contract')
     records = prefill._phase_records(binding, phase, root)
     assert records['submission'] == submission
     prefill._authenticate_child(records, 1)
