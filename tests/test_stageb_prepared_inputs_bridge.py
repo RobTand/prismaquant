@@ -387,8 +387,10 @@ def _dispatch_bridge(tmp_path, monkeypatch):
     wire = Path(block["manifest_path"]).read_bytes()
     digest = hashlib.sha256(wire).hexdigest()
     submitted = next(row for row in gateway.submitted
-                     if block["manifest_path"] in row["row"]["argv"])
+                     if row["quantum_id"] == record["quantum_id"])
     application_row = submitted["row"]
+    assert application_row["data_manifest"] == block["manifest_path"]
+    assert hashlib.sha256(Path(application_row["data_manifest"]).read_bytes()).hexdigest() == digest
     argv = application_row["argv"]
     assert digest in " ".join(argv)
     phases = [phase.split("=", 1)[0] for phase in application_row["progress_phases"]]
@@ -486,7 +488,6 @@ def test_generator_dispatch_waits_for_delayed_leased_render(tmp_path, monkeypatc
     block = record["executable_readset"]
     entries = [entry for window in block["prepared_input"]["windows"]
                for entry in window["entries"]]
-    binding = publish_inputs(tmp_path, [Path(entry["path"]) for entry in entries],
-                             read_contract=Path(block["manifest_path"]).read_bytes())
+    binding = publish_inputs(tmp_path, [Path(entry["path"]) for entry in entries])
     resolver = bind(monkeypatch, binding)
     _consume_bridge(layout, record, phases, resolver, monkeypatch)
