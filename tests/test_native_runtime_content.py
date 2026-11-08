@@ -372,3 +372,41 @@ def test_imported_spec_and_file_must_have_same_actual_owner(runtime_layout, monk
     monkeypatch.setattr(module, '__file__', str(runtime_layout['root'] / 'support/libblas.so'))
     with pytest.raises(ValueError, match='file/spec owner differs'):
         nr._runtime_module_location(module)
+
+
+@pytest.mark.parametrize('mutation', ['named-code', 'unnamed-code', 'wrong-device', 'wrong-inode', 'deleted', 'added-library'])
+def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkeypatch, mutation):
+    import builtins
+    root = runtime_layout['root']
+    library = root / 'support/libpython.so'
+    known = library.stat()
+    device = f'{os.major(known.st_dev):02x}:{os.minor(known.st_dev):02x}'
+    prefix = f'1000-2000 r-xp 00000000 {device} {known.st_ino} '
+    mapping = prefix + str(library) + '\n'
+    raw = mapping.encode()
+    original_open = builtins.open
+    def mapped_open(path, *args, **kwargs):
+        if path == '/proc/self/maps':
+            return io.BytesIO(raw)
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(builtins, 'open', mapped_open)
+    real = runtime_layout['real_libraries']
+    assert real() == {str(library):nr.file_stat_signature(known)}
+    if mutation == 'named-code':
+        raw += b'3000-4000 r-xp 00000000 00:00 0 [anon:numerical-code]\n'
+    elif mutation == 'unnamed-code':
+        raw += b'3000-4000 r-xp 00000000 00:00 0\n'
+    elif mutation == 'wrong-device':
+        raw = f'1000-2000 r-xp 00000000 00:00 {known.st_ino} {library}\n'.encode()
+    elif mutation == 'wrong-inode':
+        raw = f'1000-2000 r-xp 00000000 {device} {known.st_ino+1} {library}\n'.encode()
+    elif mutation == 'deleted':
+        raw = (mapping.rstrip() + ' (deleted)\n').encode()
+    else:
+        extra = root / 'support/libblas.so'
+        info = extra.stat()
+        raw += f'3000-4000 r-xp 00000000 {device} {info.st_ino} {extra}\n'.encode()
+        assert set(real()) == {str(library), str(extra)}
+        return
+    with pytest.raises(ValueError, match='unsupported|replaced'):
+        real()

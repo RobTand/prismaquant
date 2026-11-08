@@ -243,7 +243,9 @@ def _runtime_libraries():
             continue
         _, perms, _, device, inode, filename = fields
         if filename.startswith('['):
-            continue  # Kernel-provided vdso/vsyscall, no mutable filesystem owner.
+            if 'x' in perms and filename not in {'[vdso]', '[vsyscall]'}:
+                raise ValueError('native runtime named anonymous executable owner unsupported')
+            continue
         if 'x' not in perms and '.so' not in filename:
             continue
         if not filename.startswith('/') or filename.endswith(' (deleted)') or '\\' in filename:

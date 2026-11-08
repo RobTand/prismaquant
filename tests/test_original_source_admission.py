@@ -423,6 +423,9 @@ def test_nonqualifying_runtime_control_is_independently_selected(authority_case)
     assert observed['native_runtime'] == measure_runtime(dependencies=sg.ORIGINAL_RUNTIME_DEPENDENCIES)
     changed = copy.deepcopy(observed)
     changed['native_runtime']['python']['sha256'] = '0' * 64
+    # Keep the measured-file projection internally consistent so this still
+    # exercises the independent scientific selection join, not v3 parsing.
+    changed['native_runtime']['files'][changed['native_runtime']['python']['path']]['sha256'] = '0' * 64
     with pytest.raises(RuntimeError, match='observed original source runtime'):
         sg.validate_original_source_runtime(changed, binding)
 
