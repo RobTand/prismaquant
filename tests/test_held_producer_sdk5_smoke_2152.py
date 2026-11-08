@@ -4,10 +4,15 @@ The historical filename remains selectable. These tests grant no CUDA/source
 qualification; the full native boundary has its separate producer/consumer proof.
 """
 import copy
+from dataclasses import replace
+import gc
+import hashlib
+import json
 import os
 from pathlib import Path
 
 import pytest
+from safetensors import safe_open
 
 from prismaquant import source_generation as sg, native_results as nr
 from prismaquant.flux_jobs import ExecutionResult
@@ -22,7 +27,10 @@ pytestmark = pytest.mark.own_process
 def reader_domain_case(case):
     authority = case['authority']
     runtime = case['packet']['runtime']
-    inputs = {'runtime': {**authority['runtime'], 'bytes': Path(authority['runtime']['path']).stat().st_size}}
+    expected = _bound(case['tmp'] / 'independent-reader-runtime.json', runtime)
+    inputs = {role: {**binding, 'bytes': Path(binding['path']).stat().st_size}
+              for role, binding in (('observed-runtime', authority['runtime']),
+                                    ('selected-runtime', expected))}
     # Join-only fixture. Execution is truthfully still running in this admitted
     # test job, so this object cannot satisfy read_selected_result.
     execution = ExecutionResult('running', os.environ['FLUX_JOB_ID'], Path(os.environ['OUT']))
@@ -53,5 +61,151 @@ def test_held_producer_context_authenticates_and_joins(authority_case, monkeypat
     else:
         launch['staged_input']['read_contract_sha256'] = '0' * 64
     changed = nr.SelectedResult(publication, {}, {}, launch, selected.execution)
-    with pytest.raises(RuntimeError):
+    refusal = {'runtime': 'selected reader measured native runtime',
+               'resources': 'selected reader actual producer reservation',
+               'manifest': 'actual reader delivery selected staged contract',
+               'readset': 'actual reader delivery selected staged contract',
+               'missing-input': 'reader runtime must be an independently declared native input'}[damage]
+    with pytest.raises(RuntimeError, match=refusal):
         sg._require_original_reader_producer(receipt, authority, changed, authority['runtime'])
+
+
+def _selected_runtime_input(selected):
+    return {key: selected.publication['inputs']['selected-runtime'][key] for key in ('path', 'sha256')}
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('role', ['observed-runtime', 'selected-runtime'])
+@pytest.mark.parametrize('damage', ['missing', 'path', 'sha256', 'changed-bytes'])
+def test_each_reader_runtime_input_is_independently_bound(authority_case, monkeypatch, mode, role, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    assert authority['runtime']['path'] != expected['path']
+    assert Path(authority['runtime']['path']).read_bytes() == Path(expected['path']).read_bytes()
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    publication = copy.deepcopy(selected.publication)
+    if damage == 'missing':
+        del publication['inputs'][role]
+    elif damage in ('path', 'sha256'):
+        publication['inputs'][role][damage] = '/independent/foreign-runtime' if damage == 'path' else '0' * 64
+    else:
+        Path(publication['inputs'][role]['path']).write_bytes(b'{"changed":true}')
+    changed = replace(selected, publication=publication)
+    refusal = 'owned bytes' if damage == 'changed-bytes' else 'independently declared native input'
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._require_original_reader_producer(receipt, authority, changed, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', ['observed-runtime', 'selected-runtime', 'both-foreign-config'])
+def test_reader_runtime_selection_and_source_config_are_separate_joins(authority_case, monkeypatch, mode, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    authority = copy.deepcopy(authority)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    runtime = copy.deepcopy(authority_case['packet']['runtime'])
+    if damage == 'both-foreign-config':
+        runtime['config']['hidden_size'] += 1
+        authority['runtime'] = _bound(authority_case['tmp'] / 'foreign-observed.json', runtime)
+        expected = _bound(authority_case['tmp'] / 'foreign-selected.json', runtime)
+        publication = copy.deepcopy(selected.publication)
+        publication['inputs'] = {role: {**binding, 'bytes': Path(binding['path']).stat().st_size}
+            for role, binding in (('observed-runtime', authority['runtime']), ('selected-runtime', expected))}
+        selected = replace(selected, publication=publication)
+        refusal = 'selected reader runtime source config'
+    else:
+        runtime['versions']['python'] += '.independent-change'
+        binding = _bound(authority_case['tmp'] / 'changed-runtime.json', runtime)
+        if damage == 'observed-runtime':
+            authority['runtime'] = binding
+        else:
+            expected = binding
+        refusal = 'observed original source runtime'
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._require_original_reader_producer(receipt, authority, selected, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', [None, []])
+def test_reader_requires_explicit_staged_launch(authority_case, monkeypatch, mode, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    changed = replace(selected, launch={**selected.launch, 'staged_input': damage})
+    with pytest.raises(RuntimeError, match='requires explicit immutable staged launch'):
+        sg._require_original_reader_producer(receipt, authority, changed, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('delivery', ['nonfirst', 'reacquired'])
+@pytest.mark.parametrize('axis', ['read_contract_sha256', 'staged_manifest_sha256'])
+def test_every_actual_reader_delivery_joins_selected_staging(authority_case, monkeypatch, mode, delivery, axis):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    owner = authority_case['owner']
+    if delivery == 'reacquired':
+        prior = len(receipt['deliveries'])
+        path = owner.root / 'two.safetensors'
+        with owner.material_window([path]):
+            with owner.safe_open(safe_open, path, framework='pt') as reader:
+                tensor = reader.get_tensor(reader.keys()[0])
+                assert tensor.device.type == 'cpu'
+            del tensor
+        gc.collect()
+        receipt = owner.receipt()
+        assert len(receipt['deliveries']) > prior
+        target = len(receipt['deliveries']) - 1
+    else:
+        assert len(receipt['deliveries']) > 1
+        target = 1
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    changed = copy.deepcopy(receipt)
+    changed['deliveries'][target]['native_delivery'][axis] = '0' * 64
+    with pytest.raises(RuntimeError, match='actual reader delivery selected staged contract'):
+        sg._require_original_reader_producer(changed, authority, selected, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', ['node', 'missing-role', 'extra-role', 'rebound'])
+def test_scientific_artifact_consumer_checks_selected_node_roles_and_binding(tmp_path, monkeypatch, mode, damage):
+    path = tmp_path / 'control.json'
+    raw = b'{"answer":42}\n'
+    path.write_bytes(raw)
+    binding = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+    measured = nr.bind_result_artifact(path, max_bytes=128)
+    execution = ExecutionResult('running', os.environ['FLUX_JOB_ID'], Path(os.environ['OUT']))
+    selected = nr.SelectedResult({'producer_id': 'nonqualifying-artifact-control',
+        'artifacts': {'control': measured}}, {'control': raw}, {}, {}, execution)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._original_artifact_publication(selected, node_id='nonqualifying-artifact-control',
+                                              roles={'control'}) is selected
+    assert sg._published_original_artifact(selected, 'control', binding,
+        resource_check=None, max_bytes=128) == {'answer': 42}
+    publication = copy.deepcopy(selected.publication)
+    if damage == 'node':
+        publication['producer_id'] = 'other-node'
+        refusal = 'actual artifact publication selected node'
+    elif damage in ('missing-role', 'extra-role'):
+        if damage == 'missing-role':
+            publication['artifacts'] = {}
+        else:
+            publication['artifacts']['extra'] = measured
+        refusal = 'actual published artifact roles'
+    else:
+        replacement = b'{"answer":43}\n'
+        path.write_bytes(replacement)
+        publication['artifacts']['control'] = nr.bind_result_artifact(path, max_bytes=128)
+        rebound = replace(selected, publication=publication, artifact_payloads={'control': replacement})
+        new_binding = {'path': str(path), 'sha256': hashlib.sha256(replacement).hexdigest()}
+        assert sg._published_original_artifact(rebound, 'control', new_binding,
+            resource_check=None, max_bytes=128) == {'answer': 43}
+        with pytest.raises(RuntimeError, match='selected published control binding'):
+            sg._published_original_artifact(rebound, 'control', binding, resource_check=None, max_bytes=128)
+        return
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._original_artifact_publication(replace(selected, publication=publication),
+            node_id='nonqualifying-artifact-control', roles={'control'})
