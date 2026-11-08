@@ -1,4 +1,4 @@
-"""Native Flux CPU executor, baseline fv1-model profile v1.
+"""Native Flux CPU executor, baseline fv1-model profile v2.
 
 Callers own campaign scheduling, pinned numerical runtimes and scientific
 input/output gates. Finite immutable staged inputs are admitted through the
@@ -297,7 +297,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
 
     ``afterok`` contains saved native ID strings. ``host:NAME`` is reserved for
     a caller's justified data-owner/runtime dependency. Only CPU validation is
-    qualified in profile v1. Unsupported input/output safety settings refuse.
+    qualified in profile v2. Unsupported input/output safety settings refuse.
     """
     if isinstance(argv, (str, bytes)):
         raise ValueError('argv must be a sequence, not a shell string')
