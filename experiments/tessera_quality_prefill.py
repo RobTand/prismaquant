@@ -102,7 +102,7 @@ def _load_manifest(path: Path, *, mode: str) -> dict:
 def _publish(path: Path, value: object) -> None:
     """Publish canonical bytes exclusively: never overwrite a frozen plan."""
 
-    destination = path.absolute()
+    destination = path.parent.resolve(strict=False) / path.name
     encoded = canonical_json_bytes(value) + b"\n"
     if not publish_new_bytes(destination, encoded, nofollow=True):
         raise QualityPrefillContractError(
