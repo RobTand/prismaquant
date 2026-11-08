@@ -602,24 +602,19 @@ class _LeaseRef:
 def pin_group(members, live_leases, *, counters=None):
     """Pin a set of staged files under one reader lease (PQ #1210).
 
-    Under the strict tier policy each read used to acquire, open and release
-    its own reader-lease window: on row 041 that was 63% of the loader
-    threads' time (the SDK acquire's ownership lock and its scan of every
-    retiring mover, the per-entry cover lookup, and the release), paid once
-    per 16 MiB file. PrismaBuild's ``acquire`` pins a whole key set under one
-    ownership-lock hold (PQ #997), so a group's entries are pinned together
-    here, by the same ``staged_lease.enter_group_lease`` the exact activation
-    cache uses: RAM copies in one window and the rest in one SSD window.
+    Group files in one native descriptor window through the same
+    ``staged_lease.enter_group_lease`` used by the exact activation cache.
+    Cache eviction pins belong to the external fluxcache owner; shared-phase
+    retention belongs to the declared phase lifetime.
 
     ``members`` is ``[(declared path, expected sha256), ...]``. Returns
     ``{declared path: (lease window, map key, staged entry)}`` for the reads
     to open under, or ``None`` when no group applies: the policy is inactive,
     no resolver is bound, fewer than two files are staged with a bound digest,
-    or the batched lease refused. Then every read leases on its own exactly as
-    before, so a refusal keeps its single-entry kind. Nothing is served on the
-    batched proof alone: the SDK re-verifies every key under its lock at
-    acquire, each file is still opened through the SDK under the pin, and its
-    bytes are still hashed against the bound digest and the map's digest.
+    or the batched lease refused. Every individual read still opens through
+    the immutable resolver, checks descriptor identity and hashes the bytes
+    against the declared digest. A group does not supply read authority by
+    itself.
     ``live_leases`` receives every lease entered; :func:`unpin` exits them.
     """
     from .staged_tier_policy import policy_is_active

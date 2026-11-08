@@ -1715,15 +1715,13 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     Serves the shared-state pickles and ``checkpoint.json``; refusal
     reasons name which of the two diverged.
 
-    Under the active allowed-tier policy the bytes come from a
-    lifetime-pinned window (RAM with qualified covers, SSD re-acquired
-    after an availability refusal): exact length plus one probe byte
-    through the held descriptor, the SDK serving record registered at the
-    successful actual open, the descriptor closed and the exact ref
-    released before the caller deserializes. Unmapped/unfenced refuses
-    before a pool bulk byte. Inactive policy reads the declared path
-    exactly as before. No cache, no re-read: the owned buffer is hashed
-    once by the caller.
+    Under the active allowed-tier policy the bytes come from the immutable
+    staged resolver through an owned descriptor window. The reader checks
+    exact declared length, object bounds, descriptor identity and digest.
+    The descriptor closes and the window releases before deserialization.
+    Undeclared or changed inputs refuse before a pool bulk byte. Inactive
+    policy reads the declared path directly. The caller receives an owned
+    buffer, with no re-read of the source.
     """
     from .staged_tier_policy import policy_is_active
     if not policy_is_active():
