@@ -2,7 +2,7 @@
 
 As of: 2026-11-08, native prefill child documents and scientific value body.
 Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
-`f796c1990`. A bounded task envelope authenticates the final sealed manifest,
+`60c1158b0`. A bounded task envelope authenticates the final sealed manifest,
 acyclic plan context and complete declared child task population. The scientific
 envelope explicitly names its phase record directory for finite DAG routing;
 its envelope and result paths must belong to that canonical directory. The
@@ -16,7 +16,11 @@ explicit roster once, preserving partial/unknown submissions. Collection never
 resubmits during saved-ID resume. Cancellation targets authenticated
 known children. Conclusive failure stays separate from missing publication or
 query errors, and dependent values require every ancestor's selected success.
-This lifecycle wiring has no native prefill proof yet.
+The bounded CPU fixture proves three native parent phases, known bytes and
+value, saved-ID resume, late failure, cancellation, dependency exclusion,
+lost acknowledgement, partial submission and result replacement refusal.
+Its arithmetic uses 32 float32 values with an independently known sum of 528;
+it does not qualify model-quality measurements or the host Btrfs runtime.
 The scientific driver and numerical qualification remain separate slice3 work.
 
 As of: 2026-11-08, native Flux profile v2.
