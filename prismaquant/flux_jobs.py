@@ -396,11 +396,14 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
     env = _environment(submission.record_dir, environment)
+    dependencies = [_job_id(value) for value in afterok]
+    if [job_id_number(value) for value in launch['afterok']] != [job_id_number(value) for value in dependencies]:
+        raise ValueError('saved dependencies differ from application intent')
     expected = _native_arguments(argv, source,
                                  resources, submission.record_dir,
-                                 [_job_id(value) for value in afterok], env, staged_input)
+                                 launch['afterok'], env, staged_input)
     if (launch['argv'] != list(argv) or launch['source'] != source
-            or launch['resources'] != asdict(resources) or launch['afterok'] != list(afterok)
+            or launch['resources'] != asdict(resources)
             or launch['native_argv'] != expected):
         raise ValueError('saved execution differs from application intent')
     return launch

@@ -169,6 +169,17 @@ class FluxJobsTests(unittest.TestCase):
         self.assertIn('instance changed', result.query_error)
         self.assertEqual([call.args[0] for call in run.call_args_list], [['getattr', 'broker.starttime']])
 
+    def test_saved_dependencies_accept_native_aliases_without_rewriting_launch(self):
+        submission, _ = self.submit_fixture(afterok=('fE23pNdDTV',))
+        before = (self.record / 'launch.json').read_bytes()
+        for dependency in ('fE23pNdDTV', 'ƒE23pNdDTV', '1667135277367296'):
+            jobs.validate_launch(submission, argv=['/bin/echo', 'known'], source=self.source,
+                                 resources=self.resources, afterok=(dependency,))
+        self.assertEqual((self.record / 'launch.json').read_bytes(), before)
+        with self.assertRaisesRegex(ValueError, 'dependencies'):
+            jobs.validate_launch(submission, argv=['/bin/echo', 'known'], source=self.source,
+                                 resources=self.resources, afterok=('123',))
+
     def test_malformed_receipt_is_a_boundary_refusal(self):
         self.submit_fixture()
         (self.record / 'launch.json').write_text('[]')
