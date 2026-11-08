@@ -199,11 +199,18 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
             # disposes a failed attempt's directory, so the directory as it
             # is now is what a relaunch finds: kept aside and put back below.
             directory = checkpoint_directory(space, boundary)
-            (directory / "checkpoint.json.tmp").write_bytes(b"half written manifest")
-            kept = root.parent / f"{root.name}-boundary-{boundary}-at-death"
-            shutil.copytree(directory, kept)
-            at_death.append((kept, directory))
-            raise _Interrupted(f"died writing checkpoint {boundary}")
+            from prismaquant import cost_stage_checkpoint as checkpoint_io
+            def die_sync(_descriptor):
+                raise _Interrupted(f"died writing checkpoint {boundary}")
+            with monkeypatch.context() as failed_writer:
+                failed_writer.setattr(checkpoint_io.os, "fsync", die_sync)
+                try:
+                    checkpoint_io.atomic_write_bytes(directory / "checkpoint.json",
+                        b"half written manifest", **kw['attempt']._writer_kwargs())
+                finally:
+                    kept = root.parent / f"{root.name}-boundary-{boundary}-at-death"
+                    shutil.copytree(directory, kept)
+                    at_death.append((kept, directory))
         return checkpoint(storage, space, boundary=boundary, **kw)
 
     with monkeypatch.context() as patch:
