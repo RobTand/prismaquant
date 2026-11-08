@@ -94,7 +94,7 @@ def test_newly_loaded_implementation_cannot_remain_equal(runtime_layout, axis):
     added.write_bytes(b'new implementation\n')
     if axis == 'new-import':
         runtime_layout['imported']['new_implementation'] = {
-            'origin': str(added), 'locations': [], 'loader': 'source'}
+            'origin': str(added), 'locations': [], 'loader': 'source', 'cached': None}
     else:
         # A newly loaded external owner is separately observed, not inferred
         # from a distribution version or from numerical outputs.
@@ -175,7 +175,7 @@ def test_file_and_roster_races_refuse(runtime_layout, monkeypatch, axis):
                 (root / 'reviewpkg/data/table.bin').unlink()
             else:
                 runtime_layout['imported']['late_module'] = {
-                    'origin': str(target), 'locations': [], 'loader': 'source'}
+                    'origin': str(target), 'locations': [], 'loader': 'source', 'cached': None}
         return result
 
     # fdopen exposes an integer name, so identify its actual open descriptor.

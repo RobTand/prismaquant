@@ -164,7 +164,7 @@ def _runtime_tree(root, *, stdlib=False):
                     raise ValueError('native runtime tree contains symlink/nonregular member')
                 if len(files) + len(directories) + len(pending) > MAX_RUNTIME_ENTRIES:
                     raise ValueError('native runtime tree entry count exceeds bound')
-        if current.lstat() != info:
+        if file_stat_signature(current.lstat()) != file_stat_signature(info):
             raise ValueError('native runtime directory raced during census')
     return dict(sorted(files.items())), dict(sorted(directories.items()))
 
@@ -182,8 +182,14 @@ def _runtime_module_location(module):
         origin = _runtime_path(origin)
     locations = sorted(_runtime_path(p) for p in getattr(module, '__path__', ()))
     loader = getattr(spec, 'loader', None)
+    supported = (importlib.machinery.SourceFileLoader, importlib.machinery.ExtensionFileLoader)
+    if loader is not None and not (isinstance(loader, supported) or
+            loader in (importlib.machinery.BuiltinImporter, importlib.machinery.FrozenImporter)):
+        raise ValueError('native runtime unsupported imported loader')
+    cached = getattr(module, '__cached__', None)
+    cached = _runtime_path(cached) if cached and os.path.lexists(cached) else None
     return {'origin': origin, 'locations': locations,
-            'loader': f'{type(loader).__module__}.{type(loader).__qualname__}'}
+            'loader': f'{type(loader).__module__}.{type(loader).__qualname__}', 'cached': cached}
 
 
 def _runtime_imports():
@@ -339,7 +345,8 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
         for relative, signature in trees[root][0].items():
             signatures[str(Path(root) / relative)] = signature
     for filename in {executable, *libraries, *(r['origin'] for r in imported.values()
-                                               if r['origin'] not in {'built-in', 'frozen'})}:
+                      if r['origin'] not in {'built-in', 'frozen'}),
+                      *(r['cached'] for r in imported.values() if r['cached'] is not None)}:
         signatures[filename] = _runtime_stat(filename)
     if (len(signatures) > MAX_RUNTIME_ENTRIES or
             sum(s[2] for s in signatures.values()) > MAX_RUNTIME_BYTES):
@@ -429,12 +436,15 @@ def validate_runtime(value):
     _contract.require(0 < len(imported) <= MAX_RUNTIME_IMPORTS, 'finite imported owner roster required')
     for name, row in imported.items():
         _contract.string(name, where='imported name')
-        _result_fields(row, {'origin', 'locations', 'loader'}, 'imported owner')
+        _result_fields(row, {'origin', 'locations', 'loader', 'cached'}, 'imported owner')
         _contract.string(row['loader'], where='imported loader')
         _runtime_locations(row['locations'])
         if row['origin'] not in {'built-in', 'frozen'}:
             _contract.require(row['origin'] in files, 'imported owner missing content')
             used.add(row['origin'])
+        if row['cached'] is not None:
+            _contract.require(row['cached'] in files, 'loaded bytecode cache missing content')
+            used.add(row['cached'])
     _runtime_locations(value['libraries'])
     _contract.require(bool(value['libraries']), 'measured support libraries required')
     for filename in value['libraries']:

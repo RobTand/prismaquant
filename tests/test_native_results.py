@@ -1,7 +1,9 @@
 """Bounded publication bytes and measured runtime policy, independent of CUDA."""
 import copy
 import hashlib
+import json
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -10,7 +12,10 @@ from prismaquant import native_results as nr
 
 
 def test_measured_interpreter_is_the_actual_executable():
-    runtime = nr.measure_runtime(dependencies=('pytest',))
+    measured = subprocess.run([sys.executable, '-s', '-B', '-c',
+        'import runpy; runpy.run_path("tests/native_runtime_observer.py", run_name="__main__")'],
+        check=True, capture_output=True, text=True)
+    runtime = json.loads(measured.stdout)
     assert nr.validate_runtime(runtime) == runtime
     executable = Path(sys.executable).resolve(strict=True)
     raw = executable.read_bytes()
