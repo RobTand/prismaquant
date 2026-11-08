@@ -1,10 +1,12 @@
 """Finite prefill documents; native execution remains with the shared Flux owner."""
 from __future__ import annotations
 
+from dataclasses import asdict
 import os
 from pathlib import Path
 import re
 from fractions import Fraction
+import subprocess
 
 from . import flux_jobs, native_results
 from . import quality_prefill_contract as scientific
@@ -21,6 +23,7 @@ ROSTER_SCHEMA = 'prismaquant.quality_prefill_roster.v1'
 ENVELOPE_SCHEMA = 'prismaquant.quality_prefill_envelope.v1'
 RESULTS_SCHEMA = 'prismaquant.quality_prefill_results.v1'
 SUBMISSION_SCHEMA = 'prismaquant.quality_prefill_submission.v1'
+COLLECTION_SCHEMA = 'prismaquant.quality_prefill_collection.v1'
 MAX_ROSTER_BYTES = 16 << 20
 MAX_ENVELOPE_BYTES = 1 << 20
 MAX_RESULT_BYTES = 1 << 20
@@ -335,7 +338,7 @@ def _expected_child(records: dict, index: int) -> dict:
         environment=None, staged_input=child['staged_input'])
 
 
-def _authenticate_graph(manifest_binding: dict, phase: str, root: Path) -> dict:
+def _authenticate_graph(manifest_binding: dict, phase: str, root: Path, *, prepared=None) -> dict:
     cached, active = {}, set()
     def visit(selected_phase, selected_root):
         selected_root = Path(selected_root)
@@ -345,7 +348,8 @@ def _authenticate_graph(manifest_binding: dict, phase: str, root: Path) -> dict:
                            'phase has conflicting record roots')
             return cached[selected_phase]
         active.add(selected_phase)
-        records = _phase_records(manifest_binding, selected_phase, selected_root)
+        records = (prepared if selected_phase == phase and prepared is not None else
+                   _phase_records(manifest_binding, selected_phase, selected_root))
         dependencies = records['manifest']['execution']['phases'][selected_phase]['dependencies']
         expected_cover, observed_cover, parents = [], [], []
         for dependency in dependencies:
@@ -377,6 +381,216 @@ def _authenticate_graph(manifest_binding: dict, phase: str, root: Path) -> dict:
         active.remove(selected_phase)
         return records
     return visit(phase, root)
+
+
+def submit_phase(manifest_binding: dict, *, phase: str, checkout: Path,
+                 record_dir: Path, afterok: tuple[flux_jobs.FluxSubmission, ...] = ()) -> dict:
+    """Submit one explicit finite roster once; partial/unknown launches never retry."""
+    manifest, roster_binding, roster = _read_phase(manifest_binding, phase)
+    _validate_admission(manifest, phase, roster)
+    source = _prefill_source(manifest)
+    _check.require(Path(checkout) == Path(source['checkout']), 'prefill checkout differs from frozen source')
+    root = Path(_path(os.fspath(record_dir)))
+    _check.require(root.is_relative_to('/mnt/shared') and not root.is_relative_to(checkout),
+                   'prefill records require a separate shared phase directory')
+    _check.require(isinstance(afterok, tuple) and len(afterok) <= 4096 and
+                   all(isinstance(parent, flux_jobs.FluxSubmission) for parent in afterok),
+                   'afterok requires a finite explicit FluxSubmission tuple')
+    parents, ids, coordinates = [], set(), set()
+    for saved in afterok:
+        envelope = _parent_from_native(saved, manifest_binding)
+        number = flux_jobs.job_id_number(saved.job_id)
+        key = (envelope['phase_id'], envelope['child_id'])
+        _check.require(number not in ids and key not in coordinates, 'duplicate parent submission')
+        ids.add(number); coordinates.add(key)
+        parents.append(dict(phase_id=key[0], child_id=key[1], job_id=saved.job_id,
+                            record_dir=str(saved.record_dir), launch_sha256=saved.launch_sha256))
+    envelopes, children = _phase_layout(root, manifest_binding, manifest, roster_binding, roster)
+    submission = dict(schema=SUBMISSION_SCHEMA, phase_id=phase,
+        plan_identity_sha256=manifest['identity_sha256'], roster_sha256=roster_binding['sha256'],
+        afterok=parents, children=children)
+    _check.require(len(scientific.canonical_json_bytes(submission)) + 1 <= 1 << 20,
+                   'phase submission exceeds1MiB')
+    prepared = dict(root=root, manifest_binding=manifest_binding, manifest=manifest,
+        roster_binding=roster_binding, roster=roster, envelopes=envelopes, submission=submission)
+    _authenticate_graph(manifest_binding, phase, root, prepared=prepared)
+    flux_jobs._profile_identity()
+    for child in roster['children']:
+        measured = flux_jobs.validate_job(checkout=checkout, resources=FluxResources(**child['resources']),
+                                          staged_input=child['staged_input'])
+        _check.require(measured == source, 'source changed during phase preflight')
+    parent_fd = open_directory(str(root.parent))
+    try:
+        os.mkdir(root.name, mode=0o700, dir_fd=parent_fd)
+        directory = open_directory(str(root))
+    finally:
+        os.close(parent_fd)
+    failure = None
+    try:
+        witness = os.fstat(directory)
+        identity = (witness.st_dev, witness.st_ino)
+        for envelope, child in zip(envelopes, children):
+            _check.require(_publish_document(envelope, Path(child['envelope']['path']),
+                MAX_ENVELOPE_BYTES, directory_identity=identity) == child['envelope'],
+                'published envelope differs from frozen bytes')
+        _publish_document(submission, root / 'submission.json', 1 << 20, directory_identity=identity)
+        for index, child in enumerate(children):
+            held = open_directory(str(root), identity=identity)
+            os.close(held)
+            try:
+                intent = _expected_child(prepared, index)
+                flux_jobs.submit_job(intent['argv'], checkout=checkout, resources=intent['resources'],
+                    record_dir=Path(child['record_dir']), afterok=intent['afterok'],
+                    staged_input=intent['staged_input'])
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                failure = f"submit {child['child_id']}: {type(exc).__name__}: {str(exc)[:512]}"
+                break
+    finally:
+        os.close(directory)
+    result = collect_phase(manifest_binding, phase=phase, record_dir=root, wait=False)
+    if failure is not None:
+        result['errors'].append(failure)
+        if result['state'] != 'failed':
+            result['state'] = 'unknown'
+    return result
+
+
+def _selected_child(records: dict, index: int, saved: flux_jobs.FluxSubmission) -> tuple:
+    child = records['submission']['children'][index]
+    envelope = records['envelopes'][index]
+    stdout, _ = read_document(saved.record_dir / 'stdout', 64 << 20)
+    prefix = native_results.ANNOUNCEMENT_PREFIX
+    announcements = [line[len(prefix):] for line in stdout.splitlines() if line.startswith(prefix)]
+    _check.require(len(announcements) == 1, 'missing or ambiguous native publication announcement')
+    announcement = scientific.decode_strict_json(announcements[0].decode('utf-8'), where='announcement')
+    _check.exact_mapping(announcement, keys=frozenset({'schema', 'path', 'sha256', 'bytes'}),
+                         where='publication announcement')
+    _check.require(announcement['schema'] == native_results.ANNOUNCEMENT_SCHEMA and
+                   announcement['path'] == envelope['result_path'] + '.publication.json',
+                   'publication announcement differs from declared path')
+    publication = {key: announcement[key] for key in ('path', 'sha256', 'bytes')}
+    expected = _expected_child(records, index)
+    expected['resources'] = asdict(expected['resources'])
+    selection = dict(schema=native_results.SELECTION_SCHEMA, job_id=saved.job_id,
+        record_dir=str(saved.record_dir), launch_sha256=saved.launch_sha256,
+        publication=publication, expected_launch=expected, producer_id=envelope['child_id'],
+        inputs={key: envelope[key] for key in ('manifest', 'roster')} | {'envelope': child['envelope']},
+        runtime=records['roster']['runtime'], max_publication_bytes=16 << 20,
+        max_evidence_bytes=64 << 20, max_artifact_bytes=_NATIVE_ARTIFACT_BYTES)
+    selected = native_results.read_selected_result(selection, artifact_limits={'prefill_results': MAX_RESULT_BYTES})
+    document = scientific.decode_strict_json(selected.artifact_payloads['prefill_results'].decode('utf-8'),
+                                             where='selected task results')
+    _check.require(isinstance(document, dict) and
+                   document == _result_document(envelope, document.get('results')),
+                   'selected result metadata differs from frozen child')
+    _authenticate_measurements(document)
+    return selection, document['results']
+
+
+def _execution_value(result):
+    return dict(status=result.status, job_id=result.job_id, record_dir=str(result.record_dir),
+                payload_exit=result.payload_exit, query_error=result.query_error)
+
+
+def collect_phase(manifest_binding: dict, *, phase: str, record_dir: Path, wait: bool = True) -> dict:
+    """Collect every known child, preserving native failures apart from missing evidence."""
+    _check.require(type(wait) is bool, 'wait must be boolean')
+    records = _phase_records(manifest_binding, phase, record_dir)
+    errors, outcomes, children, task_results = [], [], [], []
+    parents_ok = True
+    try:
+        records = _authenticate_graph(manifest_binding, phase, record_dir)
+        pending = list(records['parents'])
+        seen, expanded = set(), set()
+        while pending:
+            parent_records, index, saved = pending.pop()
+            parent_phase = parent_records['roster']['phase_id']
+            if parent_phase not in expanded:
+                pending.extend(parent_records['parents'])
+                expanded.add(parent_phase)
+            number = flux_jobs.job_id_number(saved.job_id)
+            if number in seen:
+                continue
+            seen.add(number)
+            try:
+                execution = flux_jobs.collect_job(saved, wait=wait)
+                outcomes.append(execution)
+                _check.require(execution.status == 'succeeded' and not execution.query_error,
+                               'parent execution is not successful and available')
+                _selected_child(parent_records, index, saved)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                if isinstance(exc, native_results.ProducerFailed):
+                    outcomes.append(exc.execution)
+                parents_ok = False
+                errors.append(f'parent {saved.job_id}: {type(exc).__name__}: {str(exc)[:512]}')
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        parents_ok = False
+        errors.append(f'parent authority: {type(exc).__name__}: {str(exc)[:512]}')
+    for index, child in enumerate(records['submission']['children']):
+        row = dict(child_id=child['child_id'], execution=None, selection=None)
+        children.append(row)
+        try:
+            saved = flux_jobs.load_submission(Path(child['record_dir']))
+            execution = flux_jobs.collect_job(saved, wait=wait)
+            outcomes.append(execution)
+            row['execution'] = _execution_value(execution)
+            flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
+                                          **_expected_child(records, index))
+            if execution.status == 'succeeded' and not execution.query_error and parents_ok:
+                selection, results = _selected_child(records, index, saved)
+                row['selection'] = selection
+                task_results.extend(dict(task_id=result['task_id'], output_id=result['output_id'],
+                    child_id=child['child_id'], value=result['value'], value_sha256=result['value_sha256'],
+                    selection=selection) for result in results)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            if isinstance(exc, native_results.ProducerFailed):
+                outcomes.append(exc.execution)
+                row['execution'] = _execution_value(exc.execution)
+            errors.append(f"child {child['child_id']}: {type(exc).__name__}: {str(exc)[:512]}")
+    if any(result.status in {'failed', 'canceled', 'dependency-failed'} for result in outcomes):
+        state = 'failed'
+    elif not errors and parents_ok and len(task_results) == len(records['roster']['tasks']):
+        state = 'complete'
+    elif any(result.status == 'running' for result in outcomes):
+        state = 'running'
+    elif any(row['execution'] is None for row in children) or any(
+            result.status == 'unknown' or result.query_error for result in outcomes):
+        state = 'unknown'
+    else:
+        state = 'incomplete'
+    return dict(schema=COLLECTION_SCHEMA, phase_id=phase,
+        plan_identity_sha256=records['manifest']['identity_sha256'],
+        roster_sha256=records['roster_binding']['sha256'], state=state,
+        children=children, task_results=task_results, errors=errors)
+
+
+def cancel_phase(manifest_binding: dict, *, phase: str, record_dir: Path) -> dict:
+    """Cancel only authenticated acknowledged children; never parents or discovered work."""
+    records = _phase_records(manifest_binding, phase, record_dir)
+    errors = []
+    try:
+        records = _authenticate_graph(manifest_binding, phase, record_dir)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        result = collect_phase(manifest_binding, phase=phase, record_dir=record_dir, wait=False)
+        result['errors'].append(f'cancel authority: {type(exc).__name__}: {str(exc)[:512]}')
+        if result['state'] == 'complete':
+            result['state'] = 'unknown'
+        return result
+    for index, child in enumerate(records['submission']['children']):
+        try:
+            saved = flux_jobs.load_submission(Path(child['record_dir']))
+            flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
+                                          **_expected_child(records, index))
+            outcome = flux_jobs.cancel_job(saved)
+            if outcome.query_error:
+                errors.append(f"cancel {child['child_id']}: {outcome.query_error[:512]}")
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            errors.append(f"cancel {child['child_id']}: {type(exc).__name__}: {str(exc)[:512]}")
+    result = collect_phase(manifest_binding, phase=phase, record_dir=record_dir, wait=not errors)
+    result['errors'].extend(errors)
+    if errors and result['state'] == 'complete':
+        result['state'] = 'unknown'
+    return result
 
 
 def publish_task_results(envelope_binding: dict, *, results: list[dict],
@@ -422,12 +636,12 @@ def _read_bound_document(binding: dict, limit: int) -> object:
     return scientific.decode_strict_json(raw.decode('utf-8'), where='prefill document')
 
 
-def _publish_document(value: object, path: Path, limit: int) -> dict:
+def _publish_document(value: object, path: Path, limit: int, *, directory_identity=None) -> dict:
     """Publish checked document bytes once through the existing writer owner."""
     filename = Path(_path(os.fspath(path)))
     raw = scientific.canonical_json_bytes(value) + b'\n'
     _check.require(len(raw) <= limit, 'document exceeds byte limit')
-    directory = open_directory(str(filename.parent))
+    directory = open_directory(str(filename.parent), identity=directory_identity)
     written = {}
     try:
         observed = os.fstat(directory)

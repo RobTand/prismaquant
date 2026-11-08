@@ -545,6 +545,24 @@ def test_phase_records_require_actual_original_envelope_and_strict_document(tmp_
         prefill._phase_records(binding, phase, root)
 
 
+def test_phase_writer_refuses_replacement_directory_before_writing(tmp_path):
+    root = tmp_path / 'root'
+    root.mkdir()
+    witness = root.stat()
+    identity = (witness.st_dev, witness.st_ino)
+    held = tmp_path / 'held-root'
+    root.rename(held)
+    root.mkdir()
+    control = root / 'foreign-control'
+    control.write_bytes(b'leave unchanged')
+    with pytest.raises(ValueError, match='directory identity changed'):
+        prefill._publish_document({'value': 42}, root / 'new.json', 1 << 20,
+                                   directory_identity=identity)
+    assert list(held.iterdir()) == []
+    assert sorted(path.name for path in root.iterdir()) == ['foreign-control']
+    assert control.read_bytes() == b'leave unchanged'
+
+
 def test_ordered_cover_is_detached_and_preserves_scientific_meaning():
     value = roster()
     checked = prefill.validate_phase_roster(value)
