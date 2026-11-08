@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, bounded installed runtime metadata after independent review.
+Source: `prismaquant/native_results.py`, based on `bb3d8e345`.
+Only filesystem PathDistribution dist-info owners are supported. METADATA and
+RECORD pass the shared nonblocking regular-file/component reader before parsing,
+with finite metadata/file/aggregate byte ceilings and a RECORD entry bound.
+Name/version come from those fenced bytes, not eager distribution properties.
+The final observation repeats the same bounded path and checks descriptor/path
+identity. FIFO, symlink, oversized metadata and replacement refuse. Runtime v5,
+content/source/scientific gates and the production Btrfs refusal are preserved.
+
 As of: 2026-11-08, scientific native-consumer coverage under parent review.
 Source: `prismaquant/source_generation.py` and its reader/admission tests,
 based on `983b08719`.

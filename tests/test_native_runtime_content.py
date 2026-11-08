@@ -18,6 +18,68 @@ def observe():
     return nr.measure_runtime(dependencies=('reviewpkg',))
 
 
+def _forbid_eager_metadata(*args, **kwargs):
+    raise AssertionError('unbounded distribution metadata helper entered')
+
+
+def test_runtime_metadata_uses_bounded_actual_reader(runtime_layout, monkeypatch):
+    positive = observe()
+    assert positive['dependencies']['reviewpkg']['version'] == '1'
+    expected = runtime_layout['contents']['reviewpkg-1.dist-info/METADATA']
+    assert positive['files'][str(runtime_layout['root'] / 'reviewpkg-1.dist-info/METADATA')]['sha256'] == hashlib.sha256(expected).hexdigest()
+    calls = []
+    reader = nr.read_document
+    def bounded(path, limit):
+        calls.append((Path(path).name, limit))
+        assert 0 < limit <= 12 << 20
+        return reader(path, limit)
+    monkeypatch.setattr(nr, 'read_document', bounded)
+    monkeypatch.setattr(importlib.metadata.PathDistribution, 'read_text', _forbid_eager_metadata)
+    assert observe() == positive
+    assert {name for name, limit in calls} == {'METADATA', 'RECORD'}
+
+
+@pytest.mark.parametrize('name', ['METADATA', 'RECORD'])
+@pytest.mark.parametrize('kind', ['fifo', 'symlink', 'oversize', 'replacement'])
+def test_runtime_metadata_refuses_before_unbounded_helper(runtime_layout, monkeypatch, name, kind):
+    assert observe()['dependencies']['reviewpkg']['version'] == '1'
+    target = runtime_layout['root'] / ('reviewpkg-1.dist-info/' + name)
+    monkeypatch.setattr(importlib.metadata.PathDistribution, 'read_text', _forbid_eager_metadata)
+    if kind == 'fifo':
+        target.unlink(); os.mkfifo(target)
+    elif kind == 'symlink':
+        alternate = target.with_name(name + '.held')
+        target.rename(alternate); target.symlink_to(alternate)
+    elif kind == 'oversize':
+        monkeypatch.setattr(nr, 'MAX_RUNTIME_METADATA_BYTES', 16)
+        assert target.stat().st_size > 16
+    else:
+        reader = nr.read_document
+        fired = []
+        def replaced(path, limit):
+            value = reader(path, limit)
+            if Path(path) == target and not fired:
+                alternate = target.with_name(name + '.replacement')
+                alternate.write_bytes(target.read_bytes())
+                assert alternate.stat().st_ino != target.stat().st_ino
+                alternate.replace(target)
+                fired.append(True)
+            return value
+        monkeypatch.setattr(nr, 'read_document', replaced)
+    with pytest.raises((OSError, ValueError)):
+        nr._runtime_distribution('reviewpkg')
+
+
+def test_runtime_metadata_record_rows_are_bounded(runtime_layout, monkeypatch):
+    assert observe()['dependencies']['reviewpkg']['version'] == '1'
+    target = runtime_layout['root'] / 'reviewpkg-1.dist-info/RECORD'
+    target.write_bytes(b'reviewpkg/__init__.py,,\n' * 9)
+    monkeypatch.setattr(nr, 'MAX_RUNTIME_ENTRIES', 8)
+    monkeypatch.setattr(importlib.metadata.PathDistribution, 'read_text', _forbid_eager_metadata)
+    with pytest.raises(ValueError, match='count|bound'):
+        nr._runtime_distribution('reviewpkg')
+
+
 def test_known_complete_contents_and_imported_owner(runtime_layout):
     layout = runtime_layout
     runtime = observe()

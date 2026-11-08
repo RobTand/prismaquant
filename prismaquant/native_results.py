@@ -6,8 +6,11 @@ Scientific admission remains with each consumer.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import csv
+from email.parser import BytesParser
 import importlib.metadata
 import importlib.machinery
+import io
 import os
 from pathlib import Path
 import platform
@@ -99,6 +102,7 @@ MAX_RUNTIME_IMPORTS = 16384
 MAX_RUNTIME_FILE_BYTES = 4 << 30
 MAX_RUNTIME_BYTES = 32 << 30
 MAX_RUNTIME_DOCUMENT_BYTES = 12 << 20
+MAX_RUNTIME_METADATA_BYTES = 12 << 20
 MAX_RUNTIME_DEPTH = 64
 
 
@@ -270,12 +274,35 @@ def _runtime_libraries():
 
 def _runtime_distribution(name):
     dist = importlib.metadata.distribution(name)
+    if type(dist) is not importlib.metadata.PathDistribution or not isinstance(dist._path, Path):
+        raise ValueError('native runtime unsupported installed distribution owner')
     base = Path(_runtime_path(dist.locate_file('')))
+    info = Path(os.path.abspath(dist._path))
+    if info.parent != base or not info.name.endswith('.dist-info'):
+        raise ValueError('native runtime unsupported installed metadata owner')
+    documents, signatures, consumed = {}, {}, 0
+    for filename in ('METADATA', 'RECORD'):
+        path = info / filename
+        limit = min(MAX_RUNTIME_METADATA_BYTES, MAX_RUNTIME_FILE_BYTES, MAX_RUNTIME_BYTES - consumed)
+        raw, signature = read_document(path, max(0, limit))
+        consumed += len(raw)
+        documents[filename], signatures[str(path)] = raw, signature
+    metadata = BytesParser().parsebytes(documents['METADATA'], headersonly=True)
+    versions, names = metadata.get_all('Version', []), metadata.get_all('Name', [])
+    normalize = lambda value: re.sub(r'[-_.]+', '-', value).lower()
+    if (len(versions) != 1 or not versions[0] or len(names) != 1
+            or normalize(names[0]) != normalize(name)):
+        raise ValueError('native runtime invalid distribution name/version metadata')
     entries = []
-    for entry in dist.files or ():
-        if len(entries) >= MAX_RUNTIME_ENTRIES:
-            raise ValueError('native runtime distribution count exceeds bound')
-        entries.append(Path(entry))
+    try:
+        for row in csv.reader(io.StringIO(documents['RECORD'].decode('utf-8')), strict=True):
+            if len(entries) >= MAX_RUNTIME_ENTRIES:
+                raise ValueError('native runtime distribution count exceeds bound')
+            if len(row) != 3 or not row[0]:
+                raise ValueError('native runtime invalid distribution RECORD row')
+            entries.append(Path(row[0]))
+    except csv.Error as exc:
+        raise ValueError('native runtime invalid bounded distribution RECORD') from exc
     roots, modules = set(), {}
     for entry in entries:
         if entry.suffix in {'.pth', '.egg-link'}:
@@ -306,7 +333,7 @@ def _runtime_distribution(name):
     record = [str(base / e) for e in entries if str(e).endswith('.dist-info/RECORD')]
     if len(roots) > MAX_RUNTIME_ROOTS or len(modules) > MAX_RUNTIME_ROOTS:
         raise ValueError('native runtime distribution root count exceeds bound')
-    if len(metadata) != 1 or len(record) != 1 or not modules:
+    if metadata != [str(info / 'METADATA')] or record != [str(info / 'RECORD')] or not modules:
         raise ValueError(f'native runtime requires installed metadata and importable owner: {name}')
     owners = {}
     for module, entry in sorted(modules.items()):
@@ -320,7 +347,9 @@ def _runtime_distribution(name):
         if locations != expected:
             raise ValueError('native runtime import search owner differs')
         owners[module] = {'origin': entry, 'locations': locations}
-    return {'version': dist.version, 'metadata': metadata[0], 'record': record[0],
+    if any(_runtime_stat(path) != signature for path, signature in signatures.items()):
+        raise ValueError('native runtime distribution metadata changed during observation')
+    return {'version': versions[0], 'metadata': metadata[0], 'record': record[0],
             'roots': sorted(roots), 'imports': owners}
 
 
