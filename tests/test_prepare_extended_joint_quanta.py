@@ -141,7 +141,8 @@ def test_stage_b_spec_envelope_must_equal_the_resource_policy(tmp_path):
         check_stage_b_spec(path, spec, {'limits': {**_POLICY['limits'], 'gpu_bytes': 64 * 1024 ** 3}})
 
 
-def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, campaign, probe, monkeypatch):
+@pytest.mark.parametrize('produced_output', [False, True])
+def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, campaign, probe, monkeypatch, produced_output):
     """The real ``prepare()`` flow on a band that seals ``campaign_scope: null``
     and names, as what its run read, a parent that annotates the campaign's
     scope under an older plan (R13, PQ #1126). The parent is admitted by the
@@ -174,8 +175,17 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
     pair = _write(tmp_path, 'pair.json', inputs)
     root = tmp_path / 'meta'
     seen = {}
+    from prismaquant import stage_b_prep_io as prep_io
+    monkeypatch.setattr(prep_io, '_BOUND', {})
+    if produced_output:
+        from test_stage_b_prep_produced_1070 import admitted_owner
+        admission = tmp_path / 'admission'
+        admission.mkdir()
+        producer = admitted_owner(admission, prep_io.build_preparation_template(
+            metadata_root=root, payload_max_bytes=1 << 24), monkeypatch)
 
-    def generator(argv):
+    def generator(argv, *, finalize_publication):
+        assert finalize_publication is False
         def flag(name):
             return argv[argv.index(name) + 1]
         from tools.regenerate_joint_quanta import _load_json
@@ -191,6 +201,11 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
             plan_path=flag('--plan'), plan_sha256=flag('--plan-sha256'),
             prepared_path=flag('--prepared'), prepared_sha256=flag('--prepared-sha256'),
             adjoint_receipts=[band], catalog_extension=extension, stride=8)
+        if produced_output:
+            publication = prep_io.bind_preparation_publication(root, required=True)
+            prep_io.publish_files(publication, 'records', [
+                (root / 'records.json', json.dumps(seen['produced']['records'],
+                    sort_keys=True, allow_nan=False).encode(), 'quantum records')])
         return 0
 
     real_load = pe._load_json
@@ -217,7 +232,7 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
         spec=Path(stub['path']), spec_sha256=stub['sha256'],
         adjoint_receipt=None, adjoint_receipt_sha256=None,
         adjoint_band=[band_path], adjoint_band_sha256=[band_sha],
-        metadata_root=root, data_manifest_sha256=None, allowed_tiers=None, produced_output=False,
+        metadata_root=root, data_manifest_sha256=None, allowed_tiers=None, produced_output=produced_output,
         campaign_identity=Path(identity['path']), campaign_identity_sha256=identity['sha256'])
     pe.prepare(args)
     published = json.loads(gzip.decompress((root / 'parent.json.gz').read_bytes()))
@@ -235,6 +250,18 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
     assert all(record['catalog_extension'] == seen['extension'] for record in records)
     launch = json.loads((root / 'launch.bands-003.json').read_bytes())
     assert launch['catalog_extension'] == seen['extension']
+    if produced_output:
+        from prismaquant.stage_a_produced_output import read_bound_document
+        publication = prep_io._BOUND[producer['launch_sha256']]
+        assert [batch['kind'] for batch in publication.batches] == ['extension', 'inputs', 'records', 'launch']
+        index_path = Path(producer['record_dir']) / 'produced' / 'index.json'
+        index = json.loads(index_path.read_bytes())
+        entries = [row for binding in index['groups'] for row in read_bound_document(binding)['entries']]
+        expected = {str(path): path.read_bytes() for path in root.iterdir() if path.is_file()}
+        assert {row['path'] for row in entries} == set(expected)
+        import hashlib
+        assert all(row['bytes'] == len(expected[row['path']]) and
+            row['sha256'] == hashlib.sha256(expected[row['path']]).hexdigest() for row in entries)
     # A second prepare on the same root binds the extension it wrote and
     # republishes the same bytes.
     before = {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
