@@ -98,8 +98,10 @@ def test_prewrite_and_inline_descriptor_use_existing_lifecycle(render_owner):
             temp_ceiling_bytes=17, paths=[str(path), str(path) + '.tmp'])['ok']
     assert not path.exists()
     payload = b'render-fixture-v1'
-    path.write_bytes(payload)
-    ref = SimpleNamespace(path=str(path), file_bytes=len(payload), sha256=hashlib.sha256(payload).hexdigest())
+    from prismaquant.streamed_boundary_artifacts import _write_new_file
+    identity = _write_new_file(path, payload)
+    ref = SimpleNamespace(path=str(path), file_bytes=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
+                          writer_file_identity=identity)
     descriptor = pub.descriptor_for(ref, producer_generation=batch)
     pub.publish(batch_id=batch, descriptors=[descriptor])
     assert path.read_bytes() == b'render-fixture-v1'

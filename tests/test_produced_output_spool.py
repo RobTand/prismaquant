@@ -11,7 +11,7 @@ from prismaquant.perturbed_x_cache import write_exact_activation_cache_entry
 from prismaquant.produced_output_spool import (ProducedOutputSpool,
     ProducedOutputSpoolRefused, ProducedExportRefused, ProducedWindowRefused)
 from prismaquant.stage_a_produced_output import read_bound_document
-from prismaquant.streamed_boundary_artifacts import ProducedFileReference
+from prismaquant.streamed_boundary_artifacts import ProducedFileReference, _write_new_file
 from produced_native_fixtures import publication, owner
 from test_produced_native_lifecycle import raw_group
 
@@ -52,7 +52,10 @@ def test_local_atomic_publication_never_overwrites_or_deletes_foreign_file(tmp_p
     real_link = os.link
     foreign = b"unrelated file appeared before publication"
     def raced_link(source, destination, **kwargs):
-        Path(destination).write_bytes(foreign)
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                             0o600, dir_fd=kwargs.get('dst_dir_fd'))
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(foreign)
         return real_link(source, destination, **kwargs)
     monkeypatch.setattr(os, "link", raced_link)
     with pytest.raises(FileExistsError):
@@ -134,9 +137,10 @@ def test_checkpoint_and_payload_classes_survive_actual_copy(tmp_path):
         checkpoint_ceiling_bytes=10, paths=list(map(str, paths)))
     local = spool.reserve('mixed', 17)
     for target, content, kind in zip(paths, [b'payload', b'checkpoint'], ['payload', 'checkpoint']):
-        path = local / target.name; path.write_bytes(content)
+        path = local / target.name
+        identity = _write_new_file(path, content)
         spool.record('mixed', ProducedFileReference(str(path), path.name,
-            len(content), hashlib.sha256(content).hexdigest()), root, artifact_class=kind)
+            len(content), hashlib.sha256(content).hexdigest(), identity), root, artifact_class=kind)
     spool.submit('mixed'); spool.await_group('mixed')
     group = read_bound_document(pub._groups['mixed'])
     assert [(row['artifact_class'], Path(row['path']).read_bytes()) for row in group['entries']] == [

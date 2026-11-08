@@ -9070,6 +9070,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
+        ":prismaquant/file_identity",
     ],
 )
 

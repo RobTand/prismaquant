@@ -46,33 +46,40 @@ class ProducedFileReference:
     name: str
     file_bytes: int
     sha256: str
+    writer_file_identity: tuple | None = dataclasses.field(default=None, compare=False, repr=False)
 
 
-def _write_new_file(path: Path, payload: bytes) -> None:
+def _write_new_file(path: Path, payload: bytes, *, publish_to=None) -> tuple:
     """Write ``payload`` to a file that must not exist yet, then fsync it."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    from .file_identity import file_stat_signature
+    from .staged_manifest import open_directory
+    directory_fd = open_directory(str(path.parent))
     try:
-        view = memoryview(payload)
-        while view:
-            view = view[os.write(fd, view):]
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def _link_new_file(path: Path, payload: bytes) -> None:
-    """Publish a new file through its planned ``.tmp`` name; never replace one."""
-    temporary = Path(str(path) + ".tmp")
-    _write_new_file(temporary, payload)
-    try:
-        os.link(temporary, path)
-    finally:
-        temporary.unlink()
-    directory_fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
+        fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o644, dir_fd=directory_fd)
+        try:
+            view = memoryview(payload)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+            if publish_to is not None:
+                try:
+                    os.link(path.name, publish_to.name, src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd, follow_symlinks=False)
+                finally:
+                    os.unlink(path.name, dir_fd=directory_fd)
+            os.fsync(directory_fd)
+            return file_stat_signature(os.fstat(fd))
+        finally:
+            os.close(fd)
     finally:
         os.close(directory_fd)
+
+
+def _link_new_file(path: Path, payload: bytes) -> tuple:
+    """Publish a new file through its planned ``.tmp`` name; never replace one."""
+    temporary = Path(str(path) + ".tmp")
+    return _write_new_file(temporary, payload, publish_to=path)
 
 
 BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
@@ -910,8 +917,9 @@ class StreamedBoundaryArtifacts:
                     boundary_index=boundary_index, probe_index=probe_index,
                     group_size=self._produced_plan["group_size"]))
         write_directory = self.directory / "entries"
+        write_identity = self._entry_directory_identity if self._produced is not None else None
         if self._local_output_spool is not None:
-            write_directory = self._local_output_spool.directory(produced_group["batch_id"])
+            write_directory, write_identity = self._local_output_spool.writer_directory(produced_group["batch_id"])
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
@@ -920,7 +928,7 @@ class StreamedBoundaryArtifacts:
                 reference = write_exact_activation_cache_entry(write_directory, name, tensor,
                     identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit,
                     preallocate=self._local_output_spool is not None,
-                    durable=self._local_output_spool is None)
+                    durable=self._local_output_spool is None, directory_identity=write_identity)
                 if self._local_output_spool is not None:
                     # ``read_back`` keeps the group's local copy after its
                     # export lands, for this box's own reads (PQ #1110).
@@ -1023,12 +1031,15 @@ class StreamedBoundaryArtifacts:
         if group.get("origin_ref") is not None:
             return group["origin_ref"]
         batch_id = group["batch_id"]
-        if self._local_output_spool is not None:
-            self._local_output_spool.await_group(batch_id, where="commit")
-        descriptors = [self._produced.descriptor_for(ref, producer_generation=batch_id)
-                       for ref in group["references"]]
         lifetime = self._produced_plan["origin_lifetime"] or "retain"
-        out = self._produced.commit_origin(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
+        if self._local_output_spool is not None:
+            out = self._local_output_spool.commit_origin(batch_id, lifetime=lifetime)
+            from .stage_a_produced_output import read_bound_document
+            descriptors = read_bound_document(out['ref'])['entries']
+        else:
+            descriptors = [self._produced.descriptor_for(ref, producer_generation=batch_id)
+                           for ref in group["references"]]
+            out = self._produced.commit_origin(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
         group["origin_ref"] = dict(out["ref"])
         group["published"] = out["ref"]
         group["manifest_digest"] = self._produced.manifest_digest_for(descriptors)
@@ -1120,15 +1131,17 @@ class StreamedBoundaryArtifacts:
         spool = self._local_output_spool
         try:
             if spool is None:
-                for (name, payload) in files:
-                    _link_new_file(self.directory / name, payload)
+                for index, (name, payload) in enumerate(files):
+                    identity = _link_new_file(self.directory / name, payload)
+                    references[index] = dataclasses.replace(
+                        references[index], writer_file_identity=identity)
             else:
                 local = spool.reserve(batch_id, total)
                 for (name, payload), reference in zip(files, references):
                     path = Path(local) / name
-                    _write_new_file(path, payload)
+                    identity = _write_new_file(path, payload)
                     spool.record(batch_id, dataclasses.replace(
-                        reference, path=str(path)), self.directory)
+                        reference, path=str(path), writer_file_identity=identity), self.directory)
                 spool.submit(batch_id, lifetime=self._produced_plan["origin_lifetime"])
                 # The handoff record's barrier: on the export's own state,
                 # never a clock (PQ #1110).
@@ -1716,7 +1729,8 @@ class StreamedBoundaryArtifacts:
                     f"lifetime retain ({', '.join(consumed)})")
         return waited
 
-    def commit_checkpoint_artifact(self, reservation_id, record, *, references=None):
+    def commit_checkpoint_artifact(self, reservation_id, record, *, references=None,
+                                   writer_identities=None):
         """Commit a writer receipt's ACTUAL bytes/digests against its reservation.
 
         Verifies every receipt-listed file exists at its receipted size plus
@@ -1852,7 +1866,8 @@ class StreamedBoundaryArtifacts:
             batch_id = entry['produced_batch']
             descriptors = [self._produced.descriptor_for(ProducedFileReference(
                 row['path'], row['name'], row['file_bytes'], row['sha256']),
-                producer_generation=batch_id, artifact_class='checkpoint')
+                producer_generation=batch_id, artifact_class='checkpoint',
+                file_identity=None if writer_identities is None else writer_identities.get(row['path']))
                 for row in [*rows, manifest]]
             self._produced.publish(batch_id=batch_id, descriptors=descriptors)
         entry["state"] = "committed"
@@ -2062,6 +2077,13 @@ class StreamedBoundaryArtifacts:
             if (type(window_groups) is not int or not read_groups <= window_groups <= declaration["window_groups"]):
                 raise ValueError("read window exceeds declaration or cannot hold its required groups")
         publication.bind_session(self.session)
+        from .staged_manifest import open_directory
+        descriptor = open_directory(str(self.directory / 'entries'), create=True)
+        try:
+            info = os.fstat(descriptor)
+            self._entry_directory_identity = (info.st_dev, info.st_ino)
+        finally:
+            os.close(descriptor)
         self._produced = publication
         self._produced_plan = {"group_size": group_size, "n_batches": n_batches,
             "batch_start": start, "batch_stop": stop,

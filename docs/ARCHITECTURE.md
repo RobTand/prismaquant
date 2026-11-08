@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, produced writer directory and file ownership.
+Source: `prismaquant/{perturbed_x_cache,produced_output_spool,streamed_boundary_artifacts,stage_b_prep_io,joint_adjoint_checkpoints,cost_stage_checkpoint,stage_a_produced_output}.py`,
+based on `69e3f3732dedf1307df4eb6195c4ff52d75ea0ba`.
+Every produced tensor write checks the saved direct or spool directory identity
+through a nofollow directory descriptor. Tensor, metadata, preparation and
+checkpoint writers retain file signatures from held writer descriptors through
+group sealing. Spool publication retains the copy-returned destination signature.
+Descriptor construction refuses missing signatures and same-byte replacements.
+Transient signatures remain outside scientific reference and checkpoint JSON.
+
 As of: 2026-11-08, selected produced-index byte admission.
 Source: `prismaquant/{native_results,stage_a_produced_output}.py`,
 based on `774fd155dbfebbda6e22590b4110cd7b46b49680`.

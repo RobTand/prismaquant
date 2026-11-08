@@ -248,20 +248,26 @@ class SerializedEntryDigest:
 
 def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x",
                                  durable=False, serialized_digest=None,
-                                 preallocate_bytes=None, **metadata):
+                                 preallocate_bytes=None, directory_fd=None, **metadata):
     """Atomically store already-selected rows without changing their precision."""
     import os
     path = Path(cache_dir) / activation_cache_filename(name)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if directory_fd is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".pt.tmp")
-    with temporary.open("xb" if preallocate_bytes is not None else "wb") as handle:
+    handle = (temporary.open("xb" if preallocate_bytes is not None else "wb")
+              if directory_fd is None else os.fdopen(os.open(temporary.name,
+                  os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                  0o600, dir_fd=directory_fd), 'wb'))
+    with handle:
+        if serialized_digest is not None:
+            created = os.fstat(handle.fileno())
+            serialized_digest.file_identity = (created.st_dev, created.st_ino)
         if preallocate_bytes is not None:
             if type(preallocate_bytes) is not int or preallocate_bytes <= 0:
                 raise ValueError("preallocated entry ceiling must be positive")
             if serialized_digest is None or serialized_digest.max_bytes != preallocate_bytes:
                 raise ValueError("preallocation requires the matching bounded digest sink")
-            created = os.fstat(handle.fileno())
-            serialized_digest.file_identity = (created.st_dev, created.st_ino)
             os.posix_fallocate(handle.fileno(), 0, preallocate_bytes)
         torch.save({**metadata, "inputs": inputs.contiguous(), "name": name,
                     "source": source},
@@ -272,6 +278,16 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
         if durable:
             handle.flush()
             os.fsync(handle.fileno())
+        if directory_fd is not None:
+            handle.flush()
+            os.link(temporary.name, path.name, src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd, follow_symlinks=False)
+            os.unlink(temporary.name, dir_fd=directory_fd)
+            if durable:
+                os.fsync(directory_fd)
+            if serialized_digest is not None:
+                serialized_digest.writer_file_identity = file_stat_signature(os.fstat(handle.fileno()))
+            return path
     if preallocate_bytes is None:
         os.replace(temporary, path)
     else:
@@ -1043,7 +1059,7 @@ def _is_compact_host_tensor(tensor, nbytes):
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
                                        release_file_pages=True, preallocate=False,
-                                       durable=True):
+                                       durable=True, directory_identity=None):
     """Extend the ordinary atomic writer with an exact tensor/identity receipt.
 
     The caller reserves the one compact CPU copy before entering. No dtype,
@@ -1058,7 +1074,7 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
     work may pass False: the produced-output spool (PQ #1225), whose every
     reader checks the size and the sha256 of every byte against the
     reference this returns, and whose work counts as committed only once
-    PrismaBuild acknowledged the export's own fsynced copy.
+    the IO owner has verified and published the durable destination copy.
     """
     if not isinstance(inputs, torch.Tensor) or inputs.layout != torch.strided or inputs.is_meta:
         raise TypeError("exact activation entry requires a materialized strided Tensor")
@@ -1069,11 +1085,20 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                 "shape": list(inputs.shape), "dtype": str(inputs.dtype), "tensor_bytes": nbytes}
     encoded = _exact_activation_json(metadata)
     path = Path(cache_dir) / activation_cache_filename(name)
-    if path.exists() or path.with_suffix(".pt.tmp").exists():
-        raise RuntimeError("exact activation entry already exists")
+    from .staged_manifest import open_directory
+    directory = open_directory(str(path.parent.absolute()), create=directory_identity is None)
     compact = None
     digest = None
     try:
+        observed = os.fstat(directory)
+        if directory_identity is not None and (observed.st_dev, observed.st_ino) != tuple(directory_identity):
+            raise RuntimeError('exact activation writer directory changed')
+        for candidate in (path, path.with_suffix('.pt.tmp')):
+            try:
+                os.stat(candidate.name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise RuntimeError('exact activation entry already exists')
         compact = (inputs.detach() if _is_compact_host_tensor(inputs, nbytes)
                    else inputs.detach().to(device="cpu", copy=True,
                                            memory_format=torch.contiguous_format))
@@ -1081,11 +1106,13 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         path = write_activation_cache_entry(cache_dir, name, compact,
             source="exact_activation", durable=durable, exact=metadata,
             serialized_digest=digest,
-            preallocate_bytes=max_file_bytes if preallocate else None)
+            preallocate_bytes=max_file_bytes if preallocate else None, directory_fd=directory)
         del compact
         compact = None
         published_stat = path.lstat()
         signature = _activation_file_signature(path)
+        if signature != digest.writer_file_identity:
+            raise RuntimeError('exact activation writer inode changed during publication')
         if signature[2] > max_file_bytes:
             raise RuntimeError("exact activation entry exceeds file budget")
         if signature[2] != digest.bytes:
@@ -1099,18 +1126,17 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
             str(inputs.dtype), nbytes, signature[2], digest.hexdigest(), signature)
     except BaseException:
         for candidate in (path, path.with_suffix(".pt.tmp")):
-            if preallocate:
-                owned = getattr(digest, "file_identity", None)
-                try:
-                    current = candidate.lstat()
-                except FileNotFoundError:
-                    continue
-                if owned != (current.st_dev, current.st_ino):
-                    continue
-            candidate.unlink(missing_ok=True)
+            owned = getattr(digest, 'file_identity', None)
+            try:
+                current = os.stat(candidate.name, dir_fd=directory, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            if owned == (current.st_dev, current.st_ino):
+                os.unlink(candidate.name, dir_fd=directory)
         raise
     finally:
         compact = None
+        os.close(directory)
 
 
 class ExactCotangentScratch:

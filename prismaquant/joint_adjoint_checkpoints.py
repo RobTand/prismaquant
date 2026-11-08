@@ -174,7 +174,7 @@ def adjoint_receipt_path(space: str | os.PathLike) -> Path:
 
 def write_checkpoint_cotangent_entry(
     checkpoint_dir: Path, *, probe_index: int, batch_index: int, tensor: torch.Tensor,
-    session: dict, max_file_bytes: int | None = None,
+    session: dict, max_file_bytes: int | None = None, writer_identities=None,
 ) -> dict:
     """Publish one activation cotangent as a digest-checked exact entry.
 
@@ -201,6 +201,8 @@ def write_checkpoint_cotangent_entry(
         checkpoint_dir / "entries", name, tensor,
         identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
     )
+    if writer_identities is not None:
+        writer_identities[reference.path] = reference.writer_file_identity
     return exact_entry_record(reference)
 
 
@@ -447,7 +449,7 @@ def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes)
 
 
 def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
-                                  *, max_file_bytes: int) -> dict:
+                                  *, max_file_bytes: int, writer_identities=None) -> dict:
     """Stream one shared state to its pickle file with an admitted bound.
 
     Standard ``pickle.dump`` into the existing ``SerializedEntryDigest``
@@ -468,11 +470,11 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
         pickle.dump(state, sink, protocol=pickle.HIGHEST_PROTOCOL)
 
     return _publish_streamed_file(path, name, body, max_file_bytes=max_file_bytes,
-                                  label=f"shared state {name}")
+                                  label=f"shared state {name}", writer_identities=writer_identities)
 
 
 def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
-                           label: str) -> dict:
+                           label: str, writer_identities=None) -> dict:
     """Publish what ``body(sink)`` streams as one new file; returns its row.
 
     The one atomic-publication shape of the checkpoint's own small files: a
@@ -483,6 +485,7 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
     """
     from .cost_stage_checkpoint import unique_temp_suffix
     from .perturbed_x_cache import SerializedEntryDigest
+    from .file_identity import file_stat_signature
 
     if type(max_file_bytes) is not int or max_file_bytes <= 0:
         raise RuntimeError(
@@ -498,21 +501,23 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
             body(sink.sink(handle))
             handle.flush()
             os.fsync(handle.fileno())
-        published = temporary.stat().st_size
-        if published != sink.bytes_written:
-            raise RuntimeError(
-                "exact boundary checkpoint entry differs from its "
-                "serialized bytes")
-        if published > max_file_bytes:
-            raise RuntimeError(
-                "exact boundary checkpoint shared-state file exceeds its "
-                f"admitted envelope for {name}")
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+            published = os.fstat(handle.fileno()).st_size
+            if published != sink.bytes_written:
+                raise RuntimeError(
+                    "exact boundary checkpoint entry differs from its "
+                    "serialized bytes")
+            if published > max_file_bytes:
+                raise RuntimeError(
+                    "exact boundary checkpoint shared-state file exceeds its "
+                    f"admitted envelope for {name}")
+            os.replace(temporary, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+                if writer_identities is not None:
+                    writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
+            finally:
+                os.close(directory_fd)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
@@ -587,7 +592,7 @@ def _shared_state_pack_envelope(estimates) -> int:
             + _SHARED_STATE_PACK_TRAILER_BYTES)
 
 
-def _write_shared_state_pack(plan: dict, states: dict, *, hold) -> dict:
+def _write_shared_state_pack(plan: dict, states: dict, *, hold, writer_identities=None) -> dict:
     """Stream every shared state into the one pack file ``plan`` admits.
 
     ``states`` maps state name -> state and must name exactly the members
@@ -627,7 +632,8 @@ def _write_shared_state_pack(plan: dict, states: dict, *, hold) -> dict:
 
     return _publish_streamed_file(
         Path(plan["path"]), plan["name"], body,
-        max_file_bytes=plan["file_envelope"], label="shared-state pack")
+        max_file_bytes=plan["file_envelope"], label="shared-state pack",
+        writer_identities=writer_identities)
 
 
 def unpack_shared_states(payload) -> list:
@@ -1177,6 +1183,7 @@ class AdjointCheckpointAttempt:
         self._activation_entries = {}
         self._shared_state_entries = None
         self._record = None
+        self._writer_identities = {} if owner._produced is not None else None
         #: Seconds spent in ``write_activation``: the checkpoint's share of
         #: the pass that feeds it.
         self.write_seconds = 0.0
@@ -1223,7 +1230,8 @@ class AdjointCheckpointAttempt:
                 entry = write_checkpoint_cotangent_entry(
                     self.checkpoint_dir, probe_index=probe_index,
                     batch_index=batch_index, tensor=tensor, session=self.session,
-                    max_file_bytes=plan["file_envelope"])
+                    max_file_bytes=plan["file_envelope"],
+                    **self._writer_kwargs())
         finally:
             self.write_seconds += time.monotonic() - started
         if entry["file_bytes"] > plan["file_envelope"]:
@@ -1336,7 +1344,7 @@ class AdjointCheckpointAttempt:
             (plan,) = self._shared_plan
             self._shared_state_entries = [_write_shared_state_pack(
                 plan, dict(_iter_shared_states(shared_adjoint, shared_pass)),
-                hold=self.owner.hold_transient_metadata)]
+                hold=self.owner.hold_transient_metadata, **self._writer_kwargs())]
             return
         # Holds count live auxiliary usage plus transient bytes against the
         # one auxiliary ceiling. An empty shared set skips the loop.
@@ -1347,8 +1355,11 @@ class AdjointCheckpointAttempt:
                     plan["file_envelope"], f"checkpoint shared state {plan['name']}"):
                 entries.append(_write_shared_state_streaming(
                     self.checkpoint_dir, plan["name"], state,
-                    max_file_bytes=plan["file_envelope"]))
+                    max_file_bytes=plan["file_envelope"], **self._writer_kwargs()))
         self._shared_state_entries = entries
+
+    def _writer_kwargs(self):
+        return {} if self._writer_identities is None else {'writer_identities': self._writer_identities}
 
     def seal(self) -> dict:
         """Write the manifest and commit the receipt; returns the record."""
@@ -1394,12 +1405,12 @@ class AdjointCheckpointAttempt:
                 raise RuntimeError(
                     "exact boundary checkpoint manifest exceeds its admitted envelope")
             atomic_write_bytes(self.checkpoint_dir / "checkpoint.json",
-                               manifest_payload)
+                               manifest_payload, **self._writer_kwargs())
         if references is None:
-            self.owner.commit_checkpoint_artifact(self.reservation, record)
+            self.owner.commit_checkpoint_artifact(self.reservation, record, **self._writer_kwargs())
         else:
             self.owner.commit_checkpoint_artifact(
-                self.reservation, record, references=references)
+                self.reservation, record, references=references, **self._writer_kwargs())
         self._record = record
         return record
 

@@ -14,7 +14,7 @@ from prismaquant.stage_a_produced_output import (BoundaryProducedPrewriteRefused
     publish_document)
 from prismaquant.produced_output_spool import ProducedOutputSpool, ProducedExportRefused, ProducedWindowRefused
 from prismaquant.streamed_boundary_artifacts import (ProducedFileReference,
-    StreamedBoundaryArtifacts, BOUNDARY_STORAGE_SCHEMA)
+    StreamedBoundaryArtifacts, BOUNDARY_STORAGE_SCHEMA, _write_new_file)
 from produced_native_fixtures import publication, owner, selected_publications
 
 
@@ -23,9 +23,9 @@ def raw_group(pub, spool, batch='known', payload=b'\x00independent\xffbytes'):
     pub.require_prewrite(batch_id=batch, payload_ceiling_bytes=len(payload), paths=[str(destination)])
     directory = spool.reserve(batch, len(payload))
     local = directory / destination.name
-    local.write_bytes(payload)
+    identity = _write_new_file(local, payload)
     ref = spool.record(batch, ProducedFileReference(str(local), local.name,
-        len(payload), hashlib.sha256(payload).hexdigest()), destination.parent, read_back=True)
+        len(payload), hashlib.sha256(payload).hexdigest(), identity), destination.parent, read_back=True)
     return ref, local
 
 
@@ -255,3 +255,213 @@ def test_checkpoint_cancel_releases_native_reservation_only_on_absence(tmp_path,
     with storage.prefetch(refs) as window:
         assert torch.equal(storage.get(window, refs[1]), torch.arange(8, dtype=torch.float32) + 1)
     register(pub)
+def _owned_group_roster(root):
+    return {str(path.relative_to(root)): path.read_bytes()
+            for path in root.rglob('*') if path.is_file()}
+
+
+@pytest.mark.parametrize('spool', [None, 1 << 20])
+@pytest.mark.parametrize('replacement', ['intact', 'directory', 'symlink'])
+def test_group_directory_is_still_owned_before_second_write(tmp_path, spool, replacement):
+    storage, pub = owner(tmp_path, spool_bytes=spool)
+    first = storage.write(torch.arange(8, dtype=torch.float32), batch_index=0, boundary_index=0)
+    group = next(iter(storage._produced_groups.values()))
+    directory = (Path(first.path).parent if spool is None else
+                 storage._local_output_spool.directory(group['batch_id']))
+    if replacement == 'intact':
+        second = storage.write(torch.arange(8, dtype=torch.float32) + 10,
+                               batch_index=1, boundary_index=0)
+        storage._join_produced_copies()
+        with storage.prefetch([first, second]) as window:
+            assert torch.equal(storage.get(window, first), torch.arange(8, dtype=torch.float32))
+            assert torch.equal(storage.get(window, second), torch.arange(8, dtype=torch.float32) + 10)
+        assert len(pub._groups) == 1
+        return
+    original = tmp_path / 'original-group'
+    directory.rename(original)
+    foreign = tmp_path / 'foreign'
+    foreign.mkdir()
+    (foreign / 'sentinel').write_bytes(b'independent foreign bytes')
+    if replacement == 'symlink':
+        directory.symlink_to(foreign, target_is_directory=True)
+        changed = foreign
+    else:
+        directory.mkdir()
+        (directory / 'sentinel').write_bytes(b'independent replacement bytes')
+        changed = directory
+    before_original, before_foreign, before_changed = _owned_group_roster(original), _owned_group_roster(foreign), _owned_group_roster(changed)
+    refused = False
+    try:
+        storage.write(torch.arange(8, dtype=torch.float32) + 10, batch_index=1, boundary_index=0)
+    except (OSError, ValueError, RuntimeError):
+        refused = True
+    assert _owned_group_roster(original) == before_original
+    assert _owned_group_roster(foreign) == before_foreign
+    assert _owned_group_roster(changed) == before_changed, 'replacement received second payload or temporary bytes'
+    assert refused and not pub._groups
+
+
+@pytest.mark.parametrize('replace', [False, True])
+def test_direct_publication_keeps_original_writer_inode(tmp_path, replace):
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    first = storage.write(torch.arange(8, dtype=torch.float32), batch_index=0, boundary_index=0)
+    path = Path(first.path)
+    payload = path.read_bytes()
+    if replace:
+        original = tmp_path / 'original-first.pt'
+        path.rename(original)
+        path.write_bytes(payload)
+    refused = False
+    try:
+        storage.write(torch.arange(8, dtype=torch.float32) + 10, batch_index=1, boundary_index=0)
+    except (OSError, ValueError, RuntimeError):
+        refused = True
+    if replace:
+        assert refused and not pub._groups, 'same-byte replacement was adopted as writer ownership'
+        assert original.read_bytes() == path.read_bytes() == payload
+    else:
+        assert not refused and len(pub._groups) == 1
+
+
+@pytest.mark.parametrize('replace', [False, True])
+def test_copy_publication_keeps_returned_destination_inode(tmp_path, monkeypatch, replace):
+    pub = publication(tmp_path)
+    pub.bind_session({'generation': 'known', 'run_identity_sha256': 'b' * 64})
+    spool = ProducedOutputSpool.from_publication(pub)
+    ref, local = raw_group(pub, spool)
+    reached, proceed = threading.Event(), threading.Event()
+    real = io_engine.publish_copy
+    def copy(*args, **kwargs):
+        identity = real(*args, **kwargs)
+        reached.set()
+        assert proceed.wait(30)
+        return identity
+    monkeypatch.setattr(io_engine, 'publish_copy', copy)
+    spool.submit('known')
+    assert reached.wait(30)
+    path = Path(ref.path)
+    payload = path.read_bytes()
+    if replace:
+        original = tmp_path / 'original-copy'
+        path.rename(original)
+        path.write_bytes(payload)
+    proceed.set()
+    try:
+        if replace:
+            with pytest.raises(ProducedExportRefused):
+                spool.await_group('known')
+            assert not pub._groups and not spool.released('known')
+            assert original.read_bytes() == path.read_bytes() == local.read_bytes() == payload
+        else:
+            spool.await_group('known')
+            assert path.read_bytes() == payload and len(pub._groups) == 1
+    finally:
+        spool.join_copies()
+
+
+@pytest.mark.parametrize('replace', [False, True])
+def test_metadata_origin_retains_writer_identity_until_group_seal(tmp_path, monkeypatch, replace):
+    from prismaquant import streamed_boundary_artifacts as artifacts
+    storage, pub = owner(tmp_path, write_only=True, spool_bytes=None)
+    actual = artifacts._link_new_file
+    preserved = []
+    def publish(path, payload):
+        identity = actual(path, payload)
+        if replace and path.name == 'first.json':
+            saved = path.with_name('original-first')
+            path.rename(saved)
+            path.write_bytes(payload)
+            preserved.append(saved)
+        return identity
+    monkeypatch.setattr(artifacts, '_link_new_file', publish)
+    files = [('first.json', b'independent first metadata'), ('second.json', b'second')]
+    if replace:
+        with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity changed'):
+            storage.write_produced_files(files, kind='metadata', boundary_index=0)
+        assert not pub._groups
+        assert preserved[0].read_bytes() == (storage.directory / 'first.json').read_bytes() == files[0][1]
+    else:
+        refs = storage.write_produced_files(files, kind='metadata', boundary_index=0)
+        assert [Path(ref.path).read_bytes() for ref in refs] == [raw for _, raw in files]
+        rows = read_bound_document(next(iter(pub._groups.values())))['entries']
+        assert [row['file_identity'] for row in rows] == [list(ref.writer_file_identity) for ref in refs]
+
+
+@pytest.mark.parametrize('packed,replace', [(False, 'intact'), (False, 'cotangent'),
+    (False, 'shared'), (False, 'manifest'), (True, 'intact'), (True, 'shared'), (True, 'manifest')])
+def test_checkpoint_group_keeps_each_writer_identity(tmp_path, monkeypatch, packed, replace):
+    from prismaquant import joint_adjoint_checkpoints as checkpoint
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    known = torch.tensor([[1., 3.], [5., 7.]])
+    session = {**storage.session, 'kind': 'adjoint_checkpoint'}
+    cotangents = {(0, 0): known}
+    if packed:
+        cotangents = {(0, batch): storage.write(known + batch,
+            probe_index=0, batch_index=batch, boundary_index=5) for batch in range(2)}
+        storage.settle_local_output()
+    prior_groups = dict(pub._groups)
+    original_tensor = checkpoint.write_checkpoint_cotangent_entry
+    original_shared = checkpoint._publish_streamed_file
+    original_manifest = checkpoint.atomic_write_bytes
+    preserved = []
+    def replacement(path):
+        payload = path.read_bytes()
+        saved = tmp_path / (path.name + '.original')
+        path.rename(saved)
+        path.write_bytes(payload)
+        preserved.append((saved, path, payload))
+    def tensor(*args, **kwargs):
+        row = original_tensor(*args, **kwargs)
+        if replace == 'cotangent':
+            replacement(Path(row['path']))
+        return row
+    def shared(*args, **kwargs):
+        row = original_shared(*args, **kwargs)
+        if replace == 'shared' and not preserved:
+            replacement(Path(row['path']))
+        return row
+    def manifest(path, payload, **kwargs):
+        result = original_manifest(path, payload, **kwargs)
+        if replace == 'manifest':
+            replacement(path)
+        return result
+    monkeypatch.setattr(checkpoint, 'write_checkpoint_cotangent_entry', tensor)
+    monkeypatch.setattr(checkpoint, '_publish_streamed_file', shared)
+    monkeypatch.setattr(checkpoint, 'atomic_write_bytes', manifest)
+    space = Path(pub.output_prefix) / 'checkpoint-space'
+    def write():
+        return checkpoint.write_adjoint_checkpoint(space, boundary=5, session=session,
+            cotangents=cotangents, shared_adjoint={(0, 0): {'w': known + 2}},
+            shared_pass={0: {'known': 'independent shared metadata'}}, owner=storage,
+            packed=packed, referenced=packed)
+    if replace != 'intact':
+        with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity changed'):
+            write()
+        assert pub._groups == prior_groups and preserved
+        for saved, path, payload in preserved:
+            assert saved.read_bytes() == path.read_bytes() == payload
+        return
+    record = write()
+    tensors = checkpoint.read_exact_entry_tensors(record['activation_entries'],
+        expected_session=storage.session if packed else session)
+    assert torch.equal(tensors[record['activation_entries'][0]['name']], known)
+    adjoint, shared_pass = checkpoint.load_checkpoint_shared_states(space, record)
+    assert torch.equal(adjoint[(0, 0)]['w'], known + 2)
+    assert shared_pass == {0: {'known': 'independent shared metadata'}}
+    new_groups = set(pub._groups) - set(prior_groups)
+    assert len(new_groups) == 1
+    rows = read_bound_document(pub._groups[new_groups.pop()])['entries']
+    assert {row['path'] for row in rows} == {
+        *(row['path'] for row in ([] if packed else record['activation_entries'])),
+        *(row['path'] for row in record['shared_state_entries']),
+        str(space / 'checkpoints' / 'boundary-005' / 'checkpoint.json')}
+
+
+def test_generic_descriptor_refuses_missing_writer_identity(tmp_path):
+    pub = publication(tmp_path)
+    target = Path(pub.output_prefix) / 'generic'
+    _write_new_file(target, b'known generic bytes')
+    ref = ProducedFileReference(str(target), target.name, 19, hashlib.sha256(b'known generic bytes').hexdigest())
+    with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity required'):
+        pub.descriptor_for(ref, producer_generation='unowned')
+    assert target.read_bytes() == b'known generic bytes' and not pub._groups

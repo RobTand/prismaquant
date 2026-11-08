@@ -136,7 +136,20 @@ class ProducedOutputSpool:
             os.close(directory)
 
     def directory(self, batch_id):
-        return self._groups[batch_id]['directory']
+        return self.writer_directory(batch_id)[0]
+
+    def writer_directory(self, batch_id):
+        with self._cond:
+            self._check_root()
+            group = self._groups[batch_id]
+            descriptor = open_directory(str(group['directory']))
+            try:
+                info = os.fstat(descriptor)
+                if (info.st_dev, info.st_ino) != group['identity']:
+                    raise ProducedOutputSpoolRefused('owned group writer directory changed')
+                return group['directory'], group['identity']
+            finally:
+                os.close(descriptor)
 
     def record(self, batch_id, local_reference, canonical_directory, *, artifact_class='payload', read_back=False):
         if artifact_class not in ARTIFACT_CLASSES or type(read_back) is not bool:
@@ -152,7 +165,8 @@ class ProducedOutputSpool:
                     or canonical.path in self._local):
                 raise ProducedOutputSpoolRefused('foreign, duplicate or completed local entry')
             identity = produced_file_identity(local_reference.path)
-            if (identity[2] != local_reference.file_bytes or
+            writer = getattr(local_reference, 'writer_file_identity', None)
+            if (writer is None or list(writer) != identity or identity[2] != local_reference.file_bytes or
                     sum(row[1].file_bytes for row in group['references']) + canonical.file_bytes > group['ceiling_bytes']):
                 raise ProducedOutputSpoolRefused('writer exceeded local prewrite ceiling')
             group['references'].append((local_reference, canonical, artifact_class, identity))
@@ -174,10 +188,10 @@ class ProducedOutputSpool:
         group = self._groups[batch_id]
         descriptors = []
         for local, canonical, artifact_class, identity in group['references']:
-            io_engine.publish_copy(local.path, canonical.path, length=canonical.file_bytes,
+            identity = io_engine.publish_copy(local.path, canonical.path, length=canonical.file_bytes,
                 sha256=canonical.sha256, source_identity=identity)
             descriptors.append(self.publication.descriptor_for(canonical,
-                producer_generation=batch_id, artifact_class=artifact_class))
+                producer_generation=batch_id, artifact_class=artifact_class, file_identity=identity))
         return self.publication.publish(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)['ref']
 
     def _complete(self, batch_id, future):
@@ -373,8 +387,14 @@ class ProducedOutputSpool:
                 self._release(batch_id, group)
             return group['released']
 
-    def commit_origin(self, batch_id, descriptors, *, lifetime):
+    def commit_origin(self, batch_id, descriptors=None, *, lifetime):
         self.await_group(batch_id)
+        if descriptors is None:
+            from .stage_a_produced_output import read_bound_document
+            binding = self._groups[batch_id]['binding']
+            if read_bound_document(binding)['lifetime'] != lifetime:
+                raise ProducedOutputSpoolRefused('published group lifetime differs')
+            return {'ok': True, 'ref': dict(binding)}
         return self.publication.commit_origin(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)
 
     def landed(self, batch_id):

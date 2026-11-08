@@ -27,6 +27,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256_normalized,
 )
 from .digests import bytes_sha256hex, text_sha256hex
+from .file_identity import file_stat_signature
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -69,7 +70,7 @@ def unique_temp_suffix() -> str:
     return _TEMP_SUFFIX[1]
 
 
-def atomic_write_bytes(path: Path, payload: bytes) -> None:
+def atomic_write_bytes(path: Path, payload: bytes, *, writer_identities=None) -> None:
     """Publish bytes durably; a crash leaves either the old or new file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + unique_temp_suffix())
@@ -77,12 +78,14 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
-    directory_fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+            if writer_identities is not None:
+                writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
+        finally:
+            os.close(directory_fd)
 
 
 def _publication_parent_nofollow(parent: Path) -> int:
@@ -106,7 +109,8 @@ def _publication_parent_nofollow(parent: Path) -> int:
         raise
 
 
-def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> bool:
+def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
+                      writer_identities=None) -> bool:
     """Publish ``payload`` at ``path`` as a NEW file; never replace one already there.
 
     ``os.link`` is the atomic no-clobber publication on one filesystem: the
@@ -163,17 +167,24 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> 
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        try:
-            if directory_fd is None:
-                os.link(temporary, target)
+            try:
+                if directory_fd is None:
+                    os.link(temporary, target)
+                else:
+                    os.link(temporary, target, src_dir_fd=directory_fd,
+                            dst_dir_fd=directory_fd, follow_symlinks=False)
+            except FileExistsError:
+                return False
+            if nofollow:
+                os.unlink(temporary, dir_fd=directory_fd)
             else:
-                os.link(temporary, target, src_dir_fd=directory_fd,
-                        dst_dir_fd=directory_fd, follow_symlinks=False)
-        except FileExistsError:
-            return False
-        if directory_fd is None:
-            directory_fd = os.open(path.parent, os.O_RDONLY)
-        os.fsync(directory_fd)
+                temporary.unlink()
+            owns_temporary = False
+            if directory_fd is None:
+                directory_fd = os.open(path.parent, os.O_RDONLY)
+            os.fsync(directory_fd)
+            if writer_identities is not None:
+                writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
         return True
     finally:
         try:

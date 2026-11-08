@@ -135,7 +135,7 @@ def test_a_mutated_origin_is_refused_before_direct_publication(tmp_path, monkeyp
     content = path.read_bytes()
     path.write_bytes(content[:-1] + bytes([content[-1] ^ 255]))
     assert path.stat().st_size == refs[0].file_bytes
-    with pytest.raises(ValueError, match='artifact bytes differ'):
+    with pytest.raises(RuntimeError, match='writer destination identity changed'):
         write_group(storage, count=GROUP_SIZE - 1, first=1)
     assert not pub._groups and path.exists()
     storage.__exit__(RuntimeError, RuntimeError('fixture mutation'), None)

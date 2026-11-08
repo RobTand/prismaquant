@@ -389,12 +389,14 @@ class PreparationPublication:
             raise PreparationPublicationRefused('preparation group may be written once per launch')
         self._kinds.add(kind)
 
-    def commit(self, kind, created):
+    def commit(self, kind, created, *, writer_identities=None):
         from .streamed_boundary_artifacts import ProducedFileReference
         batch = self.batch_id(kind)
         descriptors = [self.publication.descriptor_for(ProducedFileReference(
             path, Path(path).name, len(payload), bytes_sha256hex(payload)),
-            producer_generation=batch) for path, payload in created]
+            producer_generation=batch,
+            file_identity=None if writer_identities is None else writer_identities.get(path))
+            for path, payload in created]
         out = self.publication.publish(batch_id=batch, descriptors=descriptors)
         self.batches.append({'kind': kind, 'batch_id': batch, 'files': len(descriptors),
             'bytes': sum(len(payload) for _, payload in created), 'ref': out['ref']})
@@ -494,8 +496,11 @@ def publish_files(publication: PreparationPublication | None, kind: str,
             raise PreparationPublicationRefused(
                 f"the preparation's {kind!r} batch: {exc}") from exc
     created: list[tuple[str, bytes]] = []
+    writer_identities = {}
     for path, payload, where in planned:
-        if publish_new_bytes(path, payload):
+        writer_kwargs = ({'nofollow': True, 'writer_identities': writer_identities}
+                         if publication is not None else {})
+        if publish_new_bytes(path, payload, **writer_kwargs):
             created.append((os.path.normpath(os.path.abspath(str(path))), payload))
             continue
         # Another writer reached the name between the check and the link.
@@ -504,7 +509,7 @@ def publish_files(publication: PreparationPublication | None, kind: str,
                 f"refusing to overwrite differing bytes at {path}: a re-seal "
                 f"is a new reviewed directory, never an edit")
     if publication is not None and created:
-        publication.commit(kind, created)
+        publication.commit(kind, created, writer_identities=writer_identities)
     return [Path(path) for path, _ in created]
 
 

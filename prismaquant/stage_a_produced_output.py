@@ -400,11 +400,17 @@ class BoundaryProducedPublication:
             self._prewrites[batch_id] = {'ceilings': ceilings, 'paths': prior['paths'] + paths}
         return {'ok': True}
 
-    def descriptor_for(self, reference, *, producer_generation, artifact_class='payload'):
+    def descriptor_for(self, reference, *, producer_generation, artifact_class='payload', file_identity=None):
+        identity = file_identity if file_identity is not None else getattr(reference, 'writer_file_identity', None)
+        if identity is None:
+            raise BoundaryProducedPublicationFailed('writer destination identity required')
+        observed = produced_file_identity(reference.path)
+        if list(identity) != observed:
+            raise BoundaryProducedPublicationFailed('writer destination identity changed')
         row = {'schema': DESCRIPTOR_SCHEMA, 'slot': self.declaration['slot'],
             'artifact_class': artifact_class, 'path': reference.path,
             'bytes': reference.file_bytes, 'sha256': reference.sha256,
-            'producer_generation': producer_generation, 'file_identity': produced_file_identity(reference.path)}
+            'producer_generation': producer_generation, 'file_identity': list(identity)}
         return validate_descriptor(row, self.declaration)
 
     def manifest_digest_for(self, descriptors):

@@ -123,3 +123,39 @@ def test_a_bound_publication_refuses_before_writing(tmp_path, monkeypatch):
         assert not (metadata / 'b.json').exists()
     finally:
         io.reset_preparation_publications_for_tests()
+
+
+@pytest.mark.parametrize('replace', [False, True])
+def test_preparation_retains_first_writer_identity_until_commit(tmp_path, monkeypatch, replace):
+    from prismaquant import cost_stage_checkpoint as writer
+    from prismaquant.stage_a_produced_output import BoundaryProducedPublicationFailed
+    metadata = tmp_path / 'metadata'
+    declaration = io.build_preparation_template(metadata_root=metadata,
+        payload_max_bytes=io.preparation_payload_ceiling(1))
+    admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    actual = writer.publish_new_bytes
+    saved = metadata / 'first-original'
+    def publish(path, payload, **kwargs):
+        result = actual(path, payload, **kwargs)
+        if replace and path.name == 'first.json':
+            path.rename(saved)
+            path.write_bytes(payload)
+        return result
+    monkeypatch.setattr(writer, 'publish_new_bytes', publish)
+    files = [(metadata / 'first.json', b'independent metadata one', 'first'),
+             (metadata / 'second.json', b'independent metadata two', 'second')]
+    try:
+        publication = io.bind_preparation_publication(metadata, required=True)
+        if replace:
+            with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity changed'):
+                io.publish_files(publication, 'known', files)
+            assert saved.read_bytes() == files[0][0].read_bytes() == files[0][1]
+            assert not publication.publication._groups
+        else:
+            assert io.publish_files(publication, 'known', files) == [path for path, _, _ in files]
+            rows = read_bound_document(publication.batches[0]['ref'])['entries']
+            assert [Path(row['path']).read_bytes() for row in rows] == [raw for _, raw, _ in files]
+            assert [row['sha256'] for row in rows] == [hashlib.sha256(raw).hexdigest() for _, raw, _ in files]
+    finally:
+        io.reset_preparation_publications_for_tests()

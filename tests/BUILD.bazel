@@ -125540,6 +125540,7 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/cost_stage_checkpoint",
         "//:tools/regenerate_joint_quanta",
         ":produced_native_fixtures",
         ":test_stage_b_prep_io_1070_lib",
