@@ -234,3 +234,35 @@ def test_same_byte_replacement_cannot_be_adopted_as_the_writer(tmp_path, monkeyp
     monkeypatch.setattr(prefill, 'publish_new_bytes', substitute)
     with pytest.raises(ValueError, match='owned writer'):
         prefill.write_phase_roster(roster(), tmp_path / 'roster.json')
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'changed', 'length', 'digest', 'oversize', 'symlink'])
+def test_bound_document_authenticates_known_bytes_before_json(tmp_path, mutation):
+    filename = tmp_path / 'document.json'
+    raw = b'{"known":42}\n'
+    filename.write_bytes(raw)
+    binding = dict(path=str(filename), sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    assert prefill._read_bound_document(binding, len(raw)) == {'known': 42}
+    if mutation == 'missing': filename.unlink()
+    elif mutation == 'changed': filename.write_bytes(b'{"known":43}\n')
+    elif mutation == 'length': binding['bytes'] -= 1
+    elif mutation == 'digest': binding['sha256'] = '0' * 64
+    elif mutation == 'oversize': binding['bytes'] += 1
+    else:
+        target = tmp_path / 'target'; filename.rename(target); filename.symlink_to(target)
+    with pytest.raises((ValueError, OSError)):
+        prefill._read_bound_document(binding, len(raw))
+
+
+@pytest.mark.parametrize('raw', [b'{"x":1,"x":2}', b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}'])
+def test_authenticated_document_still_refuses_invalid_json(tmp_path, raw):
+    filename = tmp_path / 'invalid.json'
+    filename.write_bytes(raw)
+    binding = dict(path=str(filename), sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    with pytest.raises(ValueError): prefill._read_bound_document(binding, len(raw))
+
+
+def test_private_publisher_enforces_document_bound_before_writes(tmp_path):
+    filename = tmp_path / 'never.json'
+    with pytest.raises(ValueError): prefill._publish_document({'known': 42}, filename, 1)
+    assert list(tmp_path.iterdir()) == []

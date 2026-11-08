@@ -9,7 +9,7 @@ from . import quality_prefill_contract as scientific
 from .cost_stage_checkpoint import publish_new_bytes
 from .digests import bytes_sha256hex
 from .flux_jobs import FluxResources
-from .native_results import validate_runtime
+from .native_results import _owned, validate_runtime
 from .schemas import Contract
 from .staged_launch import validate_binding as validate_staged_binding
 from .staged_manifest import digest, integer, open_directory, path as _path, read_document
@@ -95,9 +95,20 @@ def validate_phase_roster(value: object) -> dict:
 
 def write_phase_roster(value: object, path: Path) -> dict:
     """Publish one new roster, preserving the held parent and exact writer inode."""
-    body = validate_phase_roster(value)
+    return _publish_document(validate_phase_roster(value), path, MAX_ROSTER_BYTES)
+
+
+def _read_bound_document(binding: dict, limit: int) -> object:
+    """Authenticate bounded contents before strict document decoding."""
+    raw = _owned(binding, limit)
+    return scientific.decode_strict_json(raw.decode('utf-8'), where='prefill document')
+
+
+def _publish_document(value: object, path: Path, limit: int) -> dict:
+    """Publish checked document bytes once through the existing writer owner."""
     filename = Path(_path(os.fspath(path)))
-    raw = scientific.canonical_json_bytes(body) + b'\n'
+    raw = scientific.canonical_json_bytes(value) + b'\n'
+    _check.require(len(raw) <= limit, 'document exceeds byte limit')
     directory = open_directory(str(filename.parent))
     written = {}
     try:
@@ -108,7 +119,7 @@ def write_phase_roster(value: object, path: Path) -> dict:
             raise FileExistsError(filename)
         witness = open_directory(str(filename.parent), identity=identity)
         os.close(witness)
-        actual, signature = read_document(filename, MAX_ROSTER_BYTES)
+        actual, signature = read_document(filename, limit)
         _check.require(signature == written[str(filename)] and actual == raw,
                        'published roster differs from owned writer')
         witness = open_directory(str(filename.parent), identity=identity)
