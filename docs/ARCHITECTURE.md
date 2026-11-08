@@ -3,6 +3,9 @@
 As of: 2026-11-08, Unit4B application publication lifecycle under review.
 Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
 based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.
+Metadata directory setup now opens each component through the existing
+descriptor-based nofollow directory owner before creating children. Both
+produced-directory and batches-directory symlinks refuse before foreign mutation.
 An immutable produced declaration is bound by actual native argv. Finite batch
 manifests carry the authenticated producer, session, complete descriptor roster,
 inline writer digests and exact file identities. Prewrite ceilings are application

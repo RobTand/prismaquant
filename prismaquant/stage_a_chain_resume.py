@@ -54,11 +54,12 @@ names, so they are unlinked. Partial checkpoint directories below ``b`` are
 renamed aside, never deleted. Both happen only after every check passed.
 Forward boundary entries and sealed checkpoints are never touched.
 
-**PrismaBuild.** A relaunch is a new PrismaBuild owner. It reads the
-original's boundary entries, the checkpoint entries and this file as
-declared inputs, exactly as a forward-recovery capsule's inputs are read,
-and the original owner must be contained first (``require_contained``).
-That dispatcher contract is not exercised by the fixture tests.
+**Native dispatch.** A relaunch has a new native launch. Its selected inputs
+authenticate the original boundary and checkpoint entries and this chain
+state. The original producer's exact native scope must be stopped and its
+cleanup verified before reuse. Local scientific fixtures exercise the tensor
+and chain transitions; the separate native proof exercises launch, selected
+input authority and scope containment.
 """
 from __future__ import annotations
 

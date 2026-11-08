@@ -256,8 +256,9 @@ class BoundaryProducedPublication:
         self._lock = threading.RLock()
         self._prewrites, self._groups, self._released = {}, {}, set()
         self._directory = Path(producer['record_dir']) / 'produced'
-        self._directory.mkdir(exist_ok=True)
-        (self._directory / 'batches').mkdir(exist_ok=True)
+        from .staged_manifest import open_directory
+        directory = open_directory(str(self._directory / 'batches'), create=True)
+        os.close(directory)
 
     @classmethod
     def bind_from_admitted_owner(cls, *, declaration_path=None, declaration_sha256=None):
