@@ -236,7 +236,7 @@ def _runtime_libraries():
         info = os.stat(path)
         major, minor = (int(v, 16) for v in device.split(':'))
         if (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino) != (major, minor, int(inode)):
-            raise ValueError('native runtime mapped library replaced')
+            raise ValueError(f'native runtime mapped library replaced: {path}')
         libraries[path] = file_stat_signature(info)
     if not libraries or len(libraries) > MAX_RUNTIME_ENTRIES:
         raise ValueError('native runtime requires finite mapped libraries')

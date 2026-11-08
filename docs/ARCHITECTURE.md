@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, R1 native runtime content authority under review.
+Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
+based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
+`measure_runtime` and `validate_runtime` retain their public signatures and use
+`prismaquant.flux_result_runtime.v2`; old runtime evidence is refused.
+The finite declared distribution roster measures complete durable package,
+metadata and bundled-library contents, including nested code/data and empty files.
+Actual directory census detects additions/removals outside RECORD. Declared
+import roots must agree with independent import resolution and loaded owners.
+The host-interpreter contract measures stdlib/dynload, the executable and mapped
+libpython/external libraries. Other loaded implementations have individually
+measured file owners and an exact observed roster. New imports/mappings change
+identity or refuse; this does not claim a closure for arbitrary future code.
+Original-source declarations include safetensors, numpy, sympy and mpmath beside
+torch, transformers and Tessera. Descriptor streaming, finite file/root/count/byte
+budgets, pre/post file identity and final roster/import/mapping checks refuse
+races and unsupported owners. There is no runtime cache or second source archive.
+The existing durable-package filter now lives in the light file_identity owner;
+the weight-cache roster and behavior are preserved. R2/R3/R5, scientific/full64,
+root/source-family/calibration/material/format/serving gates remain unchanged.
+Focused/native proof evidence is recorded in
+`/mnt/shared/flux-migration/pq-tessera/evidence/unit4-runtime-content/`.
+Parent review/integration and scientific consumer coverage remain required.
+
 As of: 2026-11-08, authenticated active CPU source context.
 Source: `prismaquant/{flux_jobs,native_results}.py`, based on `e9b366743`.
 Active original-source controls authenticate the current saved ID and launch
@@ -35,7 +59,7 @@ ID, record directory, launch SHA256 and immutable publication path/digest/length
 then requires successful native status, complete events, allocation and cleanup.
 Native status/event/allocation and bounded owned cleanup sidecars use strict JSON.
 The publication binds finite named input/artifact rosters, execution-measured
-interpreter, installed dependency metadata/RECORD and entry-module bytes, and exactly one retained
+interpreter, complete declared dependency contents and imported/support owners, and exactly one retained
 publisher announcement. Artifact reads check length, digest and file identity.
 ASCII/Unicode f58 IDs share native identity. Resume reads the saved ID and never
 submits. Conclusive native failure survives cleanup errors; query/evidence errors
