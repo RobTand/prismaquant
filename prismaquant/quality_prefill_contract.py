@@ -62,6 +62,7 @@ ASSIGNMENT_SCHEMA = "prismaquant.quality_prefill_experiment.assignment.v1"
 FRONTIER_REPORT_SCHEMA = "prismaquant.quality_prefill_experiment.frontier_report.v1"
 TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
 WORK_ESTIMATES_SCHEMA = "prismaquant.quality_prefill_work_estimates.v1"
+MEASUREMENT_SCHEMA = "prismaquant.quality_prefill_measurement.v1"
 MAX_PREFILL_TASKS = 1024
 MAX_PREFILL_CHILDREN = 256
 MAX_PREFILL_CHILD_TASKS = 64
@@ -1272,6 +1273,38 @@ def validate_candidate(value: object, *, where: str = "candidate") -> dict[str, 
     _integer(body["footprint_bytes"], where=f"{where}.footprint_bytes", minimum=1)
     _artifact_reference(body["support_facts"], where=f"{where}.support_facts")
     return _check_seal(body, where=where)
+
+
+def validate_task_measurement(value: object, *, payload: dict) -> dict:
+    """Validate a task's finite scientific value before native selection exists."""
+    where = 'task measurement'
+    expected = validate_task_payload(payload, where='expected task payload')
+    body = decode_strict_json(canonical_json_bytes(value).decode('utf-8'), where=where)
+    _exact_mapping(body, keys=frozenset({
+        'schema', 'payload', 'units', 'measurement_status', 'value', 'artifacts',
+    }), where=where)
+    if body['schema'] != MEASUREMENT_SCHEMA:
+        _fail(f'{where} schema differs')
+    if validate_task_payload(body['payload'], where=where + '.payload') != expected:
+        _fail(f'{where} payload differs from frozen task')
+    _string(body['units'], where=where + '.units', pattern=_TOKEN_RE)
+    status = _enum(body['measurement_status'], where=where + '.measurement_status',
+                   allowed=_COVERAGE_SET)
+    if expected['currency'] == JOINT_CURRENCY and status not in _JOINT_STATUSES:
+        _fail(f'{where} joint currency requires measured status')
+    _finite_number(body['value'], where=where + '.value', minimum=0.0)
+    artifacts = _sequence(body['artifacts'], where=where + '.artifacts', minimum=1)
+    if len(artifacts) > 32:
+        _fail(f'{where} artifact count exceeds32')
+    paths = set()
+    for artifact in artifacts:
+        binding = prefill_file_binding(artifact, where=where + '.artifact')
+        if binding['bytes'] > 1 << 20:
+            _fail(f'{where} artifact exceeds1MiB')
+        if binding['path'] in paths:
+            _fail(f'{where} duplicate artifact path')
+        paths.add(binding['path'])
+    return body
 
 
 def validate_observation(value: object, *, where: str = "observation") -> dict[str, object]:

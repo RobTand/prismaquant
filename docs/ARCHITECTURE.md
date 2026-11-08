@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native prefill child documents and scientific value body.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`f796c1990`. A bounded task envelope authenticates the final sealed manifest,
+acyclic plan context and complete declared child task population. The scientific
+measurement body retains exact task payload, currency/status rules, finite
+nonnegative value and bounded artifact bindings. These document checks add no
+native submission or publication authority. Lifecycle, scientific driver and
+numerical qualification remain unfinished slice3 work.
+
 As of: 2026-11-08, native Flux profile v2.
 Source: `prismaquant/flux_jobs.py`, based on `a79b37acb`. The migration lead
 qualified the exact config revision making `exec.sdexec-constrain-resources`

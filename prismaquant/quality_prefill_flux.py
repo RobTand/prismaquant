@@ -17,7 +17,9 @@ from .staged_manifest import digest, open_directory, path as _path, read_documen
 
 
 ROSTER_SCHEMA = 'prismaquant.quality_prefill_roster.v1'
+ENVELOPE_SCHEMA = 'prismaquant.quality_prefill_envelope.v1'
 MAX_ROSTER_BYTES = 16 << 20
+MAX_ENVELOPE_BYTES = 1 << 20
 MAX_TASKS = scientific.MAX_PREFILL_TASKS
 MAX_CHILDREN = scientific.MAX_PREFILL_CHILDREN
 MAX_CHILD_TASKS = scientific.MAX_PREFILL_CHILD_TASKS
@@ -138,6 +140,55 @@ def validate_phase_roster(value: object) -> dict:
 def write_phase_roster(value: object, path: Path) -> dict:
     """Publish one new roster, preserving the held parent and exact writer inode."""
     return _publish_document(validate_phase_roster(value), path, MAX_ROSTER_BYTES)
+
+
+def _plan_context_sha256(manifest: dict) -> str:
+    body = scientific.decode_strict_json(scientific.canonical_json_bytes(manifest).decode('utf-8'),
+                                         where='manifest context')
+    body.pop('identity_sha256', None)
+    for entry in body['execution']['phases'].values():
+        entry.pop('task_roster', None)
+    return scientific.canonical_sha256({
+        'schema': 'prismaquant.quality_prefill_plan_context.v1', 'manifest': body})
+
+
+def _read_phase(manifest_binding: dict, phase: str) -> tuple:
+    _check.require(phase in scientific.PHASE_BY_NAME, 'unknown phase')
+    manifest = scientific.validate_manifest(_read_bound_document(manifest_binding, MAX_ROSTER_BYTES))
+    roster_binding = manifest['execution']['phases'][phase]['task_roster']
+    roster = validate_phase_roster(_read_bound_document(roster_binding, MAX_ROSTER_BYTES))
+    _check.require(roster['phase_id'] == phase, 'roster phase differs')
+    _check.require(roster['plan_context_sha256'] == _plan_context_sha256(manifest),
+                   'roster plan context differs')
+    return manifest, roster_binding, roster
+
+
+def read_task_envelope(binding: dict) -> dict:
+    """Read the exact frozen child population without trusting its own claims."""
+    body = _read_bound_document(binding, MAX_ENVELOPE_BYTES)
+    _check.exact_mapping(body, keys=frozenset({
+        'schema', 'phase_id', 'plan_identity_sha256', 'manifest', 'roster',
+        'child_id', 'tasks', 'result_path',
+    }), where='task envelope')
+    _check.require(body['schema'] == ENVELOPE_SCHEMA, 'envelope schema differs')
+    _identifier(body['phase_id'], 'envelope phase'); _identifier(body['child_id'], 'envelope child')
+    digest(body['plan_identity_sha256'])
+    _binding(body['manifest'], 'manifest'); _binding(body['roster'], 'roster')
+    _sequence(body['tasks'], MAX_CHILD_TASKS, 'envelope tasks')
+    _path(body['result_path'])
+    manifest, declared_roster, roster = _read_phase(body['manifest'], body['phase_id'])
+    _check.require(body['plan_identity_sha256'] == manifest['identity_sha256'],
+                   'envelope plan identity differs')
+    _check.require(body['roster'] == declared_roster, 'envelope roster differs from manifest')
+    children = [child for child in roster['children'] if child['child_id'] == body['child_id']]
+    _check.require(len(children) == 1, 'envelope child is not declared')
+    tasks = {task['task_id']: task for task in roster['tasks']}
+    _check.require(body['tasks'] == [tasks[task] for task in children[0]['task_ids']],
+                   'envelope does not match frozen ordered child tasks')
+    protected = {binding['path'], body['manifest']['path'], body['roster']['path'],
+                 *(row['path'] for row in roster['inputs'].values())}
+    _check.require(body['result_path'] not in protected, 'result path aliases an input')
+    return body
 
 
 def _read_bound_document(binding: dict, limit: int) -> object:

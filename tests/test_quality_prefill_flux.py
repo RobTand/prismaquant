@@ -202,6 +202,155 @@ def roster(size=3, *, width=2):
             staged_input=None) for i in range(0, size, width)])
 
 
+def measurement(task=None):
+    return dict(schema=scientific.MEASUREMENT_SCHEMA, payload=task or payload(),
+                units='dloss', measurement_status='measured', value=0.125,
+                artifacts=[dict(path='/owned/value.json', bytes=2,
+                                sha256=hashlib.sha256(b'42').hexdigest())])
+
+
+@pytest.mark.parametrize('status', scientific.COVERAGE_TYPES)
+def test_scalar_measurement_retains_each_declared_coverage_status(status):
+    task = payload()
+    task['currency'] = scientific.SCALAR_CURRENCY
+    value = measurement(task)
+    value['measurement_status'] = status
+    assert scientific.validate_task_measurement(value, payload=task) == value
+
+
+def test_measurement_is_detached_and_retains_zero_and_exact_frozen_payload():
+    value = measurement()
+    value['value'] = 0
+    checked = scientific.validate_task_measurement(value, payload=payload())
+    value['payload']['members'].clear()
+    value['artifacts'][0]['bytes'] = 0
+    assert checked['payload'] == payload() and checked['artifacts'][0]['bytes'] == 2
+    assert checked['value'] == 0
+
+
+@pytest.mark.parametrize('kind', ['schema', 'extra', 'missing', 'foreign-payload',
+    'joint-predicted', 'joint-pending', 'status', 'units', 'negative', 'bool',
+    'nan', 'infinite', 'artifacts-empty', 'artifacts-many', 'artifact-large',
+    'artifact-duplicate', 'artifact-relative', 'artifact-extra'])
+def test_measurement_refuses_invalid_science_and_unbounded_artifacts(kind):
+    value = measurement()
+    scientific.validate_task_measurement(value, payload=payload())
+    if kind == 'schema': value['schema'] = 'legacy.v1'
+    elif kind == 'extra': value['job_id'] = 'self-asserted'
+    elif kind == 'missing': del value['units']
+    elif kind == 'foreign-payload': value['payload']['context_id'] = 'other-context'
+    elif kind == 'joint-predicted': value['measurement_status'] = 'predicted_screen'
+    elif kind == 'joint-pending': value['measurement_status'] = 'retained_pending_measurement'
+    elif kind == 'status': value['measurement_status'] = 'success'
+    elif kind == 'units': value['units'] = 'bad units'
+    elif kind == 'negative': value['value'] = -0.125
+    elif kind == 'bool': value['value'] = True
+    elif kind == 'nan': value['value'] = float('nan')
+    elif kind == 'infinite': value['value'] = float('inf')
+    elif kind == 'artifacts-empty': value['artifacts'] = []
+    elif kind == 'artifacts-many': value['artifacts'] *= 33
+    elif kind == 'artifact-large': value['artifacts'][0]['bytes'] = (1 << 20) + 1
+    elif kind == 'artifact-duplicate': value['artifacts'] *= 2
+    elif kind == 'artifact-relative': value['artifacts'][0]['path'] = 'relative'
+    else: value['artifacts'][0]['claim'] = 'extra'
+    with pytest.raises((scientific.QualityPrefillContractError, ValueError)):
+        scientific.validate_task_measurement(value, payload=payload())
+
+
+def envelope_fixture(tmp_path):
+    manifest, phase, value, _, _ = admission_fixture(tmp_path)
+    value['plan_context_sha256'] = prefill._plan_context_sha256(manifest)
+    roster_binding = prefill.write_phase_roster(value, tmp_path / 'roster.json')
+    manifest['execution']['phases'][phase]['task_roster'] = roster_binding
+    manifest = scientific.freeze_manifest(manifest)
+    manifest_binding = prefill._publish_document(manifest, tmp_path / 'manifest.json', 16 << 20)
+    envelope = dict(schema=prefill.ENVELOPE_SCHEMA, phase_id=phase,
+        plan_identity_sha256=manifest['identity_sha256'], manifest=manifest_binding,
+        roster=roster_binding, child_id='child/0', tasks=value['tasks'][:2],
+        result_path=str(tmp_path / 'results.json'))
+    return manifest, value, envelope
+
+
+def test_task_envelope_binds_complete_child_and_sealed_plan(tmp_path):
+    manifest, value, envelope = envelope_fixture(tmp_path)
+    binding = prefill._publish_document(envelope, tmp_path / 'envelope.json', 1 << 20)
+    checked = prefill.read_task_envelope(binding)
+    assert checked == envelope
+    assert checked['tasks'] == value['tasks'][:2]
+    assert checked['plan_identity_sha256'] == manifest['identity_sha256']
+    checked['tasks'][0]['payload']['members'].clear()
+    assert prefill.read_task_envelope(binding)['tasks'][0]['payload'] == payload()
+
+
+@pytest.mark.parametrize('kind', ['identity', 'schema', 'phase', 'child', 'extra',
+    'task-missing', 'task-extra', 'task-order', 'payload', 'output', 'roster-path',
+    'roster-digest', 'manifest-digest', 'result-relative', 'result-roster',
+    'result-manifest', 'result-envelope', 'result-input'])
+def test_resealed_envelope_cannot_change_plan_or_shrink_population(tmp_path, kind):
+    _, value, envelope = envelope_fixture(tmp_path)
+    positive = prefill._publish_document(envelope, tmp_path / 'positive.json', 1 << 20)
+    assert prefill.read_task_envelope(positive)['tasks'] == value['tasks'][:2]
+    filename = tmp_path / 'mutated.json'
+    if kind == 'identity': envelope['plan_identity_sha256'] = '0' * 64
+    elif kind == 'schema': envelope['schema'] = 'legacy.v1'
+    elif kind == 'phase': envelope['phase_id'] = scientific.PHASE_DAG[1].phase
+    elif kind == 'child': envelope['child_id'] = 'undeclared'
+    elif kind == 'extra': envelope['claim'] = 'trusted'
+    elif kind == 'task-missing': envelope['tasks'].pop()
+    elif kind == 'task-extra': envelope['tasks'].append(value['tasks'][2])
+    elif kind == 'task-order': envelope['tasks'].reverse()
+    elif kind == 'payload': envelope['tasks'][0]['payload']['rate'] += 1
+    elif kind == 'output': envelope['tasks'][0]['output_id'] = 'foreign-output'
+    elif kind == 'roster-path': envelope['roster']['path'] = str(tmp_path / 'other-roster.json')
+    elif kind == 'roster-digest': envelope['roster']['sha256'] = '0' * 64
+    elif kind == 'manifest-digest': envelope['manifest']['sha256'] = '0' * 64
+    elif kind == 'result-relative': envelope['result_path'] = 'relative'
+    elif kind == 'result-roster': envelope['result_path'] = envelope['roster']['path']
+    elif kind == 'result-manifest': envelope['result_path'] = envelope['manifest']['path']
+    elif kind == 'result-envelope': envelope['result_path'] = str(filename)
+    else: envelope['result_path'] = value['inputs']['calibration']['path']
+    binding = prefill._publish_document(envelope, filename, 1 << 20)
+    with pytest.raises((ValueError, FileNotFoundError)):
+        prefill.read_task_envelope(binding)
+
+
+def test_context_omits_only_cycle_fields_and_refuses_changed_science(tmp_path):
+    manifest, value, envelope = envelope_fixture(tmp_path)
+    expected = value['plan_context_sha256']
+    changed = copy.deepcopy(manifest)
+    changed['identity_sha256'] = '0' * 64
+    for entry in changed['execution']['phases'].values():
+        entry['task_roster'] = dict(path='/future/roster.json', sha256='f' * 64, bytes=1)
+    assert prefill._plan_context_sha256(changed) == expected
+    changed = copy.deepcopy(manifest)
+    del changed['identity_sha256']
+    changed['experiment_id'] = 'other-experiment'
+    assert prefill._plan_context_sha256(changed) != expected
+    envelope['plan_identity_sha256'] = scientific.freeze_manifest(changed)['identity_sha256']
+    envelope['manifest'] = prefill._publish_document(scientific.freeze_manifest(changed),
+        tmp_path / 'other-manifest.json', 16 << 20)
+    binding = prefill._publish_document(envelope, tmp_path / 'changed.json', 1 << 20)
+    with pytest.raises(scientific.QualityPrefillContractError, match='plan context differs'):
+        prefill.read_task_envelope(binding)
+
+
+@pytest.mark.parametrize('kind', ['content', 'symlink', 'missing', 'size'])
+def test_envelope_binding_itself_requires_original_bytes(tmp_path, kind):
+    _, _, envelope = envelope_fixture(tmp_path)
+    filename = tmp_path / 'envelope.json'
+    binding = prefill._publish_document(envelope, filename, 1 << 20)
+    assert prefill.read_task_envelope(binding) == envelope
+    if kind == 'content': filename.write_bytes(b'{}')
+    elif kind == 'symlink':
+        held = tmp_path / 'held.json'
+        filename.rename(held)
+        filename.symlink_to(held)
+    elif kind == 'missing': filename.unlink()
+    else: binding['bytes'] += 1
+    with pytest.raises((ValueError, FileNotFoundError)):
+        prefill.read_task_envelope(binding)
+
+
 def test_ordered_cover_is_detached_and_preserves_scientific_meaning():
     value = roster()
     checked = prefill.validate_phase_roster(value)
