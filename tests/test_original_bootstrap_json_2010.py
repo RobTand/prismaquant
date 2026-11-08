@@ -7,10 +7,9 @@ from pathlib import Path
 import pytest
 
 from prismaquant import tessera_calibration_cache as cc
-from prismaquant.residency_map import bind_residency_manifest
+from prismaquant.residency_map import bind_residency_manifest, residency_resolver
 from test_capture_original_material import _bound, _owner, _sha, material  # noqa: F401
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from native_original_fixtures import _stage_manifest, _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
@@ -42,7 +41,7 @@ def test_native_authenticated_index_refuses_ambiguous_or_nonfinite_json(
     root = m['tmp'] / 'index-stage'
     root.mkdir()
     _stage_manifest(root, monkeypatch, m['readset'])
-    bind_residency_manifest(MANIFEST)
+    bind_residency_manifest(residency_resolver().manifest.read_contract_sha256)
     with pytest.raises(RuntimeError, match=message):
         with _owner(m):
             pass

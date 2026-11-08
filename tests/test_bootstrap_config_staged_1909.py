@@ -11,9 +11,8 @@ from prismaquant.residency_map import residency_report
 from prismaquant.staged_tier_policy import TierPolicyRefused
 from prismaquant.digests import file_sha256hex
 from test_streamed_metadata_staged_reads import (
-    checkpoint, _activate, _deny_pool_opens,
+    checkpoint, _activate, _deny_pool_opens, _forget_state,
 )
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
