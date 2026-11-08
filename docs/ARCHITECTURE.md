@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, independent native reader positions.
+Source: `prismaquant/residency_map.py`, based on `307a7a61b`.
+The staged resolver retains its original object witness and checks every
+consumer open against it. Each returned descriptor has an independent file
+position, so sequential and concurrent readers cannot inherit another read's
+EOF. Window close still follows joined reader completion.
+
 As of: 2026-11-08, native resident PWC receipts.
 Source: `prismaquant/production_weight_cache.py`, based on `5400e3c49`.
 The IO engine's native immutable input path supplies no canonical-file stat.

@@ -170,9 +170,15 @@ class ResidencyResolver:
                     os.close(fd)
                     raise StagedReadRefused('object length differs from manifest')
                 self._fds[key] = (fd, first)
-            held, first = self._fds[key]
-            self.check_entry(entry, held)
-            return os.dup(held)
+            # dup() would share the witness's file position across readers.
+            # Each consumer needs its own position as well as its own lifetime.
+            fd = open_regular(self._paths[key])
+            try:
+                self.check_entry(entry, fd)
+                return fd
+            except BaseException:
+                os.close(fd)
+                raise
 
     def check_entry(self, entry, fd):
         self._require_owner()

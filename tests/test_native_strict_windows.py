@@ -385,6 +385,22 @@ def test_closed_window_does_not_adopt_reused_descriptor_of_another_reader(tmp_pa
         assert resolver._windows == 0
 
 
+def test_two_windows_have_independent_positions_for_the_same_staged_object(tmp_path, monkeypatch):
+    resolver, entry, source, payload = _window(tmp_path, monkeypatch)
+    with staged_tier_policy_test_context('ssd'):
+        first, key = acquire_entry_window(resolver, source, entry)
+        second, other = acquire_entry_window(resolver, source, entry)
+        with first, second:
+            a, _ = first.open(key)
+            b, _ = second.open(other)
+            assert a != b
+            assert os.read(a, 3) == payload[:3]
+            assert os.read(b, len(payload) + 1) == payload
+            assert os.read(a, len(payload)) == payload[3:]
+            assert resolver._windows == 2
+        assert resolver._windows == 0
+
+
 @pytest.mark.parametrize('fault', ['changed', 'replacement'])
 def test_live_descriptor_rejects_mutation_or_same_bytes_path_replacement(tmp_path, monkeypatch, fault):
     resolver, entry, source, payload = _window(tmp_path, monkeypatch)
