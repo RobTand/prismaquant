@@ -13,9 +13,9 @@ It is a closed, strictly typed, canonically hashed contract.  It reuses the
 package's one hasher (``cost_stage_checkpoint.canonical_json_sha256``) and its
 one strict reader and field checks (``schemas.strict_json_loads`` and
 ``schemas.Contract``) rather than introducing second copies.
-:mod:`prismaquant.quality_prefill_pb_adapter` is this experiment's other half,
-not a copy: it turns one phase into a PrismaBuild logical request, and its
-wrappers raise its own error with PrismaBuild's id grammar (PQ #1302).
+Scientific task payload validation also lives here. The finite native roster
+in :mod:`prismaquant.quality_prefill_flux` uses that same scientific meaning.
+Execution-bearing manifest, observation and driver migration remains separate.
 
 Three rules the specification states and this module enforces mechanically:
 
@@ -60,6 +60,7 @@ TRANSFER_SEAL_SCHEMA = "prismaquant.quality_prefill_experiment.transfer_seal.v1"
 PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_experiment.phase_result.v1"
 ASSIGNMENT_SCHEMA = "prismaquant.quality_prefill_experiment.assignment.v1"
 FRONTIER_REPORT_SCHEMA = "prismaquant.quality_prefill_experiment.frontier_report.v1"
+TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
 
 
 class QualityPrefillContractError(ValueError):
@@ -257,6 +258,7 @@ for _spec in PHASE_DAG:  # pragma: no cover - static guard
 # ---------------------------------------------------------------------------
 
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,127}\Z")
+_TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,255}\Z")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}\Z")
 _GIT_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -348,6 +350,35 @@ def _unresolved_sentinel(value: object, *, where: str) -> None:
 # ---------------------------------------------------------------------------
 # Canonical hashing (reused, never re-implemented)
 # ---------------------------------------------------------------------------
+
+
+def prefill_identifier(value: object, *, where: str) -> str:
+    """One bounded application identifier, independent of execution transport."""
+    return _string(value, where=where, pattern=_TASK_ID_RE)
+
+
+def validate_task_payload(value: object, *, where: str) -> dict[str, object]:
+    """Validate scientific task meaning without consulting an execution SDK."""
+    body = _exact_mapping(value, keys=frozenset({
+        "schema", "serving_unit", "members", "family", "rate", "context_id", "currency",
+    }), where=where)
+    if body["schema"] != TASK_PAYLOAD_SCHEMA:
+        _fail(f"{where}.schema must be {TASK_PAYLOAD_SCHEMA}")
+    members = [
+        prefill_identifier(member, where=f"{where}.members[{index}]")
+        for index, member in enumerate(_sequence(
+            body["members"], where=f"{where}.members", minimum=1,
+        ))
+    ]
+    if len(members) != len(set(members)):
+        _fail(f"{where}.members repeats a member")
+    identifiers = {key: prefill_identifier(body[key], where=f"{where}.{key}")
+                   for key in ("serving_unit", "family", "context_id")}
+    return {
+        "schema": TASK_PAYLOAD_SCHEMA, **identifiers, "members": members,
+        "rate": _integer(body["rate"], where=f"{where}.rate", minimum=1),
+        "currency": _enum(body["currency"], where=f"{where}.currency", allowed=CURRENCIES),
+    }
 
 
 def canonical_sha256(value: object) -> str:

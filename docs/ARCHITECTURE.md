@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, finite native prefill documents, slice3a.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`f1d66889a`. Scientific task payloads have one application-owned validator.
+The explicit roster bounds tasks, children, resources and inputs and requires
+an exact ordered cover. Publication uses the existing nofollow writer and
+bounded reader with parent and writer identities. Runtime evidence is checked
+structurally here; execution and native publication authentication remain
+separate. PB transport and the experiment driver remain unfinished slice3 work.
+No GPU, scientific measurement or production qualification follows from this
+document boundary.
+
 As of: 2026-11-08, remaining native scientific fixture consumers.
 Source: `tests/{test_fleet_acceptance_level1,test_quantum_executable_readset,test_stage_minimal_covers,test_stage_cover_mid_copy_mover}.py`,
 based on `ee4a13ae6`.

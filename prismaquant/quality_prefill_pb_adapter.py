@@ -81,6 +81,7 @@ import re
 from prismaquant.cost_stage_checkpoint import canonical_json
 from prismaquant.digests import DIRECT_UTF8_STRICT, bytes_sha256hex
 from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loads
+from prismaquant import quality_prefill_contract as _prefill
 
 
 # --------------------------------------------------------------------------
@@ -93,7 +94,7 @@ from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loa
 # --------------------------------------------------------------------------
 
 PHASE_PLAN_SCHEMA = "prismaquant.quality_prefill_phase_plan.v1"
-TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
+TASK_PAYLOAD_SCHEMA = _prefill.TASK_PAYLOAD_SCHEMA
 
 LOGICAL_REQUEST_SCHEMA = "prismabuild.logical_request.v1"
 LOGICAL_TASK_ROSTER_SCHEMA = "prismabuild.logical_task_roster.v1"
@@ -111,10 +112,7 @@ TASK_BATCH_PLACEHOLDER = "{pb.task_batch}"
 #: The two measurement currencies the specification names (§3.2).  Closed: a
 #: scalar screen and a validated measured joint price are different claims, and
 #: a third spelling here would let one be reported as the other.
-TASK_CURRENCIES = frozenset({
-    "output_mse_under_route_activation_contract",
-    "joint_aura_predicted_dloss",
-})
+TASK_CURRENCIES = _prefill.CURRENCIES
 
 #: What a phase's children run, and where.  ``pbrun`` attests ``argv[0]`` off
 #: the sealed action, so the interpreter is part of the plan rather than
@@ -131,10 +129,6 @@ _BATCH_LIMIT_KEYS = frozenset({"max_setup_fraction", "max_estimated_wall_seconds
 _WORK_ITEM_KEYS = frozenset({
     "task_id", "output_id", "residency_key", "estimated_seconds",
     "estimate_evidence", "payload",
-})
-_TASK_PAYLOAD_KEYS = frozenset({
-    "schema", "serving_unit", "members", "family", "rate", "context_id",
-    "currency",
 })
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -325,49 +319,10 @@ def document_file_sha256(value: object) -> str:
 
 
 def validate_task_payload(value: object, *, where: str) -> dict[str, object]:
-    """One work item's semantic content, carried opaquely by PrismaBuild.
-
-    PrismaBuild stores the payload and hands it back to the child unchanged; it
-    never looks inside.  So this is the only place the child's instructions are
-    checked, and it is checked before the plan is frozen rather than on the
-    worker, where a refusal has already cost a claim.
-
-    ``members`` is ordered and unique because §2.2 requires a bidirectional
-    member-to-serving-unit map in which every mutable member occurs exactly
-    once; two spellings of one member in one unit would break that count.
-    """
-
-    payload = _exact_mapping(value, keys=_TASK_PAYLOAD_KEYS, where=where)
-    if payload["schema"] != TASK_PAYLOAD_SCHEMA:
-        _fail(f"{where}.schema must be {TASK_PAYLOAD_SCHEMA!r}")
-    members: list[str] = []
-    seen: set[str] = set()
-    for index, raw in enumerate(_sequence(payload["members"],
-                                          where=f"{where}.members")):
-        member = _identifier(raw, where=f"{where}.members[{index}]")
-        if member in seen:
-            _fail(f"{where}.members[{index}] repeats {member!r}")
-        seen.add(member)
-        members.append(member)
-    currency = _text(payload["currency"], where=f"{where}.currency")
-    if currency not in TASK_CURRENCIES:
-        _fail(
-            f"{where}.currency must be one of {sorted(TASK_CURRENCIES)}; a "
-            f"scalar screen and a measured joint price are different claims"
-        )
-    return {
-        "schema": TASK_PAYLOAD_SCHEMA,
-        "context_id": _identifier(payload["context_id"],
-                                  where=f"{where}.context_id"),
-        "currency": currency,
-        "family": _identifier(payload["family"], where=f"{where}.family"),
-        "members": members,
-        # An integer: a rate is a legal code from the Tessera menu, and a float
-        # rate is a rate nobody can serve.
-        "rate": _integer(payload["rate"], where=f"{where}.rate", minimum=1),
-        "serving_unit": _identifier(payload["serving_unit"],
-                                    where=f"{where}.serving_unit"),
-    }
+    try:
+        return _prefill.validate_task_payload(value, where=where)
+    except _prefill.QualityPrefillContractError as exc:
+        raise QualityPrefillAdapterError(str(exc)) from exc
 
 
 def validate_phase_plan(value: object) -> dict[str, object]:
