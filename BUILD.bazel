@@ -6945,7 +6945,6 @@ pq_py_library(
     ],
     deps = [
         ":tools/__init__",
-        ":tools/resolve_prismabuild_dev_pin",
         ":tools/resolve_tessera_dev_pin",
     ],
 )
@@ -11320,7 +11319,10 @@ pq_py_library(
     ],
     data = [
         "tools/check_tessera_dev_install.py",
-        "tools/resolve_tessera_dev_pin.py",
+        "tools/provision_tessera_pin.py",
+    ],
+    deps = [
+        ":tools/provision_tessera_pin",
     ],
 )
 
@@ -13072,21 +13074,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/allocator_cycle",
         ":prismaquant/cost_stage_checkpoint",
-    ],
-)
-
-pq_py_library(
-    name = "tools/resolve_prismabuild_dev_pin",
-    srcs = [
-        "tools/resolve_prismabuild_dev_pin.py",
-    ],
-    data = [
-        "prismaquant/staged_lease.py",
-        "tools/resolve_prismabuild_dev_pin.py",
-        "tools/resolve_tessera_dev_pin.py",
-    ],
-    deps = [
-        ":tools/resolve_tessera_dev_pin",
     ],
 )
 
