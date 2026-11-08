@@ -194,6 +194,15 @@ class FluxJobsTests(unittest.TestCase):
             events += [{'name': 'alloc'}, {'name': 'start'}]
             (self.record / 'scratch.json').write_text(json.dumps({'job_id': submission.job_id, 'path': '/fixture'}))
             (self.record / 'cleanup.json').write_text(json.dumps({'job_id': submission.job_id, 'path': '/fixture', 'removed': cleanup_ok, 'process_group_empty': cleanup_ok}))
+            if malformed == 'scratch-duplicate':
+                path = self.record / 'scratch.json'
+                path.write_bytes(b'{"job_id":"foreign",' + path.read_bytes()[1:])
+            elif malformed == 'cleanup-oversize':
+                (self.record / 'cleanup.json').write_bytes(b' ' * ((1 << 20) + 1))
+            elif malformed == 'cleanup-symlink':
+                path = self.record / 'cleanup.json'
+                path.rename(self.record / 'cleanup-target')
+                path.symlink_to(self.record / 'cleanup-target')
         if finish is not None:
             events.append({'name': 'finish', 'context': {'status': finish}})
         if exception:
@@ -241,6 +250,16 @@ class FluxJobsTests(unittest.TestCase):
         result = self.collect_fixture(cleanup_ok=False)
         self.assertEqual((result.status, result.payload_exit), ('unknown', 0))
         self.assertIn('cleanup unverified', result.query_error)
+
+    def test_cleanup_reads_are_bounded_strict_and_owned(self):
+        positive = self.collect_fixture()
+        self.assertEqual((positive.status, positive.payload_exit), ('succeeded', 0))
+        for mutation in ('scratch-duplicate', 'cleanup-oversize', 'cleanup-symlink'):
+            with self.subTest(mutation=mutation):
+                self.record = self.root / mutation
+                result = self.collect_fixture(malformed=mutation)
+                self.assertEqual((result.status, result.payload_exit), ('unknown', 0))
+                self.assertIn('cleanup unverified', result.query_error)
 
     def test_query_failure_keeps_observed_payload_exit(self):
         result = self.collect_fixture(finish=7 << 8, result=2, malformed='status')

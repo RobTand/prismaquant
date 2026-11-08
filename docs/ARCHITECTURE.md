@@ -8,6 +8,7 @@ The app-owned `prismaquant.flux_result_selection.v1` selects one known native
 ID, record directory, launch SHA256 and immutable publication path/digest/length.
 `native_results` joins independent launch intent to the retained actual original jobspec,
 then requires successful native status, complete events, allocation and cleanup.
+Native status/event/allocation and bounded owned cleanup sidecars use strict JSON.
 The publication binds finite named input/artifact rosters, execution-measured
 interpreter, installed dependency metadata/RECORD and entry-module bytes, and exactly one retained
 publisher announcement. Artifact reads check length, digest and file identity.

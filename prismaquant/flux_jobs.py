@@ -342,16 +342,20 @@ def load_submission(record_dir: Path) -> FluxSubmission:
     return _read_submission(record_dir)[0]
 
 
+def _native_document(raw):
+    from .schemas import strict_json_loads
+    def invalid(key):
+        return ValueError(f'invalid native receipt JSON: {key}')
+    return strict_json_loads(raw, duplicate=invalid, constant=invalid)
+
+
 def _read_submission(record_dir):
     record_dir = Path(record_dir).resolve()
     from .staged_manifest import read_document
-    from .schemas import strict_json_loads
     raw, _ = read_document(record_dir / 'launch.json', 16 << 20)
     receipt_raw, _ = read_document(record_dir / 'submission.json', 1 << 20)
-    def invalid(key):
-        return ValueError(f'invalid native receipt JSON: {key}')
-    intent = strict_json_loads(raw, duplicate=invalid, constant=invalid)
-    receipt = strict_json_loads(receipt_raw, duplicate=invalid, constant=invalid)
+    intent = _native_document(raw)
+    receipt = _native_document(receipt_raw)
     launch_sha = bytes_sha256hex(raw)
     if (not isinstance(intent, dict) or not isinstance(receipt, dict) or
             intent.get('schema') != 'pq.flux.launch.v1' or
@@ -471,7 +475,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
         raw = _query(submission, 'eventlog', ['job', 'eventlog', '--format=json', submission.job_id], errors)
         if raw is not None:
             try:
-                events = [json.loads(line) for line in raw.stdout.splitlines()]
+                events = [_native_document(line) for line in raw.stdout.splitlines()]
                 if not events or any(not isinstance(e, dict) or not isinstance(e.get('name'), str) for e in events):
                     raise ValueError('missing event names')
             except (ValueError, TypeError):
@@ -491,7 +495,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
         raw_r = _query(submission, 'R', ['job', 'info', submission.job_id, 'R'], errors, required=allocated)
         if allocated and raw_r is not None:
             try:
-                allocation = json.loads(raw_r.stdout)
+                allocation = _native_document(raw_r.stdout)
                 if allocation['version'] != 1 or not allocation['execution']['R_lite']:
                     raise ValueError('missing allocation')
             except (ValueError, KeyError, TypeError):
@@ -500,7 +504,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             raw_status = _query(submission, 'status', ['job', 'status', '--json', '--exception-exit-code=125',
                                                        submission.job_id], errors, required=False)
             try:
-                native = json.loads(raw_status.stdout) if raw_status is not None else None
+                native = _native_document(raw_status.stdout) if raw_status is not None else None
                 if (not isinstance(native, dict) or type(native.get('id')) is not int or
                         native['id'] != job_id_number(submission.job_id) or
                         type(native.get('exception_occurred')) is not bool or
@@ -529,8 +533,9 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             status = 'running'
         if 'start' in names and 'clean' in names:
             try:
-                scratch = json.loads((submission.record_dir / 'scratch.json').read_bytes())
-                cleanup = json.loads((submission.record_dir / 'cleanup.json').read_bytes())
+                from .staged_manifest import read_document
+                scratch = _native_document(read_document(submission.record_dir / 'scratch.json', 1 << 20)[0])
+                cleanup = _native_document(read_document(submission.record_dir / 'cleanup.json', 1 << 20)[0])
                 if (job_id_number(scratch['job_id']) != job_id_number(submission.job_id) or
                         job_id_number(cleanup['job_id']) != job_id_number(submission.job_id) or
                         cleanup['path'] != scratch['path'] or cleanup['removed'] is not True or
