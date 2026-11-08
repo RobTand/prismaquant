@@ -7,7 +7,7 @@ versioned binding. Native publication and pilot authority remain unqualified.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -32,6 +32,7 @@ _THREADS = ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'TORCH
 _PROPERTIES = frozenset(('x86_64', 'aarch64', 'gb10', 'unified-memory'))
 _HOSTS = frozenset(('dl380g10', 'sparky', 'sparklina'))
 Status = Literal['succeeded', 'failed', 'canceled', 'dependency-failed', 'running', 'unknown']
+_FAILURES = frozenset(('failed', 'canceled', 'dependency-failed'))
 
 
 @dataclass(frozen=True)
@@ -448,13 +449,55 @@ def _query(submission, name, args, errors, *, required=True, timeout=30):
         errors.append(f'{name}: {type(exc).__name__}')
         return None
     out = submission.record_dir
-    (out / f'{name}.json').write_text(result.stdout)
-    (out / f'{name}.stderr').write_text(result.stderr)
-    (out / f'{name}.returncode').write_text(str(result.returncode) + '\n')
+    try:
+        (out / f'{name}.json').write_text(result.stdout)
+        (out / f'{name}.stderr').write_text(result.stderr)
+        (out / f'{name}.returncode').write_text(str(result.returncode) + '\n')
+    except OSError as exc:
+        errors.append(f'{name}: persistence {type(exc).__name__}')
     if required and result.returncode:
         errors.append(f'{name}: query exit {result.returncode}')
         return None
     return result
+
+
+def _execution_errors(result, errors):
+    if not errors:
+        return result
+    return replace(result, status=result.status if result.status in _FAILURES else 'unknown',
+                   query_error='; '.join([*([result.query_error] if result.query_error else []), *errors]))
+
+
+def _persist_execution(submission, result, filename='result.json'):
+    try:
+        _publish_flux_json(submission.record_dir / filename,
+            {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir),
+             'launch_sha256': submission.launch_sha256})
+    except OSError as exc:
+        result = _execution_errors(result, [f'{filename}: persistence {type(exc).__name__}'])
+    return result
+
+
+def _previous_failure(submission):
+    """Retain only a locally bound failure observation, never cached success."""
+    from .staged_manifest import read_document
+    _saved_launch(submission)
+    path = submission.record_dir / 'result.json'
+    if not path.exists():
+        return None
+    previous = _native_document(read_document(path, 1 << 20)[0])
+    if not isinstance(previous, dict):
+        raise ValueError('invalid prior native result')
+    if (previous.get('schema') == 'pq.flux.result.v1'
+            and previous.get('launch_sha256') == submission.launch_sha256
+            and previous.get('record_dir') == str(submission.record_dir)
+            and job_id_number(previous['job_id']) == job_id_number(submission.job_id)
+            and previous.get('status') in _FAILURES
+            and (previous.get('payload_exit') is None or type(previous['payload_exit']) is int)
+            and (previous.get('query_error') is None or isinstance(previous['query_error'], str))):
+        return ExecutionResult(previous['status'], submission.job_id, submission.record_dir,
+                               previous['payload_exit'], previous['query_error'])
+    return None
 
 
 def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionResult:
@@ -465,11 +508,18 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
     SIGKILL/node loss can prevent scratch cleanup and need owner reconciliation.
     """
     errors, cleanup_errors, events, payload_exit, status = [], [], [], None, 'unknown'
+    previous = None
+    try:
+        previous = _previous_failure(submission)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(f'previous observation: {type(exc).__name__}')
+    identity_ok = False
     try:
         _validate_submission(submission)
+        identity_ok = True
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         errors.append(f'identity: {type(exc).__name__}: {exc}')
-    if not errors:
+    if identity_ok:
         if wait:
             _query(submission, 'wait', ['job', 'wait-event', submission.job_id, 'clean'], errors, timeout=None)
         raw = _query(submission, 'eventlog', ['job', 'eventlog', '--format=json', submission.job_id], errors)
@@ -546,14 +596,16 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                 cleanup_errors.append('scratch: cleanup unverified; reconcile owned descendants and path')
     for name in ('stdout', 'stderr'):
         if not (submission.record_dir / name).exists():
-            (submission.record_dir / f'{name}.missing').write_text('No redirected payload stream observed.\n')
-    result = ExecutionResult('unknown' if errors or (cleanup_errors and status not in
-                             ('failed', 'canceled', 'dependency-failed')) else status,
-                             submission.job_id, submission.record_dir,
-                             payload_exit, '; '.join([*errors, *cleanup_errors]) or None)
-    _publish_flux_json(submission.record_dir / 'result.json',
-                {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
-    return result
+            try:
+                (submission.record_dir / f'{name}.missing').write_text('No redirected payload stream observed.\n')
+            except OSError as exc:
+                errors.append(f'{name}: persistence {type(exc).__name__}')
+    result = ExecutionResult(status, submission.job_id, submission.record_dir, payload_exit)
+    if previous is not None:
+        if status in _FAILURES and (status, payload_exit) != (previous.status, previous.payload_exit):
+            errors.append('native failure observations conflict; reconcile retained evidence')
+        result = previous
+    return _persist_execution(submission, _execution_errors(result, [*errors, *cleanup_errors]))
 
 
 def cancel_job(submission: FluxSubmission) -> ExecutionResult:
@@ -561,17 +613,12 @@ def cancel_job(submission: FluxSubmission) -> ExecutionResult:
     try:
         _validate_submission(submission)
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        result = ExecutionResult('unknown', submission.job_id, submission.record_dir,
-                                 query_error=f'cancel identity: {type(exc).__name__}: {exc}')
-        _publish_flux_json(submission.record_dir / 'cancel-result.json',
-                    {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
-        return result
+        result = _execution_errors(collect_job(submission, wait=False),
+                                   [f'cancel identity: {type(exc).__name__}: {exc}'])
+        return _persist_execution(submission, result, 'cancel-result.json')
     errors = []
     _query(submission, 'cancel', ['cancel', submission.job_id], errors)
     result = collect_job(submission)
     if errors:
-        result = ExecutionResult('unknown', result.job_id, result.record_dir, result.payload_exit,
-                                 '; '.join([*errors, *([result.query_error] if result.query_error else [])]))
-        _publish_flux_json(submission.record_dir / 'cancel-result.json',
-                    {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
+        result = _persist_execution(submission, _execution_errors(result, errors), 'cancel-result.json')
     return result

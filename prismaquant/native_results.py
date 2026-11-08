@@ -227,15 +227,15 @@ def read_selected_result(selection: dict) -> SelectedResult:
                 flux_jobs.job_id_number(saved.job_id) != flux_jobs.job_id_number(selection['job_id']) or
                 saved.launch_sha256 != selection['launch_sha256']):
             raise ValueError('native result: selected producer coordinates differ')
-        launch = flux_jobs.verify_native_launch(saved,
-            max_evidence_bytes=selection['max_evidence_bytes'],
-            **{**expected, 'resources': flux_jobs.FluxResources(**expected['resources'])})
         execution = flux_jobs.collect_job(saved)
         # A conclusive native failure keeps its classification even if cleanup failed.
         if execution.status in ('failed', 'canceled', 'dependency-failed'):
             raise ProducerFailed(execution)
         if execution.status != 'succeeded' or execution.query_error:
             raise ResultUnavailable(f'native execution unavailable: {execution.status}; {execution.query_error}')
+        launch = flux_jobs.verify_native_launch(saved,
+            max_evidence_bytes=selection['max_evidence_bytes'],
+            **{**expected, 'resources': flux_jobs.FluxResources(**expected['resources'])})
         evidence = 0
         for name in ('eventlog.json', 'status.json', 'R.json', 'stdout', 'stderr'):
             stream, _ = read_document(saved.record_dir / name, selection['max_evidence_bytes'] - evidence)

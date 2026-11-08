@@ -1,10 +1,15 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-08, parent review of native result authority.
-Source: `prismaquant/flux_jobs.py`, based on `00835757925118c1a3fb554264fec8f5dfb94b04`.
+As of: 2026-11-08, parent review of native failure evidence.
+Source: `prismaquant/{flux_jobs,native_results}.py`, based on `7cb15a3e0a6eca4a8943d4c2b5b6ba68357b6adf`.
 A valid native completed payload followed by a fatal execution exception stays
 failed. Its observed payload exit remains separate from the fatal native ending,
-and missing cleanup cannot erase that conclusive failure. Parent pre-fix job
+and missing cleanup cannot erase that conclusive failure. Ancillary wait,
+allocation, cancellation and evidence-write errors remain diagnostics beside
+authenticated failure. Saved failure observations bind the exact launch and ID;
+later unavailable queries cannot erase them. Success is always re-observed and
+requires complete evidence. Selected results collect execution before checking
+optional publication evidence. Parent pre-fix job
 `ƒEN8nirvum` reproduced the classification gap; the admitted focused regression
 and policy checks are recorded under `evidence/unit4-parent-authority/` in the
 shared migration directory. The authority slice remains under parent review;
