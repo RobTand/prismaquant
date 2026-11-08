@@ -8367,6 +8367,18 @@ filegroup(
 )
 
 pq_py_library(
+    name = "native_prefill_cpu_fixture",
+    srcs = [
+        "native_prefill_cpu_fixture.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/quality_prefill_flux",
+    ],
+)
+
+pq_py_library(
     name = "pqtel/__init__",
     srcs = [
         "pqtel/__init__.py",
