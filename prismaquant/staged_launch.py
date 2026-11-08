@@ -97,7 +97,7 @@ def launch(binding, command):
     if manifest.lifetime['mode'] == 'host_local_cache':
         members = Path(os.environ['TMPDIR']) / 'staged-members.json'
         publish_staged_json(members, manifest.members())
-        os.execv('/usr/bin/python3', ['/usr/bin/python3', CACHE_HELPER,
+        os.execv('/usr/bin/python3', ['/usr/bin/python3', '-s', CACHE_HELPER,
             '--root', manifest.lifetime['root'], 'run-set', '--members', str(members), '--', *command])
     os.execvpe(command[0], command, os.environ)
 

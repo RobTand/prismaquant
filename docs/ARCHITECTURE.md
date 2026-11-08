@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, canonical staged-cache Python isolation.
+Source: `prismaquant/staged_launch.py`, based on `818cc8991e3e939471650ce93a09bb1ff0368b29`.
+The host-local staged launcher invokes the single external fluxcache helper
+with Python `-s`, preserving its run-set CLI and inherited pin descriptors.
+Strict-reader fixture migration uses the existing immutable materializer and
+IO engine with job-owned retained phases. This does not qualify production
+source/runtime, numerical behavior or container cache descriptor inheritance.
+
 As of: 2026-11-08, census-discovered scientific and experiment callers.
 Source: `tests/{test_stage_a_bands,test_stage_a_head_skip}.py` and
 `experiments/alloc_lead_asd/tiny_glm_control.py`, based on `5921b1d36`.
