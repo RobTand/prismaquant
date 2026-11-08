@@ -103,6 +103,7 @@ def native_staged_state(monkeypatch):
     """Own native staged globals and environment for one test, with no SDK."""
     from prismaquant import residency_map, stage_b_prep_io, staged_tier_policy
 
+    monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2')
     for name in ('PRISMAQUANT_STAGED_MANIFEST', 'PRISMAQUANT_STAGED_MANIFEST_SHA256',
                  'PRISMAQUANT_READ_CONTRACT_SHA256', 'PRISMAQUANT_READ_CONTRACT_PATH',
                  'PRISMAQUANT_STAGED_ALLOWED_TIERS', 'FLUXCACHE_MAP_FILE'):

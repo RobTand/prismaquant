@@ -140,7 +140,7 @@ def test_explicit_offline_unstaged_read_preserves_known_bytes_and_pool_accountin
         declared.write_bytes(b'a-different-input')
         resolver = bind(monkeypatch, publish_inputs(tmp_path, [declared]))
     assert active_policy() is None
-    value, observed = io_engine.load_file(source, len(payload),
+    value, observed = io_engine.load_file(source, len(payload), binding=None,
         decode=lambda raw, receipt, staged: (bytes(raw), None))
     assert value == payload and observed[0]['sha256'] == sha(payload)
     if resolver is not None:
