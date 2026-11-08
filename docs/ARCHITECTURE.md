@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, unit4 slice4A native selected-result and original-source controls.
+Source: parent `6dc0d5e1bddd2aa81dc55f91f193fb57471e1dff`,
+`prismaquant/{native_results,flux_jobs,source_generation,tessera_calibration_cache}.py`
+and their direct CPU fixtures/qualification producers.
+The app-owned `prismaquant.flux_result_selection.v1` selects one known native
+ID, record directory, launch SHA256 and immutable publication path/digest/length.
+`native_results` joins independent launch intent to the actual original jobspec,
+then requires successful native status, complete events, allocation and cleanup.
+The publication binds finite named input/artifact rosters, execution-measured
+interpreter and installed dependency metadata/RECORD, and exactly one retained
+publisher announcement. Artifact reads check length, digest and file identity.
+ASCII/Unicode f58 IDs share native identity. Resume reads the saved ID and never
+submits. Conclusive native failure survives cleanup errors; query/evidence errors
+cannot authorize a result. No scheduler, service, CAS or result cache is added.
+Original runtime v2 replaces the PB helper/worker/proxy seal with measured native
+runtime. Publisher whole-roster Git/LFS authority and immutable read-contract
+parsing use the existing staged reader, IO and owned-buffer accounting.
+Actual full64 CUDA, independent root matched-source admission, source-family,
+calibration, execution, material/copy completion, format and serving gates remain.
+CPU fixtures prove transport and real original material/CPU arithmetic only.
+The qualification controller runs inside its caller's explicitly admitted
+interpreter/image; it no longer invokes a PB container adapter or publishes CAS
+artifacts. GPU execution is still refused by the current native CPU profile.
+No GPU qualification, performance, full-suite or production claim follows.
+Slice4B still owns produced batches/spool and forward recovery. Slice4C owns
+prefill, package/dependency pins and other selected-result consumers. The direct
+original CUDA inner dependency pack retains its existing package-pin contract
+for 4C; no old proof is relabeled as native. Slice4E owns integrated qualification.
+Evidence and retained failures: `/mnt/shared/flux-migration/pq-tessera/evidence/unit4-authority/`.
+Parent independent review/integration is required.
+
 As of: 2026-11-07, parent review of integrated native staged inputs.
 Source: local reader head `176681e27cab45923d348cb27f91844c4a42e040`
 and parent corrections through `b52bd5450`.

@@ -2688,8 +2688,7 @@ def validate_original_source_material_receipt(value, authority):
             'retired original delivery still claims a live consumer')
         native = _exact(row['native_delivery'], ORIGINAL_NATIVE_DELIVERY_KEYS, 'actual native original delivery')
         _contract.sha256(native['staged_manifest_sha256'], where='actual staged manifest')
-        _same(native['read_contract_sha256'], authority['readset']['sha256'],
-              'actual immutable source read contract')
+        _contract.sha256(native['read_contract_sha256'], where='actual enclosing read contract')
         _same(native['range_ref'], residency_map_key(paths[name], 0), 'actual native whole-file range')
         _contract.string(native['pin_id'], where='actual retained source phase')
         for key in ('source_fd_stat', 'sealed_fd_stat'):

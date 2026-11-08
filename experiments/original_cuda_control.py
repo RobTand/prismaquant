@@ -1,4 +1,4 @@
-"""Finite PB fixture action using the existing container adapter and raw Netdata."""
+"""Finite native original-source qualification in an explicitly admitted runtime."""
 import argparse
 import concurrent.futures
 import hashlib
@@ -20,7 +20,6 @@ file_stat_signature=profile_source_owner('file_identity').file_stat_signature
 
 PQ_IMAGE='d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_power_draw'}
-_ARTIFACT_CAS_SDK_VERSIONS = frozenset((5, 6, 7))
 
 
 def netdata(host,endpoint):
@@ -77,66 +76,18 @@ def collect(host,charts,after,before,out):
     (out/('netdata-'+host+'.json')).write_text(json.dumps(record,indent=2)+'\n')
     return dict(host=host,charts=len(series))
 
-def artifact_identity(path):
-    """Bind the exact regular artifact bytes, never a mutable path alone."""
-    path=Path(path)
-    fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK)
-    with os.fdopen(fd,'rb') as stream:
-        before=os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before.st_size<=0:
-            raise RuntimeError('published artifact is missing/empty/nonregular: '+str(path))
-        digest=hashlib.file_digest(stream,'sha256').hexdigest()
-        if (file_stat_signature(os.fstat(stream.fileno()))!=file_stat_signature(before)
-                or file_stat_signature(os.stat(path,follow_symlinks=False))!=file_stat_signature(before)):
-            raise RuntimeError('published artifact changed while binding: '+str(path))
-    return dict(path=str(path),bytes=before.st_size,sha256=digest)
-
-
-def artifact_cas(root):
-    """Use the launch-owned immutable-input CAS without numeric host imports."""
-    if root is None:
-        raise RuntimeError('actual control publication requires an explicit sealed CAS root')
-    from tools.tessera_campaign_container import reader_context_environment
-    context,_=reader_context_environment({},os.environ)
-    if not context:
-        raise RuntimeError('actual control publication requires the launch-owned reader context')
-    source=Path(context['PRISMABUILD_READER_HELPER_ROOT'])/'src'
-    sys.path.insert(0,str(source))
-    from prismabuild import client, core
-    if client.SDK_VERSION not in _ARTIFACT_CAS_SDK_VERSIONS:
-        raise RuntimeError('actual artifact publication requires a qualified immutable-input CAS helper')
-    if any(not getattr(module,'__file__',None)
-           or not Path(module.__file__).resolve().is_relative_to(source)
-           for name,module in sys.modules.items()
-           if name=='prismabuild' or name.startswith('prismabuild.')):
-        raise RuntimeError('artifact publication imported a mixed or foreign helper generation')
-    return core.PrismaBuildCAS(root)
-
-
-def retain_artifact(cas,role,path,identity=None):
-    """Retain real bytes through PB's existing immutable input owner."""
-    identity=artifact_identity(path) if identity is None else identity
-    entry,_=cas.ingest_input(path,input_id='original-source-artifact.'+role,
-        expected_sha256=identity['sha256'],expected_bytes=identity['bytes'])
-    durable=cas.input_path(entry)
-    return dict(path=str(durable),sha256=entry['sha256'],bytes=entry['bytes'])
-
-
-def publish_control_artifacts(node_id,out,profile_evidence,cas):
-    """Make the selected stdout CAS result bind the actual node's sidecars."""
-    controls=list((out/'controls').glob('*.json'))
-    if len(controls)!=1:
+def publish_control_artifacts(node_id, out, profile_evidence, *, inputs, max_artifact_bytes):
+    """Publish actual sidecars through the single native result boundary."""
+    from prismaquant.native_results import publish_result
+    controls = list((out / 'controls').glob('*.json'))
+    if len(controls) != 1:
         raise RuntimeError('successful node requires exactly one actual control artifact')
-    paths=dict(control=controls[0],execution=out/'test-result.json',
-               action_result=out/'action-result.json',netdata_sparky=out/'netdata-sparky.json',
-               netdata_sparklina=out/'netdata-sparklina.json')
-    artifacts={role:retain_artifact(cas,role,path) for role,path in paths.items()}
-    artifacts['torch_trace']=profile_evidence
-    publication=dict(schema='prismaquant.original_source_artifact_publication.v1',
-                     node_id=node_id,artifacts=artifacts)
-    print('ORIGINAL_SOURCE_ARTIFACTS '+json.dumps(publication,sort_keys=True,
-          separators=(',',':'),allow_nan=False),flush=True)
-
+    paths = dict(control=controls[0], execution=out / 'test-result.json',
+        action_result=out / 'action-result.json', netdata_sparky=out / 'netdata-sparky.json',
+        netdata_sparklina=out / 'netdata-sparklina.json', torch_trace=Path(profile_evidence['path']))
+    return publish_result(out / 'publication.json', producer_id=node_id, inputs=inputs,
+                          artifacts=paths, dependencies=('torch', 'transformers', 'tessera-quant'),
+                          max_artifact_bytes=max_artifact_bytes)
 
 
 def main():
@@ -147,7 +98,8 @@ def main():
     p.add_argument('--node-id')
     p.add_argument('--cpu-preflight',action='store_true')
     p.add_argument('--cuda-entry-preflight',action='store_true')
-    p.add_argument('--cas-root',type=Path)
+    p.add_argument('--trace', type=Path)
+    p.add_argument('--max-artifact-bytes', type=int, default=64 << 20)
     a=p.parse_args()
     if sum((a.cpu_preflight,a.cuda_entry_preflight,bool(a.node_id)))!=1:
         raise RuntimeError('exactly CPU preflight, CUDA entry proof or one GPU control is required')
@@ -155,7 +107,10 @@ def main():
     setup_start=time.time()
     charts={}
     try:
-        cas=artifact_cas(a.cas_root) if a.node_id else None
+        from prismaquant.native_results import execution_context
+        context = execution_context()
+        if not a.cpu_preflight and context['resources']['gpus'] < 1:
+            raise RuntimeError('actual CUDA qualification requires native GPU admission')
         if not a.cpu_preflight:
             for host in ('sparky','sparklina'):
                 selected={key:value for key,value in netdata(host,'charts')['charts'].items()
@@ -165,26 +120,22 @@ def main():
                 if any(type(meta.get('update_every')) is not int or meta['update_every']<=0 for meta in selected.values()):
                     raise RuntimeError('required Netdata cadence missing')
                 charts[host]=selected
-        env=dict(PYTHONPATH='/workspace:/workspace/tests',OMP_NUM_THREADS='1',
-                 MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',NUMEXPR_NUM_THREADS='1',
-                 HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',PYTHONDONTWRITEBYTECODE='1',
-                 TMPDIR='/qualification/tmp',PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT='/qualification/controls')
-        mounts=[dict(source=str(a.dependencies.parent),target='/dependencies',readonly=True),
-                dict(source=str(a.out),target='/qualification',readonly=False)]
-        profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+        env = dict(os.environ)
+        env.update(PYTHONPATH=str(Path.cwd()) + ':' + str(Path.cwd() / 'tests'),
+            OMP_NUM_THREADS='1', MKL_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1',
+            HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', PYTHONDONTWRITEBYTECODE='1',
+            TMPDIR=str(a.out / 'tmp'), PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT=str(a.out / 'controls'))
+        profile = str(a.trace) if a.trace else None
         if not a.cpu_preflight:
-            if not profile or os.environ.get('CUDA_VISIBLE_DEVICES')=='':
-                raise RuntimeError('actual GPU scope/profile grant missing')
+            if not profile:
+                raise RuntimeError('actual GPU qualification needs an explicit Torch trace path')
+            env['PRISMAQUANT_ORIGINAL_TORCH_TRACE'] = profile
             if not a.cuda_entry_preflight:
-                env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST']='1'
-            env['PRISMABUILD_PROFILE_TORCH_OUT']='/profile/'+Path(profile).name
-            mounts.append(dict(source=str(Path(profile).parent),target='/profile',readonly=False))
+                env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST'] = '1'
         (a.out/'tmp').mkdir()
-        spec=dict(cpu_memory_gb=4,container=dict(image='prismaquant-glm-derivative:causal-exp-v1-20260908',
-                  content_sha256=PQ_IMAGE,mounts=mounts),env=env)
-        command=['python3','-P','/workspace/experiments/original_cuda_inner.py',
-                 '--dependencies','/dependencies/'+a.dependencies.name,
-                 '--dependencies-sha256',a.dependencies_sha256,'--out','/qualification']
+        command=[sys.executable, '-m', 'experiments.original_cuda_inner',
+                 '--dependencies',str(a.dependencies),
+                 '--dependencies-sha256',a.dependencies_sha256,'--out',str(a.out)]
         if a.cpu_preflight:
             command+=['--cpu-preflight']
         elif a.cuda_entry_preflight:
@@ -204,12 +155,7 @@ def main():
     start=time.time()
     code=None
     try:
-        # The existing adapter execs Docker. Supervise its CLI as a child so
-        # this owner can bind the trace, collect both raw host windows and
-        # preserve the actual container ending; never shadow runtime /run.
-        code=subprocess.run([sys.executable,'-m','tools.tessera_campaign_container',
-            '--spec',json.dumps(spec),*(['--cpu-only'] if a.cpu_preflight else []),
-            '--',*command],check=False).returncode
+        code=subprocess.run(command, env=env, check=False).returncode
     finally:
         finish=time.time()
         observations=[]
@@ -218,9 +164,9 @@ def main():
         profile_errors=[]
         if not a.cpu_preflight:
             try:
-                profile_evidence=artifact_identity(profile)
-                if code==0 and a.node_id:
-                    profile_evidence=retain_artifact(cas,'torch_trace',profile,profile_evidence)
+                from prismaquant.native_results import artifact_binding
+                measured=artifact_binding(Path(profile), max_bytes=a.max_artifact_bytes)
+                profile_evidence={key: measured[key] for key in ('path', 'sha256', 'bytes')}
             except BaseException as exc:
                 profile_errors.append(dict(path=profile,error=f'{type(exc).__name__}: {exc}'))
         if charts:
@@ -241,7 +187,10 @@ def main():
         if errors or profile_errors:
             raise RuntimeError('required raw Netdata/Torch trace evidence incomplete: '+repr(errors+profile_errors))
         if code==0 and a.node_id:
-            publish_control_artifacts(a.node_id,a.out,profile_evidence,cas)
+            publish_control_artifacts(a.node_id, a.out, profile_evidence,
+                inputs={'dependencies': {'path': str(a.dependencies), 'sha256': a.dependencies_sha256,
+                                          'bytes': a.dependencies.stat().st_size}},
+                max_artifact_bytes=a.max_artifact_bytes)
     return code
 
 

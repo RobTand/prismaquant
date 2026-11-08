@@ -1,96 +1,54 @@
-"""Selected-result byte binding, not a synthetic CUDA/provider qualification."""
+"""Bound native sidecars, never a synthetic CUDA/source qualification."""
 import hashlib
 import json
-import subprocess
-import sys
+from pathlib import Path
 
 import pytest
 
-from experiments.original_cuda_control import artifact_identity, publish_control_artifacts, retain_artifact
+from experiments.original_cuda_control import publish_control_artifacts
+from prismaquant import native_results as nr, source_generation as sg
 
 
-def test_publication_binds_all_actual_node_sidecars(tmp_path, capsys):
-    from prismabuild.core import PrismaBuildCAS
-
+@pytest.fixture
+def sidecars(tmp_path, monkeypatch):
+    # Unit fixture for the writer only. Real native provenance is exercised by
+    # tools/native_result_cpu_proof.py through the admitted native proof.
+    monkeypatch.setattr(nr, 'execution_context', lambda: {'unit_fixture': True})
     (tmp_path / 'controls').mkdir()
-    roles = {
-        'control': tmp_path / 'controls' / 'actual.json',
-        'execution': tmp_path / 'test-result.json',
-        'action_result': tmp_path / 'action-result.json',
+    roles = {'control': tmp_path / 'controls' / 'actual.json',
+        'execution': tmp_path / 'test-result.json', 'action_result': tmp_path / 'action-result.json',
         'netdata_sparky': tmp_path / 'netdata-sparky.json',
-        'netdata_sparklina': tmp_path / 'netdata-sparklina.json',
-        'torch_trace': tmp_path / 'trace.json',
-    }
+        'netdata_sparklina': tmp_path / 'netdata-sparklina.json', 'torch_trace': tmp_path / 'trace.json'}
     for role, path in roles.items():
         path.write_bytes((role + '\n').encode())
-    cas = PrismaBuildCAS(tmp_path / 'cas')
-    profile = retain_artifact(cas, 'torch_trace', roles['torch_trace'])
-    publish_control_artifacts('actual-node', tmp_path, profile, cas)
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 1 and lines[0].startswith('ORIGINAL_SOURCE_ARTIFACTS ')
-    encoded = lines[0].removeprefix('ORIGINAL_SOURCE_ARTIFACTS ')
-    value = json.loads(encoded)
-    assert encoded == json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
-    assert set(value) == {'schema', 'node_id', 'artifacts'}
-    assert value['schema'] == 'prismaquant.original_source_artifact_publication.v1'
-    assert value['node_id'] == 'actual-node'
-    assert set(value['artifacts']) == set(roles)
+    control = tmp_path / 'input.txt'; control.write_bytes(b'known explicit input\n')
+    inputs = {'control': {'path': str(control), 'sha256': hashlib.sha256(control.read_bytes()).hexdigest(),
+                           'bytes': len(b'known explicit input\n')}}
+    return roles, inputs
+
+
+def test_publication_binds_all_actual_node_sidecars(tmp_path, sidecars, capsys):
+    roles, inputs = sidecars
+    binding = publish_control_artifacts('actual-node', tmp_path,
+        {'path': str(roles['torch_trace'])}, inputs=inputs, max_artifact_bytes=4096)
+    raw = Path(binding['path']).read_bytes()
+    assert len(raw) == binding['bytes'] and hashlib.sha256(raw).hexdigest() == binding['sha256']
+    publication = json.loads(raw)
+    assert publication['schema'] == nr.PUBLICATION_SCHEMA
+    assert publication['producer_id'] == 'actual-node'
+    assert set(publication['artifacts']) == set(roles)
     for role, path in roles.items():
-        raw = path.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
-        durable = cas.input_path({'id': 'published-' + role, 'sha256': digest, 'bytes': len(raw)})
-        assert value['artifacts'][role] == {
-            'path': str(durable), 'bytes': len(raw), 'sha256': digest}
-        assert durable.read_bytes() == raw
-        assert durable.stat().st_mode & 0o222 == 0
-
-
-def test_original_publication_reader_keeps_ascii_strict_unicode_bytes():
-    from prismaquant import source_generation as sg
-
-    node = 'actual-café-\ud800'
-    artifacts = {'control': {'path': '/actual/control', 'sha256': 'a' * 64, 'bytes': 1}}
-    publication = {'schema': 'prismaquant.original_source_artifact_publication.v1',
-                   'node_id': node, 'artifacts': artifacts}
-    raw = json.dumps(publication, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
-    assert b'caf\\u00e9-\\ud800' in raw
-    assert sg._original_artifact_publication(sg.ORIGINAL_ARTIFACT_PUBLICATION_PREFIX + raw,
-        node_id=node, roles={'control'}) == artifacts
-
-
-@pytest.mark.parametrize(('raw', 'message', 'cause'), [
-    (b'{"schema":1,"schema":2}', 'artifact publication duplicate key schema', None),
-    (b'{"schema":NaN}', 'artifact publication invalid constant NaN', None),
-    (b'{"schema":Infinity}', 'artifact publication invalid constant Infinity', None),
-    (b'{"schema":-Infinity}', 'artifact publication invalid constant -Infinity', None),
-    (b'\xff', 'selected artifact publication is not strict JSON', UnicodeDecodeError),
-    (b'{', 'selected artifact publication is not strict JSON', json.JSONDecodeError),
-])
-def test_original_publication_reader_keeps_strict_errors(raw, message, cause):
-    from prismaquant import source_generation as sg
-
-    with pytest.raises(RuntimeError) as caught:
-        sg._original_artifact_publication(sg.ORIGINAL_ARTIFACT_PUBLICATION_PREFIX + raw,
-                                         node_id='actual-node', roles={'control'})
-    assert str(caught.value) == message
-    assert (None if caught.value.__cause__ is None else type(caught.value.__cause__)) is cause
-
-
-@pytest.mark.parametrize('encoding', ['spaced', 'literal-unicode'])
-def test_original_publication_reader_refuses_noncanonical_encoding(encoding):
-    from prismaquant import source_generation as sg
-
-    publication = {'schema': 'prismaquant.original_source_artifact_publication.v1',
-                   'node_id': 'actual-café', 'artifacts': {}}
-    options = {'sort_keys': True, 'allow_nan': False}
-    if encoding == 'literal-unicode':
-        options.update(separators=(',', ':'), ensure_ascii=False)
-    raw = json.dumps(publication, **options).encode()
-    with pytest.raises(RuntimeError) as caught:
-        sg._original_artifact_publication(sg.ORIGINAL_ARTIFACT_PUBLICATION_PREFIX + raw,
-                                         node_id=publication['node_id'], roles=set())
-    assert str(caught.value) == 'original generation: canonical actual artifact publication: identity mismatch'
-
+        row = publication['artifacts'][role]
+        assert row['path'] == str(path) and row['bytes'] == len((role + '\n').encode())
+        assert nr._owned({k: row[k] for k in ('path', 'sha256', 'bytes')}, 4096,
+                         identity=row['file_identity']) == (role + '\n').encode()
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    announcement = json.loads(lines[0].removeprefix(nr.ANNOUNCEMENT_PREFIX.decode()))
+    assert announcement == {'schema': nr.ANNOUNCEMENT_SCHEMA, **binding}
+    with pytest.raises(FileExistsError):
+        publish_control_artifacts('actual-node', tmp_path, {'path': str(roles['torch_trace'])},
+                                  inputs=inputs, max_artifact_bytes=4096)
 
 
 @pytest.mark.parametrize('kind', ['empty', 'directory', 'symlink'])
@@ -99,13 +57,11 @@ def test_artifact_binding_refuses_nonregular_empty_or_indirect_bytes(tmp_path, k
     if kind == 'directory':
         path.mkdir()
     elif kind == 'symlink':
-        target = tmp_path / 'target'
-        target.write_bytes(b'not an authenticated path alias')
-        path.symlink_to(target)
+        target = tmp_path / 'target'; target.write_bytes(b'known bytes'); path.symlink_to(target)
     else:
         path.touch()
-    with pytest.raises((OSError, RuntimeError)):
-        artifact_identity(path)
+    with pytest.raises((OSError, ValueError)):
+        nr.artifact_binding(path, max_bytes=4096)
 
 
 @pytest.mark.parametrize('count', [0, 2])
@@ -114,41 +70,11 @@ def test_publication_refuses_missing_or_ambiguous_control(tmp_path, capsys, coun
     for index in range(count):
         (tmp_path / 'controls' / f'{index}.json').write_bytes(b'control')
     with pytest.raises(RuntimeError, match='exactly one actual control'):
-        publish_control_artifacts('actual-node', tmp_path, None, None)
+        publish_control_artifacts('actual-node', tmp_path, None, inputs={}, max_artifact_bytes=4096)
     assert capsys.readouterr().out == ''
 
 
-def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
-    from prismabuild.core import PrismaBuildCAS
-
-    path = tmp_path / 'granted-trace'
-    path.write_bytes(b'actual original granted bytes')
-    identity = artifact_identity(path)
-    path.write_bytes(b'different replacement bytes')
-    with pytest.raises((ValueError, RuntimeError), match="ingested input"):
-        retain_artifact(PrismaBuildCAS(tmp_path / 'cas'), 'torch_trace', path, identity)
-
-
-def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path):
-    program = (
-        'import hashlib, json, os, sys; from pathlib import Path; '
-        'from experiments.original_cuda_control import artifact_cas, _ARTIFACT_CAS_SDK_VERSIONS; '
-        'cas=artifact_cas(sys.argv[1]); from prismabuild import client; '
-        'source=Path(os.environ["PRISMABUILD_READER_HELPER_ROOT"])/"src"; '
-        'assert Path(client.__file__).resolve().is_relative_to(source); '
-        'assert "prismaquant" not in sys.modules and "torch" not in sys.modules; '
-        'payload=b"cold launch-owned CAS bytes"; artifact=Path(sys.argv[1]).parent/"input.bin"; '
-        'artifact.write_bytes(payload); digest=hashlib.sha256(payload).hexdigest(); '
-        'entry,_=cas.ingest_input(artifact,input_id="cold-input",expected_sha256=digest,expected_bytes=len(payload)); '
-        'stored=cas.input_path(entry); '
-        'print(json.dumps({"root":str(cas.root),"bytes_match":stored.read_bytes()==payload, '
-        '"readonly":stored.stat().st_mode & 0o222 == 0,"sdk":client.SDK_VERSION})); '
-        '\nclient.SDK_VERSION=max(_ARTIFACT_CAS_SDK_VERSIONS)+1\n'
-        'try:\n artifact_cas(sys.argv[1])\n'
-        'except RuntimeError as error:\n assert "qualified immutable-input CAS helper" in str(error)\n'
-        'else:\n raise AssertionError("unqualified future SDK was admitted")\n')
-    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas')],
-                          capture_output=True, text=True, check=True)
-    observed = json.loads(done.stdout)
-    assert observed['root'] == str(tmp_path / 'cas')
-    assert observed['bytes_match'] and observed['readonly']
+def test_selected_original_reader_does_not_accept_legacy_or_cpu_dicts():
+    for value in ({}, {'payload': b'old CAS bytes'}, {'producer_context': {}}):
+        with pytest.raises(RuntimeError, match='verified native bytes'):
+            sg._original_artifact_publication(value, node_id='actual-node', roles={'control'})

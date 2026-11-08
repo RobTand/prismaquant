@@ -262,7 +262,7 @@ def test_unsupported_routes_remain_closed(material, monkeypatch, route):
         stage_root = m['tmp'] / 'dynamic-stage'
         stage_root.mkdir()
         _stage_manifest(stage_root, monkeypatch, m['readset'])
-            with pytest.raises(RuntimeError, match='unsupported dynamic'):
+        with pytest.raises(RuntimeError, match='unsupported dynamic'):
             _owner(m)
         return
     with _owner(m) as owner:

@@ -40,6 +40,9 @@ def _stage_manifest(tmp_path, monkeypatch, manifest):
         lifetime={'mode': 'retained_shared_phase', 'namespace': str(root),
                   'reader_scopes': ['original-cpu-fixture'],
                   'retention': 'until_all_readers_stopped_or_fenced'})
+    # The negative controls deliberately rewrite these owned fixture objects.
+    for artifact in root.iterdir():
+        artifact.chmod(0o644)
     binding = {'schema': 'prismaquant.staged_launch.v1', 'path': str(filename), 'sha256': digest,
                'read_contract_path': str(contract), 'read_contract_sha256': identity, 'allowed_tiers': 'ssd'}
     resolver = bind(monkeypatch, binding)

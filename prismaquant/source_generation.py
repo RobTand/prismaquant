@@ -892,9 +892,13 @@ def _require_original_reader_producer(receipt, reader_authority, result, expecte
         _require(any(row['path'] == binding['path'] and row['sha256'] == binding['sha256']
                      for row in result.publication['inputs'].values()),
                  'reader runtime must be an independently declared native input')
+    staged = result.launch.get('staged_input')
+    _require(isinstance(staged, dict), 'selected reader requires explicit immutable staged launch')
     for row in receipt['deliveries']:
-        _same(row['native_delivery']['read_contract_sha256'], reader_authority['readset']['sha256'],
-              'actual reader delivery selected read contract')
+        for observed, selected in (('read_contract_sha256', 'read_contract_sha256'),
+                                   ('staged_manifest_sha256', 'sha256')):
+            _same(row['native_delivery'][observed], staged[selected],
+                  'actual reader delivery selected staged contract')
 
 
 _CUDA_CASES = frozenset({
