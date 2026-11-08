@@ -40,13 +40,13 @@ def _identifier(value, where):
     return scientific.prefill_identifier(value, where=where)
 
 
-def _sequence(value, maximum, where):
+def _prefill_bounded_rows(value, maximum, where):
     _check.require(isinstance(value, list) and 0 < len(value) <= maximum,
                    f'{where} must be a finite nonempty list of at most {maximum}')
     return value
 
 
-def _binding(value, where):
+def _prefill_file_binding(value, where):
     return scientific.prefill_file_binding(value, where=where)
 
 
@@ -111,9 +111,9 @@ def _phase_roster_structure(value: object) -> dict:
     inputs = _check.mapping(body['inputs'], where='inputs')
     _check.require(len(inputs) <= MAX_INPUTS, 'input count exceeds limit')
     for role, binding in inputs.items():
-        _identifier(role, 'input role'); _binding(binding, f'input {role}')
-    tasks = _sequence(body['tasks'], MAX_TASKS, 'tasks')
-    children = _sequence(body['children'], MAX_CHILDREN, 'children')
+        _identifier(role, 'input role'); _prefill_file_binding(binding, f'input {role}')
+    tasks = _prefill_bounded_rows(body['tasks'], MAX_TASKS, 'tasks')
+    children = _prefill_bounded_rows(body['children'], MAX_CHILDREN, 'children')
     task_ids, output_ids, child_ids, cover = [], set(), set(), []
     for task in tasks:
         _check.exact_mapping(task, keys=frozenset({'task_id', 'output_id', 'payload'}), where='task')
@@ -131,7 +131,7 @@ def _phase_roster_structure(value: object) -> dict:
         _check.require(identity not in child_ids, 'duplicate child_id')
         child_ids.add(identity)
         cover.extend(_identifier(task, 'child task_id') for task in
-                     _sequence(child['task_ids'], MAX_CHILD_TASKS, 'child tasks'))
+                     _prefill_bounded_rows(child['task_ids'], MAX_CHILD_TASKS, 'child tasks'))
         resources = _check.exact_mapping(child['resources'], keys=frozenset({
             'cores', 'memory_gib', 'gpus', 'walltime_s', 'placement',
         }), where='resources')
@@ -186,8 +186,8 @@ def read_task_envelope(binding: dict) -> dict:
     _check.require(body['schema'] == ENVELOPE_SCHEMA, 'envelope schema differs')
     _identifier(body['phase_id'], 'envelope phase'); _identifier(body['child_id'], 'envelope child')
     digest(body['plan_identity_sha256'])
-    _binding(body['manifest'], 'manifest'); _binding(body['roster'], 'roster')
-    _sequence(body['tasks'], MAX_CHILD_TASKS, 'envelope tasks')
+    _prefill_file_binding(body['manifest'], 'manifest'); _prefill_file_binding(body['roster'], 'roster')
+    _prefill_bounded_rows(body['tasks'], MAX_CHILD_TASKS, 'envelope tasks')
     _path(body['result_path'])
     root = Path(_path(body['phase_record_dir']))
     directory = open_directory(str(root))
@@ -221,7 +221,7 @@ def _result_document(envelope: dict, results: list) -> dict:
     raw = scientific.canonical_json_bytes(document)
     _check.require(len(raw) + 1 <= MAX_RESULT_BYTES, 'result document exceeds1MiB')
     document = scientific.decode_strict_json(raw.decode('utf-8'), where='prefill results')
-    rows = _sequence(document['results'], MAX_CHILD_TASKS, 'task results')
+    rows = _prefill_bounded_rows(document['results'], MAX_CHILD_TASKS, 'task results')
     _check.require(len(rows) == len(envelope['tasks']), 'result task count differs')
     artifact_bytes = 0
     for row, task in zip(rows, envelope['tasks']):
