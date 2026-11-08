@@ -43,5 +43,5 @@ printf '%s\n' "$work/dependency-links" > "$site/zz_private_dependency_base.pth"
 "$base" -s -B "$root/tools/check_tessera_dev_install.py" --python "$py" --clone "$clone"
 export PYTHONPATH="$root:$root/tests" PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 if [[ $# == 0 ]]; then set -- tests/test_tessera_campaign_namespace_1986.py; fi
-"$py" -s -B -m pytest -v -o addopts= -p pytest_timeout --timeout=90 \
+"$py" -s -B -m pytest -v -o addopts= -p no:cacheprovider -p pytest_timeout --timeout=90 \
   --basetemp="$work/pytest" "$@"
