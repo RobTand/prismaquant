@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, authenticated active CPU source context.
+Source: `prismaquant/{flux_jobs,native_results}.py`, based on `e9b366743`.
+Active original-source controls authenticate the current saved ID and launch
+against its original native jobspec before using resource claims. The granted
+single-host allocation must match core/performance/memory leaves and actual
+process affinity. Its allocation is retained. Missing submit acknowledgement
+refuses context; an unverified launch file cannot establish admission.
+The current profile admits no GPU. Runtime completeness and scientific consumer
+coverage remain acceptance blockers under parent review.
+
 As of: 2026-11-08, parent review of native failure evidence.
 Source: `prismaquant/{flux_jobs,native_results}.py`, based on `7cb15a3e0a6eca4a8943d4c2b5b6ba68357b6adf`.
 A valid native completed payload followed by a fatal execution exception stays

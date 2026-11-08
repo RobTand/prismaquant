@@ -145,14 +145,23 @@ def validate_runtime(value):
 
 
 def execution_context() -> dict:
-    """Observe the actual job and clean source, without waiting for its receipt."""
+    """Authenticate current source, native launch and actual CPU allocation."""
     out = Path(os.environ['OUT'])
+    if not out.is_absolute() or out.resolve(strict=True) != out:
+        raise ValueError('native result: current record must be its canonical absolute path')
     raw, _ = read_document(out / 'launch.json', 16 << 20)
     launch = _document(raw)
     source = flux_jobs._source_identity(Path.cwd().resolve())
     if (Path(__file__).resolve() != Path(source['checkout']) / 'prismaquant/native_results.py'
             or source != launch['source'] or str(out) != launch['record_dir']):
         raise ValueError('native result: executing source/record differs from launch')
+    try:
+        saved, authenticated = flux_jobs.verify_current_job(job_id=os.environ['FLUX_JOB_ID'],
+                                                           record_dir=out, source=source)
+    except flux_jobs.SubmissionUnknown as exc:
+        raise ResultUnavailable('current native submission acknowledgement unavailable; context refused') from exc
+    if saved.launch_sha256 != bytes_sha256hex(raw) or authenticated != launch:
+        raise ValueError('native result: current launch changed during authentication')
     return {'schema': PRODUCER_SCHEMA, 'job_id': flux_jobs._job_id(os.environ['FLUX_JOB_ID']),
             'record_dir': str(out), 'launch_sha256': bytes_sha256hex(raw), 'source': source,
             'argv': launch['argv'], 'resources': launch['resources'], 'afterok': launch['afterok'],

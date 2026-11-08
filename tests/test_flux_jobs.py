@@ -12,6 +12,12 @@ from prismaquant import flux_jobs as jobs
 
 
 class FluxJobsTests(unittest.TestCase):
+    def test_native_allocation_sets_are_finite_and_unique(self):
+        self.assertEqual(jobs._allocation_ids('1-3,7'), {1, 2, 3, 7})
+        for value in ('', '1-999999999', '2-1', '1,1', '1-2,2-3', '-1', '0-4096', 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                jobs._allocation_ids(value)
+
     def test_ascii_and_unicode_f58_are_one_saved_identity(self):
         submission, _ = self.submit_fixture(self.completed('fBqv3wNoLK\n'))
         self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')

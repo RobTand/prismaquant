@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import subprocess
 import tempfile
 from typing import Literal
@@ -440,6 +441,69 @@ def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **in
         if decode_document(raw) != actual:
             raise ValueError('retained original jobspec changed')
     return launch
+
+
+def _allocation_ids(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*', value):
+        raise ValueError('invalid native allocation ID set')
+    result = set()
+    for item in value.split(','):
+        ends = [int(part) for part in item.split('-')]
+        low, high = ends[0], ends[-1]
+        if not 0 <= low <= high < 4096:
+            raise ValueError('native allocation ID set exceeds bound')
+        members = set(range(low, high + 1))
+        if result & members:
+            raise ValueError('native allocation repeats IDs')
+        result.update(members)
+    return result
+
+
+def verify_current_job(*, job_id, record_dir, source):
+    """Authenticate current CPU admission before using saved resource claims.
+
+    A missing submit acknowledgement refuses. No receipt race permits trusting
+    unverified launch fields, adopting another job or submitting a replacement.
+    """
+    from .staged_manifest import decode_document, publish_staged_json, read_document
+    saved, launch = _read_submission(record_dir)
+    if job_id_number(saved.job_id) != job_id_number(job_id) or source != launch['source']:
+        raise ValueError('current native job/source differs from saved submission')
+    settings = {'XDG_RUNTIME_DIR': '/run/user/1000'} if '--env=XDG_RUNTIME_DIR=/run/user/1000' in launch['native_argv'] else None
+    resources = FluxResources(**launch['resources'])
+    verify_native_launch(saved, max_evidence_bytes=16 << 20, argv=launch['argv'], source=source,
+        resources=resources, afterok=launch['afterok'], environment=settings,
+        staged_input=launch.get('staged_input'))
+    allocation = decode_document(_checked(['job', 'info', saved.job_id, 'R']))
+    execution = allocation['execution']
+    if (allocation['version'] != 1 or len(execution['R_lite']) != 1 or
+            execution['nodelist'] != [socket.gethostname().split('.')[0]]):
+        raise ValueError('current native allocation host/rank differs')
+    row = execution['R_lite'][0]
+    rank = int(row['rank'])
+    if str(rank) != row['rank'] or not 0 <= rank <= 2:
+        raise ValueError('current native allocation rank differs')
+    nodes = [node['metadata'] for node in allocation['scheduling']['graph']['nodes']]
+    leaves = {kind: [node for node in nodes if node['type'] == kind]
+              for kind in ('core', 'perf', 'memory', 'gpu')}
+    if any(len(leaves[kind]) != expected for kind, expected in
+           (('core', resources.cores), ('perf', resources.cores),
+            ('memory', resources.memory_gib), ('gpu', resources.gpus))):
+        raise ValueError('current native allocation differs from admitted resources')
+    if any(node['rank'] != rank for members in leaves.values() for node in members):
+        raise ValueError('current native resource leaves span ranks')
+    core_ids = {node['id'] for node in leaves['core']}
+    pus = set().union(*(_allocation_ids(node['properties']['os-pus']) for node in leaves['core']))
+    if (len(core_ids) != resources.cores or core_ids != _allocation_ids(row['children']['core'])
+            or row['children'].get('gpu') is not None or pus != set(os.sched_getaffinity(0))):
+        raise ValueError('current native allocation/affinity differs')
+    retained = saved.record_dir / 'active-allocation.json'
+    try:
+        publish_staged_json(retained, allocation)
+    except FileExistsError:
+        if decode_document(read_document(retained, 16 << 20)[0]) != allocation:
+            raise ValueError('retained active allocation changed')
+    return saved, launch
 
 
 def _query(submission, name, args, errors, *, required=True, timeout=30):
