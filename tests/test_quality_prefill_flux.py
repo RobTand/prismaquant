@@ -268,6 +268,7 @@ def envelope_fixture(tmp_path):
     envelope = dict(schema=prefill.ENVELOPE_SCHEMA, phase_id=phase,
         plan_identity_sha256=manifest['identity_sha256'], manifest=manifest_binding,
         roster=roster_binding, child_id='child/0', tasks=value['tasks'][:2],
+        phase_record_dir=str(tmp_path),
         result_path=str(tmp_path / 'results.json'))
     return manifest, value, envelope
 
@@ -286,7 +287,8 @@ def test_task_envelope_binds_complete_child_and_sealed_plan(tmp_path):
 @pytest.mark.parametrize('kind', ['identity', 'schema', 'phase', 'child', 'extra',
     'task-missing', 'task-extra', 'task-order', 'payload', 'output', 'roster-path',
     'roster-digest', 'manifest-digest', 'result-relative', 'result-roster',
-    'result-manifest', 'result-envelope', 'result-input'])
+    'result-manifest', 'result-envelope', 'result-input', 'result-submission',
+    'root-relative', 'root-foreign', 'root-symlink'])
 def test_resealed_envelope_cannot_change_plan_or_shrink_population(tmp_path, kind):
     _, value, envelope = envelope_fixture(tmp_path)
     positive = prefill._publish_document(envelope, tmp_path / 'positive.json', 1 << 20)
@@ -309,9 +311,16 @@ def test_resealed_envelope_cannot_change_plan_or_shrink_population(tmp_path, kin
     elif kind == 'result-roster': envelope['result_path'] = envelope['roster']['path']
     elif kind == 'result-manifest': envelope['result_path'] = envelope['manifest']['path']
     elif kind == 'result-envelope': envelope['result_path'] = str(filename)
-    else: envelope['result_path'] = value['inputs']['calibration']['path']
+    elif kind == 'result-input': envelope['result_path'] = value['inputs']['calibration']['path']
+    elif kind == 'result-submission': envelope['result_path'] = str(tmp_path / 'submission.json')
+    elif kind == 'root-relative': envelope['phase_record_dir'] = 'relative'
+    elif kind == 'root-foreign': envelope['phase_record_dir'] = str(tmp_path.parent)
+    else:
+        link = tmp_path / 'root-link'
+        link.symlink_to(tmp_path, target_is_directory=True)
+        envelope['phase_record_dir'] = str(link)
     binding = prefill._publish_document(envelope, filename, 1 << 20)
-    with pytest.raises((ValueError, FileNotFoundError)):
+    with pytest.raises((ValueError, OSError)):
         prefill.read_task_envelope(binding)
 
 
@@ -355,6 +364,91 @@ def test_envelope_binding_itself_requires_original_bytes(tmp_path, kind):
     else:
         with pytest.raises((ValueError, FileNotFoundError)):
             prefill.read_task_envelope(binding)
+
+
+def task_results(envelope):
+    rows = []
+    for task in envelope['tasks']:
+        value = measurement(copy.deepcopy(task['payload']))
+        rows.append(dict(task_id=task['task_id'], output_id=task['output_id'], value=value,
+                         value_sha256=scientific.canonical_sha256(value)))
+    return rows
+
+
+def test_result_document_preserves_exact_population_and_independent_value_hashes(tmp_path):
+    _, _, envelope = envelope_fixture(tmp_path)
+    rows = task_results(envelope)
+    document = prefill._result_document(envelope, rows)
+    assert document['schema'] == prefill.RESULTS_SCHEMA
+    assert document['phase_id'] == envelope['phase_id']
+    assert document['plan_identity_sha256'] == envelope['plan_identity_sha256']
+    assert document['roster_sha256'] == envelope['roster']['sha256']
+    assert [(row['task_id'], row['output_id']) for row in document['results']] == [
+        ('task/0', 'out/0'), ('task/1', 'out/1')]
+    for row in document['results']:
+        raw = json.dumps(row['value'], sort_keys=True, separators=(',', ':'),
+                         ensure_ascii=False, allow_nan=False).encode()
+        assert row['value_sha256'] == hashlib.sha256(raw).hexdigest()
+    rows[0]['value']['value'] = 7
+    assert document['results'][0]['value']['value'] == 0.125
+
+
+@pytest.mark.parametrize('kind', ['missing', 'duplicate', 'order', 'task', 'output',
+    'value-hash', 'extra', 'payload', 'aggregate-artifacts', 'result-bytes'])
+def test_results_refuse_wrong_cover_and_finite_limits_before_artifact_reads(tmp_path, monkeypatch, kind):
+    _, _, envelope = envelope_fixture(tmp_path)
+    rows = task_results(envelope)
+    prefill._result_document(envelope, rows)
+    if kind == 'missing': rows.pop()
+    elif kind == 'duplicate': rows[1] = copy.deepcopy(rows[0])
+    elif kind == 'order': rows.reverse()
+    elif kind == 'task': rows[0]['task_id'] = 'foreign'
+    elif kind == 'output': rows[0]['output_id'] = 'foreign'
+    elif kind == 'value-hash': rows[0]['value_sha256'] = '0' * 64
+    elif kind == 'extra': rows[0]['claim'] = 'extra'
+    elif kind == 'payload':
+        rows[0]['value']['payload']['rate'] += 1
+        rows[0]['value_sha256'] = scientific.canonical_sha256(rows[0]['value'])
+    elif kind == 'aggregate-artifacts':
+        for number, row in enumerate(rows):
+            row['value']['artifacts'] = [dict(path=f'/absent/{number}/{i}',bytes=1 << 20,
+                                             sha256='a'*64) for i in range(17)]
+            row['value_sha256'] = scientific.canonical_sha256(row['value'])
+    else:
+        for number, row in enumerate(rows):
+            row['value']['artifacts'] = [dict(path='/'+'a'*(1 << 19)+str(number),bytes=1,
+                                             sha256='a'*64)]
+            row['value_sha256'] = scientific.canonical_sha256(row['value'])
+    def forbidden(*args, **kwargs):
+        raise AssertionError('result bounds and cover must precede artifact opens')
+    monkeypatch.setattr(prefill, '_owned', forbidden)
+    with pytest.raises(ValueError):
+        prefill._result_document(envelope, rows)
+
+
+@pytest.mark.parametrize('kind', ['changed', 'missing', 'symlink', 'conflict'])
+def test_result_measurement_artifacts_use_actual_known_bytes(tmp_path, kind):
+    _, _, envelope = envelope_fixture(tmp_path)
+    rows = task_results(envelope)
+    artifact = tmp_path / 'actual-measurement.bin'
+    raw = b'\x00known measurement\xff\n'
+    artifact.write_bytes(raw)
+    for row in rows:
+        row['value']['artifacts'] = [dict(path=str(artifact), bytes=len(raw),
+                                         sha256=hashlib.sha256(raw).hexdigest())]
+        row['value_sha256'] = scientific.canonical_sha256(row['value'])
+    document = prefill._result_document(envelope, rows)
+    prefill._authenticate_measurements(document)
+    if kind == 'changed': artifact.write_bytes(b'\x00wrong measurement\xff\n')
+    elif kind == 'missing': artifact.unlink()
+    elif kind == 'symlink':
+        held = tmp_path / 'held.bin'
+        artifact.rename(held)
+        artifact.symlink_to(held)
+    else:
+        document['results'][1]['value']['artifacts'][0]['sha256'] = '0' * 64
+    with pytest.raises((ValueError, OSError)):
+        prefill._authenticate_measurements(document)
 
 
 def test_ordered_cover_is_detached_and_preserves_scientific_meaning():

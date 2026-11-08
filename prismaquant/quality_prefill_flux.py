@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 from fractions import Fraction
 
+from . import flux_jobs, native_results
 from . import quality_prefill_contract as scientific
 from .cost_stage_checkpoint import publish_new_bytes
 from .digests import bytes_sha256hex
@@ -18,8 +19,11 @@ from .staged_manifest import digest, open_directory, path as _path, read_documen
 
 ROSTER_SCHEMA = 'prismaquant.quality_prefill_roster.v1'
 ENVELOPE_SCHEMA = 'prismaquant.quality_prefill_envelope.v1'
+RESULTS_SCHEMA = 'prismaquant.quality_prefill_results.v1'
 MAX_ROSTER_BYTES = 16 << 20
 MAX_ENVELOPE_BYTES = 1 << 20
+MAX_RESULT_BYTES = 1 << 20
+_NATIVE_ARTIFACT_BYTES = 34 << 20
 MAX_TASKS = scientific.MAX_PREFILL_TASKS
 MAX_CHILDREN = scientific.MAX_PREFILL_CHILDREN
 MAX_CHILD_TASKS = scientific.MAX_PREFILL_CHILD_TASKS
@@ -168,7 +172,7 @@ def read_task_envelope(binding: dict) -> dict:
     body = _read_bound_document(binding, MAX_ENVELOPE_BYTES)
     _check.exact_mapping(body, keys=frozenset({
         'schema', 'phase_id', 'plan_identity_sha256', 'manifest', 'roster',
-        'child_id', 'tasks', 'result_path',
+        'phase_record_dir', 'child_id', 'tasks', 'result_path',
     }), where='task envelope')
     _check.require(body['schema'] == ENVELOPE_SCHEMA, 'envelope schema differs')
     _identifier(body['phase_id'], 'envelope phase'); _identifier(body['child_id'], 'envelope child')
@@ -176,6 +180,12 @@ def read_task_envelope(binding: dict) -> dict:
     _binding(body['manifest'], 'manifest'); _binding(body['roster'], 'roster')
     _sequence(body['tasks'], MAX_CHILD_TASKS, 'envelope tasks')
     _path(body['result_path'])
+    root = Path(_path(body['phase_record_dir']))
+    directory = open_directory(str(root))
+    os.close(directory)
+    _check.require(Path(binding['path']).parent == root and
+                   Path(body['result_path']).parent == root,
+                   'envelope and result must be in the explicit phase directory')
     manifest, declared_roster, roster = _read_phase(body['manifest'], body['phase_id'])
     _check.require(body['plan_identity_sha256'] == manifest['identity_sha256'],
                    'envelope plan identity differs')
@@ -186,9 +196,87 @@ def read_task_envelope(binding: dict) -> dict:
     _check.require(body['tasks'] == [tasks[task] for task in children[0]['task_ids']],
                    'envelope does not match frozen ordered child tasks')
     protected = {binding['path'], body['manifest']['path'], body['roster']['path'],
+                 str(root / 'submission.json'),
                  *(row['path'] for row in roster['inputs'].values())}
     _check.require(body['result_path'] not in protected, 'result path aliases an input')
     return body
+
+
+def _result_document(envelope: dict, results: list) -> dict:
+    document = dict(schema=RESULTS_SCHEMA, phase_id=envelope['phase_id'],
+        plan_identity_sha256=envelope['plan_identity_sha256'],
+        roster_sha256=envelope['roster']['sha256'], child_id=envelope['child_id'], results=results)
+    raw = scientific.canonical_json_bytes(document)
+    _check.require(len(raw) + 1 <= MAX_RESULT_BYTES, 'result document exceeds1MiB')
+    document = scientific.decode_strict_json(raw.decode('utf-8'), where='prefill results')
+    rows = _sequence(document['results'], MAX_CHILD_TASKS, 'task results')
+    _check.require(len(rows) == len(envelope['tasks']), 'result task count differs')
+    artifact_bytes = 0
+    for row, task in zip(rows, envelope['tasks']):
+        _check.exact_mapping(row, keys=frozenset({
+            'task_id', 'output_id', 'value', 'value_sha256',
+        }), where='task result')
+        _check.require((row['task_id'], row['output_id']) == (task['task_id'], task['output_id']),
+                       'result ordered task/output cover differs')
+        measurement = scientific.validate_task_measurement(row['value'], payload=task['payload'])
+        digest(row['value_sha256'])
+        _check.require(row['value_sha256'] == scientific.canonical_sha256(measurement),
+                       'measurement value digest differs')
+        artifact_bytes += sum(binding['bytes'] for binding in measurement['artifacts'])
+    _check.require(artifact_bytes <= 32 << 20, 'child measurement artifacts exceed32MiB')
+    return document
+
+
+def _authenticate_measurements(document: dict) -> None:
+    artifacts = {}
+    for row in document['results']:
+        for binding in row['value']['artifacts']:
+            previous = artifacts.setdefault(binding['path'], binding)
+            _check.require(previous == binding, 'measurement artifact has conflicting bindings')
+    for binding in artifacts.values():
+        _owned(binding, 1 << 20)
+
+
+def _prefill_source(manifest: dict) -> dict:
+    commits = [entry['commit'] for entry in manifest['source']['dependency_commits']
+               if entry['name'] == 'prismaquant']
+    _check.require(len(commits) == 1, 'live prefill requires one prismaquant dependency commit')
+    source = flux_jobs._source_identity(Path(__file__).resolve().parents[1])
+    _check.require(source['commit'] == commits[0], 'prismaquant source differs from frozen commit')
+    return source
+
+
+def _child_argv(envelope_binding: dict, roster: dict) -> list:
+    return [roster['command']['interpreter'], '-s', '-m', roster['command']['module'],
+            '--envelope', envelope_binding['path'], '--envelope-sha256', envelope_binding['sha256']]
+
+
+def publish_task_results(envelope_binding: dict, *, results: list[dict],
+                         dependencies: tuple[str, ...] = ()) -> dict:
+    """Publish actual admitted task bytes; selection still requires terminal success."""
+    envelope = read_task_envelope(envelope_binding)
+    manifest, _, roster = _read_phase(envelope['manifest'], envelope['phase_id'])
+    _validate_admission(manifest, envelope['phase_id'], roster)
+    document = _result_document(envelope, results)
+    _authenticate_measurements(document)
+    source = _prefill_source(manifest)
+    child = next(child for child in roster['children'] if child['child_id'] == envelope['child_id'])
+    context = native_results.execution_context()
+    _check.require(context['source'] == source and context['argv'] == _child_argv(envelope_binding, roster)
+        and context['resources'] == child['resources'] and context['staged_input'] == child['staged_input'],
+        'current native launch differs from frozen prefill child')
+    _check.require(isinstance(dependencies, tuple) and
+                   tuple(sorted(dependencies)) == tuple(sorted(roster['runtime']['dependencies'])),
+                   'runtime dependency roster differs')
+    _check.require(native_results.measure_runtime(dependencies=dependencies) == roster['runtime'],
+                   'current measured runtime differs from frozen roster')
+    result_path = Path(envelope['result_path'])
+    _publish_document(document, result_path, MAX_RESULT_BYTES)
+    return native_results.publish_result(
+        result_path.with_name(result_path.name + '.publication.json'), producer_id=envelope['child_id'],
+        inputs={key: envelope[key] for key in ('manifest', 'roster')} | {'envelope': envelope_binding},
+        artifacts={'prefill_results': result_path}, dependencies=dependencies,
+        max_artifact_bytes=_NATIVE_ARTIFACT_BYTES)
 
 
 def _read_bound_document(binding: dict, limit: int) -> object:
