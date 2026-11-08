@@ -64,10 +64,10 @@ def _strict_window(tmp_path, monkeypatch, *, count=COUNT, shape=(8, 16)):
     return cache, paths, expected, resolver, total
 
 
-def _open_window(cache, paths, total, workers, **kwargs):
+def _open_window(cache, paths, total, workers, *, release_file_pages=True, **kwargs):
     return cache.retained_window(
         list(paths), max_resident_bytes=2 * total, max_workers=workers,
-        max_load_buffer_bytes=2 * total, release_file_pages=True, **kwargs)
+        max_load_buffer_bytes=2 * total, release_file_pages=release_file_pages, **kwargs)
 
 
 def _observe_windows(monkeypatch, resolver):
@@ -76,6 +76,8 @@ def _observe_windows(monkeypatch, resolver):
     entered, exited, opened = [], [], []
     real_enter, real_exit = LeaseWindow.__enter__, LeaseWindow.__exit__
     real_open, real_close = LeaseWindow.open, LeaseWindow.close_fd
+    real_os_close = os.close
+    closed = []
 
     def enter(window):
         result = real_enter(window)
@@ -98,14 +100,21 @@ def _observe_windows(monkeypatch, resolver):
         return fd, serving
 
     def close(window, fd):
+        marker = (threading.get_ident(), fd)
+        start = len(closed)
         real_close(window, fd)
-        with pytest.raises(OSError):
-            os.fstat(fd)
+        assert marker in closed[start:] and fd not in window._fds
+
+    def syscall_close(fd):
+        result = real_os_close(fd)
+        closed.append((threading.get_ident(), fd))
+        return result
 
     monkeypatch.setattr(LeaseWindow, '__enter__', enter)
     monkeypatch.setattr(LeaseWindow, '__exit__', exit)
     monkeypatch.setattr(LeaseWindow, 'open', open)
     monkeypatch.setattr(LeaseWindow, 'close_fd', close)
+    monkeypatch.setattr(os, 'close', syscall_close)
     return entered, exited, opened
 
 
@@ -130,7 +139,7 @@ def test_a_retained_window_pins_its_staged_renders_under_one_lease(
     digests = {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in paths.items()}
     entered, exited, opened = _observe_windows(monkeypatch, resolver)
     _deny_pool_opens(monkeypatch, tmp_path / 'pool', names=[p.name for p in paths.values()])
-    with _open_window(cache, paths, total, workers) as receipt:
+    with _open_window(cache, paths, total, workers, release_file_pages=False) as receipt:
         # The window's loads are done and the pin is gone before the consumer
         # runs: a pin protects the reads, not the consumer's compute.
         assert resolver._windows == 0
@@ -405,36 +414,27 @@ class _Progress:
         self.phases.append(name)
 
 
-def test_the_window_readiness_proves_its_entries_in_one_cover_lookup(
+def test_the_window_readiness_covers_every_exact_declared_span(
         tmp_path, monkeypatch):
     from prismaquant.joint_cost_quantum import prepare_retained_window_read
 
-    from prismaquant import staged_lease
     _cache, paths, _expected, resolver, _total = _strict_window(
         tmp_path, monkeypatch)
     record = {"executable_readset": {"prepared_input": {"windows": [{
         "window_index": 3,
         "entries": [{"path": str(path), "offset": 0, "bytes": path.stat().st_size}
                     for path in paths.values()]}]}}}
-    calls = []
-    real_batch = staged_lease.stage_covers_are_published
-
-    def observed(owner, items):
-        calls.append(list(items))
-        return real_batch(owner, calls[-1])
-
-    monkeypatch.setattr(staged_lease, 'stage_covers_are_published', observed)
     progress = _Progress()
     assert prepare_retained_window_read(3, record=record, progress=progress) == "ready"
-    assert len(calls) == 1 and len(calls[0]) == len(paths)
-    assert all(entry['_resolver'] is resolver for _path, entry in calls[0])
+    for path in paths.values():
+        entry = resolver.staged_range(path, 0, path.stat().st_size)
+        assert entry['_resolver'] is resolver and entry['declared_path'] == str(path)
     assert progress.phases
 
 
-def test_the_window_readiness_asks_per_entry_when_the_batch_cannot_say(
+def test_the_window_readiness_refuses_one_undeclared_entry(
         tmp_path, monkeypatch):
-    """A batched proof that refuses falls back to one lookup per entry."""
-    from prismaquant import staged_lease
+    """Declared siblings cannot grant authority to a foreign span."""
     from prismaquant.joint_cost_quantum import prepare_retained_window_read
 
     _cache, paths, _expected, resolver, _total = _strict_window(
@@ -443,19 +443,11 @@ def test_the_window_readiness_asks_per_entry_when_the_batch_cannot_say(
         "window_index": 0,
         "entries": [{"path": str(path), "offset": 0, "bytes": path.stat().st_size}
                     for path in paths.values()]}]}}}
-    monkeypatch.setattr(staged_lease, "stage_covers_are_published",
-                        lambda resolver, items: None)
-    calls = []
-    real_single = staged_lease.stage_cover_is_published
-
-    def observed(owner, path, entry):
-        assert owner is resolver and entry['_resolver'] is resolver
-        calls.append(path)
-        return real_single(owner, path, entry)
-
-    monkeypatch.setattr(staged_lease, 'stage_cover_is_published', observed)
     assert prepare_retained_window_read(0, record=record, progress=_Progress()) == "ready"
-    assert set(calls) == {str(p) for p in paths.values()} and len(calls) == len(paths)
+    entry = record['executable_readset']['prepared_input']['windows'][0]['entries'][-1]
+    entry['path'] = str(tmp_path / 'never-declared.pt')
+    assert prepare_retained_window_read(0, record=record, progress=_Progress()) == 'unready-undeclared'
+    assert resolver._windows == 0 and resolver.report()['bytes_from_pool'] == 0
 
 
 def test_an_active_group_refusal_is_not_hidden_by_single_entry_reads(tmp_path, monkeypatch, workers):
