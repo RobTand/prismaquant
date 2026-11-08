@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native spill and retained-budget fixture bindings.
+Source: `tests/{test_spill_phase_plan_1011,test_stage_b_spill_ceiling_sealed,test_retained_budget_provenance_1022}.py`,
+based on `f81c8179d`.
+Spill capacity assertions inspect the actual native payload specification;
+retained-budget fixtures use the existing native state owner. The PB-only spill
+planner test is removed. Exact geometry, grid, byte-count, phase and budget
+positives and refusals remain CPU checks, with no production qualification.
+
 As of: 2026-11-08, retired PB lease-comparison benchmark.
 Source: deletion of `tools/pwc_window_load_bench.py`, based on `0a725806a`.
 The historical cross-tree PB claim/map comparison has been removed. Native

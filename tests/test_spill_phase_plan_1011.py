@@ -32,7 +32,6 @@ from test_quantum_executable_readset import (  # noqa: E402
 from test_stageb_prepared_render_inputs import (  # noqa: E402
     _bind_prepared, _dispatch_prepared, _prepared_inputs, _render_files,
 )
-from fullstack_pb_generation import pinned_pb_source
 
 
 def test_spill_phase_names():
@@ -138,23 +137,6 @@ def test_binder_carries_the_mode_and_refuses_the_other(tmp_path):
             output_root=str(tmp_path / "run"), strided_boundaries=STRIDED,
             n_probes=N_PROBES, calib=dict(CALIB),
             render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared)
-
-
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_spill_manifest_passes_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
-    manifest = _build(_inputs(tmp_path), replay_mode="spill")
-    prefix = str(tmp_path)
-    for entry in manifest["entries"]:
-        if entry["path"].startswith("/fixture"):
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len("/fixture"):]
-        elif entry["path"].startswith(prefix):
-            entry["path"] = "/mnt/shared/fixture-renders" + entry["path"][len(prefix):]
-    ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(manifest))
-    assert [item["name"] for item in ranges] == [
-        phase["name"] for phase in manifest["read_plan"]["phases"]]
-    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
 
 
 def test_dispatch_main_accepts_a_spill_sealed_row(tmp_path, monkeypatch, capsys):
