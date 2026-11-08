@@ -148,9 +148,23 @@ def _source_identity(checkout):
 
 
 def _job_id(value):
-    if not isinstance(value, str) or not re.fullmatch(r'(?:[1-9][0-9]*|ƒ[1-9A-HJ-NP-Za-km-z]+)', value):
+    if not isinstance(value, str) or not re.fullmatch(r'(?:[1-9][0-9]*|[fƒ][1-9A-HJ-NP-Za-km-z]+)', value):
         raise ValueError('expected a saved native Flux job ID')
-    return value
+    return 'ƒ' + value[1:] if value.startswith('f') else value
+
+
+def job_id_number(value):
+    """The native numeric identity shared by Unicode/ASCII f58 and decimal IDs."""
+    value = _job_id(value)
+    if not value.startswith('ƒ'):
+        return int(value)
+    number = 0
+    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    for digit in value[1:]:
+        number = number * 58 + alphabet.index(digit)
+    if not 0 < number < 2**64:
+        raise ValueError('native job ID exceeds uint64')
+    return number
 
 
 def _environment(record_dir, supplied):
@@ -253,7 +267,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if not record_dir.is_relative_to(Path('/mnt/shared')) or record_dir.is_relative_to(checkout):
         raise ValueError('records require a separate shared directory outside the source checkout')
     dependencies = [_job_id(value) for value in afterok]
-    if len(set(dependencies)) != len(dependencies):
+    if len({job_id_number(value) for value in dependencies}) != len(dependencies):
         raise ValueError('duplicate dependency ID')
     env = _environment(record_dir, environment)
     command = list(argv)
@@ -443,7 +457,8 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             try:
                 scratch = json.loads((submission.record_dir / 'scratch.json').read_bytes())
                 cleanup = json.loads((submission.record_dir / 'cleanup.json').read_bytes())
-                if (scratch['job_id'] != submission.job_id or cleanup['job_id'] != submission.job_id or
+                if (job_id_number(scratch['job_id']) != job_id_number(submission.job_id) or
+                        job_id_number(cleanup['job_id']) != job_id_number(submission.job_id) or
                         cleanup['path'] != scratch['path'] or cleanup['removed'] is not True):
                     raise ValueError('scratch cleanup unverified')
             except (OSError, ValueError, KeyError, TypeError):

@@ -12,6 +12,15 @@ from prismaquant import flux_jobs as jobs
 
 
 class FluxJobsTests(unittest.TestCase):
+    def test_ascii_and_unicode_f58_are_one_saved_identity(self):
+        submission, _ = self.submit_fixture(self.completed('fBqv3wNoLK\n'))
+        self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')
+        self.assertEqual(jobs.load_submission(self.record), submission)
+        self.assertEqual(jobs.job_id_number('fBqv3wNoLK'),
+                         jobs.job_id_number('ƒBqv3wNoLK'))
+        # Independently captured native status from the pre-fix admitted run.
+        self.assertEqual(jobs.job_id_number('fE23pNdDTV'), 1667135277367296)
+
     def test_launch_encoding_keeps_exact_utf8_lax_identity_bytes(self):
         self.assertEqual(jobs._json_bytes({'n': float('nan'), 'a': 'ƒ'}),
                          b'{"a":"\xc6\x92","n":NaN}\n')
