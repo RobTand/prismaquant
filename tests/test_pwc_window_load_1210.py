@@ -458,9 +458,10 @@ def test_an_active_group_refusal_is_not_hidden_by_single_entry_reads(tmp_path, m
         raise staged_lease.LeaseRefused('unpublished: forced', kind='availability')
 
     monkeypatch.setattr(staged_lease, 'acquire_entries_window', refuse)
-    with pytest.raises(staged_lease.LeaseRefused, match='unpublished: forced'):
+    with pytest.raises(io_engine.EntryError, match='LeaseRefused: unpublished: forced') as failure:
         with _open_window(cache, paths, total, workers):
             pytest.fail('refused group became readable')
+    assert failure.value.key in paths
     assert resolver._windows == 0
     assert resolver.report()['bytes_from_stage'] == resolver.report()['bytes_from_pool'] == 0
     assert all(isinstance(value, str) for value in cache.weights.values())
