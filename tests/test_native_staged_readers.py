@@ -356,7 +356,8 @@ def test_source_result_and_publication_authority_cannot_use_ambient_pb_context(t
     for operation in (staged_lease.client_sdk, staged_lease.resolve_context):
         with pytest.raises(staged_lease.LeaseRefused, match='unit4 native'):
             operation()
-    with pytest.raises(stage_b_prep_io.PreparationPublicationRefused, match='unit4 native'):
+    with pytest.raises(stage_b_prep_io.PreparationPublicationRefused,
+                       match='native preparation declaration unavailable'):
         stage_b_prep_io.bind_preparation_publication(tmp_path, required=True)
     assert stage_b_prep_io.bind_preparation_publication(tmp_path, required=False) is None
 
