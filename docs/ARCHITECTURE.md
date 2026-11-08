@@ -13,7 +13,10 @@ separate. Saved state is a presentation record, not native success evidence.
 The PB prefill adapter and its decomposition/SDK/queue/group-only tests are
 retired. Existing scientific validators and finite native owners retain
 currency, measured-estimate, exact-cover, publication and failure gates.
-CPU and actual native proof of this consumer change is still pending.
+CPU contract and actual native driver/observation proofs are retained in
+migration Jobs97 and99, including named cycle, duplicate-parent and foreign-
+manifest refusals. The cycle is rejected by final-manifest DAG validation.
+These bounded CPU results leave combined review and qualification separate.
 GPU prefill remains a separately approved Unit4E canary obligation.
 
 As of: 2026-11-08, native prefill sibling recovery boundary.
