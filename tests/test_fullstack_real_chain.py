@@ -21,7 +21,8 @@ from safetensors.torch import save_file
 from staged_native_fixtures import bind, native_staged_state, publish_inputs
 from prismaquant.staged_manifest import load_staged_manifest
 from prismaquant.staged_launch import read_contract_document
-from prismaquant.staged_tier_policy import staged_tier_policy_test_context, TierPolicyRefused
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from prismaquant.residency_map import StagedReadRefused
 from test_streamed_metadata_staged_reads import _deny_pool_opens
 from prismaquant.joint_layer_quanta import layer_quanta, seal_manifest_bytes, verify_quanta_coverage
 from prismaquant.joint_quanta_join import (
@@ -328,7 +329,7 @@ def test_uncovered_span_refuses_without_pool_reads(staged, campaign, tmp_path, m
     _write_shard(missing, _tensors())
     assert not resolver.stages(str(missing))
     _deny_pool_opens(monkeypatch, tmp_path, names=[missing.name])
-    with pytest.raises(TierPolicyRefused):
+    with pytest.raises(StagedReadRefused, match='source is not declared'):
         with layer_streaming._source_safe_open(str(missing), framework='pt') as reader:
             reader.get_tensor('w0')
             pytest.fail('undeclared source granted tensor bytes')
