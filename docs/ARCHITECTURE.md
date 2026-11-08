@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, census-discovered scientific and experiment callers.
+Source: `tests/{test_stage_a_bands,test_stage_a_head_skip}.py` and
+`experiments/alloc_lead_asd/tiny_glm_control.py`, based on `5921b1d36`.
+Band and head-skip CPU recovery fixtures select actual immutable application
+publications through the existing offline terminal-authority seam. Their tensor,
+checkpoint and campaign assertions remain. Obsolete PB keyed-egress and template
+wire assertions are removed; native launch-coordinate tests replace PB owner
+identity tests. The tiny-GLM control declares one dtype per native session and
+accepts immutable declaration flags. Its existing capture owner finalizes and
+cleans up; the experiment no longer calls the deleted PB release API. CPU
+orchestration tests cover exact private tensor publication and original capture
+or later failure preservation. They do not qualify GLM numerical behavior.
+
 As of: 2026-11-08, shipped byte-cycle caller directory ownership.
 Source: `tools/stagea_produced_byte_cycle.py`, based on `9326498bc`.
 The byte-cycle caller opens its generation through the shared nofollow owner
