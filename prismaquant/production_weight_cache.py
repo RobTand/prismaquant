@@ -1579,7 +1579,10 @@ class ProductionWeightCache:
                 self._file_load_receipts.pop(key, None)
             raise RuntimeError("PWC file receipt has no matching resident tensor")
         receipt, signature, guard = entry[1]
+        # Native manifests authenticate the delivered bytes without a canonical
+        # stat. The resident tensor still has the same mutation/lifetime guard.
         if (self._file_tensor_guard(tensor) != guard or
+                signature is not None and
                 self._file_signature(Path(receipt["path"]).lstat()) != signature):
             self._file_load_receipts.pop(key, None)
             raise RuntimeError("PWC file receipt tensor or source file changed")

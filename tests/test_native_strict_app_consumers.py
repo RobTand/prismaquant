@@ -42,9 +42,14 @@ def test_pwc_reads_digest_bound_known_tensor_and_retains_owned_mapping(tmp_path,
         receipt = cache.file_load_receipt(key, got)
         assert receipt['sha256'] == sha(raw) and receipt['serving_tier'] == 'stage'
         assert resolver._windows == 0
+        source.unlink()
         # The decoded tensor's own mapping survives the staged window.
         resolver.close()
         assert torch.equal(got.view(torch.uint8), expected.view(torch.uint8))
+        assert cache.file_load_receipt(key, got) == receipt
+        got[0, 0] += 1
+        with pytest.raises(RuntimeError, match='tensor or source file changed'):
+            cache.file_load_receipt(key, got)
     assert opened == [] and resolver.report()['bytes_from_pool'] == 0
     assert resolver.report()['bytes_from_stage'] == len(raw)
 
@@ -178,8 +183,7 @@ def test_checkpoint_tensor_and_shared_state_roundtrip_without_pool(tmp_path, mon
     space, record, expected, state, passes, files = _checkpoint(tmp_path)
     binding = publish_inputs(tmp_path, files)
     resolver = bind(monkeypatch, binding)
-    for filename in files:
-        filename.unlink()
+    opened = [_forbid_source(monkeypatch, filename) for filename in files]
     arena = None
     def factory(entries):
         nonlocal arena
@@ -208,6 +212,7 @@ def test_checkpoint_tensor_and_shared_state_roundtrip_without_pool(tmp_path, mon
             arena.close()
     assert held == [0] and 0 < peak[0] <= 192
     assert resolver._windows == 0 and resolver.report()['bytes_from_pool'] == 0
+    assert all(not calls for calls in opened)
 
 
 @pytest.mark.parametrize('fault', ['manifest-unmapped', 'state-unmapped', 'state-corrupt'])
@@ -225,12 +230,12 @@ def test_checkpoint_missing_or_corrupt_scientific_state_refuses(tmp_path, monkey
         raw = obj.read_bytes()
         obj.chmod(0o600)
         obj.write_bytes(b'X' + raw[1:])
-    for filename in files:
-        filename.unlink()
+    opened = [_forbid_source(monkeypatch, filename) for filename in files]
     with staged_tier_policy_test_context('ssd'):
         with pytest.raises((TierPolicyRefused, RuntimeError, ValueError)):
             checkpoints.load_adjoint_checkpoint(space, record, max_resident_bytes=192)
     assert resolver._windows == 0 and resolver.report()['bytes_from_pool'] == 0
+    assert all(not calls for calls in opened)
 
 
 def test_checkpoint_stream_close_releases_charges_before_owned_inputs_close(tmp_path, monkeypatch):

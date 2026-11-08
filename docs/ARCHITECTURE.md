@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native resident PWC receipts.
+Source: `prismaquant/production_weight_cache.py`, based on `5400e3c49`.
+The IO engine's native immutable input path supplies no canonical-file stat.
+PWC receipts retain their verified delivered digest and resident tensor guard
+without requiring that source path. Ordinary file receipts retain their saved
+stat checks. Tensor mutation and cache lifetime changes still invalidate both.
+This CPU reader correction grants no production/runtime qualification.
+
 As of: 2026-11-08, canonical staged-cache Python isolation.
 Source: `prismaquant/staged_launch.py`, based on `818cc8991e3e939471650ce93a09bb1ff0368b29`.
 The host-local staged launcher invokes the single external fluxcache helper
