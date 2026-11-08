@@ -627,5 +627,3 @@ def test_real_partial_qualification_metadata_is_not_renamed_full64(authority_cas
     # positive source qualifications or an independently approved root record.
     with pytest.raises(RuntimeError, match='partial full64'):
         sg._require_original_source_proofs(authority, case['owner'].resource_check)
-
-
