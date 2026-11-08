@@ -7993,6 +7993,7 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
+        ":prismaquant/quality_prefill_flux",
     ],
 )
 
@@ -10068,20 +10069,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/quality_prefill_pb_adapter",
-    srcs = [
-        "prismaquant/quality_prefill_pb_adapter.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        "@pq_pip//prismabuild",
     ],
 )
 
