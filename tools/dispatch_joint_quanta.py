@@ -1694,20 +1694,15 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     positive decimal byte count, is left as it is, so the row's spool check
     (:func:`produced_spool_row_environment`) refuses it as before.
 
-    Every row whose spec declares a produced spool with a well-formed bound
-    seals the host window opt-in (``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW=1``,
-    PB #910), so PrismaBuild charges that window to the executing box's
-    ``spool_gb`` at placement and two rows cannot together overrun one box's
-    spool disk: the Stage A row since PQ #1120, every quantum row since
-    PQ #1364 (a Stage B row's spool had gone uncharged beside its charged
-    spill and cotangent scratch). A spec that declares the opt-in off
-    refuses: the window would go uncharged.
+    A declared produced spool must carry a valid application byte bound.
+    The existing spool and IO owners enforce that bound and reader lifetime.
+    Flux accounts for declared transient memory; persistent disk capacity
+    remains an independently admitted filesystem requirement.
 
     ``spill_bound`` is the row's sealed Stage B spill bound
     (:func:`_sealed_spill_bound`). Its reservation replaces the spec's
     ``PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES`` in the same one parse, so the
-    ceiling the quantum checks and the ``spool_gb`` PrismaBuild charges for
-    the pair (PB #911) are the sealed need, not a spec literal. A spec that
+    ceiling the quantum checks is the sealed need, not a spec literal. A spec that
     declares no spill, or launches another capture batch than the bound
     counts parts for, refuses.
 
