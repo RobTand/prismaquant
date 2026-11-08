@@ -105,7 +105,7 @@ from prismaquant.digests import (
     canonical_json,
     text_sha256hex,
 )
-from prismaquant.file_identity import file_stat_signature
+from prismaquant.file_identity import file_stat_signature, _production_cache_identity_paths
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -3421,21 +3421,6 @@ def _production_cache_source_root(package_root: Path | None) -> Path:
             f"production source identity cannot read package root {root}"
         )
     return root
-
-
-def _production_cache_identity_paths(root: Path) -> list[Path]:
-    """Every file the package-tree digest hashes, in digest order.
-
-    One home for the filter: the digest, and any diagnosis of a digest
-    mismatch, must agree on what counts as a package input (PQ #2218).
-    """
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.relative_to(root).parts
-        and path.suffix not in {".pyc", ".pyo"}
-    )
 
 
 def _production_cache_source_sha256(

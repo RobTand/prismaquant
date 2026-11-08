@@ -600,7 +600,7 @@ def file_range_sha256hex(path: str | os.PathLike, offset: int, size: int) -> str
     return digest.hexdigest()
 
 
-def file_digest_sha256hex(handle: BinaryIO) -> str:
+def file_digest_sha256hex(handle: BinaryIO, *, max_bytes: int | None = None) -> str:
     """Digest an already-open, stat-fenced file handle in one stream.
 
     ``file_sha256hex`` opens the path itself; a site that fenced its read with
@@ -608,8 +608,26 @@ def file_digest_sha256hex(handle: BinaryIO) -> str:
     descriptor and must not reopen the path. This is the one spelling for that
     shape: the stdlib streaming ``file_digest`` over the caller's handle,
     reading it from its current position to EOF.
+
+    ``max_bytes`` bounds consumption, including a one-byte overflow probe.
+    Reads allocate at most ``FILE_BLOCK_BYTES``; short streams retain their
+    ordinary digest and the caller owns any exact-length/stat checks.
     """
-    return hashlib.file_digest(handle, "sha256").hexdigest()
+    if max_bytes is None:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+    if type(max_bytes) is not int or max_bytes < 0:
+        raise ValueError("invalid stream byte ceiling")
+    digest = hashlib.sha256()
+    remaining = max_bytes
+    while remaining:
+        chunk = handle.read(min(remaining, FILE_BLOCK_BYTES))
+        if not chunk:
+            break
+        digest.update(chunk)
+        remaining -= len(chunk)
+    if handle.read(1):
+        raise ValueError("file stream exceeds byte ceiling")
+    return digest.hexdigest()
 
 
 def indent2_json_file_bytes(value: object) -> bytes:

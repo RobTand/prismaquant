@@ -9,6 +9,18 @@ tuple; it never builds its own from the ``stat_result``.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+
+def durable_package_path(relative: Path) -> bool:
+    """Exclude only disposable interpreter bytecode from package identity."""
+    return "__pycache__" not in relative.parts and relative.suffix not in {".pyc", ".pyo"}
+
+
+def _production_cache_identity_paths(root: Path) -> list[Path]:
+    """Every durable package file, in the production digest's original order."""
+    return sorted(path for path in root.rglob("*")
+                  if path.is_file() and durable_package_path(path.relative_to(root)))
 
 
 def file_stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]:
