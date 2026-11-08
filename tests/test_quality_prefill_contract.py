@@ -163,7 +163,7 @@ def draft_manifest() -> dict:
         "execution": {
             "phases": {
                 spec.phase: {
-                    "task_roster": _ref("roster-" + spec.phase),
+                    "task_roster": {**_ref("roster-" + spec.phase), "bytes": 1},
                     "dependencies": list(spec.dependencies),
                     "work_limit": 1,
                     "cost_limit": 1,
@@ -171,10 +171,9 @@ def draft_manifest() -> dict:
                 for spec in PHASE_DAG
             },
             "setup_cost_reference": _ref("setup-cost"),
-            "pb_policy": {
-                "batch_policy": "exact_cover",
-                "progress_policy": "progress_v1",
-                "priority": -10,
+            "native_policy": {
+                "dispatch": "explicit-roster-v1",
+                "progress": "local-log-v1",
             },
             "retry_policy": {"max_attempts": 2},
             "withdrawal_policy": "release_after_cleanup",
@@ -223,6 +222,21 @@ def test_a_frozen_manifest_round_trips_to_a_stable_digest():
     # The seal covers the body and never its own field.
     body = {k: v for k, v in frozen.items() if k != "identity_sha256"}
     assert canonical_sha256(body) == frozen["identity_sha256"]
+
+
+@pytest.mark.parametrize('change', ['v1', 'pb-policy', 'dispatch', 'progress', 'roster-bytes'])
+def test_native_manifest_refuses_legacy_transport_and_ignored_execution_fields(change):
+    body = resolved_manifest()
+    freeze_manifest(body)
+    if change == 'v1': body['schema'] = 'prismaquant.quality_prefill_experiment.v1'
+    elif change == 'pb-policy':
+        body['execution']['pb_policy'] = body['execution'].pop('native_policy')
+    elif change in ('dispatch', 'progress'):
+        body['execution']['native_policy'][change] = 'ignored-policy'
+    else:
+        body['execution']['phases'][PHASE_DAG[0].phase]['task_roster']['bytes'] = True
+    with pytest.raises(QualityPrefillContractError):
+        freeze_manifest(body)
 
 
 def test_the_manifest_binds_exactly_the_eleven_named_sections():
@@ -463,10 +477,11 @@ def test_the_initial_states_cover_the_whole_dag():
 
 def _run(*argv: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(DRIVER), *argv],
+        [sys.executable, '-s', str(DRIVER), *argv],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        timeout=120,
     )
 
 
@@ -533,6 +548,7 @@ def _frozen_with_roster(tmp_path, digest: str | None = None):
     manifest["execution"]["phases"][phase]["task_roster"] = {
         "path": "/" + str(roster).lstrip("/"),
         "sha256": digest or hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "bytes": len(body.encode('utf-8')),
     }
     frozen.write_text(json.dumps(freeze_manifest(manifest)), encoding="utf-8")
     return frozen, phase

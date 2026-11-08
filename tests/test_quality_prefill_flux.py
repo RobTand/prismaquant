@@ -16,6 +16,167 @@ def payload():
                 context_id='prefill-2048', currency=scientific.JOINT_CURRENCY)
 
 
+def admission_fixture(tmp_path, *, size=3, width=2):
+    """Invented timing evidence for schema tests, never a measured live estimate."""
+    from test_quality_prefill_contract import resolved_manifest
+    phase = scientific.PHASE_DAG[0].phase
+    value = roster(size, width=width)
+    value['phase_id'] = phase
+    evidence_path = tmp_path / 'synthetic-timing-evidence.txt'
+    evidence_path.write_bytes(b'synthetic test evidence, not a scientific measurement')
+    binding = dict(path=str(evidence_path), bytes=evidence_path.stat().st_size,
+                   sha256=hashlib.sha256(evidence_path.read_bytes()).hexdigest())
+    entry = dict(command_sha256=scientific.canonical_sha256(value['command']),
+                 runtime_sha256=scientific.canonical_sha256(value['runtime']), children=[])
+    tasks = {t['task_id']: t for t in value['tasks']}
+    for child in value['children']:
+        entry['children'].append(dict(child_id=child['child_id'],
+            resources_sha256=scientific.canonical_sha256(child['resources']),
+            setup_seconds=0.25, setup_evidence=copy.deepcopy(binding), tasks=[dict(
+                task_id=task, payload_sha256=scientific.canonical_sha256(tasks[task]['payload']),
+                estimated_seconds=0.5, estimate_evidence=copy.deepcopy(binding))
+                for task in child['task_ids']]))
+    estimates = dict(schema=scientific.WORK_ESTIMATES_SCHEMA, phases={phase: entry})
+    manifest = resolved_manifest()
+    manifest['execution']['phases'][phase].update(work_limit=size, cost_limit=2)
+    estimates_path = tmp_path / 'work-estimates.json'
+    def publish_estimates():
+        estimates_path.write_text(json.dumps(estimates, allow_nan=False))
+        manifest['execution']['setup_cost_reference'] = dict(path=str(estimates_path),
+            sha256=hashlib.sha256(estimates_path.read_bytes()).hexdigest())
+    publish_estimates()
+    return manifest, phase, value, estimates, publish_estimates
+
+
+def test_admission_accepts_known_exact_budget_and_zero_setup(tmp_path):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path)
+    # Two setups at .25 and three tasks at .5 exactly reach the budget of 2s.
+    prefill._validate_admission(scientific.freeze_manifest(manifest), phase,
+                               prefill.validate_phase_roster(value))
+    for child in estimates['phases'][phase]['children']:
+        child['setup_seconds'] = 0
+    publish()
+    prefill._validate_admission(manifest, phase, value)
+
+
+@pytest.mark.parametrize('kind', ['work', 'cost', 'wall', 'tiny-positive'])
+def test_admission_enforces_each_independent_budget_without_rounding(tmp_path, kind):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path)
+    prefill._validate_admission(manifest, phase, value)
+    if kind == 'work':
+        manifest['execution']['phases'][phase]['work_limit'] = 2
+    elif kind == 'cost':
+        manifest['execution']['phases'][phase]['cost_limit'] = 1
+    elif kind == 'wall':
+        value['children'][0]['resources']['walltime_s'] = 1
+        estimates['phases'][phase]['children'][0]['resources_sha256'] = scientific.canonical_sha256(
+            value['children'][0]['resources'])
+    else:
+        # Exactly 2 + 1e-100 must refuse, even under the default Decimal precision.
+        estimates['phases'][phase]['children'][0]['tasks'][0]['estimated_seconds'] = 1e-100
+        estimates['phases'][phase]['children'][0]['setup_seconds'] = 0.75
+    publish()
+    with pytest.raises(scientific.QualityPrefillContractError, match='limit|walltime'):
+        prefill._validate_admission(manifest, phase, value)
+
+
+@pytest.mark.parametrize('kind', ['phase', 'command', 'runtime', 'resources', 'payload',
+    'child-order', 'task-order', 'missing-child', 'missing-task'])
+def test_admission_authenticates_the_declared_order_and_computation(tmp_path, kind):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path)
+    prefill._validate_admission(manifest, phase, value)
+    entry = estimates['phases'][phase]
+    if kind == 'phase': estimates['phases'] = {scientific.PHASE_DAG[1].phase: entry}
+    elif kind in ('command', 'runtime'): entry[kind + '_sha256'] = '0' * 64
+    elif kind == 'resources': entry['children'][0]['resources_sha256'] = '0' * 64
+    elif kind == 'payload': entry['children'][0]['tasks'][0]['payload_sha256'] = '0' * 64
+    elif kind == 'child-order': entry['children'].reverse()
+    elif kind == 'task-order': entry['children'][0]['tasks'].reverse()
+    elif kind == 'missing-child': entry['children'].pop()
+    else: entry['children'][0]['tasks'].pop()
+    publish()
+    with pytest.raises(scientific.QualityPrefillContractError):
+        prefill._validate_admission(manifest, phase, value)
+
+
+@pytest.mark.parametrize('kind', ['missing', 'changed', 'symlink', 'size', 'digest',
+                                 'estimate-digest'])
+def test_admission_reads_and_authenticates_actual_evidence(tmp_path, kind):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path)
+    prefill._validate_admission(manifest, phase, value)
+    entry = estimates['phases'][phase]['children'][0]
+    binding = entry['setup_evidence']
+    filename = tmp_path / 'synthetic-timing-evidence.txt'
+    original = filename.read_bytes()
+    if kind == 'missing': filename.unlink()
+    elif kind == 'changed': filename.write_bytes(b'x' * len(original))
+    elif kind == 'symlink':
+        target = tmp_path / 'target'; filename.rename(target); filename.symlink_to(target)
+    elif kind == 'size': binding['bytes'] += 1
+    elif kind == 'digest': binding['sha256'] = '0' * 64
+    else: manifest['execution']['setup_cost_reference']['sha256'] = '0' * 64
+    if kind != 'estimate-digest': publish()
+    with pytest.raises((ValueError, OSError)):
+        prefill._validate_admission(manifest, phase, value)
+
+
+@pytest.mark.parametrize('kind', ['schema', 'unknown-phase', 'duplicate-child',
+    'duplicate-task', 'empty-tasks', 'unknown-child-key', 'unknown-task-key',
+    'setup-negative', 'setup-bool', 'task-zero', 'task-bool', 'bad-evidence-size',
+    'bad-payload-digest'])
+def test_work_estimate_structure_rejects_malformed_inputs(tmp_path, kind):
+    _, phase, _, estimates, _ = admission_fixture(tmp_path)
+    assert scientific.validate_work_estimates(estimates) == estimates
+    child = estimates['phases'][phase]['children'][0]
+    task = child['tasks'][0]
+    if kind == 'schema': estimates['schema'] = 'prismabuild.logical_task_roster.v1'
+    elif kind == 'unknown-phase': estimates['phases']['unknown-phase'] = copy.deepcopy(estimates['phases'][phase])
+    elif kind == 'duplicate-child': estimates['phases'][phase]['children'].append(copy.deepcopy(child))
+    elif kind == 'duplicate-task': child['tasks'].append(copy.deepcopy(task))
+    elif kind == 'empty-tasks': child['tasks'] = []
+    elif kind == 'unknown-child-key': child['ignored'] = 1
+    elif kind == 'unknown-task-key': task['ignored'] = 1
+    elif kind == 'setup-negative': child['setup_seconds'] = -1
+    elif kind == 'setup-bool': child['setup_seconds'] = True
+    elif kind == 'task-zero': task['estimated_seconds'] = 0
+    elif kind == 'task-bool': task['estimated_seconds'] = True
+    elif kind == 'bad-evidence-size': task['estimate_evidence']['bytes'] = (1 << 20) + 1
+    else: task['payload_sha256'] = 'invalid'
+    with pytest.raises(scientific.QualityPrefillContractError):
+        scientific.validate_work_estimates(estimates)
+
+
+@pytest.mark.parametrize('kind', ['children', 'tasks', 'child-tasks', 'document'])
+def test_work_estimate_limits_apply_at_their_exact_boundary(tmp_path, monkeypatch, kind):
+    _, _, _, estimates, _ = admission_fixture(tmp_path)
+    limits = dict(children=('MAX_PREFILL_CHILDREN', 2), tasks=('MAX_PREFILL_TASKS', 3),
+                  **{'child-tasks': ('MAX_PREFILL_CHILD_TASKS', 2),
+                     'document': ('MAX_WORK_ESTIMATES_BYTES',
+                                  len(scientific.canonical_json_bytes(estimates)) + 1)})
+    name, boundary = limits[kind]
+    monkeypatch.setattr(scientific, name, boundary)
+    scientific.validate_work_estimates(estimates)
+    monkeypatch.setattr(scientific, name, boundary - 1)
+    with pytest.raises(scientific.QualityPrefillContractError):
+        scientific.validate_work_estimates(estimates)
+
+
+def test_estimate_evidence_aggregate_refuses_before_any_evidence_open(tmp_path, monkeypatch):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path, size=20, width=10)
+    manifest['execution']['phases'][phase]['cost_limit'] = 11
+    number = 0
+    for child in estimates['phases'][phase]['children']:
+        for binding in [child['setup_evidence'], *[t['estimate_evidence'] for t in child['tasks']]]:
+            binding.update(path=str(tmp_path / f'absent-{number}'), bytes=1 << 20)
+            number += 1
+    publish()
+    def forbidden(*args, **kwargs):
+        raise AssertionError('aggregate bound must precede evidence opens')
+    monkeypatch.setattr(prefill, '_owned', forbidden)
+    with pytest.raises(scientific.QualityPrefillContractError, match='aggregate estimate evidence'):
+        prefill._validate_admission(manifest, phase, value)
+
+
 def roster(size=3, *, width=2):
     # Structurally complete invented evidence. It is deliberately NOT a claim
     # about an installed interpreter; that is the native boundary's obligation.

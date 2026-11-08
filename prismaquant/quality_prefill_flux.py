@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+from fractions import Fraction
 
 from . import quality_prefill_contract as scientific
 from .cost_stage_checkpoint import publish_new_bytes
@@ -12,15 +13,15 @@ from .flux_jobs import FluxResources
 from .native_results import _owned, validate_runtime
 from .schemas import Contract
 from .staged_launch import validate_binding as validate_staged_binding
-from .staged_manifest import digest, integer, open_directory, path as _path, read_document
+from .staged_manifest import digest, open_directory, path as _path, read_document
 
 
 ROSTER_SCHEMA = 'prismaquant.quality_prefill_roster.v1'
 MAX_ROSTER_BYTES = 16 << 20
-MAX_TASKS = 1024
-MAX_CHILDREN = 256
-MAX_CHILD_TASKS = 64
-MAX_INPUTS = 32
+MAX_TASKS = scientific.MAX_PREFILL_TASKS
+MAX_CHILDREN = scientific.MAX_PREFILL_CHILDREN
+MAX_CHILD_TASKS = scientific.MAX_PREFILL_CHILD_TASKS
+MAX_INPUTS = scientific.MAX_PREFILL_INPUTS
 _MODULE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\Z')
 _check = Contract(scientific.QualityPrefillContractError, 'prefill roster: ')
 
@@ -36,9 +37,50 @@ def _sequence(value, maximum, where):
 
 
 def _binding(value, where):
-    _check.exact_mapping(value, keys=frozenset({'path', 'sha256', 'bytes'}), where=where)
-    _path(value['path']); digest(value['sha256'])
-    integer(value['bytes'])
+    return scientific.prefill_file_binding(value, where=where)
+
+
+def _validate_admission(manifest: dict, phase: str, roster: dict) -> None:
+    """Authenticate the declared measured work before creating native records."""
+    reference = manifest['execution']['setup_cost_reference']
+    raw, _ = read_document(reference['path'], scientific.MAX_WORK_ESTIMATES_BYTES)
+    _check.require(bytes_sha256hex(raw) == reference['sha256'], 'work estimates digest differs')
+    estimates = scientific.validate_work_estimates(
+        scientific.decode_strict_json(raw.decode('utf-8'), where='work estimates'))
+    _check.require(phase in estimates['phases'], 'selected phase has no work estimates')
+    declared = estimates['phases'][phase]
+    for key in ('command', 'runtime'):
+        _check.require(declared[key + '_sha256'] == scientific.canonical_sha256(roster[key]),
+                       f'estimated {key} differs from roster')
+    children = roster['children']
+    _check.require([c['child_id'] for c in declared['children']] ==
+                   [c['child_id'] for c in children], 'estimated child cover differs')
+    tasks = {task['task_id']: task for task in roster['tasks']}
+    evidence, total = {}, Fraction(0)
+    for child, estimate in zip(children, declared['children']):
+        _check.require(estimate['resources_sha256'] == scientific.canonical_sha256(child['resources']),
+                       'estimated resources differ')
+        _check.require([t['task_id'] for t in estimate['tasks']] == child['task_ids'],
+                       'estimated task cover differs')
+        seconds = Fraction(str(estimate['setup_seconds']))
+        bindings = [estimate['setup_evidence']]
+        for task in estimate['tasks']:
+            _check.require(task['payload_sha256'] ==
+                           scientific.canonical_sha256(tasks[task['task_id']]['payload']),
+                           'estimated task payload differs')
+            seconds += Fraction(str(task['estimated_seconds']))
+            bindings.append(task['estimate_evidence'])
+        _check.require(seconds <= child['resources']['walltime_s'], 'estimate exceeds child walltime')
+        total += seconds
+        for binding in bindings:
+            evidence[(binding['path'], binding['sha256'], binding['bytes'])] = binding
+    limits = manifest['execution']['phases'][phase]
+    _check.require(len(tasks) <= limits['work_limit'], 'phase work_limit exceeded')
+    _check.require(total <= limits['cost_limit'], 'phase cost_limit exceeded')
+    _check.require(sum(b['bytes'] for b in evidence.values()) <= scientific.MAX_WORK_ESTIMATES_BYTES,
+                   'aggregate estimate evidence exceeds limit')
+    for binding in evidence.values():
+        _owned(binding, scientific.MAX_ESTIMATE_EVIDENCE_BYTES)
 
 
 def validate_phase_roster(value: object) -> dict:

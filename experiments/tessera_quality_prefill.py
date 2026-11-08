@@ -75,7 +75,6 @@ def submit_phase_to_prismabuild(
     manifest: dict,
     phase: str,
     task_roster: dict,
-    priority: int,
 ) -> dict:
     """Submit one phase's task roster to PrismaBuild and return its receipt.
 
@@ -88,7 +87,6 @@ def submit_phase_to_prismabuild(
         phase: a phase name from ``PHASE_DAG``.
         task_roster: the decoded, strictly parsed roster artifact named by
             ``manifest["execution"]["phases"][phase]["task_roster"]``.
-        priority: ``manifest["execution"]["pb_policy"]["priority"]``.
 
     Returns a submission receipt::
 
@@ -98,7 +96,6 @@ def submit_phase_to_prismabuild(
           "plan_identity_sha256": <manifest identity>,
           "action_keys": [<one PB action key per submitted task>],
           "task_ids": [<the task ids those action keys cover, in order>],
-          "priority": <int>,
         }
 
     ``collect`` consumes exactly that shape: ``task_ids`` must be an exact
@@ -268,7 +265,6 @@ def command_submit(args: argparse.Namespace) -> int:
         manifest=manifest,
         phase=args.phase,
         task_roster=roster,
-        priority=manifest["execution"]["pb_policy"]["priority"],
     )
     states[args.phase] = transition(states[args.phase], "submitted", max_attempts=budget)
     if args.state_out is not None:
@@ -394,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="tessera_quality_prefill.py",
         description=(
             "Opt-in driver for the Tessera quality-prefill experiment "
-            "(prismaquant.quality_prefill_experiment.v1)."
+            "(prismaquant.quality_prefill_experiment.v2)."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)

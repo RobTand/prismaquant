@@ -2,7 +2,7 @@
 
 This module owns three things and performs no I/O:
 
-* the frozen run manifest ``prismaquant.quality_prefill_experiment.v1``
+* the frozen run manifest ``prismaquant.quality_prefill_experiment.v2``
   (:data:`MANIFEST_SCHEMA`), with the eleven closed sections of the
   specification's section 3.1;
 * the seven evidence envelopes of section 3.2, and the one price-table object
@@ -51,7 +51,7 @@ from prismaquant.cost_stage_checkpoint import (
 from prismaquant.schemas import Contract, strict_json_loads
 
 
-MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v1"
+MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v2"
 PRICE_TABLE_SCHEMA = "prismaquant.quality_prefill_experiment.price_table.v1"
 CANDIDATE_SCHEMA = "prismaquant.quality_prefill_experiment.candidate.v1"
 OBSERVATION_SCHEMA = "prismaquant.quality_prefill_experiment.observation.v1"
@@ -61,6 +61,13 @@ PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_experiment.phase_result.v1"
 ASSIGNMENT_SCHEMA = "prismaquant.quality_prefill_experiment.assignment.v1"
 FRONTIER_REPORT_SCHEMA = "prismaquant.quality_prefill_experiment.frontier_report.v1"
 TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
+WORK_ESTIMATES_SCHEMA = "prismaquant.quality_prefill_work_estimates.v1"
+MAX_PREFILL_TASKS = 1024
+MAX_PREFILL_CHILDREN = 256
+MAX_PREFILL_CHILD_TASKS = 64
+MAX_PREFILL_INPUTS = 32
+MAX_WORK_ESTIMATES_BYTES = 16 << 20
+MAX_ESTIMATE_EVIDENCE_BYTES = 1 << 20
 
 
 class QualityPrefillContractError(ValueError):
@@ -329,6 +336,19 @@ def _artifact_reference(value: object, *, where: str) -> Mapping[str, object]:
     _absolute_posix_path(body["path"], where=f"{where}.path")
     _sha256(body["sha256"], where=f"{where}.sha256")
     return body
+
+
+def prefill_file_binding(value: object, *, where: str) -> dict:
+    """The finite native document binding, without granting I/O authority."""
+    from .staged_manifest import integer, path
+    body = _exact_mapping(value, keys=_ARTIFACT_REFERENCE_KEYS | {'bytes'}, where=where)
+    _sha256(body['sha256'], where=f'{where}.sha256')
+    try:
+        path(body['path'])
+        integer(body['bytes'])
+    except ValueError as exc:
+        raise QualityPrefillContractError(f'{where}: {exc}') from exc
+    return dict(body)
 
 
 def _named_version(value: object, *, where: str) -> Mapping[str, object]:
@@ -653,7 +673,7 @@ _EXECUTION_KEYS = frozenset(
     {
         "phases",
         "setup_cost_reference",
-        "pb_policy",
+        "native_policy",
         "retry_policy",
         "withdrawal_policy",
     }
@@ -678,7 +698,7 @@ _RESOURCE_POLICY_KEYS = frozenset(
     {"partition_producer", "independent_recomputation", "energy_attribution"}
 )
 _SOLVER_LIMIT_KEYS = frozenset({"max_seconds", "max_states"})
-_PB_POLICY_KEYS = frozenset({"batch_policy", "progress_policy", "priority"})
+_NATIVE_POLICY = {"dispatch": "explicit-roster-v1", "progress": "local-log-v1"}
 _RETRY_POLICY_KEYS = frozenset({"max_attempts"})
 _PHASE_ENTRY_KEYS = frozenset(
     {"task_roster", "dependencies", "work_limit", "cost_limit"}
@@ -915,7 +935,7 @@ def _validate_execution(value: object, *, where: str) -> None:
     for name, spec in PHASE_BY_NAME.items():
         entry_where = f"{where}.phases.{name}"
         entry = _exact_mapping(phases[name], keys=_PHASE_ENTRY_KEYS, where=entry_where)
-        _artifact_reference(entry["task_roster"], where=f"{entry_where}.task_roster")
+        prefill_file_binding(entry["task_roster"], where=f"{entry_where}.task_roster")
         declared = _sequence(entry["dependencies"], where=f"{entry_where}.dependencies")
         declared_names = _unique_ids(declared, where=f"{entry_where}.dependencies")
         if declared_names != spec.dependencies:
@@ -928,16 +948,11 @@ def _validate_execution(value: object, *, where: str) -> None:
     _artifact_reference(
         body["setup_cost_reference"], where=f"{where}.setup_cost_reference"
     )
-    pb_policy = _exact_mapping(
-        body["pb_policy"], keys=_PB_POLICY_KEYS, where=f"{where}.pb_policy"
+    native_policy = _exact_mapping(
+        body["native_policy"], keys=frozenset(_NATIVE_POLICY), where=f"{where}.native_policy"
     )
-    _string(pb_policy["batch_policy"], where=f"{where}.pb_policy.batch_policy", pattern=_ID_RE)
-    _string(
-        pb_policy["progress_policy"], where=f"{where}.pb_policy.progress_policy", pattern=_ID_RE
-    )
-    _integer(
-        pb_policy["priority"], where=f"{where}.pb_policy.priority", minimum=-20, maximum=20
-    )
+    if native_policy != _NATIVE_POLICY:
+        _fail(f"{where}.native_policy must be {_NATIVE_POLICY}")
     retry = _exact_mapping(
         body["retry_policy"], keys=_RETRY_POLICY_KEYS, where=f"{where}.retry_policy"
     )
@@ -1051,6 +1066,60 @@ def freeze_manifest(draft: Mapping[str, object]) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 # Evidence envelopes (specification section 3.2)
 # ---------------------------------------------------------------------------
+
+
+def validate_work_estimates(value: object) -> dict:
+    """Validate finite planning evidence; native admission authenticates its bytes."""
+    raw = canonical_json_bytes(value)
+    if len(raw) + 1 > MAX_WORK_ESTIMATES_BYTES:
+        _fail('work estimates document exceeds byte limit')
+    body = decode_strict_json(raw.decode('utf-8'), where='work estimates')
+    _exact_mapping(body, keys=frozenset({'schema', 'phases'}), where='work estimates')
+    if body['schema'] != WORK_ESTIMATES_SCHEMA:
+        _fail('work estimates schema differs')
+    phases = _CHECK.mapping(body['phases'], where='work estimates.phases')
+    if not phases or not set(phases) <= set(PHASE_BY_NAME):
+        _fail('work estimates must name existing phases')
+    for phase, entry in phases.items():
+        _exact_mapping(entry, keys=frozenset({'command_sha256', 'runtime_sha256', 'children'}),
+                       where=phase)
+        for key in ('command_sha256', 'runtime_sha256'):
+            _sha256(entry[key], where=f'{phase}.{key}')
+        children = _sequence(entry['children'], where=f'{phase}.children', minimum=1)
+        if len(children) > MAX_PREFILL_CHILDREN:
+            _fail('work estimates child count exceeds limit')
+        child_ids, task_ids = set(), set()
+        for child in children:
+            _exact_mapping(child, keys=frozenset({'child_id', 'resources_sha256',
+                'setup_seconds', 'setup_evidence', 'tasks'}), where='estimated child')
+            child_id = prefill_identifier(child['child_id'], where='estimated child_id')
+            if child_id in child_ids:
+                _fail('duplicate estimated child_id')
+            child_ids.add(child_id)
+            _sha256(child['resources_sha256'], where='estimated resources_sha256')
+            _finite_number(child['setup_seconds'], where='setup_seconds', minimum=0)
+            evidence = prefill_file_binding(child['setup_evidence'], where='setup_evidence')
+            if evidence['bytes'] > MAX_ESTIMATE_EVIDENCE_BYTES:
+                _fail('setup evidence exceeds byte limit')
+            tasks = _sequence(child['tasks'], where='estimated tasks', minimum=1)
+            if len(tasks) > MAX_PREFILL_CHILD_TASKS:
+                _fail('estimated child tasks exceed limit')
+            for task in tasks:
+                _exact_mapping(task, keys=frozenset({'task_id', 'payload_sha256',
+                    'estimated_seconds', 'estimate_evidence'}), where='estimated task')
+                task_id = prefill_identifier(task['task_id'], where='estimated task_id')
+                if task_id in task_ids:
+                    _fail('duplicate estimated task_id')
+                task_ids.add(task_id)
+                _sha256(task['payload_sha256'], where='estimated payload_sha256')
+                if _finite_number(task['estimated_seconds'], where='estimated_seconds', minimum=0) <= 0:
+                    _fail('estimated_seconds must be positive')
+                evidence = prefill_file_binding(task['estimate_evidence'], where='estimate_evidence')
+                if evidence['bytes'] > MAX_ESTIMATE_EVIDENCE_BYTES:
+                    _fail('task evidence exceeds byte limit')
+            if len(task_ids) > MAX_PREFILL_TASKS:
+                _fail('estimated task count exceeds limit')
+    return body
 
 _CANDIDATE_KEYS = frozenset(
     {

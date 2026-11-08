@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, finite native prefill measured admission, slice3b.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
+`614dad302`. Manifest v2 binds immutable phase rosters and explicit native
+dispatch and local-log policy. Finite measured setup/task evidence is matched
+to the declared command, runtime, resources and ordered task cover. Work limits
+count tasks; cost limits cap aggregate estimated elapsed seconds, with setup
+charged once per explicit child. Serial estimates must fit each native walltime.
+Existing scientific validators remain authoritative. This gate does not choose
+grouping or fill missing estimates. Native prefill lifecycle and the scientific
+driver remain unfinished, with GPU and production qualification separately held.
+
 As of: 2026-11-08, finite native prefill documents, slice3a.
 Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py`, based on
 `f1d66889a`. Scientific task payloads have one application-owned validator.
