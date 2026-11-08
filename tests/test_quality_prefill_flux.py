@@ -1,5 +1,6 @@
 """Finite application documents, without native execution or runtime measurement."""
 import copy
+import errno
 import hashlib
 import json
 import os
@@ -347,8 +348,13 @@ def test_envelope_binding_itself_requires_original_bytes(tmp_path, kind):
         filename.symlink_to(held)
     elif kind == 'missing': filename.unlink()
     else: binding['bytes'] += 1
-    with pytest.raises((ValueError, FileNotFoundError)):
-        prefill.read_task_envelope(binding)
+    if kind == 'symlink':
+        with pytest.raises(OSError) as refused:
+            prefill.read_task_envelope(binding)
+        assert refused.value.errno == errno.ELOOP
+    else:
+        with pytest.raises((ValueError, FileNotFoundError)):
+            prefill.read_task_envelope(binding)
 
 
 def test_ordered_cover_is_detached_and_preserves_scientific_meaning():
