@@ -32,6 +32,7 @@ class FluxJobsTests(unittest.TestCase):
         self.checkout = self.root / 'source'
         self.checkout.mkdir()
         self.record = self.root / 'record'
+        self.source = {'checkout': str(self.checkout), 'commit': 'a' * 40, 'tree': 'b' * 40}
         self.profile = {'profile': jobs._PROFILE, 'uri': jobs._URI, 'broker_starttime': '123.5'}
         self.resources = jobs.FluxResources(2, 3, 0, 60)
 
@@ -41,7 +42,7 @@ class FluxJobsTests(unittest.TestCase):
     def submit_fixture(self, response=None, **kwargs):
         if response is None:
             response = self.completed('ƒBqv3wNoLK\n')
-        with patch.object(jobs, '_source_identity', return_value={'commit': 'a' * 40}), \
+        with patch.object(jobs, '_source_identity', return_value=self.source), \
                 patch.object(jobs, '_profile_identity', return_value=self.profile), \
                 patch.object(jobs, '_flux_run', return_value=response) as run:
             submission = jobs.submit_job(['/bin/echo', 'known'], checkout=self.checkout,
@@ -103,7 +104,7 @@ class FluxJobsTests(unittest.TestCase):
                             record_dir=self.checkout / 'record')
 
     def test_lost_ack_is_durable_and_no_blind_resubmit(self):
-        with patch.object(jobs, '_source_identity', return_value={'commit': 'a' * 40}), \
+        with patch.object(jobs, '_source_identity', return_value=self.source), \
                 patch.object(jobs, '_profile_identity', return_value=self.profile), \
                 patch.object(jobs, '_flux_run', side_effect=subprocess.TimeoutExpired('flux', 30)) as run:
             with self.assertRaises(jobs.SubmissionUnknown):
@@ -152,7 +153,7 @@ class FluxJobsTests(unittest.TestCase):
     def test_saved_launch_requires_exact_placement_and_effective_environment(self):
         environment = {'XDG_RUNTIME_DIR': '/run/user/1000'}
         submission, _ = self.submit_fixture(environment=environment)
-        intent = dict(argv=['/bin/echo', 'known'], source={'commit': 'a' * 40},
+        intent = dict(argv=['/bin/echo', 'known'], source=self.source,
                       resources=self.resources, environment=environment)
         jobs.validate_launch(submission, **intent)
         with self.assertRaisesRegex(ValueError, 'application intent'):
@@ -196,7 +197,7 @@ class FluxJobsTests(unittest.TestCase):
             if args[1] == 'info':
                 return self.completed(json.dumps({'version': 1, 'execution': {'R_lite': [{'rank': '0'}]}}), 0 if allocated else 1)
             if args[1] == 'status':
-                native = {'id': 123, 'exception_occurred': exception is not None, 'result': result, 'waitstatus': finish}
+                native = {'id': jobs.job_id_number(submission.job_id), 'exception_occurred': exception is not None, 'result': result, 'waitstatus': finish}
                 return self.completed('bad-json' if malformed == 'status' else json.dumps(native),
                                       status_rc if status_rc is not None else (0 if result == 1 else 125))
             if args[1] == 'wait-event':

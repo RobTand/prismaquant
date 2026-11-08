@@ -1,4 +1,4 @@
-"""Internal original-material qualification through real PB leases, CPU only.
+"""Internal original-material qualification through real immutable native staged windows, CPU only.
 
 This is not automatic campaign admission or a GLM producer transition.
 """
@@ -17,8 +17,8 @@ from safetensors.torch import save_file
 
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.residency_map import bind_residency_manifest
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from native_original_fixtures import _stage_manifest
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 REVISION = 'a6' * 20
@@ -74,7 +74,6 @@ def material(tmp_path, monkeypatch, request):
     pub = _bound(tmp_path / 'publisher.json', publisher)
     reads = _bound(tmp_path / 'readset.json', readset)
     staged = _stage_manifest(tmp_path, monkeypatch, readset)
-    bind_residency_manifest(MANIFEST)
     checks = []
     def admit(label, **kwargs):
         checks.append((label, kwargs))
@@ -263,8 +262,7 @@ def test_unsupported_routes_remain_closed(material, monkeypatch, route):
         stage_root = m['tmp'] / 'dynamic-stage'
         stage_root.mkdir()
         _stage_manifest(stage_root, monkeypatch, m['readset'])
-        bind_residency_manifest(MANIFEST)
-        with pytest.raises(RuntimeError, match='unsupported dynamic'):
+            with pytest.raises(RuntimeError, match='unsupported dynamic'):
             _owner(m)
         return
     with _owner(m) as owner:

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 from typing import Literal
 from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_LAX, bytes_sha256hex
 
@@ -92,9 +93,16 @@ def _publish_flux_json(path, value):
 
 def _flux_run(args, *, timeout=30):
     # Never inherit CLI plugins, job KVS namespaces, credentials, or PB context.
-    return subprocess.run([_CLI, *args], text=True, capture_output=True,
-                          env={'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
-                               'FLUX_URI': _URI}, timeout=timeout, check=False)
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        result = subprocess.run([_CLI, *args], stdout=stdout, stderr=stderr,
+                                env={'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
+                                     'FLUX_URI': _URI}, timeout=timeout, check=False)
+        for stream in (stdout, stderr):
+            if stream.tell() > 16 << 20:
+                raise ValueError('native query output exceeds evidence bound')
+            stream.seek(0)
+        return subprocess.CompletedProcess(result.args, result.returncode,
+                                           stdout.read().decode(), stderr.read().decode())
 
 
 def _checked(args):
@@ -248,6 +256,22 @@ sys.exit(128 - code if code < 0 else code)
 '''
 
 
+def _native_arguments(argv, source, resources, record_dir, dependencies, environment, staged_input):
+    command = list(argv)
+    if staged_input is not None:
+        command = ['/usr/bin/python3', '-m', 'prismaquant.staged_launch',
+                   DIRECT_ASCII_SPACED_LAX.text(staged_input), *command]
+    args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(environment.items())),
+            f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
+            f'--cwd={source["checkout"]}', '--input=/dev/null', f'--output={record_dir}/stdout',
+            f'--error={record_dir}/stderr', f'--job-name=pq-{record_dir.name}']
+    if resources.placement != 'portable':
+        args.append(f'--requires={resources.placement}')
+    args.extend(f'--dependency=afterok:{value}' for value in dependencies)
+    args.extend(['/usr/bin/python3', '-c', _PAYLOAD, source['commit'], *command])
+    return args
+
+
 def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Path,
                afterok=(), environment=None, staged_input=None) -> FluxSubmission:
     """Submit once. Existing records and lost acknowledgements require reconciliation.
@@ -270,21 +294,12 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if len({job_id_number(value) for value in dependencies}) != len(dependencies):
         raise ValueError('duplicate dependency ID')
     env = _environment(record_dir, environment)
-    command = list(argv)
     if staged_input is not None:
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
-        command = ['/usr/bin/python3', '-m', 'prismaquant.staged_launch',
-                   DIRECT_ASCII_SPACED_LAX.text(staged_input), *command]
     source, profile = _source_identity(checkout), _profile_identity()
-    args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
-            f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
-            f'--cwd={checkout}', '--input=/dev/null', f'--output={record_dir}/stdout',
-            f'--error={record_dir}/stderr', f'--job-name=pq-{record_dir.name}']
-    if resources.placement != 'portable':
-        args.append(f'--requires={resources.placement}')
-    args.extend(f'--dependency=afterok:{value}' for value in dependencies)
-    args.extend(['/usr/bin/python3', '-c', _PAYLOAD, source['commit'], *command])
+    args = _native_arguments(argv, {**source, 'checkout': str(checkout)}, resources,
+                             record_dir, dependencies, env, staged_input)
     intent = {'schema': 'pq.flux.launch.v1', 'source': source, 'profile': profile,
               'resources': asdict(resources), 'afterok': dependencies, 'argv': list(argv),
               'native_argv': args, 'record_dir': str(record_dir),
@@ -317,9 +332,15 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
 def load_submission(record_dir: Path) -> FluxSubmission:
     """Reconnect to a saved ID only; never submit or infer a producer by name."""
     record_dir = Path(record_dir).resolve()
-    intent = json.loads((record_dir / 'launch.json').read_bytes())
-    receipt = json.loads((record_dir / 'submission.json').read_bytes())
-    launch_sha = bytes_sha256hex(_json_bytes(intent))
+    from .staged_manifest import read_document
+    from .schemas import strict_json_loads
+    raw, _ = read_document(record_dir / 'launch.json', 16 << 20)
+    receipt_raw, _ = read_document(record_dir / 'submission.json', 1 << 20)
+    def invalid(key):
+        return ValueError(f'invalid native receipt JSON: {key}')
+    intent = strict_json_loads(raw, duplicate=invalid, constant=invalid)
+    receipt = strict_json_loads(receipt_raw, duplicate=invalid, constant=invalid)
+    launch_sha = bytes_sha256hex(raw)
     if (not isinstance(intent, dict) or not isinstance(receipt, dict) or
             intent.get('schema') != 'pq.flux.launch.v1' or
             receipt.get('schema') != 'pq.flux.submission.v1' or
@@ -358,18 +379,41 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
     env = _environment(submission.record_dir, environment)
-    prefix = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(env.items())),
-              f'--resources-shape={_shape(resources)}']
+    expected = _native_arguments(argv, source,
+                                 resources, submission.record_dir,
+                                 [_job_id(value) for value in afterok], env, staged_input)
     if (launch['argv'] != list(argv) or launch['source'] != source
             or launch['resources'] != asdict(resources) or launch['afterok'] != list(afterok)
-            or launch['native_argv'][:len(prefix)] != prefix):
+            or launch['native_argv'] != expected):
         raise ValueError('saved execution differs from application intent')
+
+
+def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **intent):
+    """Bind independent launch intent to the original actual native jobspec.
+
+    Native environments are compared in memory and never included in errors.
+    This queries the known ID only; it neither discovers nor submits jobs.
+    """
+    from .staged_manifest import read_document, decode_document
+    validate_launch(submission, **intent)
+    _validate_submission(submission)
+    raw, _ = read_document(submission.record_dir / 'launch.json', max_evidence_bytes)
+    launch = decode_document(raw)
+    args = launch['native_argv']
+    expected = decode_document(_checked([args[0], '--dry-run', *args[1:]]))
+    actual_raw = _checked(['job', 'info', '--original', submission.job_id, 'jobspec'])
+    if len(actual_raw.encode()) > max_evidence_bytes:
+        raise ValueError('original native jobspec exceeds evidence bound')
+    actual = decode_document(actual_raw)
+    if actual != expected:
+        raise ValueError('original native jobspec differs from selected launch intent')
+    return launch
 
 
 def _query(submission, name, args, errors, *, required=True, timeout=30):
     try:
         result = _flux_run(args, timeout=timeout)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         errors.append(f'{name}: {type(exc).__name__}')
         return None
     out = submission.record_dir
@@ -389,7 +433,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
     retained even for failure; absence before allocation/start is recorded.
     SIGKILL/node loss can prevent scratch cleanup and need owner reconciliation.
     """
-    errors, events, payload_exit, status = [], [], None, 'unknown'
+    errors, cleanup_errors, events, payload_exit, status = [], [], [], None, 'unknown'
     try:
         _validate_submission(submission)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
@@ -431,6 +475,7 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             try:
                 native = json.loads(raw_status.stdout) if raw_status is not None else None
                 if (not isinstance(native, dict) or type(native.get('id')) is not int or
+                        native['id'] != job_id_number(submission.job_id) or
                         type(native.get('exception_occurred')) is not bool or
                         type(native.get('result')) is not int or native['result'] not in (1, 2, 4, 8)):
                     raise ValueError('missing native result')
@@ -443,7 +488,9 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                     status = 'dependency-failed'
                 elif native['result'] == 4:
                     status = 'canceled'
-                elif native['result'] == 1 and payload_exit == 0 and raw_status.returncode == 0:
+                elif (native['result'] == 1 and payload_exit == 0 and raw_status.returncode == 0
+                      and native['exception_occurred'] is False
+                      and not any(e.get('severity') == 0 for e in exceptions)):
                     status = 'succeeded'
                 elif native['result'] in (2, 8):
                     status = 'failed'
@@ -462,12 +509,14 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                         cleanup['path'] != scratch['path'] or cleanup['removed'] is not True):
                     raise ValueError('scratch cleanup unverified')
             except (OSError, ValueError, KeyError, TypeError):
-                errors.append('scratch: cleanup unverified; reconcile owned descendants and path')
+                cleanup_errors.append('scratch: cleanup unverified; reconcile owned descendants and path')
     for name in ('stdout', 'stderr'):
         if not (submission.record_dir / name).exists():
             (submission.record_dir / f'{name}.missing').write_text('No redirected payload stream observed.\n')
-    result = ExecutionResult('unknown' if errors else status, submission.job_id, submission.record_dir,
-                             payload_exit, '; '.join(errors) or None)
+    result = ExecutionResult('unknown' if errors or (cleanup_errors and status not in
+                             ('failed', 'canceled', 'dependency-failed')) else status,
+                             submission.job_id, submission.record_dir,
+                             payload_exit, '; '.join([*errors, *cleanup_errors]) or None)
     _publish_flux_json(submission.record_dir / 'result.json',
                 {'schema': 'pq.flux.result.v1', **asdict(result), 'record_dir': str(result.record_dir)})
     return result

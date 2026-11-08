@@ -2,7 +2,7 @@
 
 This has no cache, delivery, network fetch, or persistent manifest of its own.
 The caller's sealed control-input binding establishes publication authority;
-this module checks that authority's native coordinates and their PB mapping.
+this module checks that authority's native coordinates and their immutable staged mapping.
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ ORIGINAL_PLAN_BINDING_KEYS = frozenset({
 ORIGINAL_RUNTIME_KEYS = frozenset({
     'schema', 'prismaquant_source_sha256', 'tessera_source_sha256', 'modeling_source',
     'model_class', 'profile', 'config', 'versions', 'container_content_sha256',
-    'arithmetic', 'material_pipeline', 'prismabuild',
+    'arithmetic', 'material_pipeline', 'native_runtime',
 })
 ORIGINAL_RESOURCE_KEYS = frozenset({
     'schema', 'cpu_bytes', 'material_bytes', 'source_cache_bytes', 'source_prefetch',
@@ -80,10 +80,7 @@ ORIGINAL_PREPARATION_KEYS = frozenset({
     'schema', 'scope', 'static_authority_sha256', 'implementation_sha256',
     'source_model_identity', 'source_execution', 'calibration', 'resources', 'head_source',
 })
-ORIGINAL_RESULT_SELECTION_KEYS = frozenset({
-    'queue_root', 'action_key', 'published_unix', 'attempt', 'max_result_bytes',
-    'max_evidence_bytes', 'request', 'payload_sha256', 'source_inputs',
-})
+from .native_results import SELECTION_KEYS as ORIGINAL_RESULT_SELECTION_KEYS
 
 
 class BoundOriginalInput(TypedDict):
@@ -207,12 +204,12 @@ def _full_calibration(value, *, shape=(512, 512)):
     return value
 
 
-def _validate_original_source_runtime(value, expected, *, sdk_version):
-    """Validate one runtime against its independently selected exact SDK policy."""
+def _validate_original_source_runtime(value, expected):
+    """Validate the measured native runtime against its independent selection."""
     if isinstance(expected, dict) and set(expected) == {'path', 'sha256'}:
         _, expected = _control(expected, 'original expected runtime')
     _exact(value, ORIGINAL_RUNTIME_KEYS, 'original runtime')
-    _same(value['schema'], 'prismaquant.original_source_runtime.v1', 'original runtime schema')
+    _same(value['schema'], 'prismaquant.original_source_runtime.v2', 'original runtime schema')
     for key in ('prismaquant_source_sha256', 'tessera_source_sha256'):
         _contract.sha256(value[key], where=f'original runtime {key}')
     _binding(value['modeling_source'], 'original modeling source')
@@ -251,25 +248,14 @@ def _validate_original_source_runtime(value, expected, *, sdk_version):
         _contract.string(name, where='actual scale/cast name')
         _require(isinstance(coordinate, list) and len(coordinate) == 2 and
                  all(type(item) is str and item for item in coordinate), 'actual scale/cast coordinate malformed')
-    pb = _exact(value['prismabuild'], {'sdk_version', 'helper_root', 'source_tree', 'runtime_generation'},
-                'original runtime PrismaBuild')
-    _same(pb['sdk_version'], sdk_version, 'original runtime SDK version')
-    _contract.absolute_posix_path(pb['helper_root'], where='original runtime helper root')
-    tree = _exact(pb['source_tree'], {'package_sha256', 'helper_tree_sha256'},
-                  'original runtime complete shared tree')
-    _contract.sha256(tree['package_sha256'], where='original shared package tree')
-    _require(tree['helper_tree_sha256'] is None or is_sha256hex(tree['helper_tree_sha256']),
-             'invalid original shared generation tree digest')
-    _contract.string(pb['runtime_generation'], where='original published runtime generation')
+    from .native_results import validate_runtime
+    validate_runtime(value['native_runtime'])
     _same(value, expected, 'observed original source runtime')
     return _snapshot(value)
 
 
 def validate_original_source_runtime(value, expected):
-    """The current consumer's installed runtime retains its exact SDK boundary."""
-    from .staged_lease import PB_CLIENT_SDK_VERSION
-
-    return _validate_original_source_runtime(value, expected, sdk_version=PB_CLIENT_SDK_VERSION)
+    return _validate_original_source_runtime(value, expected)
 
 
 def _resources(value):
@@ -287,7 +273,8 @@ def _resources(value):
     prefetch = source_prefetch(value)
     _require((prefetch['max_cache_slots'], prefetch['prefetch_lookahead'],
               prefetch['prefetch_workers']) == (2, 1, 1), 'original source prefetch differs from 2/1/1')
-    _contract.mapping(value['claim_demand'], where='original resource claim demand')
+    from .flux_jobs import FluxResources
+    FluxResources(**value['claim_demand'])
     _require(value['material_bytes'] <= value['cpu_bytes'] and
              value['serialization_bytes'] <= value['cpu_bytes'], 'original sub-envelope exceeds CPU bound')
     return value
@@ -321,7 +308,7 @@ class OriginalCoordinate:
 
 def original_generation_coordinates(*, publisher_input, publisher_id, publisher_revision,
                                     readset_input, source_paths, producer_source, resource_check):
-    """Closed native HF sibling roster projected into existing PB whole-file entries.
+    """Closed native HF sibling roster projected into immutable whole-file entries.
 
     A Git auxiliary's SHA256 comes from the separately bound readset; delivered
     bytes must ALSO authenticate to the publisher's native Git blob ID before
@@ -357,17 +344,17 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
     _require(len(set(source_paths.values())) == len(source_paths),
              'source mapping repeats a physical file')
     from .io_engine import SealedBuffer
-    from .staged_lease import client_sdk
+    from .staged_launch import read_contract_document
 
     raw, _readset_document = _control(readset_input, 'original material readset')
-    client = client_sdk()  # The same qualified generation owns parsing and leases.
     reserve_allocation(resource_check, 'before_original_generation_control', cpu_bytes=len(raw))
     control = SealedBuffer(len(raw))
     try:
         control.fill_bytes(raw)
         _require(control.seal() == readset_input['sha256'], 'readset control binding changed')
         control.require_sealed()
-        readset, _encoding = client.read_data_manifest(control.path)
+        with control.readonly() as view:
+            readset = read_contract_document(bytes(view))
     finally:
         control.close()
     entries = {(row['path'], row['offset']): row for row in readset['entries']}
@@ -416,28 +403,15 @@ def _bound_source_documents(authority, resource_check):
     return producer, paths, coordinates, tensors
 
 
-def _shared_runtime_tree(sdk, claim):
-    from .production_weight_cache import _production_cache_source_sha256
-
-    package = Path(sdk.__file__).resolve().parent
-    root = Path(claim['helper_root']).resolve()
-    # Existing test-only installed-SDK controls truthfully have no complete
-    # shared helper/worker/proxy generation. Null is missing proof, never a
-    # substitute tree or a source eligibility flag.
-    sealed = package == root / 'src' / 'prismabuild'
-    return {'package_sha256': _production_cache_source_sha256(package),
-            'helper_tree_sha256': _production_cache_source_sha256(root) if sealed else None}
-
-
 def _environment_matches(runtime):
-    """Re-read the executing package/SDK/image axes without a source/profile read."""
+    """Re-read the executing package/interpreter/image axes without a profile read."""
     import torch
     import tessera
     from .joint_projection_backend import executing_image
     from .production_weight_cache import _production_cache_source_sha256
-    from .staged_lease import resolve_context
+    from .native_results import measure_runtime, execution_context
 
-    sdk, claim = resolve_context()
+    context = execution_context()
     _same(runtime['versions'], {
         'python': platform.python_version(), 'torch': str(torch.__version__),
         'torch_git': torch.version.git_version, 'cuda': torch.version.cuda,
@@ -455,12 +429,8 @@ def _environment_matches(runtime):
     _same(runtime['tessera_source_sha256'],
           _production_cache_source_sha256(Path(tessera.__file__).resolve().parent),
           'executing Tessera module tree')
-    _same(runtime['prismabuild']['sdk_version'], sdk.SDK_VERSION, 'executing SDK version')
-    _same(runtime['prismabuild']['helper_root'], claim['helper_root'], 'executing shared SDK root')
-    _same(runtime['prismabuild']['source_tree'], _shared_runtime_tree(sdk, claim),
-          'executing complete shared SDK/helper/worker/proxy generation tree')
-    _same(runtime['prismabuild']['runtime_generation'], Path(claim['helper_root']).name,
-          'executing shared runtime generation')
+    _same(runtime['native_runtime'], measure_runtime(dependencies=('torch', 'transformers', 'tessera-quant')),
+          'executing measured native runtime')
     modeling = runtime['modeling_source']
     from .digests import file_sha256hex
 
@@ -472,7 +442,7 @@ def _environment_matches(runtime):
         module.replace('.', '/') + '.py')).resolve(strict=True)
     _same(modeling['path'], str(installed), 'original installed modeling source path')
     _same(file_sha256hex(Path(modeling['path'])), modeling['sha256'], 'installed modeling source')
-    return sdk, claim
+    return context
 
 
 def original_checkpoint_description(source_model, owner):
@@ -492,18 +462,17 @@ def original_source_runtime(runner, owner):
     import tessera
     from .joint_projection_backend import executing_image
     from .production_weight_cache import _production_cache_source_sha256
-    from .staged_lease import resolve_context
+    from .native_results import measure_runtime
     from .tessera_calibration_cache import CaptureSourceAuthentication
     from .digests import file_sha256hex
 
     _require(isinstance(owner, CaptureSourceAuthentication) and owner.is_qualified_original_material
              and runner.context.source_authentication is owner,
              'original runtime requires the same source context/owner')
-    sdk, claim = resolve_context()
     cls = type(runner.model)
     modeling = Path(inspect.getfile(cls)).resolve(strict=True)
     value = {
-        'schema': 'prismaquant.original_source_runtime.v1',
+        'schema': 'prismaquant.original_source_runtime.v2',
         'prismaquant_source_sha256': _production_cache_source_sha256(),
         'tessera_source_sha256': _production_cache_source_sha256(Path(tessera.__file__).resolve().parent),
         'modeling_source': {'path': str(modeling), 'sha256': file_sha256hex(modeling)},
@@ -523,9 +492,7 @@ def original_source_runtime(runner, owner):
             'tensor_dtypes': {name: str(dtype) for name, dtype in sorted(runner.context.buffer_dtypes.items())},
             'scale_inv_map': {name: list(coordinate) for name, coordinate
                               in sorted(runner.context.fp8_scale_inv_map.items())}},
-        'prismabuild': {'sdk_version': sdk.SDK_VERSION, 'helper_root': claim['helper_root'],
-            'source_tree': _shared_runtime_tree(sdk, claim),
-            'runtime_generation': Path(claim['helper_root']).name},
+        'native_runtime': measure_runtime(dependencies=('torch', 'transformers', 'tessera-quant')),
     }
     return validate_original_source_runtime(value, value)
 
@@ -675,7 +642,7 @@ def observe_original_source_execution(authority_input, plan_input, *, resource_c
     """Build the existing-owner intake packet from independently bound controls.
 
     This observes no source/model/device and grants no eligibility. The public
-    requirement separately revalidates active native claim/CAS readset and live
+    requirement separately revalidates active native execution and immutable readset and live
     installed environment, then requires actual qualification/root admission.
     """
     _, authority = _control(authority_input, 'original authority')
@@ -710,7 +677,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
     consumers cannot turn this independent snapshot into an admitted owner.
     """
     from .streamed_model_identity import validate_streamed_model_identity
-    from .staged_lease import _load_sealed_payload
+    from .staged_lease import load_sealed_manifest
 
     _exact(admitted_execution, ORIGINAL_EXECUTION_KEYS, 'original admitted execution')
     for key, supplied in (('authority_input', authority_input), ('plan_input', plan_input)):
@@ -782,11 +749,9 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
     _resources(resources)
     _same(resources, admitted_execution['resources'], 'independently observed source resources')
     _same(plan.get('source_prefetch'), resources['source_prefetch'], 'final source prefetch')
-    sdk, claim = _environment_matches(runtime)
-    claimed = sdk.read_claimed_record(sdk.PoolQueue(claim['queue_root']), claim['action_key'])
-    _require(isinstance(claimed, dict), 'original source has no active native claim')
-    _same(claimed.get('resources'), resources['claim_demand'], 'native reservation/resource demand')
-    actual = _load_sealed_payload(bindings['read_manifest']['sha256'])
+    context = _environment_matches(runtime)
+    _same(context['resources'], resources['claim_demand'], 'native reservation/resource demand')
+    actual = load_sealed_manifest(bindings['read_manifest']['sha256'])
     active = {(row['path'], row['offset']): row for row in actual['entries']}
     for row in coordinates.values():
         entry = active.get((row.path, 0))
@@ -834,94 +799,34 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
 
 
 def _verified_original_result(selection, resource_check):
-    """Require SDK5's selected native producer owner, never queue/consumer guesses."""
-    from .staged_lease import client_sdk
-    from .digests import bytes_sha256hex
-
-    _exact(selection, ORIGINAL_RESULT_SELECTION_KEYS, 'original qualification action selection')
-    _contract.absolute_posix_path(selection['queue_root'], where='qualification queue')
-    _contract.sha256(selection['action_key'], where='qualification action key')
-    _contract.sha256(selection['payload_sha256'], where='qualification CAS payload')
-    for key in ('attempt', 'max_result_bytes', 'max_evidence_bytes'):
-        _contract.integer(selection[key], where=f'qualification {key}', minimum=1)
-    _require(type(selection['published_unix']) in (int, float) and
-             math.isfinite(selection['published_unix']), 'qualification needs exact finite publication')
-    inputs = selection['source_inputs']
-    _require(isinstance(inputs, list) and inputs and len(inputs) <= 64,
-             'qualification requires the complete declared source-input bindings')
-    ids = set()
-    for row in inputs:
-        _exact(row, {'id', 'sha256', 'bytes'}, 'qualification source input')
-        _contract.string(row['id'], where='qualification source input ID')
-        _contract.sha256(row['sha256'], where='qualification source input SHA256')
-        _contract.integer(row['bytes'], where='qualification source input bytes', minimum=1)
-        _require(row['id'] not in ids, 'qualification repeats a declared source input')
-        ids.add(row['id'])
-    source_bytes = sum(row['bytes'] for row in inputs)
-    _require(source_bytes <= selection['max_evidence_bytes'],
-             'qualification source inputs exceed the independent evidence envelope')
+    """The app boundary owns actual native provenance, never consumer guesses."""
+    from .native_results import read_selected_result
+    _exact(selection, ORIGINAL_RESULT_SELECTION_KEYS, 'original qualification selection')
     reserve_allocation(resource_check, 'before_original_qualification_result',
-        cpu_bytes=selection['max_evidence_bytes'] + selection['max_result_bytes'] + source_bytes)
-    _, expected_request = _control(selection['request'], 'qualification sealed request')
-    sdk = client_sdk()
-    result = sdk.read_verified_action_result(sdk.PoolQueue(selection['queue_root']), selection['action_key'],
-        published_unix=selection['published_unix'], attempt=selection['attempt'],
-        max_result_bytes=selection['max_result_bytes'], max_evidence_bytes=selection['max_evidence_bytes'],
-        input_limits={row['id']: row['bytes'] for row in inputs},
-        require_native_producer_context=True)
-    _same(result['request'], expected_request, 'selected original qualification request')
-    _same(bytes_sha256hex(result['payload']), selection['payload_sha256'], 'selected original qualification payload')
-    _same(result['inputs'], inputs, 'selected original qualification source-input roster')
-    _require(set(result['input_payloads']) == ids, 'qualified CAS source input payloads are incomplete')
-    # Bind the ACTUAL executable wrapper, not params.command asserted alone.
-    sdk.bind_standard_capture_command(result['request'])
-    return result
+        cpu_bytes=selection['max_publication_bytes'] + selection['max_evidence_bytes']
+                  + 2 * selection['max_artifact_bytes'])
+    return read_selected_result(selection)
 
 
-ORIGINAL_ARTIFACT_PUBLICATION_PREFIX = b'ORIGINAL_SOURCE_ARTIFACTS '
 ORIGINAL_CUDA_ARTIFACT_ROLES = frozenset({
     'control', 'execution', 'action_result', 'netdata_sparky', 'netdata_sparklina', 'torch_trace',
 })
 
 
-def _original_artifact_publication(payload, *, node_id, roles):
-    """Interpret the one actual producer publication in authenticated CAS bytes."""
-    _require(type(payload) is bytes, 'qualified result payload must be owned CAS bytes')
-    lines = [line[len(ORIGINAL_ARTIFACT_PUBLICATION_PREFIX):] for line in payload.splitlines()
-             if line.startswith(ORIGINAL_ARTIFACT_PUBLICATION_PREFIX)]
-    _require(len(lines) == 1, 'selected result lacks exactly one actual artifact publication; old receipts remain unqualified')
-    try:
-        publication = strict_json_loads(lines[0],
-            duplicate=lambda key: RuntimeError(f'artifact publication duplicate key {key}'),
-            constant=lambda key: RuntimeError(f'artifact publication invalid constant {key}'))
-    except (ValueError, UnicodeError) as exc:
-        raise RuntimeError('selected artifact publication is not strict JSON') from exc
-    _exact(publication, {'schema', 'node_id', 'artifacts'}, 'selected artifact publication')
-    _same(publication['schema'], 'prismaquant.original_source_artifact_publication.v1', 'actual artifact publication schema')
-    _same(publication['node_id'], node_id, 'actual artifact publication selected node')
-    _same(lines[0], DIRECT_ASCII_STRICT.encoded(publication), 'canonical actual artifact publication')
-    artifacts = _exact(publication['artifacts'], roles, 'actual published artifact roles')
-    paths = set()
-    for role, artifact in artifacts.items():
-        _exact(artifact, {'path', 'sha256', 'bytes'}, f'actual published {role}')
-        _contract.absolute_posix_path(artifact['path'], where=f'actual published {role} path')
-        _contract.sha256(artifact['sha256'], where=f'actual published {role} SHA256')
-        _contract.integer(artifact['bytes'], where=f'actual published {role} bytes', minimum=1)
-        _require(artifact['path'] not in paths, 'artifact publication reuses a path for different roles')
-        paths.add(artifact['path'])
-    return artifacts
+def _original_artifact_publication(result, *, node_id, roles):
+    from .native_results import SelectedResult
+    _require(isinstance(result, SelectedResult), 'qualified result requires verified native bytes')
+    _same(result.publication['producer_id'], node_id, 'actual artifact publication selected node')
+    _same(set(result.publication['artifacts']), set(roles), 'actual published artifact roles')
+    return result
 
 
-def _published_original_artifact(artifacts, role, binding, *, resource_check, max_bytes, decode_json=True):
-    """Join independently selected bytes to the digest/length the result published."""
-    artifact = artifacts[role]
+def _published_original_artifact(result, role, binding, *, resource_check, max_bytes, decode_json=True):
+    artifact = result.publication['artifacts'][role]
     _same(_binding(binding, f'independent qualified {role}'),
           {key: artifact[key] for key in ('path', 'sha256')}, f'selected published {role} binding')
     _require(artifact['bytes'] <= max_bytes, f'published {role} exceeds the qualified evidence envelope')
-    _same(Path(binding['path']).stat().st_size, artifact['bytes'], f'actual published {role} length')
-    reserve_allocation(resource_check, f'before_original_published_artifact:{role}', cpu_bytes=2 * artifact['bytes'])
-    raw = read_bound(binding, f'actual published {role}')
-    _same(len(raw), artifact['bytes'], f'owned actual {role} length')
+    raw = result.artifact_payloads[role]
     if not decode_json:
         return raw
     try:
@@ -932,9 +837,9 @@ def _published_original_artifact(artifacts, role, binding, *, resource_check, ma
         raise RuntimeError(f'published {role} is not strict JSON') from exc
 
 
-def _published_original_json(artifacts, role, binding, selection, resource_check):
-    return _published_original_artifact(artifacts, role, binding, resource_check=resource_check,
-                                        max_bytes=selection['max_evidence_bytes'])
+def _published_original_json(result, role, binding, selection, resource_check):
+    return _published_original_artifact(result, role, binding, resource_check=resource_check,
+                                        max_bytes=selection['max_artifact_bytes'])
 
 
 def _require_original_qualified_source(row, request, accepted, target_runtime):
@@ -944,8 +849,7 @@ def _require_original_qualified_source(row, request, accepted, target_runtime):
     equals the target. The existing acceptance can describe identical sources,
     but still binds the actual executed snapshot and target package/runtime.
     """
-    snapshot = request['params']['checkout_snapshot']
-    _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
+    _same(request['source']['commit'], row['source_snapshot'], 'original actual qualified source snapshot')
     _require(row['compatibility'] is not None,
              'every qualified member requires independently bound executed-to-target source acceptance')
     family = accepted.get(row['node_id'])
@@ -971,64 +875,26 @@ def _require_original_reader_target(reader_authority, authority):
         _same(reader_authority[key], authority[key], f'qualified reader target {key}')
 
 
-def _helper_tree(helper_root):
-    """The package and complete tree digests of the helper generation on disk."""
-    from .production_weight_cache import _production_cache_source_sha256
-
-    return {'package_sha256': _production_cache_source_sha256(helper_root / 'src' / 'prismabuild'),
-            'helper_tree_sha256': _production_cache_source_sha256(helper_root)}
-
-
 def _require_original_reader_producer(receipt, reader_authority, result, expected_runtime_input):
-    """Join material observations to the SDK-owned selected producer context.
-
-    The SDK owns native provenance verification. This only joins its result
-    to Original domain controls; it never looks up a queue or a live claim.
-    """
-    context = result.get('producer_context')
-    _require(isinstance(context, dict), 'qualified reader requires selected native producer context')
-    _same(context['attempt_source'], 'selected-immutable-attempt', 'selected reader context provenance')
-    _same(context['resources_semantics'], 'selected-claim-sealed-demand', 'selected reader reservation semantics')
-    for key in ('action_key', 'published_unix', 'attempt', 'generation', 'host'):
-        _same(context[key], result[key], f'selected reader producer {key}')
-    _same(context['worker'], result['worker_id'], 'selected reader full worker identity')
-    _same(context['incarnation'], context['worker'], 'selected reader full incarnation')
-    _same(context['receipt_sha256'], result['receipt']['receipt_sha256'], 'selected reader execution receipt')
-    _same(context['runtime_sha256'], result['receipt']['producer']['runtime']['runtime_sha256'],
-          'selected reader attested runtime')
+    """Join actual material observations to the verified native producer."""
+    from .native_results import SelectedResult
+    _require(isinstance(result, SelectedResult), 'qualified reader requires selected native producer context')
     _, runtime = _control(reader_authority['runtime'], 'selected reader observed runtime')
     _, expected_runtime = _control(expected_runtime_input, 'independent selected reader runtime')
-    _exact(expected_runtime, ORIGINAL_RUNTIME_KEYS, 'independent selected reader runtime')
-    expected_pb = _exact(expected_runtime['prismabuild'],
-        {'sdk_version', 'helper_root', 'source_tree', 'runtime_generation'}, 'independent selected reader SDK policy')
-    _contract.integer(expected_pb['sdk_version'], where='independent selected reader SDK version', minimum=1)
-    runtime = _validate_original_source_runtime(runtime, expected_runtime, sdk_version=expected_pb['sdk_version'])
+    runtime = _validate_original_source_runtime(runtime, expected_runtime)
     _same(runtime['config'], reader_authority['source_model_identity']['config'],
           'selected reader runtime source config')
-    # From here on the reader's record of its producer run meets the identity
-    # the SDK selected for it: D32 seals, stamped in dev mode.
-    _recorded_same(runtime['prismabuild']['helper_root'], context['helper_root'],
-                   'selected reader actual helper root')
-    helper_root = Path(context['helper_root'])
-    _recorded_same(runtime['prismabuild']['runtime_generation'], helper_root.name,
-                   'selected reader actual helper generation')
+    _same(runtime['native_runtime'], result.publication['runtime'], 'selected reader measured native runtime')
     _, resources = _control(reader_authority['resources'], 'selected reader observed resources')
     resources = _resources(resources)
-    _recorded_same(resources['claim_demand'], context['resources'],
-                   'selected reader actual producer reservation')
-    identity_keys = ('queue_root', 'action_key', 'nonce', 'scope_id', 'worker', 'host',
-                     'incarnation', 'helper_root')
+    _same(resources['claim_demand'], result.launch['resources'], 'selected reader actual producer reservation')
+    for binding in (reader_authority['runtime'], expected_runtime_input):
+        _require(any(row['path'] == binding['path'] and row['sha256'] == binding['sha256']
+                     for row in result.publication['inputs'].values()),
+                 'reader runtime must be an independently declared native input')
     for row in receipt['deliveries']:
-        claim = row['native_delivery']['claim']
-        _recorded_same({key: claim[key] for key in identity_keys},
-                       {key: context[key] for key in identity_keys},
-                       'actual reader delivery selected producer')
-        _recorded_same(claim['attempt_source'], 'launch-env', 'actual reader delivery launch provenance')
-    # Dev mode hashes no existing tree only to seal a run: NOT_COMPUTED stands for
-    # the tree on disk, beside the tree the reader recorded.
-    _recorded_same(NOT_COMPUTED if dev_mode_enabled() else _helper_tree(helper_root),
-                   runtime['prismabuild']['source_tree'], 'selected reader actual complete helper tree')
-
+        _same(row['native_delivery']['read_contract_sha256'], reader_authority['readset']['sha256'],
+              'actual reader delivery selected read contract')
 
 
 _CUDA_CASES = frozenset({
@@ -1128,8 +994,8 @@ def _require_original_source_proofs(authority, resource_check):
     _require(authority['root_admission'] is not None,
              'original source requires independent root matched-source admission')
     _, target_runtime = _control(authority['runtime'], 'qualified target runtime')
-    _require(target_runtime['prismabuild']['source_tree']['helper_tree_sha256'] is not None,
-             'original source requires actual shared helper/worker/proxy generation proof')
+    from .native_results import validate_runtime
+    validate_runtime(target_runtime['native_runtime'])
     _, admission = _control(authority['root_admission'], 'original root admission')
     _exact(admission, {'schema', 'scope', 'static_authority_sha256', 'session', 'runtime', 'resources',
                        'qualification', 'matched_source'}, 'original root admission')
@@ -1171,11 +1037,11 @@ def _require_original_source_proofs(authority, resource_check):
         _contract.string(row['node_id'], where='original actual CUDA node')
         _contract.string(row['source_snapshot'], where='original qualified snapshot', pattern=_GIT_OBJECT_ID)
         result = _verified_original_result(row['result'], resource_check)
-        command = result['request']['params']['command']
+        command = result.launch['argv']
         _require('--node-id' in command and command.index('--node-id') + 1 < len(command)
                  and command[command.index('--node-id') + 1] == row['node_id'],
                  'actual CUDA request executed a different control')
-        artifacts = _original_artifact_publication(result['payload'], node_id=row['node_id'],
+        artifacts = _original_artifact_publication(result, node_id=row['node_id'],
                                                    roles=ORIGINAL_CUDA_ARTIFACT_ROLES)
         control = _published_original_json(artifacts, 'control', row['control'], row['result'], resource_check)
         execution = _published_original_json(artifacts, 'execution', row['execution'], row['result'], resource_check)
@@ -1192,16 +1058,17 @@ def _require_original_source_proofs(authority, resource_check):
                  and ending['cpu_preflight'] is False and not ending['netdata_errors']
                  and not ending['torch_trace_errors'] and isinstance(ending['torch_trace'], dict),
                  'actual CUDA controller/trace/native telemetry did not complete')
-        trace = artifacts['torch_trace']
+        trace = {key: artifacts.publication['artifacts']['torch_trace'][key]
+                 for key in ('path', 'sha256', 'bytes')}
         _same(ending['torch_trace'], trace, 'selected controller/native trace artifact')
         _published_original_artifact(artifacts, 'torch_trace',
             {key: trace[key] for key in ('path', 'sha256')}, resource_check=resource_check,
-            max_bytes=row['result']['max_evidence_bytes'], decode_json=False)
+            max_bytes=row['result']['max_artifact_bytes'], decode_json=False)
         _same({record['host'] for record in ending['netdata']}, {'sparky', 'sparklina'},
               'selected actual raw telemetry hosts')
         for host in ('sparky', 'sparklina'):
             role = 'netdata_' + host
-            artifact = artifacts[role]
+            artifact = artifacts.publication['artifacts'][role]
             raw_host = _published_original_json(artifacts, role,
                 {key: artifact[key] for key in ('path', 'sha256')}, row['result'], resource_check)
             _same(raw_host['host'], host, 'selected native telemetry producer host')
@@ -1209,7 +1076,7 @@ def _require_original_source_proofs(authority, resource_check):
             _same(actual_host['charts'], len(raw_host['charts']), 'selected actual raw host chart census')
             _require(raw_host['after'] <= ending['start_unix'] and raw_host['before'] <= ending['finish_unix']
                      and raw_host['after'] < raw_host['before'], 'selected native telemetry window differs from controller')
-        _require_original_qualified_source(row, result['request'], accepted, target_runtime)
+        _require_original_qualified_source(row, result.launch, accepted, target_runtime)
     _same(seen, {(case, pages, dtype) for case in _CUDA_CASES for pages in ('0', '1')
                  for dtype in ('torch.float32', 'torch.bfloat16')}, 'actual full64 CUDA coverage')
     reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority',
@@ -1217,14 +1084,14 @@ def _require_original_source_proofs(authority, resource_check):
     _contract.string(reader['node_id'], where='actual qualified reader node')
     _contract.string(reader['source_snapshot'], where='actual reader source snapshot', pattern=_GIT_OBJECT_ID)
     reader_result = _verified_original_result(reader['result'], resource_check)
-    _require(reader['node_id'] in reader_result['request']['params']['command'],
+    _require(reader['node_id'] in reader_result.launch['argv'],
              'selected native reader request executed another proof')
-    artifacts = _original_artifact_publication(reader_result['payload'], node_id=reader['node_id'],
+    artifacts = _original_artifact_publication(reader_result, node_id=reader['node_id'],
                                                roles={'receipt', 'authority'})
     receipt = _published_original_json(artifacts, 'receipt', reader['receipt'], reader['result'], resource_check)
     reader_authority = _published_original_json(artifacts, 'authority', reader['authority'], reader['result'], resource_check)
     _require_original_reader_target(reader_authority, authority)
-    _require_original_qualified_source(reader, reader_result['request'], accepted, target_runtime)
+    _require_original_qualified_source(reader, reader_result.launch, accepted, target_runtime)
     from .tessera_calibration_cache import validate_original_source_material_receipt
 
     validate_original_source_material_receipt(receipt, reader_authority)
