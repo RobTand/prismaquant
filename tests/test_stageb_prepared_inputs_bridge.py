@@ -408,7 +408,9 @@ def _consume_bridge(layout, record, phases, resolver, monkeypatch):
     order = []
     sources = [_forbid_source(monkeypatch, Path(entry["path"]))
                for window in windows for entry in window["entries"]]
-    assert resolver.declared_readset()["state"] == "bound", resolver.declared_readset()
+    assert resolver.declared_readset() == {
+        entry["path"]: [(0, entry["bytes"])]
+        for window in windows for entry in window["entries"]}
     progress = QuantumProgress(frontier=ChunkFrontier(chunks=[], windows=[]))
     # Local phase data is the actual dispatched roster. Progress transport is
     # deliberately not injected; its independent migration stays in slice4.
