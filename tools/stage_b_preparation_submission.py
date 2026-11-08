@@ -192,7 +192,7 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
                               "entry_point": args.tool},
         annotations=annotations, mount_prefix=args.mount_prefix)
     template = build_preparation_template(
-        metadata_root=root, tier=args.tier,
+        metadata_root=root,
         payload_max_bytes=preparation_payload_ceiling(quanta, indexes=indexes))
     out.mkdir(parents=True, exist_ok=True)
     manifest_bytes = seal_manifest_bytes(manifest)
@@ -218,11 +218,9 @@ def write_submission(args, entries, annotations, quanta, indexes) -> dict:
         "strict_read_flags": ["--data-manifest-sha256",
                               hashlib.sha256(manifest_bytes).hexdigest(),
                               "--allowed-tiers", "ram,ssd"],
-        # --residency stage also gives the action PRISMABUILD_RESIDENCY_MAP,
-        # which the produced-output binding needs for its queue root.
-        "pbrun_options": ["--data-manifest", str(manifest_path),
-                          "--produced-output-template", str(template_path),
-                          "--residency", "stage", "--residency-ram", "auto"],
+        "native_argv": ["--produced-declaration", str(template_path),
+                        "--produced-declaration-sha256", hashlib.sha256(template_bytes).hexdigest()],
+        "staged_input_required": True,
     }
     (out / "submission.json").write_bytes(
         (json.dumps(submission, sort_keys=True, indent=1) + "\n").encode())
@@ -235,8 +233,6 @@ def _common(parser):
     parser.add_argument("--adjoint-receipt-sha256", default=None)
     parser.add_argument("--adjoint-band", type=Path, action="append", default=[])
     parser.add_argument("--adjoint-band-sha256", action="append", default=[])
-    parser.add_argument("--tier", required=True,
-                        help="the stage tier the template permits (a fleet fact)")
     parser.add_argument("--out", type=Path, required=True,
                         help="directory for the manifest, template and submission.json")
     parser.add_argument("--mount-prefix", default="/mnt/shared")

@@ -1001,27 +1001,13 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     return payload, execution
 
 
-EXACT_ACTIVATION_SCHEMA = "prismaquant.exact_activation_entry.v1"
+from .exact_activation_contract import EXACT_ACTIVATION_SCHEMA, ExactActivationReference
 
 # The block hashlib.file_digest read these entries in before the digest was
 # folded into the load (its _bufsize default, pinned by the read-amplification
 # tests). Keeping that block keeps the kernel's readahead overlapping the next
 # block with the hash of the current one; one whole-file read does not.
 _ENTRY_READ_BLOCK_BYTES = 2**18
-
-
-@dataclass(frozen=True)
-class ExactActivationReference:
-    """An immutable exact tensor receipt, never an activation sample/cache."""
-
-    path: str
-    name: str
-    metadata_json: str
-    shape: tuple[int, ...]
-    dtype: str
-    tensor_bytes: int
-    file_bytes: int
-    sha256: str
 
 
 _exact_activation_json = DIRECT_ASCII_STRICT.text

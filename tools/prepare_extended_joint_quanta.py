@@ -377,6 +377,8 @@ def prepare(args):
         'generator_argv': generator, 'coordinator_argv': launch,
         'requires': 'reviewed source checkout; all GPU work through published PB dispatcher'}),
         'launch recipe')])
+    if publication is not None:
+        publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
     print(json.dumps({'status': 'metadata_ready', 'launch': str(root/launch_name),
                       'catalog_extension': extension,
                       'produced_batches': [] if publication is None else publication.batches}))
@@ -413,6 +415,8 @@ def main(argv=None):
                              'admitted action (PQ #1070); the action must declare '
                              'the write-only template tools/stage_b_preparation_submission.py '
                              'writes, over --metadata-root')
+    from prismaquant.stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     args = parser.parse_args(argv)
     try:
         prepare(args)

@@ -694,10 +694,22 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                 errors.append(f'{name}: persistence {type(exc).__name__}')
     result = ExecutionResult(status, submission.job_id, submission.record_dir, payload_exit)
     if previous is not None:
+        if status not in _FAILURES:
+            errors.append('fresh native failure observation unavailable; retained failure is historical')
         if status in _FAILURES and (status, payload_exit) != (previous.status, previous.payload_exit):
             errors.append('native failure observations conflict; reconcile retained evidence')
         result = previous
     return _persist_execution(submission, _execution_errors(result, [*errors, *cleanup_errors]))
+
+
+def require_stopped_job(submission: FluxSubmission, *, expected_launch):
+    """Authenticate a known launch and fresh terminal facts before mutation."""
+    verify_native_launch(submission, max_evidence_bytes=64 << 20,
+        **{**expected_launch, 'resources': FluxResources(**expected_launch['resources'])})
+    execution = collect_job(submission, wait=False)
+    if execution.status not in {'succeeded', *_FAILURES} or execution.query_error:
+        raise RuntimeError('native producer scope is not verified stopped')
+    return execution
 
 
 def cancel_job(submission: FluxSubmission) -> ExecutionResult:

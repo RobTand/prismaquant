@@ -1603,6 +1603,7 @@ def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, sessio
     except BaseException:
         owner.cancel_checkpoint_artifact(reservation)
         raise
+    owner.checkpoint_directory_created(reservation)
     return AdjointCheckpointAttempt(
         owner=owner, checkpoint_dir=checkpoint_dir, boundary=boundary,
         session=session, activation_plan=activation_plan,

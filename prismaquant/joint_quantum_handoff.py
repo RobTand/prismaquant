@@ -550,6 +550,9 @@ class HandoffStream:
             with self._cond:
                 self._cancelled = True
                 self._cond.notify_all()
+                owner = getattr(self, '_storage_owner', None)
+            if owner is not None:
+                owner.cancel_waits()
             self._thread.join()
         self._release()
         self.telemetry["cancelled"] = self._cancelled
@@ -662,6 +665,9 @@ class HandoffStream:
             # follows a failure is bounded by the work in hand.
             owner.cancel_waits_when(lambda: self._cancelled)
             with self._cond:
+                self._storage_owner = owner
+                if self._cancelled:
+                    owner.cancel_waits()
                 self._ready = True
                 self._cond.notify_all()
             for probe in range(self._n_probes):
@@ -1392,41 +1398,12 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
 
 
 def bind_handoff_publication(*, boundary_storage: Mapping, env=None):
-    """This admitted action's produced-output publication for its handoff.
-
-    ``None`` only when the process carries no PrismaBuild launch context
-    (a local or test run): the handoff then writes its entries directly.
-    An admitted action that cannot bind refuses, and so does a template
-    that is not write-only (PQ #1075) or whose durable payload maximum is
-    not the handoff owner's artifact ceiling -- the same rule Stage A
-    applies to its own entries.
-    """
-    from .stage_a_produced_output import (
-        BoundaryProducedBindingError, BoundaryProducedPublication)
-
-    source = dict(os.environ) if env is None else dict(env)
-    if not source.get("PRISMABUILD_ACTION_KEY"):
-        return None
-    try:
-        publication = BoundaryProducedPublication.bind_from_admitted_owner(
-            queue_root=None, tier=None, env=source, command_extra=())
-    except BoundaryProducedBindingError as exc:
-        raise QuantumHandoffRefused(
-            "this quantum is an admitted PrismaBuild action "
-            f"({source['PRISMABUILD_ACTION_KEY'][:12]}) and cannot bind the "
-            f"produced output its handoff needs: {exc}") from exc
-    if publication.write_only is not True:
-        raise QuantumHandoffRefused(
-            "the handoff's produced-output template is not write-only: the "
-            "producer never reads its handoff back, so each group commits at "
-            "its origin, which only a write-only template allows "
-            "(PrismaBuild #912, PQ #1075)")
-    declared = int(publication.durable_maxima().get("payload_max_bytes", 0))
-    if declared != int(boundary_storage["max_artifact_bytes"]):
-        raise QuantumHandoffRefused(
-            "the handoff's produced-output template declares a durable payload "
-            f"maximum of {declared} bytes, but the handoff owner runs under "
-            f"{int(boundary_storage['max_artifact_bytes'])}")
+    """Bind this native launch to its explicit write-only declaration."""
+    from .joint_cost_stage_a import bind_stage_a_produced_output
+    publication = bind_stage_a_produced_output(
+        artifact_max_bytes=boundary_storage['max_artifact_bytes'])
+    if publication is not None and not publication.write_only:
+        raise QuantumHandoffRefused('handoff requires a write-only declaration')
     return publication
 
 

@@ -4314,6 +4314,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one layer quantum of the distributed joint-AURA "
                     "cost campaign (contract §6).")
+    from .stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     parser.add_argument("--quantum", type=Path, required=True,
                         help="the producer's sealed layer-quantum record")
     parser.add_argument("--quantum-sha256", required=True)

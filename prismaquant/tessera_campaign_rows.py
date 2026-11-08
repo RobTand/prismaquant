@@ -720,9 +720,11 @@ def validate_row(row):
                'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot', 'staged_input'}
     if not isinstance(row, dict) or set(row) - allowed:
         raise ValueError('unsupported native row fields; requirements cannot be discarded')
-    for field in ('produced_outputs', 'pilot'):
+    for field in ('pilot',):
         if field in row:
             raise ValueError(f'{field}: strict staging/publication/pilot contract is unqualified (units 2/4)')
+    if 'produced_outputs' in row:
+        raise ValueError('legacy produced_outputs cannot authorize native publication; bind a declaration in argv')
     if 'data_manifest' in row:
         from .staged_launch import validate_read_contract
         if 'staged_input' not in row:

@@ -1,5 +1,46 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, Unit4B application publication lifecycle under review.
+Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
+based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.
+An immutable produced declaration is bound by actual native argv. Finite batch
+manifests carry the authenticated producer, session, complete descriptor roster,
+inline writer digests and exact file identities. Prewrite ceilings are application
+bounds. No service funding, mover queue, persistent capacity ledger or scheduler
+is retained. The existing IO engine copies and exclusively publishes same-box
+spool files; reader holds and durable publication precede local release and
+deferred canonical unlinks. Rematerialization reads the existing immutable group.
+`produced_stager` now contains only bookkeeping synchronization.
+
+Independent reuse selects the existing native-results owner, runtime v5 and
+actual terminal native evidence. Explicit launch-declared failed checkpoints
+use a separate reader that retains the failed verdict. Running, canceled,
+dependency-failed and unknown executions cannot authorize independent recovery.
+Recovery v2 uses a finite selected-publication chain and a launch-bound scientific
+state input; legacy PB capsules refuse. Retirement v2 joins every recorded native
+producer, successor/session and whole declared consumer binding scan, then seals
+exact file targets before unlinking. Crash continuation rechecks all barriers
+and cannot acquire additional targets. Chain-state active launch records establish
+later stopped-scope checks, never selected output authority. Separate producer,
+warm and consumer phases use native dependencies through `flux_jobs`.
+
+```mermaid
+flowchart LR
+    L[Native launch and immutable declaration] --> W[Existing tensor or metadata writer]
+    W --> S[Bounded same-box spool]
+    S --> I[Existing IO engine and immutable batches]
+    S --> R[Existing exact resident reader]
+    I --> N[Terminal native selected result]
+    N --> F[Finite recovery chain]
+    N --> T[Successor and consumer barriers]
+    T --> U[Sealed exact retirement targets]
+```
+
+This migration remains under parent and independent review. CPU byte fixtures
+and actual tensor/scientific tests are reported separately. Unit4, production
+Btrfs/symlink runtime, CUDA/full64 and integrated qualification remain incomplete.
+No numerical format, serving gate, production default or performance claim moves.
+
 As of: 2026-11-08, native executor Python startup policy.
 Source: `prismaquant/flux_jobs.py`, based on `884b79fda`.
 The owned native wrapper and staged-input launcher explicitly use Python `-s`.

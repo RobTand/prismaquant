@@ -462,7 +462,7 @@ class QuantumRow:
     priority: int
     command: Sequence[str]
     environment: Sequence[tuple[str, str]] = ()
-    produced_output_template: str | None = None
+    produced_declaration: str | None = None
     container_image: str | None = None
 
     def row(self, *, checkout: str) -> dict:
@@ -485,8 +485,9 @@ class QuantumRow:
                "data_manifest": self.manifest_path,
                "residency": {"tier": "stage", "ram": "auto"},
                "progress_phases": [f"{name}={grace}" for name, grace in self.progress]}
-        if self.produced_output_template is not None:
-            row["produced_outputs"] = {"template": str(self.produced_output_template)}
+        if self.produced_declaration is not None:
+            from .stage_a_produced_output import declaration_launch_arguments
+            row['argv'] += declaration_launch_arguments(self.produced_declaration)
         if self.container_image is not None:
             row["container_images"] = [self.container_image]
         return row

@@ -484,11 +484,13 @@ def _reserve_for_record(owner, space, record):
              for row in record["activation_entries"] + record["shared_state_entries"]]
     manifest_bytes = (directory / "checkpoint.json").stat().st_size
     envelope = sum(row["envelope_bytes"] for row in files) + manifest_bytes
-    return owner.reserve_checkpoint_artifact(
+    reservation = owner.reserve_checkpoint_artifact(
         label="tamper", envelope_bytes=envelope,
         file_plan={"files": files, "manifest_bytes": manifest_bytes,
                    "temp_overlap_bytes": 0, "envelope_bytes": envelope},
         checkpoint_dir=directory)
+    owner.checkpoint_directory_created(reservation)
+    return reservation
 
 
 def test_commit_rejects_unplanned_receipt_rows(tmp_path):

@@ -95,6 +95,17 @@ def bind_result_artifact(filename, *, max_bytes):
             'file_identity': list(identity)}
 
 
+def verify_result_artifact(binding, *, max_bytes):
+    """Stream an immutable artifact through the existing runtime digest owner."""
+    content = {key: binding[key] for key in ('path', 'sha256', 'bytes')}
+    _result_file_binding(content)
+    if content['bytes'] > max_bytes:
+        raise ValueError('native result: artifact exceeds byte bound')
+    measured = _runtime_file(content['path'], tuple(binding['file_identity']))
+    if measured != {key: content[key] for key in ('bytes', 'sha256')}:
+        raise ValueError('native result: artifact bytes differ')
+
+
 MAX_RUNTIME_DEPENDENCIES = 64
 MAX_RUNTIME_ROOTS = 256
 MAX_RUNTIME_ENTRIES = 65536
@@ -605,6 +616,22 @@ def _ceiling(value, maximum):
 
 def read_selected_result(selection: dict) -> SelectedResult:
     """Read one publication only after authenticating actual terminal execution."""
+    return _read_selected_result(selection, checkpoint_exit=None)
+
+
+def read_selected_checkpoint(selection: dict, *, payload_exit: int) -> SelectedResult:
+    """Read an explicitly selected failed checkpoint without declaring success.
+
+    The application must additionally bind its checkpoint policy to the native
+    launch and this publication's inputs. Cancellation and unknown cleanup
+    cannot authorize recovery. This grants no scientific qualification.
+    """
+    if type(payload_exit) is not int or not 1 <= payload_exit <= 124:
+        raise ResultUnavailable('checkpoint requires an explicit nonzero payload exit in 1..124')
+    return _read_selected_result(selection, checkpoint_exit=payload_exit)
+
+
+def _read_selected_result(selection, *, checkpoint_exit):
     try:
         _result_fields(selection, SELECTION_KEYS, 'selection')
         _contract.require(selection['schema'] == SELECTION_SCHEMA, 'selection schema differs')
@@ -623,10 +650,14 @@ def read_selected_result(selection: dict) -> SelectedResult:
             raise ValueError('native result: selected producer coordinates differ')
         execution = flux_jobs.collect_job(saved)
         # A conclusive native failure keeps its classification even if cleanup failed.
-        if execution.status in ('failed', 'canceled', 'dependency-failed'):
+        checkpoint = (checkpoint_exit is not None and execution.status == 'failed'
+                      and execution.payload_exit == checkpoint_exit and not execution.query_error)
+        if execution.status in ('failed', 'canceled', 'dependency-failed') and not checkpoint:
             raise ProducerFailed(execution)
-        if execution.status != 'succeeded' or execution.query_error:
+        if (execution.status != 'succeeded' and not checkpoint) or execution.query_error:
             raise ResultUnavailable(f'native execution unavailable: {execution.status}; {execution.query_error}')
+        if checkpoint_exit is not None and not checkpoint:
+            raise ResultUnavailable('selected execution is not the declared failed checkpoint')
         launch = flux_jobs.verify_native_launch(saved,
             max_evidence_bytes=selection['max_evidence_bytes'],
             **{**expected, 'resources': flux_jobs.FluxResources(**expected['resources'])})

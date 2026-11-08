@@ -360,17 +360,9 @@ class ProducedOutputDeclarationUnsupported(DispatchRefused):
 
 
 def build_stage_a_produced_template(**intent) -> dict:
-    """Refuse unavailable native output authority, retaining the complete request.
-
-    Existing sealed template bytes may be planned as row intent, but this caller
-    cannot author/authenticate new output contracts through a retired executor.
-    Unit 4 owns the replacement authority and its template schema.
-    """
-    error = ProducedOutputDeclarationUnsupported(
-        "native produced-output template authority is unqualified (unit 4); "
-        "the requested geometry and policy remain in the refusal's intent")
-    error.intent = intent
-    raise error
+    """Build explicit immutable application publication intent."""
+    from prismaquant.stage_a_produced_output import build_boundary_template
+    return build_boundary_template(**intent)
 
 
 def _sha_bytes(data: bytes) -> str:
@@ -1609,44 +1601,10 @@ def _slice_chain_batch_size(record: Mapping) -> int:
 
 
 def produced_spool_row_environment(spec: Mapping) -> dict:
-    """The produced output spool a row seals, from its sealed spec.
-
-    The spool's root and byte bound, and each opt-in the spec declares, go
-    into the application row's explicit environment. Native admission refuses
-    this unqualified contract. The campaign container also refuses to
-    launch a spec that declares the spool without them
-    (``tessera_campaign_container.produced_spool_environment``). The
-    container check runs here too, so a spec whose root has no writable
-    identity bind refuses before anything is published. The root must be
-    local to the executing box: a root under ``/mnt/shared`` would write
-    every entry into the pool the spool exists to keep writes out of
-    (PQ #1012). Returns ``{}`` for a spec that declares no spool.
-    """
-
-    declared = spec.get("env", {})
-    try:
-        forwarded = produced_spool_environment(spec, declared)
-    except RuntimeError as exc:
-        raise DispatchRefused(str(exc)) from exc
-    if not forwarded:
-        stray = [name for name in PRODUCED_SPOOL_OPT_IN_ENV if name in declared]
-        if stray:
-            raise DispatchRefused(
-                f"spec env declares {', '.join(stray)} without "
-                f"{PRODUCED_SPOOL_ROOT_ENV}")
-        return {}
-    root = PurePosixPath(forwarded[PRODUCED_SPOOL_ROOT_ENV])
-    if PurePosixPath("/mnt/shared") in root.parents:
-        raise DispatchRefused(
-            f"produced spool root {root} is under /mnt/shared; it must be a "
-            "directory on the executing box's own disk")
-    for name in PRODUCED_SPOOL_OPT_IN_ENV:
-        if name in declared:
-            if declared[name] not in ("0", "1"):
-                raise DispatchRefused(
-                    f"spec env {name} must be \"0\" or \"1\", not {declared[name]!r}")
-            forwarded[name] = declared[name]
-    return forwarded
+    """Reject retired service settings; spool bounds live in the declaration."""
+    if any(name.startswith("PRISMABUILD_PRODUCED_") for name in spec.get("env", {})):
+        raise DispatchRefused("retired produced service environment; use a launch-bound declaration")
+    return {}
 
 
 #: The spec field that admits a container cache pinned to the overlay, with
@@ -1779,24 +1737,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 f"spill bound counts parts for {spill_bound['capture_batch']}; "
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
-    declared = spec.get("env", {}).get(PRODUCED_SPOOL_MAX_ENV)
-    if (PRODUCED_SPOOL_ROOT_ENV in spec.get("env", {})
-            and isinstance(declared, str) and declared.isascii()
-            and declared.isdigit() and int(declared) > 0):
-        window = spec["env"].get(PRODUCED_SPOOL_HOST_WINDOW_ENV)
-        if window == "0":
-            raise DispatchRefused(
-                f"spec {spec_path} declares {PRODUCED_SPOOL_HOST_WINDOW_ENV}=0, "
-                "but this row writes a produced spool on the executing box's "
-                "disk: its window must be charged to the box at placement "
-                "(PQ #1120, PQ #1364)")
-        spec["env"] = dict(spec["env"])
-        if spool_max_bytes is not None:
-            spec["env"][PRODUCED_SPOOL_MAX_ENV] = str(int(spool_max_bytes))
-        # A value other than "0" or "1" is left for the row's spool check,
-        # which refuses it.
-        if window in (None, "1"):
-            spec["env"][PRODUCED_SPOOL_HOST_WINDOW_ENV] = "1"
+    produced_spool_row_environment(spec)
     require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its explicit row environment below; no ambient
@@ -2229,7 +2170,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                    ("PRISMAQUANT_DEV_MODE", "1")]
     return quantum_row.QuantumRow(
         str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
-        produced_output_template=emit_template, container_image=container_image).row(
+        produced_declaration=emit_template, container_image=container_image).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
@@ -2237,7 +2178,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
                  *, tag: str = ADJOINT_TAG,
                  prefetch_override: Path | None = None,
                  artifact_budget_bytes: int | str | None = None,
-                 produced_output_template: Path | None = None,
+                 produced_declaration: Path | None = None,
                  binding: dict | None = None,
                  batch_range: Sequence[int] | None = None) -> dict:
     """Build a neutral Stage A row, preserving every scientific and resource input.
@@ -2246,11 +2187,11 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
     and artifact-budget overrides. Demand and spool windows retain their existing
     derivations, including per-range windows. The produced-output template is
     explicit intent; native authentication is unqualified and refuses at launch."""
-    if produced_output_template is not None:
-        if not Path(produced_output_template).is_file():
+    if produced_declaration is not None:
+        if not Path(produced_declaration).is_file():
             raise DispatchRefused(
                 "stage-A produced-output template is not a file: "
-                f"{produced_output_template}")
+                f"{produced_declaration}")
     if binding is None:
         binding = _stage_manifest_binding(adjoint_manifest, campaign)
     if artifact_budget_bytes is not None:
@@ -2304,17 +2245,15 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    spool = produced_spool_row_environment(sealed_spec)
-    if not spool:
-        raise DispatchRefused(
-            f"stage-A spec {SPEC_PATH} declares no {PRODUCED_SPOOL_ROOT_ENV}: "
-            "without the produced output spool every boundary entry is "
-            "written synchronously into the pool (PQ #1012)")
+    produced_spool_row_environment(sealed_spec)
+    if produced_declaration is None:
+        raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
+    spool = {}
     return quantum_row.QuantumRow(
         str(adjoint_manifest), progress,
         quantum_row.QuantumRowDemand(str(stage_a_memory_gib(campaign)), "80", 10),
         [tag], 0, wrapped, (*spool.items(), ("PRISMAQUANT_DEV_MODE", "1")),
-        produced_output_template=(None if produced_output_template is None else str(produced_output_template)),
+        produced_declaration=(None if produced_declaration is None else str(produced_declaration)),
         container_image=container_image).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
@@ -2584,11 +2523,11 @@ def handoff_template(record: Mapping, *, plan: Mapping,
 
         def build(name: str) -> dict:
             return build_stage_a_produced_template(
-                output_prefix=policy["directory"], tier=str(tier),
+                output_prefix=policy["directory"],
                 artifact_max_bytes=int(policy["max_artifact_bytes"]),
                 group_size=int(policy["prefetch_batches"]),
                 max_entry_tensor_bytes=max(tensors), template_id=name,
-                write_only=True, export_rate_family=HANDOFF_EXPORT_RATE_FAMILY)
+                write_only=True)
 
         template = build(HANDOFF_TEMPLATE_ID_PREFIX + str(quantum_id)
                          if template_id is None else template_id)
@@ -3458,7 +3397,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "payload's --artifact-budget-bytes; the run stamps "
                              "the deviation into its provenance; the sealed "
                              "plan is unchanged")
-    parser.add_argument("--stage-a-produced-output-template", type=Path,
+    parser.add_argument("--stage-a-produced-declaration", type=Path,
                         default=None,
                         help="produced-output template JSON declaring the "
                              "bounded window the stage-A action will stage "
@@ -3679,8 +3618,8 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                               tag=adjoint_tag,
                                               prefetch_override=args.stage_a_prefetch_override,
                                               artifact_budget_bytes=args.stage_a_artifact_budget_bytes,
-                                              produced_output_template=(
-                                                  args.stage_a_produced_output_template),
+                                              produced_declaration=(
+                                                  args.stage_a_produced_declaration),
                                               binding=stage_a_binding)})
         if receipt_ok:
             # Pass 1: the quantum rows this dispatch publishes. Their count

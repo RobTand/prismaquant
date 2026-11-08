@@ -167,9 +167,8 @@ def window_groups(base_template: dict, *, tier: str, n_probes: int,
     one cotangent group per probe per read window. Credit past that funds
     nothing, so the row's window is the smaller of the two.
     """
-    demands = base_template["working_demands"][tier]
-    per_group = int(demands["minimum_gib"])
-    base = int(demands["window_gib"]) // per_group
+    base = base_template["window_groups"]
+    per_group = 1
     held = 2 * (1 + int(n_probes)) * -(-int(range_batches) // int(group_size))
     groups = min(base, held)
     return {"groups": groups, "window_gib": groups * per_group, "minimum_gib": per_group,
@@ -186,8 +185,7 @@ def row_template(base_template: dict, *, template_id: str, tier: str,
             f"the base template's payload maximum {maxima['payload_max_bytes']} is not "
             f"the artifact budget {artifact_budget_bytes}")
     template["template_id"] = template_id
-    template["working_demands"] = {tier: {"minimum_gib": window["minimum_gib"],
-                                         "window_gib": window["window_gib"]}}
+    template["window_groups"] = window["groups"]
     return template
 
 
@@ -202,7 +200,7 @@ def _stage_row(*, name, kind, checkout, manifest, template_path, campaign, spec,
     row = dispatch.stage_a_argv(
         Path(manifest), campaign, tag=tag, prefetch_override=Path(prefetch_override),
         artifact_budget_bytes=artifact_budget_bytes,
-        produced_output_template=Path(template_path), batch_range=batch_range)
+        produced_declaration=Path(template_path), batch_range=batch_range)
     payload = row["argv"]
     if "--forward-recovery" in payload or "--chain-seed" in payload:
         raise SplitDispatchRefused("a split row takes no forward recovery and no seed")

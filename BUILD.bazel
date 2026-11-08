@@ -5663,7 +5663,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/glm_source_derivative",
-        ":prismaquant/joint_cost_stage_a",
         ":prismaquant/kl_fisher",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
@@ -7031,7 +7030,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_cost_stage_a",
         ":prismaquant/joint_retained_window_plan",
         "@pq_pip//numpy",
         "@pq_pip//pytest",
@@ -8489,6 +8487,7 @@ pq_py_library(
         "prismaquant/joint_checkpoint_publication.py",
         "prismaquant/joint_cost_quantum.py",
         "prismaquant/joint_cost_read_schedule.py",
+        "prismaquant/joint_cost_stage_a.py",
         "prismaquant/joint_dispatch_pilot.py",
         "prismaquant/joint_forward_campaign.py",
         "prismaquant/joint_forward_resume.py",
@@ -8497,6 +8496,7 @@ pq_py_library(
         "prismaquant/joint_layer_quanta.py",
         "prismaquant/joint_price_step.py",
         "prismaquant/joint_quantum_handoff.py",
+        "prismaquant/joint_quantum_row.py",
         "prismaquant/joint_replay_spill.py",
         "prismaquant/joint_run_progress.py",
         "prismaquant/joint_served_activation.py",
@@ -8582,6 +8582,9 @@ pq_py_library(
         "prismaquant/source_prefetch.py",
         "prismaquant/stage_a_chain_resume.py",
         "prismaquant/stage_a_chain_seed.py",
+        "prismaquant/stage_a_chain_split.py",
+        "prismaquant/stage_a_forward_split.py",
+        "prismaquant/stage_a_head.py",
         "prismaquant/stage_a_produced_output.py",
         "prismaquant/stage_a_retirement.py",
         "prismaquant/stage_a_selected_row_diagnostic.py",
@@ -8710,6 +8713,7 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
+        ":prismaquant/exact_activation_contract",
         ":prismaquant/export_output_safety",
         ":prismaquant/export_partition",
         ":prismaquant/file_identity",
@@ -8728,7 +8732,6 @@ pq_py_library(
         ":prismaquant/joint_prewarm_phases",
         ":prismaquant/joint_projection_backend",
         ":prismaquant/joint_projection_contract",
-        ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_frontier",
         ":prismaquant/joint_replay_metadata",
         ":prismaquant/joint_replay_regime",
@@ -9123,6 +9126,13 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/exact_activation_contract",
+    srcs = [
+        "prismaquant/exact_activation_contract.py",
     ],
 )
 
@@ -9575,7 +9585,7 @@ pq_py_library(
     ],
     deps = [
         ":prismaquant/__init__",
-        ":prismaquant/joint_cost_stage_a",
+        ":prismaquant/activation_fair_pricing_cycle",
     ],
 )
 
@@ -9600,31 +9610,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/joint_cost_stage_a",
-    srcs = [
-        "prismaquant/joint_cost_stage_a.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/dev_mode",
-        ":prismaquant/digests",
-        ":prismaquant/gpu_guard",
-        ":prismaquant/joint_projection_backend",
-        ":prismaquant/joint_quantum_row",
-        ":prismaquant/kl_fisher",
-        ":prismaquant/matmul_arithmetic",
-        ":prismaquant/source_read_plan",
-        ":prismaquant/stage_a_chain_split",
-        ":prismaquant/stage_a_forward_split",
-        ":prismaquant/stage_a_head",
-        ":prismaquant/tessera_reader",
-        "@pq_pip//torch",
     ],
 )
 
@@ -9693,13 +9678,6 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/joint_quantum_row",
-    srcs = [
-        "prismaquant/joint_quantum_row.py",
     ],
 )
 
@@ -10113,7 +10091,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/dev_mode",
         ":prismaquant/digests",
-        ":prismaquant/joint_quantum_row",
         ":prismaquant/source_read_plan",
     ],
 )
@@ -10348,46 +10325,6 @@ pq_py_library(
     name = "prismaquant/source_read_plan",
     srcs = [
         "prismaquant/source_read_plan.py",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/stage_a_chain_split",
-    srcs = [
-        "prismaquant/stage_a_chain_split.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        ":prismaquant/joint_adjoint_slices",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/stage_a_forward_split",
-    srcs = [
-        "prismaquant/stage_a_forward_split.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/cost_stage_checkpoint",
-        ":prismaquant/digests",
-        ":prismaquant/stage_a_chain_split",
-    ],
-)
-
-pq_py_library(
-    name = "prismaquant/stage_a_head",
-    srcs = [
-        "prismaquant/stage_a_head.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
     ],
 )
 
@@ -10940,7 +10877,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_regime",
         ":tools/dispatch_joint_quanta",
         "@pq_pip//torch",
@@ -11052,7 +10988,6 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/stage_a_head",
     ],
 )
 
@@ -11069,8 +11004,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_quantum_row",
-        ":prismaquant/stage_a_head",
     ],
 )
 
@@ -11087,9 +11020,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_quantum_row",
-        ":prismaquant/stage_a_chain_split",
-        ":prismaquant/stage_a_head",
         ":tools/__init__",
         ":tools/build_stagea_seed_package",
     ],
@@ -11894,7 +11824,6 @@ pq_py_library(
         ":prismaquant/joint_adjoint_slices",
         ":prismaquant/joint_campaign_ledger",
         ":prismaquant/joint_projection_backend",
-        ":prismaquant/joint_quantum_row",
         ":prismaquant/joint_replay_regime",
         ":prismaquant/matmul_arithmetic",
         ":prismaquant/readset_coverage",
@@ -11918,8 +11847,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/stage_a_chain_split",
-        ":prismaquant/stage_a_forward_split",
         ":tools/dispatch_joint_quanta",
     ],
 )
@@ -12412,7 +12339,6 @@ pq_py_library(
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
         ":prismaquant/joint_adjoint_slices",
-        ":prismaquant/joint_cost_stage_a",
         ":prismaquant/joint_retained_window_plan",
         ":tools/__init__",
         ":tools/measure_container_cache_row",
@@ -13303,11 +13229,20 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/stagea_produced_byte_cycle",
+    srcs = [
+        "tools/stagea_produced_byte_cycle.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "tools/stagea_produced_live_cycle",
     srcs = [
-        "tools/stagea_produced_live_cycle.py",
-    ],
-    data = [
         "tools/stagea_produced_live_cycle.py",
     ],
     deps = [

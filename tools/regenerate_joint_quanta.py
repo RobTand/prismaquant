@@ -899,6 +899,8 @@ def main(argv=None) -> int:
                          "unchanged")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
+    from prismaquant.stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(ap)
     args = ap.parse_args(argv)
     if args.produced_output:
         from prismaquant.stage_b_prep_io import (
@@ -1514,6 +1516,8 @@ def main(argv=None) -> int:
         records.append((out / "derivation.json", _pretty(produced["derivation"]),
                         "derivation"))
         publish_files(publication, "records", records)
+        if publication is not None:
+            publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
     except (ValueError, OSError, PreparationPublicationRefused) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else
