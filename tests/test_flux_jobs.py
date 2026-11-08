@@ -12,6 +12,11 @@ from prismaquant import flux_jobs as jobs
 
 
 class FluxJobsTests(unittest.TestCase):
+    def test_native_unit_identity_is_canonical_for_all_saved_spellings(self):
+        for value in ('fE23pNdDTV', 'ƒE23pNdDTV', '1667135277367296'):
+            with self.subTest(value=value):
+                self.assertEqual(jobs.job_unit_name(value), 'shell-fE23pNdDTV:sys.service')
+
     def test_native_allocation_sets_are_finite_and_unique(self):
         self.assertEqual(jobs._allocation_ids('1-3,7'), {1, 2, 3, 7})
         for value in ('', '1-999999999', '2-1', '1,1', '1-2,2-3', '-1', '0-4096', 1):

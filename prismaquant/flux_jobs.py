@@ -32,6 +32,7 @@ _MODEL_SHA = '261a084b72cb3a0c5055816f642f51ccbf473d3373876f34e67be55d5b5221a8'
 _THREADS = ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'TORCH_NUM_THREADS')
 _PROPERTIES = frozenset(('x86_64', 'aarch64', 'gb10', 'unified-memory'))
 _HOSTS = frozenset(('dl380g10', 'sparky', 'sparklina'))
+_F58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 Status = Literal['succeeded', 'failed', 'canceled', 'dependency-failed', 'running', 'unknown']
 _FAILURES = frozenset(('failed', 'canceled', 'dependency-failed'))
 
@@ -168,12 +169,20 @@ def job_id_number(value):
         raise ValueError('expected a saved native Flux job ID')
     number = int(value) if value[0] not in 'fƒ' else 0
     if value[0] in 'fƒ':
-        alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
         for digit in value[1:]:
-            number = number * 58 + alphabet.index(digit)
+            number = number * 58 + _F58_ALPHABET.index(digit)
     if not 0 < number < 2**64:
         raise ValueError('native job ID exceeds uint64 or is zero')
     return number
+
+
+def job_unit_name(job_id):
+    """The qualified sdexec unit's canonical ASCII f58 job identity."""
+    number, encoded = job_id_number(job_id), ''
+    while number:
+        number, digit = divmod(number, 58)
+        encoded = _F58_ALPHABET[digit] + encoded
+    return f'shell-f{encoded}:sys.service'
 
 
 def _environment(record_dir, supplied):
@@ -474,6 +483,18 @@ def verify_current_job(*, job_id, record_dir, source):
     verify_native_launch(saved, max_evidence_bytes=16 << 20, argv=launch['argv'], source=source,
         resources=resources, afterok=launch['afterok'], environment=settings,
         staged_input=launch.get('staged_input'))
+    events = [_native_document(line) for line in
+              _checked(['job', 'eventlog', '--format=json', saved.job_id]).splitlines()]
+    if not events or any(not isinstance(event, dict) or not isinstance(event.get('name'), str)
+                         for event in events):
+        raise ValueError('current native execution events unavailable')
+    names = {event['name'] for event in events}
+    if 'start' not in names or names.intersection(('finish', 'clean')):
+        raise ValueError('current native job is not executing')
+    scope = '/' + job_unit_name(saved.job_id)
+    if not any(line.split(':', 2)[-1].endswith(scope)
+               for line in Path('/proc/self/cgroup').read_text().splitlines()):
+        raise ValueError('current native process scope differs from selected job')
     allocation = decode_document(_checked(['job', 'info', saved.job_id, 'R']))
     execution = allocation['execution']
     if (allocation['version'] != 1 or len(execution['R_lite']) != 1 or

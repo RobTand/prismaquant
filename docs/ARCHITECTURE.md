@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, current execution-scope authentication.
+Source: `prismaquant/flux_jobs.py`, based on `cabd4b20e4f8a2c34dab64c77caabb21e440cb79`.
+Active original-source context additionally requires started nonterminal native
+events and the current process's exact sdexec job unit. A completed job or an
+ID borrowed by another process scope cannot establish current admission, even
+when its source, saved original jobspec and allocation all match.
+
 As of: 2026-11-08, R1 native runtime v5 content authority under review.
 Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
 based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
