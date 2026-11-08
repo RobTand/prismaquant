@@ -7,7 +7,6 @@ import copy
 from dataclasses import replace
 import gc
 import hashlib
-import json
 import os
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from safetensors import safe_open
 
 from prismaquant import source_generation as sg, native_results as nr
 from prismaquant.flux_jobs import ExecutionResult
+from test_capture_original_material import _owner
 from test_original_source_admission import (  # noqa: F401
     authority_case, original_runner, original_model, material, _forget_state, _bound,
     runtime_layout, nonqualifying_runtime,
@@ -93,7 +93,7 @@ def test_each_reader_runtime_input_is_independently_bound(authority_case, monkey
         Path(publication['inputs'][role]['path']).write_bytes(b'{"changed":true}')
     changed = replace(selected, publication=publication)
     refusal = 'owned bytes' if damage == 'changed-bytes' else 'independently declared native input'
-    with pytest.raises(RuntimeError, match=refusal):
+    with pytest.raises(ValueError if damage == 'changed-bytes' else RuntimeError, match=refusal):
         sg._require_original_reader_producer(receipt, authority, changed, expected)
 
 
@@ -145,19 +145,27 @@ def test_reader_requires_explicit_staged_launch(authority_case, monkeypatch, mod
 def test_every_actual_reader_delivery_joins_selected_staging(authority_case, monkeypatch, mode, delivery, axis):
     receipt, authority, selected = reader_domain_case(authority_case)
     expected = _selected_runtime_input(selected)
-    owner = authority_case['owner']
     if delivery == 'reacquired':
-        prior = len(receipt['deliveries'])
-        path = owner.root / 'two.safetensors'
-        with owner.material_window([path]):
-            with owner.safe_open(safe_open, path, framework='pt') as reader:
-                tensor = reader.get_tensor(reader.keys()[0])
-                assert tensor.device.type == 'cpu'
-            del tensor
-        gc.collect()
-        receipt = owner.receipt()
-        assert len(receipt['deliveries']) > prior
-        target = len(receipt['deliveries']) - 1
+        # authority_case advances staging while preparing its controls. A new
+        # real owner isolates these two deliveries to one actual manifest.
+        with _owner(authority_case['material']) as owner:
+            path = owner.root / 'two.safetensors'
+            for _ in range(2):
+                with owner.material_window([path]):
+                    with owner.safe_open(safe_open, path, framework='pt') as reader:
+                        tensor = reader.get_tensor(reader.keys()[0])
+                        assert tensor.device.type == 'cpu'
+                    del tensor
+                gc.collect()
+            receipt = owner.receipt()
+        targets = [i for i, row in enumerate(receipt['deliveries']) if row['name'] == path.name]
+        assert len(targets) == 2
+        target = targets[-1]
+        assert receipt['deliveries'][target]['delivery_index'] == 2
+        witness = receipt['deliveries'][0]['native_delivery']
+        staged = {'sha256': witness['staged_manifest_sha256'],
+                  'read_contract_sha256': witness['read_contract_sha256']}
+        selected = replace(selected, launch={**selected.launch, 'staged_input': staged})
     else:
         assert len(receipt['deliveries']) > 1
         target = 1
