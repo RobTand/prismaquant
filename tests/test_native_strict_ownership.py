@@ -5,13 +5,14 @@ import os
 from pathlib import Path
 
 import pytest
+import torch
 
-from prismaquant import residency_map
+from prismaquant import layer_streaming, residency_map, residency_shard_reader
 from prismaquant.staged_lease import acquire_entry_window
 from prismaquant.staged_manifest import ManifestRefused, load_staged_manifest, publish_staged_json
-from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from prismaquant.staged_tier_policy import TierPolicyRefused, staged_tier_policy_test_context
 from staged_native_fixtures import bind, native_staged_state, publish_inputs, sha
-from test_native_strict_reader_contract import _forbid_source
+from test_native_strict_reader_contract import _forbid_source, _shard
 
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
@@ -79,3 +80,37 @@ def test_open_failure_after_acquisition_releases_only_its_owned_window(tmp_path,
     assert all(not calls for calls in opened)
     resolver.close()
     assert resolver._fds == {}
+
+
+@pytest.mark.parametrize('fault', ['length', 'corrupt', 'missing'])
+def test_changed_shard_refuses_without_landing_wait_or_partial_tensor(tmp_path, monkeypatch, fault):
+    source, expected = _shard(tmp_path)
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, [source]))
+    opened = _forbid_source(monkeypatch, source)
+    obj = Path(resolver.manifest.extents[0].object_path)
+    source.unlink()
+    exposed = []
+    with staged_tier_policy_test_context('ssd'):
+        with layer_streaming._source_safe_open(str(source), framework='pt') as reader:
+            known = reader.get_tensor('f32')
+            assert torch.equal(known.view(torch.uint8), expected['f32'].view(torch.uint8))
+        assert resolver._windows == 0
+        before = resolver.report()['bytes_from_stage']
+        raw = obj.read_bytes()
+        if fault == 'missing':
+            obj.unlink()
+        else:
+            obj.chmod(0o600)
+            obj.write_bytes(raw[:-1] if fault == 'length' else raw[:-1] + bytes([raw[-1] ^ 1]))
+
+        def forbidden_wait(*args, **kwargs):
+            raise AssertionError('an integrity failure entered dynamic landing')
+
+        monkeypatch.setattr(residency_shard_reader, 'await_staged_spans', forbidden_wait)
+        with pytest.raises((TierPolicyRefused, OSError, RuntimeError, ValueError)):
+            with layer_streaming._source_safe_open(str(source), framework='pt') as reader:
+                exposed.append(reader.get_tensor('f32'))
+        assert exposed == [] and resolver._windows == 0
+        assert resolver.report()['bytes_from_stage'] == before
+        assert torch.equal(known.view(torch.uint8), expected['f32'].view(torch.uint8))
+    assert opened == [] and resolver.report()['bytes_from_pool'] == 0
