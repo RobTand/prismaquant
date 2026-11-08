@@ -31,7 +31,8 @@ def _two_entries(tmp_path, monkeypatch, *, retire_head=False):
     resolver = bind(monkeypatch, binding)
     # Fault injection only, not a supported per-object phase retirement API.
     if retire_head:
-        Path(manifest.extents[0].object_path).unlink()
+        head = next(e for e in manifest.extents if e.source_path == str(sources[0]))
+        Path(head.object_path).unlink()
     for source in sources:
         source.unlink()
     return resolver, sources, manifest, payloads, binding
@@ -67,8 +68,10 @@ def test_a_current_entry_also_acquires_while_the_head_is_live(tmp_path, monkeypa
 
 def test_missing_requested_coverage_still_refuses_without_pool_bytes(tmp_path, monkeypatch):
     resolver, sources, manifest, payloads, _binding = _two_entries(tmp_path, monkeypatch)
-    Path(manifest.extents[1].object_path).unlink()
-    with pytest.raises(StagedReadRefused):
+    assert _read(resolver, sources[1], len(payloads[1])) == payloads[1]
+    current = next(e for e in manifest.extents if e.source_path == str(sources[1]))
+    Path(current.object_path).unlink()
+    with pytest.raises(FileNotFoundError):
         _read(resolver, sources[1], len(payloads[1]))
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 

@@ -262,14 +262,6 @@ def test_moved_names_have_one_home(old):
         assert hasattr(importlib.import_module(home), name), f"{home}.{name} is missing"
 
 
-def test_the_restore_names_the_entries_staged_lease_names():
-    from prismabuild_imports import prismabuild_entries
-
-    from prismaquant.staged_lease import _prismabuild_modules
-
-    assert sorted(prismabuild_entries()) == sorted(_prismabuild_modules())
-
-
 def test_conftest_restores_the_activation_scale_variable_the_joint_lease_reads():
     import conftest
 

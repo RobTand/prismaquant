@@ -252,7 +252,7 @@ def test_staged_reads_are_bit_identical_with_stage_bytes_counted(
                 assert got.dtype == want.dtype and got.shape == want.shape
                 assert torch.equal(got.view(torch.uint8), want.view(torch.uint8)), name
     report = resolver.report()
-    assert report['fallback_count'] == 0 and report['bytes_from_pool'] == 0
+    assert report['fallbacks'] == [] and report['bytes_from_pool'] == 0
     assert report['bytes_from_stage'] > 0 and resolver._windows == 0
 
 

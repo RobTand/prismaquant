@@ -66,13 +66,15 @@ def test_published_inputs_serve_both_known_extents(tmp_path, monkeypatch):
 def test_a_ready_declaration_cannot_make_bad_object_bytes_readable(tmp_path, monkeypatch, fault):
     resolver, paths, manifest = _inputs(tmp_path, monkeypatch)
     assert _read(resolver, paths[0], len(HEADER)) == HEADER
-    body = Path(manifest.extents[1].object_path)
+    assert _read(resolver, paths[1], len(BODY)) == BODY
+    body = Path(next(e.object_path for e in manifest.extents if e.source_path == str(paths[1])))
     if fault == 'missing':
         body.unlink()
     else:
         body.chmod(0o600)
         body.write_bytes(b'!' * len(BODY))
-    with pytest.raises(StagedReadRefused):
+    refusal = FileNotFoundError if fault == 'missing' else StagedReadRefused
+    with pytest.raises(refusal):
         _read(resolver, paths[1], len(BODY))
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 

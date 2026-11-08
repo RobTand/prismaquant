@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 import torch
+from staged_native_fixtures import native_staged_state
 
 from prismaquant import joint_quantum_row as quantum_row
 

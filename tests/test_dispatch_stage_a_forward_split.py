@@ -1,4 +1,4 @@
-"""A fresh run's forward split as PrismaBuild rows (PQ #738).
+"""A fresh run's forward split as native rows (PQ #738).
 
 The package builder derives the forward split's manifests from the fresh
 run's own submitted manifest; the dispatcher seals a prep row, one quantum
@@ -7,11 +7,11 @@ only once the rows it follows have finished. These tests hold:
 
 * The prep stages the head only; each quantum stages the head and every
   forward layer, and reads no entry another row wrote.
-* The manifests pass PrismaBuild's own validator.
+* The manifests preserve exact declared phase bytes.
 * Every Stage A row carries the gb10 tag alone, priority -10 and its own
   manifest and template; the join is a CPU row.
 * The quanta wait for the prep's record and ending; the join waits for every
-  quantum's ending and receipt. The rows the fake ``pbrun`` "runs" are the
+  quantum's ending and receipt. The rows the native transport fixture "runs" are the
   fixture's own core calls, so the gates read real records.
 * A forward walk's read-ahead depth looks up the walk, not down.
 
@@ -33,10 +33,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
 from prismaquant.joint_adjoint_checkpoints import adjoint_space
+from prismaquant.stage_a_produced_output import build_boundary_template, DECLARATION_FLAG
+from staged_native_fixtures import native_staged_state
 from prismaquant.stage_a_chain_resume import chain_state_path
 from prismaquant.tessera_joint_aura import HEAD_WALK_INPUT_KEYS
 
-from stage_a_spool_spec import stage_a_plan, with_spool
+from stage_a_spool_spec import stage_a_plan
 from test_stage_a_chain_resume import _offline_tier_policy, _run  # noqa: F401
 from test_stage_a_chain_split import RANGES
 
@@ -183,19 +185,16 @@ def sealed(tmp_path, monkeypatch):
     campaign = {"plan_path": str(plan), "plan_sha256": _sha(plan),
                 "prepared_path": str(tmp_path / "prepared.json"),
                 "prepared_sha256": "b" * 64, "read_manifest_sha256": "d" * 64}
-    spec = _json(tmp_path / "spec.json", with_spool(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec = _json(tmp_path / "spec.json",
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})
     prefetch = _json(tmp_path / "prefetch.json",
                      {"source_prefetch": {"prefetch_lookahead": 2}})
     space = adjoint_space(root)
-    base = _json(tmp_path / "template.json", {
-        "schema": "prismaquant.prismabuild.produced_output_template.v1", "version": 1,
-        "template_id": "fixture-base", "output_prefix": str(space),
-        "slots": {"boundary_entries": {"class": "payload"}},
-        "durable_maxima": {"payload_max_bytes": BUDGET, "checkpoint_max_bytes": BUDGET,
-                           "temp_max_bytes": BUDGET},
-        "working_demands": {TIER: {"minimum_gib": 2, "window_gib": 48}},
-        "permitted_tiers": [TIER]})
+    base = _json(tmp_path / "template.json", build_boundary_template(
+        output_prefix=space, artifact_max_bytes=BUDGET, group_size=2,
+        max_entry_tensor_bytes=1 << 20, concurrent_groups=24,
+        spool={"root": str(tmp_path / "native-spool"), "max_bytes": BUDGET},
+        template_id="fixture-base"))
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
     monkeypatch.setattr(split_dispatch, "implementation_sha256", lambda checkout: "1" * 64)
     document = seal_forward_round(
@@ -242,7 +241,7 @@ def test_a_sealed_forward_round_names_every_row(sealed):
         assert str(envelope["priority"]) == "-10"
         assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
         assert "--host-class" not in envelope and "--measurement" not in envelope
-        templates.add(json.loads(Path(envelope["produced_outputs"]["template"]).read_text())["template_id"])
+        templates.add(json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())["template_id"])
         # A forward walk reads up: two layers ahead of the one it reads.
         depth = rows[name]["reader"]["depth"]
         if name != "forward-prep":

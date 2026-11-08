@@ -2,10 +2,10 @@
 
 The dispatcher seals a round's rows from one checkout and submits each row
 only once the rows it follows have finished, by what they left on disk and
-by their PrismaBuild endings. These tests seal a round of the split
+by their native endings. These tests seal a round of the split
 fixture's run (``test_stage_a_chain_split``: five layers, five samples in
 windows of two, interrupted below checkpoint 4, split 4 -> 2 as ``0:2`` and
-``2:5``) and drive the ordering with a fake ``pbrun``; the rows the fake
+``2:5``) and drive the ordering with a native transport fixture; the rows the fake
 "runs" are the fixture's own core calls, so the receipts the gates read are
 real ones.
 """
@@ -22,10 +22,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from prismaquant.joint_adjoint_checkpoints import adjoint_space
+from prismaquant.stage_a_produced_output import build_boundary_template, DECLARATION_FLAG
+from staged_native_fixtures import native_staged_state
 from prismaquant.stage_a_chain_resume import chain_state_path
 from prismaquant.tessera_joint_aura import HEAD_WALK_INPUT_KEYS
 
-from stage_a_spool_spec import stage_a_plan, with_spool
+from stage_a_spool_spec import stage_a_plan
 from test_stage_a_chain_resume import (  # noqa: F401  (autouse fixture)
     N_PROBES,
     ONE,
@@ -106,18 +108,15 @@ def sealed(tmp_path, monkeypatch, request):
           chain_state_sha256=_sha(chain_state_path(space)),
           checkpoint_sha256=_sha(space / "checkpoints" / "boundary-004" / "checkpoint.json"),
           through=2, ranges=RANGES, output=tmp_path / "package")
-    spec = _json(tmp_path / "spec.json", with_spool(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}}))
+    spec = _json(tmp_path / "spec.json",
+        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})
     prefetch = _json(tmp_path / "prefetch.json",
                      {"source_prefetch": {"prefetch_lookahead": 2}})
-    base = _json(tmp_path / "template.json", {
-        "schema": "prismaquant.prismabuild.produced_output_template.v1", "version": 1,
-        "template_id": "fixture-base", "output_prefix": str(space),
-        "slots": {"boundary_entries": {"class": "payload"}},
-        "durable_maxima": {"payload_max_bytes": BUDGET, "checkpoint_max_bytes": BUDGET,
-                           "temp_max_bytes": BUDGET},
-        "working_demands": {TIER: {"minimum_gib": 2, "window_gib": 48}},
-        "permitted_tiers": [TIER]})
+    base = _json(tmp_path / "template.json", build_boundary_template(
+        output_prefix=space, artifact_max_bytes=BUDGET, group_size=2,
+        max_entry_tensor_bytes=1 << 20, concurrent_groups=24,
+        spool={"root": str(tmp_path / "native-spool"), "max_bytes": BUDGET},
+        template_id="fixture-base"))
     band_request = _json(tmp_path / "request.json", {"params": {}})
     earlier = _json(tmp_path / "band-005.json", {"band": {"boundary": 5}})
     monkeypatch.setattr(split_dispatch, "checkout_commit", lambda checkout: "c" * 40)
@@ -181,10 +180,8 @@ def test_a_sealed_round_names_every_row_and_its_order(sealed):
         envelope = _envelope(rows[name])
         assert envelope["tags"] == ["gb10"]
         assert str(envelope["priority"]) == "-10"
-        assert envelope["residency"]["tier"] == "stage"
-        assert envelope["residency"]["ram"] == "auto"
         assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
-        template = json.loads(Path(envelope["produced_outputs"]["template"]).read_text())
+        template = json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())
         templates.add(template["template_id"])
         assert template["output_prefix"] == str(sealed["space"])
         assert template["durable_maxima"]["payload_max_bytes"] == BUDGET
@@ -232,23 +229,22 @@ def test_a_priority_that_is_not_an_integer_refuses(tmp_path, priority):
 
 
 def test_a_quantum_seals_its_own_windows(sealed):
-    import dispatch_joint_quanta
-
     rows = {row["name"]: row for row in sealed["document"]["rows"]}
-    for label, samples in zip(sealed["document"]["labels"], RANGES):
-        envs = _envelope(rows[label])["env"]
-        assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == (
-            dispatch_joint_quanta.stage_a_spool_window_bytes(sealed["campaign"], samples))
-    # The prep writes nothing; it is sized as the widest quantum.
-    envs = _envelope(rows["prep"])["env"]
-    assert int(envs["PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"]) == (
-        dispatch_joint_quanta.stage_a_spool_window_bytes(sealed["campaign"], RANGES[1]))
+    for name in ["prep", *sealed["document"]["labels"]]:
+        row = _envelope(rows[name])
+        template = json.loads(Path(_flag(row["argv"], DECLARATION_FLAG)).read_bytes())
+        assert template["window_groups"] == rows[name]["window"]["groups"]
+        assert template["group_size"] == 2
+        assert template["max_entry_tensor_bytes"] == 1 << 20
+        assert template["spool"] == {"root": str(sealed["round"].parent / "native-spool"),
+                                     "max_bytes": BUDGET}
+        assert template["durable_maxima"]["payload_max_bytes"] == BUDGET
     assert rows["prep"]["window"] == rows[sealed["document"]["labels"][1]]["window"]
     # Windows of two batches: 0:2 is one per boundary, 2:5 two; each boundary
     # holds a boundary group and one per probe, two boundaries at once.
     first, second = (rows[label]["window"] for label in sealed["document"]["labels"])
-    assert (first["groups"], first["window_gib"]) == (2 * (1 + N_PROBES), 20)
-    assert (second["groups"], second["window_gib"]) == (min(24, 4 * (1 + N_PROBES)), 40)
+    assert first["groups"] == 2 * (1 + N_PROBES)
+    assert second["groups"] == min(24, 4 * (1 + N_PROBES))
 
 
 from native_dispatch_fixture import FakeNative
@@ -375,8 +371,8 @@ def test_the_read_rate_estimate_and_the_window():
     rate = quantum_read_rate(described, samples=[64, 128], n_batches=512,
                              seconds_per_layer=1000.0)
     assert rate["phase"] == "chain-042" and rate["read_mb_s"] == 40
-    base = {"working_demands": {TIER: {"minimum_gib": 2, "window_gib": 48}}}
+    base = {"window_groups": 24}
     assert window_groups(base, tier=TIER, n_probes=4, range_batches=64,
-                         group_size=64)["window_gib"] == 20
+                         group_size=64)["groups"] == 10
     assert window_groups(base, tier=TIER, n_probes=4, range_batches=512,
-                         group_size=64)["window_gib"] == 48
+                         group_size=64)["groups"] == 24

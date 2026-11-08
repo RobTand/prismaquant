@@ -189,16 +189,3 @@ def test_the_registry_export_contains_the_reviewed_hashed_sdk_archive():
             'https://github.com/RobTand/prismabuild/archive/' + PB_READER_LEASE_PIN_COMMIT + '.tar.gz')
         sdk = next(block for block in export.split('\n\n') if block.startswith('prismabuild @'))
         assert '--hash=sha256:e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970' in sdk
-
-
-def test_sdk_import_graph_child_declares_its_selected_test_modules():
-    from types import SimpleNamespace
-
-    control = load('sdk_import_graph_control', 'tests/test_prismabuild_import_leak_1281.py')
-    families, _ = control._source_refusal_representatives(ROOT / 'tests')
-    required = {target.split('::', 1)[0] for target in families.values()}
-    scope = {'struct': SimpleNamespace}
-    exec((ROOT / 'tools/bazel/test_inputs.bzl').read_text(), scope)
-    entry = scope['TEST_INPUTS'].get('//tests:test_prismabuild_import_leak_1281')
-    declared = set(getattr(entry, 'modules', []))
-    assert required <= declared, sorted(required - declared)

@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from staged_native_fixtures import native_staged_state
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
