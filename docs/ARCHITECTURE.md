@@ -8,6 +8,12 @@ enclosing preparation defers that step, publishes its launch recipe, then
 finalizes the shared publication once. Exclusive index publication remains
 immutable. CPU metadata proofs do not qualify the production source/runtime.
 
+As of: 2026-11-08, produced writer prewrite limits.
+Source: `prismaquant/streamed_boundary_artifacts.py`, based on `db9f80a0d`.
+Direct and spooled tensor writers enforce the same declared per-entry tensor
+ceiling before creating a group. Write-only metadata reserves its largest
+sequential temporary file before either the direct writer or spool creates it.
+
 As of: 2026-11-08, Unit4B joined lifecycle and scientific consumer migration under review.
 Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
 based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.

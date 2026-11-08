@@ -1,5 +1,6 @@
 """Known bytes, exact tensors and ownership barriers through the real IO owner."""
 import dataclasses
+import copy
 import hashlib
 from pathlib import Path
 import threading
@@ -9,9 +10,11 @@ import torch
 
 from prismaquant import io_engine
 from prismaquant.stage_a_produced_output import (BoundaryProducedPrewriteRefused,
-    BoundaryProducedPublicationFailed, read_bound_document)
+    BoundaryProducedPublication, BoundaryProducedPublicationFailed, read_bound_document,
+    publish_document)
 from prismaquant.produced_output_spool import ProducedOutputSpool, ProducedExportRefused, ProducedWindowRefused
-from prismaquant.streamed_boundary_artifacts import ProducedFileReference
+from prismaquant.streamed_boundary_artifacts import (ProducedFileReference,
+    StreamedBoundaryArtifacts, BOUNDARY_STORAGE_SCHEMA)
 from produced_native_fixtures import publication, owner
 
 
@@ -34,6 +37,55 @@ def test_prewrite_ceiling_refuses_before_any_byte(tmp_path):
         pub.require_prewrite(batch_id='overflow', payload_ceiling_bytes=8, paths=[str(filename)])
     assert list(Path(pub.output_prefix).iterdir()) == []
     assert not pub._prewrites
+
+
+@pytest.mark.parametrize('spool', [None, 1 << 20])
+@pytest.mark.parametrize('budget', [0, 64])
+def test_metadata_temporary_ceiling_precedes_writes(tmp_path, monkeypatch, spool, budget):
+    original = publication(tmp_path, spool_bytes=spool, write_only=True)
+    declaration = copy.deepcopy(original.declaration)
+    declaration['durable_maxima']['temp_max_bytes'] = budget
+    binding = publish_document(tmp_path / 'temp-declaration.json', declaration)
+    producer = copy.deepcopy(original.producer)
+    producer['argv'] = ['fixture', '--produced-declaration', binding['path'],
+                       '--produced-declaration-sha256', binding['sha256']]
+    pub = BoundaryProducedPublication(declaration=declaration, binding=binding, producer=producer)
+    monkeypatch.setattr(pub, 'finalize', lambda *a, **k: None)
+    storage = StreamedBoundaryArtifacts({'schema': BOUNDARY_STORAGE_SCHEMA,
+        'directory': str(Path(pub.output_prefix) / 'boundaries'),
+        'max_resident_bytes': 1024, 'max_auxiliary_bytes': 1024,
+        'max_artifact_bytes': 1 << 24, 'prefetch_batches': 2})
+    storage.bind({'fixture': 'temp-budget'}, n_probes=1, published=True)
+    storage.bind_produced_output(pub, group_size=2, n_batches=2,
+        max_entry_tensor_bytes=1024, origin_lifetime='retain')
+    payload = b'independently known metadata bytes'
+    with storage:
+        if budget == 0:
+            with pytest.raises(BoundaryProducedPrewriteRefused, match='temp_max_bytes'):
+                storage.write_produced_files([('control.json', payload)], kind='metadata', boundary_index=0)
+            assert not (storage.directory / 'control.json').exists()
+            assert not list(storage.directory.rglob('*.tmp')) and not pub._prewrites
+        else:
+            refs = storage.write_produced_files([('control.json', payload)], kind='metadata', boundary_index=0)
+            assert len(refs) == 1 and Path(refs[0].path).read_bytes() == payload
+
+
+@pytest.mark.parametrize('spool', [None, 1 << 20])
+@pytest.mark.parametrize('ceiling', [4, 32])
+def test_direct_and_spooled_tensor_ceiling_precedes_writes(tmp_path, monkeypatch, spool, ceiling):
+    storage, pub = owner(tmp_path, tensor_bytes=ceiling, spool_bytes=spool)
+    monkeypatch.setattr(pub, 'finalize', lambda *a, **k: None)
+    with storage:
+        if ceiling < 32:
+            with pytest.raises(RuntimeError, match='tensor ceiling'):
+                storage.write(torch.arange(8, dtype=torch.float32), batch_index=0, boundary_index=0)
+            assert not list(storage.directory.rglob('*.pt*')) and not pub._prewrites
+        else:
+            refs = [storage.write(torch.arange(8, dtype=torch.float32) + batch,
+                batch_index=batch, boundary_index=0) for batch in range(2)]
+            with storage.prefetch(refs) as window:
+                for batch, ref in enumerate(refs):
+                    assert torch.equal(storage.get(window, ref), torch.arange(8, dtype=torch.float32) + batch)
 
 
 def test_known_bytes_live_reader_retention_and_rematerialization(tmp_path):

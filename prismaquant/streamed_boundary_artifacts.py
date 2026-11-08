@@ -882,9 +882,9 @@ class StreamedBoundaryArtifacts:
         # retained) checkpoint narrows later ordinary writes exactly as live
         # ordinary entries narrow later checkpoints.
         file_limit = nbytes + 65536
-        if (self._local_output_spool is not None
+        if (self._produced_plan is not None
                 and nbytes > self._produced_plan["max_entry_tensor_bytes"]):
-            raise RuntimeError("local output entry exceeds its sealed group tensor ceiling")
+            raise RuntimeError("produced output entry exceeds its sealed group tensor ceiling")
         remaining = self.checkpoint_remaining_bytes()
         if file_limit > remaining:
             raise RuntimeError(
@@ -1115,7 +1115,8 @@ class StreamedBoundaryArtifacts:
             planned += [str(self.directory / name),
                         str(self.directory / name) + ".tmp"]
         self._produced.require_prewrite(
-            batch_id=batch_id, payload_ceiling_bytes=total, paths=planned)
+            batch_id=batch_id, payload_ceiling_bytes=total,
+            temp_ceiling_bytes=max(ref.file_bytes for ref in references), paths=planned)
         spool = self._local_output_spool
         try:
             if spool is None:
