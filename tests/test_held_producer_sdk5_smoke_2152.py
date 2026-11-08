@@ -13,6 +13,7 @@ from prismaquant import source_generation as sg, native_results as nr
 from prismaquant.flux_jobs import ExecutionResult
 from test_original_source_admission import (  # noqa: F401
     authority_case, original_runner, original_model, material, _forget_state, _bound,
+    runtime_layout, nonqualifying_runtime,
 )
 
 pytestmark = pytest.mark.own_process

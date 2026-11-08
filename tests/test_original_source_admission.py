@@ -415,7 +415,7 @@ def test_producer_runtime_requires_its_independently_bound_complete_expectation(
         sg._validate_original_source_runtime(observed, binding)
 
 
-def test_native_runtime_is_measured_and_independently_selected(authority_case):
+def test_nonqualifying_runtime_control_is_independently_selected(authority_case):
     from prismaquant.native_results import measure_runtime
     observed = authority_case['packet']['runtime']
     binding = _bound(authority_case['tmp'] / 'independent-producer-runtime.json', copy.deepcopy(observed))

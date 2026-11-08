@@ -339,11 +339,14 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
     roots = {root for p in packages.values() for root in p['roots']} | {stdlib}
     if len(roots) > MAX_RUNTIME_ROOTS:
         raise ValueError('native runtime root count exceeds bound')
-    trees, signatures = {}, {}
+    trees, signatures, directories = {}, {}, set()
     for root in sorted(roots):
         trees[root] = _runtime_tree(root, stdlib=root == stdlib)
+        directories.update(str(Path(root) / member) for member in trees[root][1])
         for relative, signature in trees[root][0].items():
             signatures[str(Path(root) / relative)] = signature
+        if len(directories) + len(signatures) > MAX_RUNTIME_ENTRIES:
+            raise ValueError('native runtime aggregate directory/file count exceeds bound')
     for filename in {executable, *libraries, *(r['origin'] for r in imported.values()
                       if r['origin'] not in {'built-in', 'frozen'}),
                       *(r['cached'] for r in imported.values() if r['cached'] is not None)}:

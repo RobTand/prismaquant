@@ -5,6 +5,7 @@ from prismaquant import source_generation as sg, tessera_calibration_cache as cc
 from test_held_producer_sdk5_smoke_2152 import reader_domain_case
 from test_original_source_admission import (  # noqa: F401
     authority_case, original_runner, original_model, material, _forget_state,
+    runtime_layout, nonqualifying_runtime,
 )
 
 pytestmark = pytest.mark.own_process
