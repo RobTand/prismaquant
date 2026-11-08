@@ -236,8 +236,14 @@ def test_canonical_cache_helper_uses_isolated_python(tmp_path, monkeypatch):
                  'PRISMAQUANT_STAGED_ALLOWED_TIERS'):
         monkeypatch.setenv(name, 'fixture-restored-on-exit')
     calls = []
-    monkeypatch.setattr(os, 'execv', lambda executable, argv: calls.append((executable, argv)))
-    staged_launch.launch(binding, ['python3', '-s', '-m', 'owned_payload'])
+    class Executed(Exception):
+        pass
+    def executed(executable, argv):
+        calls.append((executable, argv))
+        raise Executed
+    monkeypatch.setattr(os, 'execv', executed)
+    with pytest.raises(Executed):
+        staged_launch.launch(binding, ['python3', '-s', '-m', 'owned_payload'])
     executable, argv = calls.pop()
     assert executable == '/usr/bin/python3'
     assert argv[:3] == ['/usr/bin/python3', '-s', staged_launch.CACHE_HELPER]
