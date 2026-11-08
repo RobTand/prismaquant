@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 
 from prismaquant.digests import bytes_sha256hex, canonical_json_sha256
+from prismaquant.file_identity import file_stat_signature
 from prismaquant.stage_a_produced_output import (BoundaryProducedPublication,
     add_declaration_arguments, read_bound_document)
 from prismaquant.produced_output_spool import ProducedOutputSpool
@@ -23,6 +24,7 @@ class FixtureReference:
     name: str
     file_bytes: int
     sha256: str
+    writer_file_identity: tuple
 
 
 def main(argv=None):
@@ -53,8 +55,11 @@ def main(argv=None):
             source = local / path.name
             with source.open('xb') as stream:
                 stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+                identity = file_stat_signature(os.fstat(stream.fileno()))
             ref = spool.record(batch, FixtureReference(str(source), path.name,
-                len(raw), bytes_sha256hex(raw)), directory, read_back=True)
+                len(raw), bytes_sha256hex(raw), identity), directory, read_back=True)
             references.append(ref)
         spool.submit(batch)
         spool.await_group(batch)
