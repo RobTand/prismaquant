@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""The PrismaBuild submission inputs for a Stage B preparation (PQ #1070).
+"""The native launch inputs for a Stage B preparation (PQ #1070).
 
 Writes, for one run of ``tools/prepare_extended_joint_quanta.py`` (``prepare``)
 or of ``tools/regenerate_joint_quanta.py`` alone (``regenerate``):
 
 * ``read-manifest.json.gz``: the data manifest of what the run reads, for
-  ``pbrun --data-manifest``;
+  the explicit staged-input launch;
 * ``template.json``: the write-only produced-output template over the
-  metadata root, for ``pbrun --produced-output-template``;
-* ``submission.json``: both digests, the read totals and the ``pbrun``
+  metadata root, bound by native argv;
+* ``submission.json``: both digests, the read totals and the native launch
   options that attach them.
 
 It submits nothing. It reads the control documents its arguments bind, each
 selected safetensors shard's header, and every declared file that has no
 bound digest, which it hashes: every entry the tools add declares its
 SHA-256 (PQ #1092). ``strict_read_flags`` in ``submission.json`` are the
-flags the tool's command line carries, so the action reads its inputs off
+flags the tool's command line carries, so the launch reads its inputs off
 the stage and refuses rather than reading the pool.
 
 The read set, by source:

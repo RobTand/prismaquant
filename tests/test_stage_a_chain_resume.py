@@ -199,8 +199,7 @@ def _run(root, monkeypatch, *, model="dense", stride=2, implementation=ONE,
             # disposes a failed attempt's directory, so the directory as it
             # is now is what a relaunch finds: kept aside and put back below.
             directory = checkpoint_directory(space, boundary)
-            (directory / "entries").mkdir(parents=True, exist_ok=True)
-            (directory / "entries" / "cotangent-0-0.pt").write_bytes(b"half written")
+            (directory / "checkpoint.json.tmp").write_bytes(b"half written manifest")
             kept = root.parent / f"{root.name}-boundary-{boundary}-at-death"
             shutil.copytree(directory, kept)
             at_death.append((kept, directory))
@@ -289,28 +288,26 @@ def _capsule(tmp_path, monkeypatch):
     launch binds, so a chain resume must continue a capsule-bound run too.
     """
     from prismaquant import joint_forward_resume as recovery_mod
-    from test_joint_forward_resume import _bound, _chain_sdk, _owner_spool
-
-    monkeypatch.setattr(recovery_mod, "_sdk", _chain_sdk)
+    from test_joint_forward_resume import _bound
+    from produced_native_fixtures import selected_publications, recovery_publication
     refs, identities = {}, []
     last = len(draw()) - 1
     _interrupted(tmp_path / "r9", monkeypatch, generation=9, forward_refs=refs,
                  identities=identities,
                  interrupt=lambda kw: kw.get("probe_index") is None and (
                      kw["boundary_index"], kw["batch_index"]) == (1, last))
-    spool, instance, template = _owner_spool(tmp_path, "e" * 64, refs)
     ref = refs[0, 0]
     capsule = tmp_path / "r9-to-r10.json"
-    recovery_mod.build_forward_recovery(specification={
-        "schema": recovery_mod.SCHEMA, "queue_root": str(tmp_path / "queue"),
-        "instance": instance, "template": template,
-        "session": json.loads(ref.metadata_json)["identity"]["session"],
+    specification = {
         "original_bind_identity": identities[-1],
         "campaign_identity": {**CAMPAIGN, "campaign_scope": None},
         "implementation_compatibility": {"original": ONE, "recovery": TWO,
                                          "scope": "forward-identical-memory-only"},
-        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype},
-        spool_directory=spool, output=capsule, frontier=1)
+        "n_batches": len(draw()), "entry_shape": list(ref.shape), "entry_dtype": ref.dtype}
+    selection, _pub, _selected = recovery_publication(tmp_path / 'r9-publication',
+        refs, specification, selected_publications(monkeypatch))
+    recovery_mod.build_forward_recovery(selection=selection, specification=specification,
+        output=capsule, frontier=1)
     return _bound(capsule)
 
 
@@ -795,23 +792,10 @@ def test_the_interrupted_owner_must_be_contained(tmp_path, monkeypatch):
     assert asked == [producer]
 
 
-def test_containment_is_the_forward_recovery_check(monkeypatch):
-    from prismaquant import joint_forward_resume
-
-    calls = []
-    sdk = {"pool": SimpleNamespace(PoolQueue=lambda root: ("queue", root))}
-    monkeypatch.setattr(joint_forward_resume, "_sdk", lambda: sdk)
-
-    def contained(queue, instance, given):
-        calls.append((queue, instance, given))
-        raise joint_forward_resume.ForwardRecoveryRefused("owner still running")
-
-    monkeypatch.setattr(joint_forward_resume, "require_contained", contained)
+def test_legacy_containment_cannot_authorize_native_mutation():
     producer = {"owner_action_key": "e" * 64, "owner_attempt": 2, "queue_root": "/q"}
-    with pytest.raises(ChainResumeRefused, match="not contained"):
+    with pytest.raises(ChainResumeRefused, match='legacy producer records'):
         resume_mod.require_producer_contained(producer)
-    assert calls == [(("queue", "/q"), {"owner_action_key": "e" * 64,
-                                        "owner_attempt": 2}, sdk)]
 
 
 # -- the command line -----------------------------------------------------------

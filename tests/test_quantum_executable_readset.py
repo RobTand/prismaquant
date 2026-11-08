@@ -1481,7 +1481,7 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
 def _exec_campaign(tmp_path):
     """Tiny campaign files with a calibration input for the regen CLI."""
     import regenerate_joint_quanta as _regen  # noqa: F401
-    from test_stageb_prepared_inputs_bridge import (
+    from prepared_input_fixtures import (
         _execution, _render_files, _production_pkl, _qnames, FMT)
     files = _render_files(tmp_path)
     pkl_path = _production_pkl(tmp_path, files)

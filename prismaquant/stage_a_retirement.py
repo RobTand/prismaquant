@@ -46,14 +46,14 @@ def refuse_retired_space(space, error=RuntimeError, *, what):
         raise error(f'{path} retires this Stage A run: {what}')
 
 
-def _decode(raw):
+def decode_retirement_document(raw):
     def invalid(key):
         return RetirementRefused(f'invalid retirement JSON: {key}')
     return strict_json_loads(raw, duplicate=invalid, constant=invalid)
 
 
 def _read_json(path):
-    return _decode(read_document(path, BINDING_MAX_BYTES)[0])
+    return decode_retirement_document(read_document(path, BINDING_MAX_BYTES)[0])
 
 
 def _session_of(document, where) -> dict:
@@ -79,7 +79,7 @@ def _load_chain_state(space: Path) -> tuple[dict, str]:
             f"{path} is missing: without the run's chain state there is no "
             "record of the native owners that wrote it; no publication to "
             "reclaim can be found") from None
-    document = _decode(raw)
+    document = decode_retirement_document(raw)
     if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA
             or _seal(document)["chain_state_sha256"] != document.get("chain_state_sha256")):
         raise RetirementRefused(f"{path} is not a sealed chain state")
@@ -114,7 +114,7 @@ def _successor(path, sha256, *, space: Path, session: dict) -> dict:
     real = Path(os.path.realpath(path))
     if real.is_relative_to(os.path.realpath(space)):
         raise RetirementRefused("the successor lies inside the run it would supersede")
-    successor = _session_of(_decode(raw), f"the successor {path}")
+    successor = _session_of(decode_retirement_document(raw), f"the successor {path}")
     if successor["run_identity_sha256"] == session["run_identity_sha256"]:
         raise RetirementRefused(
             "the successor carries this run's own identity: that is a resume of "
@@ -137,7 +137,7 @@ def _checkpoint_planes(space: Path, session: dict) -> tuple[list[str], dict]:
     for directory in occupied_checkpoint_directories(space):
         manifest = directory / "checkpoint.json"
         if not manifest.is_file():
-            continue  # A partial checkpoint names nothing; its directory goes.
+            continue  # A partial checkpoint names no referenced tensor plane.
         boundary = int(directory.name.removeprefix("boundary-"))
         try:
             record, _binding = read_sealed_checkpoint(space, boundary)

@@ -7,7 +7,6 @@ The immutable declaration must be bound by the actual native launch arguments.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from prismaquant.stage_a_produced_output import add_declaration_arguments, BoundaryProducedPublication
@@ -47,8 +46,9 @@ def main(argv=None):
                 if not torch.equal(storage.get(window, reference), value):
                     raise AssertionError('exact tensor readback differs')
         report = storage.produced_output_report()
-    print(json.dumps({'schema': 'prismaquant.produced_tensor_cycle.v1',
-        'producer': publication.producer, 'tensors': count, 'report': report}, sort_keys=True))
+    from prismaquant.digests import DIRECT_ASCII_STRICT
+    print(DIRECT_ASCII_STRICT.encoded({'schema': 'prismaquant.produced_tensor_cycle.v1',
+        'producer': publication.producer, 'tensors': count, 'report': report}).decode())
     return 0
 
 

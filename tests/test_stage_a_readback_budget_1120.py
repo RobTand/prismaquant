@@ -1,64 +1,35 @@
-"""A Stage A owner that reads back from a local spool needs its allowance (PQ #1120).
-
-Since PQ #1110 such an owner reads the groups it wrote back from its own
-box's spool and never commits them, so each group's durable charge stays at
-its prewrite ceiling: every entry at the bound entry size plus the 64 KiB
-envelope (``stage_a_produced_output.boundary_group_ceiling_bytes``). A
-budget between the raw-tensor floor and that allowance passed the preflight
-and then failed with ``prewrite-exceeds-payload-maxima`` hours into the
-forward. These tests drive the real preflight
-(``joint_cost_stage_a._run_artifact_preflight``) on the capture fixture's
-live geometry, in the launch environment the owner binds from.
-"""
-from __future__ import annotations
-
+"""Preflight prices exact geometry from a launch-bound native declaration."""
 import pytest
-
-ACTION_KEY_ENV = "PRISMABUILD_ACTION_KEY"
-SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
-N_PROBES = 2
-STRIDE = 8
+N_PROBES, STRIDE = 2, 8
 
 
 def _preflight(tmp_path, budget, *, probe_microbatch=0):
-    """The real preflight at ``budget``, always over the same output root.
-
-    The planning allowance carries the checkpoint manifest's envelope, and
-    the manifest names its entries' paths, so the root is held fixed.
-    """
     from test_layer_major_boundary_capture import draw, fixture
     from prismaquant.joint_adjoint_checkpoints import adjoint_space
     from prismaquant.joint_cost_stage_a import _run_artifact_preflight
-
     _, _, runner, _ = fixture()
-    return _run_artifact_preflight(
-        runner, draw(), {"n_probes": N_PROBES,
-                         "probe_microbatch": probe_microbatch,
-                         "boundary_storage": {"max_auxiliary_bytes": 1 << 20}},
-        STRIDE, adjoint_space(tmp_path / "out"),
-        {"run_used": int(budget), "override": None})
+    return _run_artifact_preflight(runner, draw(), {'n_probes': N_PROBES,
+        'probe_microbatch': probe_microbatch,
+        'boundary_storage': {'max_auxiliary_bytes': 1 << 20}},
+        STRIDE, adjoint_space(tmp_path / 'out'), {'run_used': int(budget), 'override': None})
 
 
 def _numbers(tmp_path, monkeypatch, *, probe_microbatch=0):
-    """The floor and the planning allowance, read with no owner bound."""
-
-    monkeypatch.delenv(ACTION_KEY_ENV, raising=False)
-    monkeypatch.delenv(SPOOL_ROOT_ENV, raising=False)
-    result = _preflight(tmp_path, 1 << 40,
-                        probe_microbatch=probe_microbatch)
-    floor = result["required_floor_bytes"]
-    allowance = result["planning_estimate_bytes"]
+    monkeypatch.delenv('FLUX_JOB_ID', raising=False)
+    result = _preflight(tmp_path, 1 << 40, probe_microbatch=probe_microbatch)
+    floor, allowance = result['required_floor_bytes'], result['planning_estimate_bytes']
     assert floor < allowance
     return floor, allowance, result
 
 
-def _bind_spool(tmp_path, monkeypatch):
-    """The launch environment of an admitted owner with a local spool."""
-
-    monkeypatch.setenv(ACTION_KEY_ENV, "a" * 64)
-    monkeypatch.setenv(SPOOL_ROOT_ENV, str(tmp_path / "spool"))
-
-
+def _bind_spool(tmp_path, monkeypatch, *, spool=True, write_only=False):
+    from produced_native_fixtures import publication
+    from prismaquant import native_results
+    pub = publication(tmp_path / 'launch', spool_bytes=(1 << 24) if spool else None,
+        write_only=write_only)
+    monkeypatch.setenv('FLUX_JOB_ID', pub.producer['job_id'])
+    monkeypatch.setattr(native_results, 'execution_context', lambda: pub.producer)
+    return pub
 def test_a_spool_bound_owner_below_its_allowance_refuses_at_the_preflight(
         tmp_path, monkeypatch):
     from prismaquant.joint_cost_stage_a import AdjointIdentityRefused
@@ -84,27 +55,23 @@ def test_a_spool_bound_owner_at_its_allowance_passes_as_before(
         assert result["planning_estimate_bytes"] == allowance
 
 
-@pytest.mark.parametrize("unset", [ACTION_KEY_ENV, SPOOL_ROOT_ENV])
-def test_without_a_spool_bound_owner_the_floor_still_gates(
-        tmp_path, monkeypatch, unset):
-    """No admitted owner, or an owner with no local spool: unchanged."""
 
+@pytest.mark.parametrize('mode', ['unadmitted', 'no-spool', 'write-only'])
+def test_without_a_spool_bound_owner_the_floor_still_gates(tmp_path, monkeypatch, mode):
     from prismaquant.joint_cost_stage_a import AdjointIdentityRefused
-
     floor, allowance, _ = _numbers(tmp_path, monkeypatch)
-    _bind_spool(tmp_path, monkeypatch)
-    monkeypatch.delenv(unset)
+    _bind_spool(tmp_path, monkeypatch, spool=mode != 'no-spool', write_only=mode == 'write-only')
+    if mode == 'unadmitted':
+        monkeypatch.delenv('FLUX_JOB_ID')
     between = floor + (allowance - floor) // 2
-    assert _preflight(tmp_path, between)["declared_bytes"] == between
-    with pytest.raises(AdjointIdentityRefused, match="hard geometry floor"):
+    assert _preflight(tmp_path, between)['declared_bytes'] == between
+    with pytest.raises(AdjointIdentityRefused, match='hard geometry floor'):
         _preflight(tmp_path, floor - 1)
-
-
 def test_a_partial_last_batch_is_charged_at_the_full_bound(
         tmp_path, monkeypatch):
     """Five rows at four per batch: a 4-row entry and a 1-row entry.
 
-    PrismaBuild reserves each entry of a group at the bound entry size, the
+    The declaration bounds each entry of a group at the bound entry size, the
     full batch's, so a read-back owner's 1-row entries are charged as 4-row
     ones: one per retained boundary group, live probe plane and checkpoint
     copy. The planning allowance prices them at their own size, so a budget

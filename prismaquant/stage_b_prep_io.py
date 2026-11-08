@@ -14,16 +14,13 @@ from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
 #: The template id prefix; the id's suffix digests the template body, so a
-#: changed root, tier or ceiling files a template of its own (PQ #1054).
+#: changed root or ceiling files a declaration of its own (PQ #1054).
 PREPARATION_TEMPLATE_PREFIX = "pq-stage-b-preparation"
-#: PrismaBuild's produced-output template schema (``produced_output.
-#: TEMPLATE_SCHEMA_V1``), restated for the submitter, which runs outside PB.
+#: Immutable application output declaration schema.
 PRODUCED_OUTPUT_TEMPLATE_SCHEMA = "prismaquant.produced_declaration.v1"
 #: The read phase the preparation's manifest declares.
 PREPARATION_READ_PHASE = "stage-b-preparation"
-#: PrismaBuild's own per-manifest bound (``prismabuild.core
-#: DATA_MANIFEST_MAX_BYTES``), restated as ``campaign_data_manifests``
-#: restates it: this module runs where PrismaBuild is not importable.
+#: Bound for the retained scientific manifest format.
 DATA_MANIFEST_MAX_BYTES = 64 * 1024 * 1024
 #: Files the preparation writes besides one set per quantum: the catalog
 #: extension, the parent, the partition, the derivation input, the spec, the
@@ -76,7 +73,7 @@ def file_entry(path: str | os.PathLike, sha256: str | None = None) -> dict:
 
     ``sha256`` is the file's bound digest when the caller holds one; without
     it the file is hashed. Every entry declares its digest (PQ #1092), so
-    PrismaBuild's staged copy is bound to these bytes and the preparation
+    the staged copy is bound to these bytes and the preparation
     checks what it reads against them.
     """
     path = os.path.normpath(os.path.abspath(os.fspath(path)))
@@ -98,7 +95,7 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
     safetensors index and headers: ``header_reads`` of
     ``layer_streaming.streaming_source_plan``). A range
     that a whole-file entry at the same offset already covers is dropped;
-    PrismaBuild refuses a repeated ``(path, offset)``.
+    the reader refuses a repeated ``(path, offset)``.
 
     A ``files`` item is a path or a ``(path, sha256)`` pair; a bare path, and
     every range, is hashed here, so each entry the tools add declares its
@@ -341,7 +338,7 @@ def read_input(path, *, sha256: str | None = None, where: str) -> bytes:
 def preparation_payload_ceiling(quanta: int, *, indexes: int = 1) -> int:
     """The template's durable payload maximum for ``quanta`` quanta.
 
-    Every file the preparation writes is at most PrismaBuild's own manifest
+    Every file the preparation writes is at most the scientific manifest
     bound: the manifests it seals must fit it to be submitted at all, and a
     record, slice or control document is smaller than the manifest that
     names it. The file count is the generator's per-quantum set plus the
@@ -383,8 +380,9 @@ class PreparationPublication:
         return self.publication.output_prefix
 
     def batch_id(self, kind):
-        from .stage_a_produced_output import _name
-        return _name(f'stage-b-prep-{_name(kind)}-{self.publication.generation}')
+        from .stage_a_produced_output import produced_identifier
+        return produced_identifier(
+            f'stage-b-prep-{produced_identifier(kind)}-{self.publication.generation}')
 
     def claim_kind(self, kind):
         if kind in self._kinds:
@@ -409,15 +407,18 @@ class PreparationPublication:
 _BOUND = {}
 
 
-def bind_preparation_publication(metadata_root, *, required, env=None):
+def bind_preparation_publication(metadata_root, *, required):
     if not required:
         return None
-    from .stage_a_produced_output import BoundaryProducedPublication
+    from .stage_a_produced_output import BoundaryProducedPublication, BoundaryProducedBindingError
     class MetadataPublication(BoundaryProducedPublication):
         DEFAULT_SLOT = PREPARATION_SLOT
     if metadata_root is None:
         raise PreparationPublicationRefused('explicit metadata root required')
-    publication = MetadataPublication.bind_from_admitted_owner()
+    try:
+        publication = MetadataPublication.bind_from_admitted_owner()
+    except BoundaryProducedBindingError as exc:
+        raise PreparationPublicationRefused(f'native preparation declaration unavailable: {exc}') from exc
     root = str(Path(metadata_root).absolute())
     if root != publication.output_prefix:
         raise PreparationPublicationRefused('metadata root differs from launch declaration')

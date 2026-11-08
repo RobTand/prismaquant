@@ -276,8 +276,8 @@ def capsule_recovery(forward_recovery: dict | None, *, plan_sha256, prepared_sha
     receipt_binding = {
         "schema": SCHEMA, "capsule": {"path": path, "sha256": digest},
         "frontier": document["frontier"], "original_session": document["session"],
-        "original_owner": document["instance"]["owner_action_key"],
-        "original_attempt": document["instance"]["owner_attempt"]}
+        "producer": document["selection"]["job_id"],
+        "checkpoint_exit": document['checkpoint_exit']}
     records = chain_records(document)
     for rows in records.values():
         for row in rows:

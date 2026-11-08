@@ -158,7 +158,7 @@ def plan_boundary_partition_ranges(*, n_partitions, n_ranges):
     boundary)`` coordinates as an independent file, and no range reads
     another's (PQ #738). This function only *names* the quanta -- it
     schedules nothing, owns no bytes and builds no dispatcher. Execution,
-    placement and balancing stay PrismaBuild's: one campaign row per range
+    placement and balancing stay in flux_jobs: one campaign row per range
     produces that range's entries, and :func:`verify_boundary_partition_coverage`
     checks the union before anything downstream reads it as one capture.
     """
@@ -269,13 +269,7 @@ class StreamedBoundaryArtifacts:
     does. Only completed signed cost shards are resumable measurement state.
     """
 
-    #: Thread owning the application writer and its IO barriers.
-    PRODUCED_DRIVERS = ("compute", "writer")
-
-    def __init__(self, config, *, driven_by="compute"):
-        if driven_by not in self.PRODUCED_DRIVERS:
-            raise ValueError(f"unknown owner driver {driven_by!r}")
-        self._produced_driver = driven_by
+    def __init__(self, config):
         self.config = normalize_boundary_storage(config)
         self.identity = {key: value for key, value in self.config.items() if key != "directory"}
         self.session = None
@@ -329,12 +323,9 @@ class StreamedBoundaryArtifacts:
         self._produced_retained_uncommitted = []
         self._produced_retained_boundary = None
         self._produced_retained_reads = frozenset()
+        self._produced_retained_read_context = None
         from .produced_stager import OwnerLock
         self._produced_lock = OwnerLock()
-        import threading
-        # Per thread: spans nest on the thread that opened them, and a frame
-        # from another thread in the same stack would misattribute both.
-        self._produced_blocked_local = threading.local()
         self.telemetry = {"resident_tensor_bytes": 0, "peak_resident_tensor_bytes": 0,
             "peak_auxiliary_bytes": 0, "peak_shared_cotangent_reservation_bytes": 0,
             "live_artifact_bytes": 0, "peak_artifact_bytes": 0,
@@ -353,23 +344,7 @@ class StreamedBoundaryArtifacts:
             "produced_local_windows": 0,
             "produced_deferred_unlinks": 0,
             "produced_deferred_unlinks_done": 0,
-            "produced_deferred_unlink_bytes": 0,
-            "produced_compute_blocked_s": 0.0,
-            **{f"produced_compute_blocked_{reason}_s": 0.0
-               for reason in self.PRODUCED_BLOCKED_REASONS}}
-        if driven_by == "writer":
-            # The writer's own names (PQ #1262): the compute counters stay
-            # zero, because the compute thread never waits on this owner.
-            self.telemetry.update({
-                "produced_writer_blocked_s": 0.0,
-                **{f"produced_writer_blocked_{reason}_s": 0.0
-                   for reason in self.PRODUCED_BLOCKED_REASONS}})
-
-    #: Application barrier timing categories; these are not speed claims.
-    PRODUCED_BLOCKED_REASONS = (
-        "prewrite", "publish_ahead", "stage_ahead", "read_fund", "stage_wait",
-        "compose", "release", "copy_before_unlink", "reclaim_origin",
-        "queue_full", "settle", "close")
+            "produced_deferred_unlink_bytes": 0}
 
     def __enter__(self):
         return self
@@ -480,7 +455,7 @@ class StreamedBoundaryArtifacts:
         the run did not finish (``running`` after a kill, ``failed`` after
         an exception). A ``complete`` generation has a receipt, an
         ``attached`` one is read-only, and a ``retained`` one is still owned
-        by a stager that never joined.
+        by owned IO that never joined.
 
         ``identity`` is the bind identity the relaunch recomputed; it must
         hash to the session's ``run_identity_sha256``, as it did at ``bind``.
@@ -521,7 +496,7 @@ class StreamedBoundaryArtifacts:
         activation cotangents of the sealed checkpoint at ``boundary`` the
         chain resumes from. Both are read the way forward-recovery inputs
         are: through the process input map, never through this owner's
-        produced output, because a relaunch is a new PrismaBuild owner and
+        produced output, because a relaunch is a new native producer and
         the original's groups are not its own. Neither is ever unlinked by
         this owner. A boundary entry keeps its slot, so a second writer of
         it refuses; a checkpoint entry holds none, and the first roll below
@@ -841,9 +816,8 @@ class StreamedBoundaryArtifacts:
     def watch_progress(self, reporter):
         """Report each published entry to ``joint_run_progress``, or to nothing.
 
-        Publication is where a unit becomes durable, so it is the only place
-        the count may move: PB #480 buys a long run time on committed work and
-        a counter that ticked on intent would keep a wedged run alive. The
+        Publication is where a unit becomes durable, so progress advances only
+        after verified publication, never on write intent. The
         reporter is optional so a legacy or standalone caller keeps today's
         behaviour byte for byte.
         """
@@ -919,11 +893,7 @@ class StreamedBoundaryArtifacts:
                 f"{self.config['max_artifact_bytes']}")
         name = f"{slot}-at-{boundary_index}"
         identity = {"session": self.session, "slot": slot, "kind": kind, "coordinates": coordinates}
-        # BEFORE the first byte: a bound owner claims its group's durable
-        # budget, or refuses with nothing written. The claim covers the
-        # whole 64-entry group once, so the remaining writes in it cost no
-        # further call, and it holds no stage credit -- the funding happens
-        # at the commit inside the deferred publish.
+        # Reserve the whole group before the first byte of any member.
         produced_group = None
         if self._produced is not None:
             self._require_produced_copies()
@@ -945,13 +915,8 @@ class StreamedBoundaryArtifacts:
         self._reserve(nbytes)
         try:
             with torch.profiler.record_function("aura.exact_activation.write"):
-                # A spool entry is never the only copy of committed work, so
-                # it is written without fsync (PQ #1225). Nothing counts it
-                # until PrismaBuild acknowledges the export's own fsynced
-                # copy, the export hashes every byte it copies against this
-                # reference, and a same-box read (PQ #1110) checks the size
-                # and the sha256 of every byte it reads. A crash that tears
-                # the local file fails those checks; it never lands.
+                # The local file is provisional. Copy publication fsyncs and
+                # verifies canonical bytes; own readback verifies exact bytes.
                 reference = write_exact_activation_cache_entry(write_directory, name, tensor,
                     identity=identity, max_tensor_bytes=nbytes, max_file_bytes=file_limit,
                     preallocate=self._local_output_spool is not None,
@@ -973,6 +938,8 @@ class StreamedBoundaryArtifacts:
                 group_size=self._produced_plan["group_size"])
             with self._produced_lock.held():
                 produced_group["references"].append(reference)
+                if self._local_output_spool is None:
+                    produced_group['file_identities'][reference.path] = reference.writer_file_identity
                 produced_group["live_references"] += 1
                 self._produced_index[reference] = produced_key
                 complete = (len(produced_group["references"])
@@ -986,13 +953,9 @@ class StreamedBoundaryArtifacts:
                 # export is acknowledged (``settle_local_output``).
                 self._produced_commit_origin(produced_group)
             if complete and read_back:
-                # The group's last entry is durable, and everything its
-                # publication needs is on the references already. Publishing
-                # here lets PrismaBuild's mover run while the GPU works.
-                # ``read_back=False`` is the writer saying no read follows
-                # (the walk's last roll): staging that group would be a copy
-                # nobody reads, racing the disposal of its origins.
-                self._produced_publish_ahead(produced_key, produced_group)
+                # Complete direct groups publish here. Spool IO already owns
+                # publication; no read follows the final unread roll.
+                self._publish_complete_produced_group(produced_group)
         self.telemetry["written_entries"] += 1
         self.telemetry["written_tensor_bytes"] += nbytes
         self.telemetry["live_artifact_bytes"] += reference.file_bytes
@@ -1034,7 +997,7 @@ class StreamedBoundaryArtifacts:
 
         A writer on a thread of its own (the streamed handoff) is cancelled
         when its quantum fails; a wait on a window or an export would
-        otherwise last as long as PrismaBuild's evidence does. The wait then
+        otherwise outlive the failing consumer. The wait then
         raises :class:`~prismaquant.produced_output_spool.
         ProducedOutputWaitCancelled` and the owner exits on its failure
         path. Without a spool there is no wait to end.
@@ -1076,9 +1039,8 @@ class StreamedBoundaryArtifacts:
     def produced_origin_batches(self):
         """The refs of the groups committed at their origin, in commit order.
 
-        Each is PrismaBuild's ``origin_batch_ref`` (#912): owner action,
-        attempt nonce, template, batch id and manifest digest. It is what a
-        consumer declares, and what pins the bytes it reads.
+        Each binding names one immutable application batch, including its
+        exact bytes, session and producer.
         """
         return [dict(ref) for ref in self._produced_origin_batches]
 
@@ -1090,19 +1052,17 @@ class StreamedBoundaryArtifacts:
         produced-output group (PQ #1015). It claims the group's exact
         payload before the first byte, with the final and ``.tmp`` names as
         its planned paths. Through the local spool the files land in the
-        group's PB reservation and PrismaBuild exports them in list order.
+        local directory and the existing IO engine copies them in list order.
         This method returns only after the export is acknowledged, so a
         caller that puts its record last can rely on the record's presence.
-        ``paced`` selects this group's PB export mode; ``None`` preserves
-        the backend's sealed default.
         Without the spool each file is written through its ``.tmp`` name
         and linked into place, in the same order.
 
         No read follows in this action, so a bound owner's template must be
-        write-only (PrismaBuild #912), and the group is committed at its
+        write-only, and the group is committed at its
         origin once its files are durable, with the owner's origin lifetime
         (PQ #1075): directly after the last file is linked, or through the
-        spool once PrismaBuild acknowledged the export. A read-back template
+        spool after verified durable publication. A read-back template
         refuses before the first byte, because nothing could ever commit
         the group.
 
@@ -1130,7 +1090,7 @@ class StreamedBoundaryArtifacts:
             for name, payload in files]
         total = sum(ref.file_bytes for ref in references)
         # The files share max_artifact_bytes with the entries, as the
-        # template's payload maximum does on the PrismaBuild side.
+        # declaration's payload maximum.
         remaining = self.checkpoint_remaining_bytes()
         if total > remaining:
             raise RuntimeError(
@@ -1146,7 +1106,7 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "produced files are never read back by the action that writes "
                 "them, so they commit at their origin, which needs a "
-                "write-only produced-output template (PrismaBuild #912)")
+                "write-only produced-output declaration")
         self._require_produced_copies()
         batch_id = self._produced.batch_id_for(
             kind=kind, boundary_index=boundary_index, group_index=0)
@@ -1174,8 +1134,7 @@ class StreamedBoundaryArtifacts:
                 spool.await_group(batch_id, where="produced-files")
         except BaseException:
             if spool is None or not spool.pending(batch_id):
-                # PB proves every planned path absent before it releases
-                # the claim, and retains it otherwise.
+                # Release only after every planned path is absent.
                 self._produced.abort_prewrite(batch_id=batch_id)
             raise
         self._produced_commit_origin(
@@ -1231,14 +1190,14 @@ class StreamedBoundaryArtifacts:
                 # Write-behind (PQ #1110): the chain does not wait for the
                 # export here. The entry leaves the live set now; its
                 # canonical file goes once the group's local copy is
-                # released, which PrismaBuild does only after the export
+                # released, which happens only after the copy
                 # landed and which re-checks every landed destination. The
                 # window bounds how many wait: a full window makes the next
                 # reservation wait on the exports, never on a clock.
                 # A group the window released for room while another of
                 # its entries is still live keeps the file too (PQ #1236):
                 # that entry's read publishes or restages the whole group,
-                # and PrismaBuild stats every origin in it.
+                # and rematerialization verifies every canonical file.
                 del self._references[reference.name]
                 self.telemetry["retired_entries"] += 1
                 self._deferred_unlinks.setdefault(batch_id, []).append(reference)
@@ -1266,9 +1225,8 @@ class StreamedBoundaryArtifacts:
 
         True while any entry of the group other than ``retiring`` is live
         (PQ #1236). A read of that entry publishes the whole group through
-        PrismaBuild, or restages it, and both stat every origin the group's
-        manifest names (``produced_output`` refuses ``descriptor-unstatable``
-        or ``restage-origin-changed``). So no retired file of the group may
+        the publication owner, or rematerializes it, and both verify every
+        canonical file in the immutable manifest. So no retired file of the group may
         go before it. A retired entry is out of ``_references``, so no read
         of it follows here (``_entry_identity``).
         """
@@ -1302,7 +1260,7 @@ class StreamedBoundaryArtifacts:
         Runs on the thread that writes and retires (PQ #1110): at each
         write, each retirement and at settle. Never waits. A group still
         held keeps its deferred entries, and its local copy counts against
-        the window until PrismaBuild's export lands. A released group keeps
+        the window until verified durable publication. A released group keeps
         them too while another of its entries is live (PQ #1236): the
         window can release a group for room before its reads are done, and
         the read of a live entry then publishes or restages the whole group
@@ -1341,7 +1299,7 @@ class StreamedBoundaryArtifacts:
                 # The origin is gone, so the reference is dead: drop it from
                 # the lookup index AFTER the reclaim gate has read it. The
                 # group's own list is untouched -- the committed batch's
-                # descriptors are PrismaBuild's and are not rewritten by this
+                # descriptors are immutable and are not rewritten by this
                 # owner disposing of its files.
                 self._produced_index.pop(reference, None)
 
@@ -1706,8 +1664,8 @@ class StreamedBoundaryArtifacts:
         """Wait until every referenced own entry is durable at its origin.
 
         A referenced checkpoint (PQ #1036) names the owner's canonical entry
-        paths. Through a local output spool those land when PrismaBuild's
-        export of their group is acknowledged; the checkpoint's manifest is
+        paths. Through a local output spool those land after verified copy
+        publication; the checkpoint's manifest is
         written only after that, so a checkpoint that exists names only
         durable files. Without a spool the entries were written in place.
         Returns the seconds waited; with a spool they also accumulate in
@@ -1723,7 +1681,7 @@ class StreamedBoundaryArtifacts:
                 continue
             _key, group = self._produced_group_for(reference)
             if group is None and self._local_output_spool is None:
-                continue  # Filed in no PB batch, so no PB lifetime governs it.
+                continue  # Not produced here; its existing input authority owns the bytes.
             if group is None:
                 raise RuntimeError(
                     f"referenced checkpoint entry {reference.name} is in no "
@@ -1744,10 +1702,8 @@ class StreamedBoundaryArtifacts:
             self.telemetry["checkpoint_reference_wait_s"] = (
                 self.telemetry.get("checkpoint_reference_wait_s", 0.0) + waited)
         if self._produced is not None and batches:
-            # Fail closed (PQ #1036): the pin lives in PQ, and PrismaBuild's
-            # retirement tick unlinks a ``consumed`` origin-only batch once
-            # its consumers succeed. Stage A commits staged batches today;
-            # a move to origin batches must file them ``retain``.
+            # Checkpoints need retained entries. Write-only consumed groups
+            # cannot lend bytes to a later checkpoint.
             lifetimes = self._produced.origin_only_lifetimes()
             consumed = sorted(batch_id for batch_id in batches
                               if lifetimes.get(batch_id) == "consumed")
@@ -1755,7 +1711,7 @@ class StreamedBoundaryArtifacts:
                 raise RuntimeError(
                     "a referenced checkpoint cannot name entries of an "
                     "origin-only batch committed with lifetime consumed: "
-                    "PrismaBuild retires those origins; commit them with "
+                    "write-only consumers own that lifetime; publish them with "
                     f"lifetime retain ({', '.join(consumed)})")
         return waited
 
@@ -2044,8 +2000,8 @@ class StreamedBoundaryArtifacts:
             "live_ordinary_bytes": self.telemetry["live_artifact_bytes"],
             "live_checkpoint_bytes": self.telemetry["live_checkpoint_bytes"],
             "reserved_bytes": reserved,
-            "note": ("Application-level accounting only: not a PrismaBuild "
-                     "shared SSD/RAM reservation and not staged output."),
+            "note": ("Application-level artifact accounting; filesystem capacity "
+                     "and fleet resource admission are independent."),
         }
 
     def _reclaim_retained_checkpoints(self):
@@ -2126,17 +2082,6 @@ class StreamedBoundaryArtifacts:
             raise ProducedWindowRefused("local disk lacks two-plane headroom")
         return need
 
-    @contextmanager
-    def _produced_blocked(self, reason):
-        started = time.monotonic()
-        try:
-            yield
-        finally:
-            seconds = time.monotonic() - started
-            self.telemetry["produced_compute_blocked_s"] += seconds
-            key = f"produced_compute_blocked_{reason}_s"
-            self.telemetry[key] = self.telemetry.get(key, 0.0) + seconds
-
     def _require_produced_copies(self):
         if self._local_output_spool is not None:
             with self._local_output_spool._cond:
@@ -2183,7 +2128,7 @@ class StreamedBoundaryArtifacts:
             self._local_output_spool.reserve(batch, ceiling)
         group = {"batch_id": batch, "planned": planned, "references": [], "published": None,
             "context": None, "manifest_digest": None, "retired": False,
-            "origin_reclaimed": False, "live_references": 0}
+            "origin_reclaimed": False, "live_references": 0, 'file_identities': {}}
         self._produced_groups[key] = group
         self.telemetry["produced_groups_prewritten"] += 1
         return group
@@ -2200,22 +2145,49 @@ class StreamedBoundaryArtifacts:
 
     def stage_produced_reads_ahead(self, references):
         if self._local_output_spool is not None:
-            self._local_output_spool.prepare_reads(references)
+            self._local_output_spool.prepare_reads(
+                ref for ref in references if ref in self._produced_index)
 
+    @contextmanager
     def retain_produced_boundary(self, boundary_index):
+        """Hold this plane's local aliases across its consuming windows."""
+        if self._produced_retained_boundary is not None:
+            raise RuntimeError("produced boundary retention does not nest")
         self._produced_retained_boundary = boundary_index
+        try:
+            references = [ref for key, group in self._produced_groups.items()
+                if key[0] == 'boundary' and key[1] == boundary_index
+                for ref in group['references']]
+            if self._local_output_spool is None or not references:
+                yield
+            else:
+                self._local_output_spool.prepare_reads(references)
+                with self._local_output_spool.local_reads(references):
+                    yield
+        finally:
+            self._produced_retained_boundary = None
 
     def retain_produced_reads(self, references):
-        self._produced_retained_reads = frozenset(references)
+        references = frozenset(ref for ref in references if ref in self._produced_index)
+        if references == self._produced_retained_reads:
+            return len(references)
+        prior, self._produced_retained_read_context = self._produced_retained_read_context, None
+        self._produced_retained_reads = frozenset()
+        if prior is not None:
+            prior.__exit__(None, None, None)
+        if references and self._local_output_spool is not None:
+            self._local_output_spool.prepare_reads(references)
+            context = self._local_output_spool.local_reads(references)
+            context.__enter__()
+            self._produced_retained_read_context = context
+            self._produced_retained_reads = references
+        return len(references)
 
-    def _produced_publish_ahead(self, key, group):
+    def _publish_complete_produced_group(self, group):
         # The spool's existing IO future publishes complete groups. Direct
         # writers publish on this thread, with no scheduling or funding state.
         if self._local_output_spool is None:
             self._produced_commit_origin(group)
-
-    def produced_ahead_refusals(self):
-        return []
 
     def produced_group_records(self):
         return [{"batch_id": group["batch_id"], "entries": len(group["references"]),
@@ -2223,6 +2195,8 @@ class StreamedBoundaryArtifacts:
             "origin_reclaimed": group["origin_reclaimed"]} for group in self._produced_groups.values()]
 
     def produced_output_report(self):
+        if self._produced is None:
+            return None
         return {"schema": "prismaquant.boundary_produced_output.v2",
             "producer": None if self._produced is None else self._produced.producer,
             "declaration": None if self._produced is None else self._produced.binding,
@@ -2237,6 +2211,8 @@ class StreamedBoundaryArtifacts:
             return
         for group in self._produced_groups.values():
             if group.get("origin_ref") is None:
+                if failing and self._produced_plan['dispose_on_failure']:
+                    self._dispose_uncommitted_group(group)
                 if (self._local_output_spool is not None and
                         self._local_output_spool.holds(group['batch_id'])):
                     self._produced_retained_uncommitted.append({
@@ -2245,6 +2221,33 @@ class StreamedBoundaryArtifacts:
                 result = self._produced.abort_prewrite(batch_id=group["batch_id"])
                 if not result["ok"]:
                     self._produced_retained_uncommitted.append({"batch_id": group["batch_id"], **result})
+
+    def _dispose_uncommitted_group(self, group):
+        """Dispose only this failed write-only writer's fenced file roster."""
+        from .native_results import verify_result_artifact
+        from .staged_manifest import unlink_owned
+        batch, spool = group['batch_id'], self._local_output_spool
+        if spool is not None:
+            local = spool._groups[batch]
+            if local['future'] is None:
+                if any(os.path.lexists(path) for path in group['planned']):
+                    raise RuntimeError('unsubmitted canonical paths changed; retaining prewrite')
+                spool.discard_unsubmitted(batch)
+                return
+            elif not local['durable']:
+                return  # The failed publication retains every source.
+        if batch in self._produced._groups:
+            from .stage_a_produced_output import read_bound_document
+            rows = read_bound_document(self._produced._groups[batch])['entries']
+        else:
+            rows = [{'path': ref.path, 'bytes': ref.file_bytes, 'sha256': ref.sha256,
+                'file_identity': group['file_identities'][ref.path]}
+                for ref in group['references']]
+        for row in rows:
+            verify_result_artifact(row, max_bytes=1 << 32)
+        for row in rows:
+            unlink_owned(row['path'], row['file_identity'])
+        group['origin_reclaimed'] = True
 
     def release_produced_group(self, reference):
         key, group = self._produced_group_for(reference)
@@ -2320,6 +2323,7 @@ class StreamedBoundaryArtifacts:
         cleanup_error = None
         try:
             # All asynchronous owners finish before source retention changes.
+            self.retain_produced_reads(())
             self._join_produced_copies()
             if self._active_window is not None or self.telemetry["resident_tensor_bytes"]:
                 raise RuntimeError("exact boundary generation closed with a live window")
@@ -2563,9 +2567,8 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
                                 then=None, window_end=None):
     """Preserve original batch order while leasing exact tensors in windows.
 
-    A storage that stages its reads through PrismaBuild is asked, as soon as
-    a window is open, for the groups the NEXT window reads, so their movers
-    run under this window's compute (RobTand/prismaquant#989). ``then``
+    Once a window opens, the existing IO owner prepares the next window's
+    own groups from their immutable canonical publication. ``then``
     names the pass read after this one, as ``(boundary_index, incoming)``:
     its first window is asked for from this pass's last window. Staging
     only: the order, the reads and the tensors are unchanged.

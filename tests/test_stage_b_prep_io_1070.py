@@ -1,22 +1,23 @@
 """The Stage B preparation's declared reads and its write path (PQ #1070).
 
 ``tools/prepare_extended_joint_quanta.py`` and ``tools/regenerate_joint_quanta.py``
-run as one PrismaBuild action with a data manifest of what they read and a
-write-only produced-output template over the metadata root. These tests hold
-the PrismaBuild-free half:
+run as a native preparation phase with a declared read manifest and an
+immutable write-only output declaration over the metadata root. These tests
+exercise the generator's scientific and IO behavior:
 
 * the read manifest ``tools/stage_b_preparation_submission.py`` writes for a
   generator run names every file that run opens for reading (an audit hook
   records the opens, so a read the manifest misses is a failure, not a guess);
 * the manifest's pieces: the parent's head phase, one entry per
-  ``(path, offset)``, the safetensors header ranges, the v2 shape PrismaBuild
-  validates;
+  ``(path, offset)`` and the safetensors header ranges. The scientific v2
+  manifest format remains unqualified by the native staged reader;
 * the template's shape and ceiling;
 * ``publish_files`` without a publication writes exactly as the tools did
   before, and ``--produced-output`` is the only way to bind one.
 
-``test_stage_b_prep_produced_1070`` drives the same generator run under a
-real admitted owner and checks what PrismaBuild committed.
+``test_stage_b_prep_produced_1070`` drives the same generator through the actual
+application publication owner. Its offline launch/terminal seam is explicit;
+the separate native proof establishes actual selected execution authority.
 """
 from __future__ import annotations
 
@@ -76,8 +77,7 @@ def generator_args(tmp_path, campaign, receipt_path, metadata_root):
         "--executable-readsets", "--source-layers-prefix", PREFIX]
 
 
-def submission_args(tmp_path, campaign, receipt_path, metadata_root, out, *,
-                    tier="prismabuild-stage:test"):
+def submission_args(tmp_path, campaign, receipt_path, metadata_root, out):
     return ["regenerate",
             "--plan", str(campaign["plan_path"]), "--plan-sha256", campaign["plan_sha"],
             "--prepared", str(campaign["prepared_path"]),
@@ -88,7 +88,7 @@ def submission_args(tmp_path, campaign, receipt_path, metadata_root, out, *,
             "--partition", str(campaign["partition"]),
             "--adjoint-receipt", str(receipt_path),
             "--executable-readsets", "--source-layers-prefix", PREFIX,
-            "--metadata-root", str(metadata_root), "--tier", tier,
+            "--metadata-root", str(metadata_root),
             "--out", str(out), "--mount-prefix", str(tmp_path)]
 
 
@@ -218,10 +218,7 @@ def test_read_entries_keep_one_row_per_path_and_offset(tmp_path):
         io.preparation_read_entries(head=[], files=[empty])
 
 
-def test_the_read_manifest_is_one_phase_prismabuild_accepts(tmp_path):
-    from fleet_sdk import require_prismabuild_sdk
-    require_prismabuild_sdk()
-    import prismabuild.core as core
+def test_the_read_manifest_keeps_one_phase_without_widening_native_read_gates(tmp_path):
 
     rows = [{"path": f"/mnt/shared/fixture/{name}", "offset": 0, "bytes": size,
              "sha256": None} for name, size in (("a", 3), ("b", 5))]
@@ -230,7 +227,9 @@ def test_the_read_manifest_is_one_phase_prismabuild_accepts(tmp_path):
     assert manifest["read_plan"]["phases"] == [
         {"name": io.PREPARATION_READ_PHASE, "entry_indices": [0, 1],
          "bytes": 8, "cumulative_bytes": 8}]
-    core.validate_data_manifest(manifest)
+    from prismaquant.staged_launch import read_contract_document
+    with pytest.raises(ValueError, match="schema is unqualified"):
+        read_contract_document(jl.seal_manifest_bytes(manifest))
     assert len(jl.seal_manifest_bytes(manifest)) < io.DATA_MANIFEST_MAX_BYTES
     with pytest.raises(ValueError, match="outside /mnt/shared"):
         io.preparation_read_manifest(
@@ -259,24 +258,22 @@ def test_source_plan_header_reads_name_the_index_and_each_header(tmp_path):
 
 def test_the_template_is_write_only_with_a_zero_window(tmp_path):
     template = io.build_preparation_template(
-        metadata_root=tmp_path / "m", tier="prismabuild-stage:x",
+        metadata_root=tmp_path / "m",
         payload_max_bytes=io.preparation_payload_ceiling(3))
     assert template["write_only"] is True
     assert template["output_prefix"] == str(tmp_path / "m")
-    assert template["permitted_tiers"] == ["prismabuild-stage:x"]
-    assert template["working_demands"] == {
-        "prismabuild-stage:x": {"minimum_gib": 0, "window_gib": 0}}
-    assert template["slots"] == {io.PREPARATION_SLOT: {"class": "payload"}}
+    assert template["slot"] == io.PREPARATION_SLOT
+    assert template["spool"] is None
     maxima = template["durable_maxima"]
     assert maxima["payload_max_bytes"] == maxima["temp_max_bytes"] == (
         (3 * io.PREPARATION_FILES_PER_QUANTUM + io.PREPARATION_CONTROL_FILES)
         * io.DATA_MANIFEST_MAX_BYTES)
     assert maxima["checkpoint_max_bytes"] == 0
     other = io.build_preparation_template(
-        metadata_root=tmp_path / "n", tier="prismabuild-stage:x",
+        metadata_root=tmp_path / "n",
         payload_max_bytes=maxima["payload_max_bytes"])
-    assert template["template_id"].startswith(io.PREPARATION_TEMPLATE_PREFIX + "-")
-    assert other["template_id"] != template["template_id"]
+    assert template["template_id"] == io.PREPARATION_TEMPLATE_PREFIX
+    assert other["output_prefix"] != template["output_prefix"]
     assert io.preparation_payload_ceiling(3, indexes=4) == (
         maxima["payload_max_bytes"] + 3 * io.DATA_MANIFEST_MAX_BYTES)
     with pytest.raises(ValueError):
@@ -317,20 +314,20 @@ def test_publish_files_without_a_publication_writes_as_before(tmp_path):
 
 def test_only_the_flag_binds_a_publication(tmp_path):
     root = tmp_path / "m"
-    action = {"PRISMABUILD_ACTION_KEY": "a" * 64}
+    action = {"FLUX_JOB_ID": "123"}
     # Ambient executor context never authenticates native publication.
-    assert io.bind_preparation_publication(root, required=False, env=action) is None
-    with pytest.raises(io.PreparationPublicationRefused, match="unit4 native preparation publication authority"):
-        io.bind_preparation_publication(root, required=True, env={})
-    with pytest.raises(io.PreparationPublicationRefused, match="unit4 native preparation publication authority"):
-        io.bind_preparation_publication(None, required=True, env=action)
+    assert io.bind_preparation_publication(root, required=False) is None
+    with pytest.raises(io.PreparationPublicationRefused, match="native preparation declaration unavailable"):
+        io.bind_preparation_publication(root, required=True)
+    with pytest.raises(io.PreparationPublicationRefused, match="explicit metadata root required"):
+        io.bind_preparation_publication(None, required=True)
 
 
 def test_the_generator_refuses_the_flag_outside_an_action_before_writing(
         tmp_path, monkeypatch, capsys):
     import regenerate_joint_quanta as regen
 
-    monkeypatch.delenv("PRISMABUILD_ACTION_KEY", raising=False)
+    monkeypatch.delenv("FLUX_JOB_ID", raising=False)
     io.reset_preparation_publications_for_tests()
     metadata = tmp_path / "metadata-generation"
     # Unavailable inputs prove the owning boundary refuses before source
@@ -342,6 +339,6 @@ def test_the_generator_refuses_the_flag_outside_an_action_before_writing(
         if flag != '--derivation':
             argv += [flag + '-sha256', 'a' * 64]
     assert regen.main(argv + ['--metadata-root', str(metadata), '--produced-output']) == 3
-    assert 'unit4 native preparation publication authority' in capsys.readouterr().err
+    assert 'native preparation declaration unavailable' in capsys.readouterr().err
     assert not metadata.exists() or not any(
         path.is_file() for path in metadata.rglob("*"))

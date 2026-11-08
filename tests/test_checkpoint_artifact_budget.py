@@ -259,7 +259,8 @@ def test_output_descriptor_is_application_scope(tmp_path):
     assert descriptor["ceiling_bytes"] == owner.config["max_artifact_bytes"]
     assert descriptor["live_checkpoint_bytes"] == owner.telemetry["live_checkpoint_bytes"]
     assert descriptor["live_ordinary_bytes"] == owner.telemetry["live_artifact_bytes"]
-    assert "not a PrismaBuild" in descriptor["note"]
+    assert descriptor["note"] == (
+        "Application-level artifact accounting; filesystem capacity and fleet resource admission are independent.")
     assert owner.checkpoint_commitment(record["cotangent_sha256"]) is not None
 
 

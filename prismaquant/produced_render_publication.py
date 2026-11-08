@@ -1,9 +1,8 @@
-"""Render-specific binding and planning on the application publication lifecycle.
+"""Render planning on the shared native application publication lifecycle.
 
-This adapter does not enable produced-output writes in ProductionWeightCache.
-Its plans accept explicit reservation envelopes, not tensors or archive-size
-estimates. Writer and reader integration remain separate. admitted Flux owns execution; this owner binds
-admission, immutable prewrite accounting, publication and retirement.
+This adapter does not enable writes in ProductionWeightCache. It binds explicit
+archive ceilings and native launch identity; writer and serving qualification
+remain independent.
 """
 from __future__ import annotations
 

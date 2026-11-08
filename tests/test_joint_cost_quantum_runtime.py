@@ -1618,7 +1618,7 @@ def test_comparison_tool_on_a_synthetic_pair(tmp_path):
     tool = Path(__file__).resolve().parents[1] / "tools" / "compare_joint_layer_gate.py"
     verdict_path = tmp_path / "verdict.json"
     code = subprocess.run(
-        [sys.executable, str(tool), "--single-run", str(left),
+        [sys.executable, '-s', '-B', str(tool), "--single-run", str(left),
          "--quantum", str(right), "--layers", "13", "--json", str(verdict_path)],
         capture_output=True, text=True, check=False).returncode
     assert code == 0
@@ -1630,7 +1630,7 @@ def test_comparison_tool_on_a_synthetic_pair(tmp_path):
     tampered["model.layers.13.proj"] = _unit_state(0.75)
     wrong = _journal(tmp_path / "wrong", tampered, {"side": "quantum"})
     code = subprocess.run(
-        [sys.executable, str(tool), "--single-run", str(left),
+        [sys.executable, '-s', '-B', str(tool), "--single-run", str(left),
          "--quantum", str(wrong), "--layers", "13"],
         capture_output=True, text=True, check=False).returncode
     assert code == 1

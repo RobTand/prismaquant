@@ -147,11 +147,11 @@ def test_exclusive_temporary_collision_never_removes_foreign_file(tmp_path, monk
         if writer == 'document':
             publish_staged_json(target, {'known': 'input'})
         else:
-            from prismaquant.stage_a_produced_output import _file_identity
+            from prismaquant.stage_a_produced_output import produced_file_identity
             source = tmp_path / 'source'
             source.write_bytes(b'known')
             io_engine.publish_copy(source, target, length=5,
-                sha256=hashlib.sha256(b'known').hexdigest(), source_identity=_file_identity(source))
+                sha256=hashlib.sha256(b'known').hexdigest(), source_identity=produced_file_identity(source))
     assert temporary.read_bytes() == b'foreign-owner-bytes'
     assert not target.exists()
 

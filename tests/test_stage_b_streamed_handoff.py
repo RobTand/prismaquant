@@ -133,6 +133,13 @@ def _pin_generations(monkeypatch, value):
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=value))
 
 
+def await_written(stream, count):
+    with stream._cond:
+        assert stream._cond.wait_for(lambda: (
+            stream.telemetry['entries_before_finish'] >= count or stream._done), timeout=60)
+        assert stream.telemetry['entries_before_finish'] >= count
+
+
 # -- the bytes ------------------------------------------------------------------
 
 def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
@@ -164,10 +171,7 @@ def test_streamed_bytes_equal_the_all_final_bytes(tmp_path, monkeypatch):
             # file lands inside the write and the writer counts it just after,
             # so wait for the count: a file alone lets finish overtake it.
             want = _keys().index(key) + 1
-            deadline = time.monotonic() + 30
-            while (stream.telemetry["entries_before_finish"] < want
-                   and time.monotonic() < deadline):
-                time.sleep(0.01)
+            await_written(stream, want)
             # A writer that leaves finality order waits on a slot that is not
             # final yet: name the order it wrote in, not only the count (PQ #1263).
             assert stream.telemetry["entries_before_finish"] == want, (
@@ -239,9 +243,8 @@ def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
             for key in first:
                 scratch[key] = _plane(shape)[key]
                 stream.mark_final([key], [_plane(shape)[key]])
-            deadline = time.monotonic() + 30
-            while stream.telemetry["tee_hits"] < 1 and time.monotonic() < deadline:
-                time.sleep(0.01)
+            await_written(stream, 1)
+            assert stream.telemetry['tee_hits'] == 1
             for pair in (rest[i:i + 2] for i in range(0, len(rest), 2)):
                 for key in pair:
                     scratch[key] = _plane(shape)[key]
@@ -260,42 +263,22 @@ def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
     assert telemetry["tee_misses"] == telemetry["scratch_reads"]
 
 
-def test_a_handoff_generation_digest_line(monkeypatch, capsys):
-    """The all-final writer's file digests, printed for a before/after
-    comparison across trees (PQ #1251).
+def test_a_handoff_generation_digest_line(tmp_path, monkeypatch, capsys):
+    """Print the actual generation's digest manifest under this test's owned root.
 
-    The campaign's records, and so every handoff file, name the paths they
-    were written under, so the fixture runs under one fixed root, not under
-    ``tmp_path``: two trees' runs then write the same paths and their
-    digests compare. The root is under ``~/tmp``, never the system
-    temporary directory, which is ``/tmp`` when ``TMPDIR`` is unset
-    (PQ #1263). An exclusive lock serializes runs on one box, and each run
-    removes the root first and last, so a root left by a killed run is
-    removed by the next one.
+    Absolute paths are part of the digest. Byte equivalence is asserted by
+    the separate all-final/streamed comparison within one owned test root.
     """
-    import fcntl
-    import shutil
-
-    base = Path.home() / "tmp"
-    base.mkdir(parents=True, exist_ok=True)
-    root = base / "pq-1251-handoff-identity"
-    with open(base / "pq-1251-handoff-identity.lock", "a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        shutil.rmtree(root, ignore_errors=True)
-        root.mkdir()
-        try:
-            record, adjoint_slice = _producer(root)
-            _pin_generations(monkeypatch, 1251)
-            published = _emitter(root, record, adjoint_slice).emit(
-                grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
-                n_batches=N_BATCHES, kda_capture_kernel=None)
-            generation = Path(published["path"]).parent
-            document = json.loads(Path(published["path"]).read_bytes())
-            line = {"published": published, "files": _digest(generation),
-                    "entries": {entry["name"]: entry["sha256"]
-                                for entry in document["activation_entries"]}}
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
+    root = tmp_path / 'identity'; root.mkdir()
+    record, adjoint_slice = _producer(root)
+    _pin_generations(monkeypatch, 1251)
+    published = _emitter(root, record, adjoint_slice).emit(
+        grad_plane=_plane(), cotangent_owners=_owners(), n_probes=N_PROBES,
+        n_batches=N_BATCHES, kda_capture_kernel=None)
+    generation = Path(published['path']).parent
+    document = json.loads(Path(published['path']).read_bytes())
+    line = {'published': published, 'files': _digest(generation),
+            'entries': {entry['name']: entry['sha256'] for entry in document['activation_entries']}}
     with capsys.disabled():
         print("HANDOFF-IDENTITY " + json.dumps(line, sort_keys=True), flush=True)
 
@@ -405,7 +388,6 @@ def test_a_writer_failure_reaches_the_main_thread_and_leaves_no_record(tmp_path)
                             n_batches=N_BATCHES, kda_capture_kernel=None) as stream:
             for key in _keys():
                 stream.mark_final([key])
-                time.sleep(0.01)
             stream.finish(_owners())
     assert _records(record) == [] and _statuses(record) == ["failed"]
     assert "plane read failed" in stream.telemetry["error"]
@@ -429,7 +411,7 @@ def test_leaving_without_a_finish_cancels_the_writer(tmp_path):
 
 
 _KILLED_CHILD = r"""
-import json, sys, time
+import json, sys, signal
 from pathlib import Path
 root = Path(sys.argv[1])
 sys.path[:0] = [sys.argv[2], sys.argv[2] + "/tests", sys.argv[2] + "/tools"]
@@ -445,8 +427,10 @@ with emitter.stream(grad_plane=plane, n_probes=N_PROBES, n_batches=N_BATCHES,
         plane[key] = _plane()[key]
         stream.mark_final([key])
     from prismaquant.joint_quantum_handoff import handoff_root
+    with stream._cond:
+        assert stream._cond.wait_for(lambda: stream.telemetry['entries_before_finish'] == N_BATCHES + 1, timeout=60)
     print("MARKED " + str(handoff_root(record["output_space"]["root"])), flush=True)
-    time.sleep(3600)
+    signal.pause()
 """
 
 
@@ -458,7 +442,7 @@ def test_a_killed_producer_leaves_no_handoff_a_consumer_can_bind(tmp_path):
     so a producer killed before that leaves nothing to bind.
     """
     child = subprocess.Popen(
-        [sys.executable, "-c", _KILLED_CHILD, str(tmp_path), str(ROOT)],
+        [sys.executable, "-s", "-B", "-c", _KILLED_CHILD, str(tmp_path), str(ROOT)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env={**os.environ, "PYTHONPATH": os.pathsep.join(
             [str(ROOT), str(ROOT / "tests"), os.environ.get("PYTHONPATH", "")])})
@@ -466,13 +450,7 @@ def test_a_killed_producer_leaves_no_handoff_a_consumer_can_bind(tmp_path):
         line = child.stdout.readline().split()
         assert line and line[0] == "MARKED", child.stderr.read()
         record_root = Path(line[1])
-        deadline = time.monotonic() + 60
-        entries = []
-        while time.monotonic() < deadline:
-            entries = list(record_root.glob("*/entries/*.pt"))
-            if len(entries) == N_BATCHES + 1:
-                break
-            time.sleep(0.05)
+        entries = list(record_root.glob("*/entries/*.pt"))
         assert len(entries) == N_BATCHES + 1, entries
         child.send_signal(signal.SIGKILL)
         assert child.wait(timeout=60) == -signal.SIGKILL
@@ -590,8 +568,14 @@ def test_close_waits_for_a_read_in_flight(tmp_path, monkeypatch):
     reader.start()
     assert entered.wait(30)
     closer = threading.Thread(target=scratch.close)
+    waiting = threading.Event()
+    wait_for = scratch._readers.wait_for
+    def observe_wait(*args, **kwargs):
+        waiting.set()
+        return wait_for(*args, **kwargs)
+    monkeypatch.setattr(scratch._readers, 'wait_for', observe_wait)
     closer.start()
-    time.sleep(0.2)
+    assert waiting.wait(30)
     assert closer.is_alive(), "close did not wait for the read in flight"
     release.set()
     reader.join(30)
@@ -729,9 +713,8 @@ def test_the_handoff_is_written_while_the_final_passes_run(tmp_path, monkeypatch
             # The file lands inside the write and the writer counts it just
             # after. Wait for the count too, so the finish the quantum reaches
             # next cannot overtake it.
-            deadline = time.monotonic() + 60
-            while counted() < len(prefix) and time.monotonic() < deadline:
-                time.sleep(0.005)
+            for stream in streams:
+                await_written(stream, len(prefix))
             assert counted() >= len(prefix), (
                 "the writer did not count the stored slots while the passes ran")
 

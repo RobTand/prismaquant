@@ -1,39 +1,9 @@
-"""One executed band-serial handoff pair on the live fleet (PQ #1015).
+"""One native band-serial handoff pair using the existing tensor IO owners.
 
-Quantum ``L`` (the producer) writes its handoff through PrismaBuild's
-produced-output lifecycle, and quantum ``L - 1`` (the consumer) reads it as
-declared, staged inputs. The unit tests drive both halves on a private queue;
-this driver runs them as two real admitted actions, so the consumer reads the
-handoff from the stage tier that PrismaBuild filled, not from the pool.
-
-The campaign is the tiny one the unit tests use
-(``tests/test_quantum_executable_readset.py``: layers 3 and 2 of band 4,
-bound to a real Stage A receipt), written once under ``--root`` by
-``prepare``. Every call site below is the production one:
-
-* ``prepare`` (coordinator side, like the dispatcher): the producer's
-  handoff template from ``dispatch_joint_quanta.handoff_template_path``, and
-  a one-phase data manifest of the producer's checkpoint plane, so the
-  producer action has a residency map to bind its owner on.
-* ``producer`` (inside the producer action): reads its checkpoint plane
-  staged, binds ``bind_handoff_publication`` and emits through
-  ``HandoffEmitter``. Prints the published handoff.
-* ``derive`` (coordinator side): ``dispatch_joint_quanta.bind_consumer_handoff``,
-  which runs the consumer's handoff checks and writes the band-serial
-  readset the consumer row stages.
-* ``consumer`` (inside the consumer action): ``require_band_serial_readset``,
-  ``load_quantum_handoff`` and ``load_handoff_inputs`` under the strict tier
-  policy, then checks where every handoff byte was served from.
-
-What is synthetic: the consumer's sealed chain-mode readset. The tiny
-campaign's own readsets name ``/fixture`` paths that do not exist, so
-``prepare`` seals one whose ``head`` phase is a real 4 KiB file and whose
-checkpoint and chain phases name real Stage A entries. The band-serial
-derivation drops those phases, so the consumer stages ``head`` and
-``handoff-load`` only.
-
-``producer`` and ``consumer`` print one JSON object on their last line and
-exit nonzero unless every check in it holds.
+Prepare immutable application declarations and scientific readsets, emit exact
+handoff tensors in the producer, derive the consumer readset and verify its exact
+plane and owner states through the staged reader. Native admission and selected
+result authority remain independent of these scientific checks.
 """
 from __future__ import annotations
 
@@ -265,28 +235,25 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
         HANDOFF_ORIGIN_LIFETIME, HANDOFF_OWNER_STATES_NAME, HANDOFF_RECORD_BATCH_KIND,
         HANDOFF_RECORD_NAME,
         HandoffEmitter, bind_handoff_publication)
-    from prismaquant.prismabuild_progress import report as progress
-    from prismaquant.produced_output_spool import MAX_ENV, ROOT_ENV
-    from prismaquant.staged_lease import sdk_submodule
+    from prismaquant.stage_a_produced_output import read_bound_document
+    from prismaquant.native_results import execution_context
 
     pair, records = _load(root)
     producer = records["producer"]
     adjoint_slice = _slice(producer)
     checkpoint = adjoint_slice["checkpoint"]
     out: dict = {"role": "producer",
-                 "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                 "producer": execution_context(),
                  "host": os.uname().nodename}
     checks: dict = {}
     _bind_staged(data_manifest_sha256)
 
-    progress(PRODUCER_PHASE, 0, unit="entries")
     plane = {}
     for entry in checkpoint["activation_entries"]:
         probe, batch = _probe_batch(entry)
         tensor = read_exact_entry_tensors(
             [entry], expected_session=checkpoint_entry_session(checkpoint))[entry["name"]]
         plane[(probe, batch)] = tensor + (10.0 * probe + batch)
-    progress(PRODUCER_PHASE, len(plane), unit="entries")
     out["checkpoint_read"] = _serving([e["path"] for e in checkpoint["activation_entries"]])
     checks["checkpoint_plane_staged"] = all(
         tiers and set(tiers) <= {"stage", "ram"}
@@ -295,9 +262,10 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
         out["checkpoint_read"]["tier_bytes"] == out["checkpoint_read"]["read_bytes"])
 
     publication = bind_handoff_publication(boundary_storage=pair["storage"])
-    env = getattr(publication, "env", {}) or {}
-    out["spool"] = {"root": env.get(ROOT_ENV), "max_bytes": env.get(MAX_ENV)}
-    checks["spool_sealed"] = bool(env.get(ROOT_ENV))
+    if publication is None:
+        raise RuntimeError('live handoff requires a native produced declaration')
+    out['spool'] = publication.declaration['spool']
+    checks['write_only_declaration'] = publication.write_only
     n_probes, n_batches = pair["n_probes"], pair["n_batches"]
     owners = [[_Owner({"scale": float(p + b)}) for b in range(n_batches)]
               for p in range(n_probes)]
@@ -318,35 +286,32 @@ def producer_role(root: Path, data_manifest_sha256: str) -> int:
     out["published"] = published
 
     # The record group: its files, and its commit at the origin (PQ #1075).
-    po = sdk_submodule("produced_output")
     directory = Path(published["path"]).parent
     batch_id = publication.batch_id_for(
         kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=int(producer["layer"]),
         group_index=0)
     files = [directory / HANDOFF_OWNER_STATES_NAME, directory / HANDOFF_RECORD_NAME]
     planned = sorted(p for f in files for p in (str(f), str(f) + ".tmp"))
-    commitments = json.loads((Path(po.instance_dir(
-        publication.queue.root, publication.instance)) / "commitments.json"
-        ).read_text())["batches"]
-    entry = commitments.get(batch_id) or {}
     refs = published.get("origin_batches") or []
+    groups = [read_bound_document(ref) for ref in refs]
+    matches = [group for group in groups if group['batch_id'] == batch_id]
+    if len(matches) != 1:
+        raise AssertionError('handoff record has no unique immutable batch')
+    entry = matches[0]
     out["record_group"] = {
         "batch_id": batch_id,
         "commitment": entry,
         "file_bytes": {f.name: f.stat().st_size for f in files},
     }
     checks["record_committed_at_origin"] = (
-        entry.get("origin_only") is True
-        and entry.get("lifetime") == HANDOFF_ORIGIN_LIFETIME
-        and sorted(entry.get("paths") or []) == sorted(str(f) for f in files))
-    checks["record_prewrite_consumed"] = po._read_prewrite(
-        po._prewrites_dir(publication.queue.root, publication.instance)
-        / f"{batch_id}.prewrite.json") is None
-    checks["record_ref_last"] = bool(refs) and refs[-1]["batch_id"] == batch_id
+        entry['producer'] == publication.producer
+        and entry['session']['generation'] == published['generation']
+        and entry['lifetime'] == HANDOFF_ORIGIN_LIFETIME
+        and sorted(row['path'] for row in entry['entries']) == sorted(str(f) for f in files))
+    checks["record_ref_last"] = bool(groups) and groups[-1]['batch_id'] == batch_id
     checks["every_group_committed"] = all(
-        (commitments.get(ref["batch_id"]) or {}).get("origin_only") is True
-        and commitments[ref["batch_id"]].get("manifest_digest")
-        == ref["manifest_digest"] for ref in refs)
+        group['producer'] == publication.producer and group['lifetime'] == HANDOFF_ORIGIN_LIFETIME
+        for group in groups)
     checks["record_digest"] = (
         _sha(files[1].read_bytes()) == published["sha256"])
     checks["no_temporaries"] = not any(Path(p).exists() for p in planned
@@ -382,7 +347,7 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
         require_band_serial_readset,
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
-    from prismaquant.prismabuild_progress import report as progress
+    from prismaquant.native_results import execution_context
     from prismaquant.staged_tier_policy import TierPolicyRefused
 
     pair, records = _load(root)
@@ -390,7 +355,7 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
     adjoint_slice = _slice(consumer)
     checkpoint = adjoint_slice["checkpoint"]
     out: dict = {"role": "consumer",
-                 "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                 "producer": execution_context(),
                  "host": os.uname().nodename}
     checks: dict = {}
     _bind_staged(data_manifest_sha256)
@@ -403,11 +368,9 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
                                 data_manifest_sha256=data_manifest_sha256)
     checks["readset_is_the_derivation"] = True
 
-    progress("head", 0, unit="entries")
     head = _read_calibration_payload(Path(pair["head"]["path"]),
                                      expected_sha256=pair["head"]["sha256"])
     checks["head_read"] = _sha(head) == pair["head"]["sha256"]
-    progress(HANDOFF_LOAD_PHASE, 1, unit="entries")
 
     # Band-serial replaces the original checkpoint plane with the handoff.
     # Its bound entry must be refused without a canonical payload read.
@@ -428,7 +391,6 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
     plane, shared_adjoint, shared_pass = load_handoff_inputs(
         handoff_doc, checkpoint, n_probes=n_probes, n_batches=n_batches)
     rows = handoff_read_entries(handoff_doc, checkpoint)
-    progress(HANDOFF_LOAD_PHASE, 1 + len(rows), unit="entries")
     checks["plane_values"] = all(
         torch.equal(plane[(p, b)], torch.full((2, 4), 10.0 * p + b))
         for p in range(n_probes) for b in range(n_batches))

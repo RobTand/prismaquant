@@ -58,7 +58,7 @@ def test_a_microbatched_plan_seals_two_planes_of_its_batches_not_its_rows(tmp_pa
 def test_a_partial_last_batch_is_one_more_entry_at_the_full_bound(tmp_path):
     """Ten rows at four per batch are three entries: 4, 4 and 2 rows.
 
-    PrismaBuild reserves every entry of a group at the bound entry size
+    The declaration bounds every entry of a group at the bound entry size
     (``boundary_group_ceiling_bytes``), so the partial batch is priced as a
     full one.
     """
@@ -143,8 +143,8 @@ def _capture_bind_arguments(root: Path, monkeypatch, *, n_probes,
         seen.update(kwargs)
         raise _Bound
 
-    publication = SimpleNamespace(
-        instance={"owner_action_key": "0" * 64}, output_prefix=str(root))
+    from produced_native_fixtures import publication as make_publication
+    publication = make_publication(root / 'launch')
     with monkeypatch.context() as patch:
         patch.setattr(StreamedBoundaryArtifacts, "bind_produced_output",
                       recording)
@@ -164,29 +164,17 @@ def _bind_need(root: Path, monkeypatch, arguments: dict, *, n_probes,
     (``ProducedWindowRefused``).
     """
 
-    from prismaquant import produced_output_spool
     from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts
-    from prismaquant.stage_a_produced_output import boundary_group_ceiling_bytes
     from test_streamed_boundary_artifacts import _policy
-
-    spool = SimpleNamespace(max_bytes=int(sealed), root=root)
-    publication = SimpleNamespace(
-        write_only=False, output_prefix=str(root), contains=lambda path: True,
-        group_ceiling_bytes=lambda *, entries, max_entry_tensor_bytes: (
-            boundary_group_ceiling_bytes(
-                group_size=entries,
-                max_entry_tensor_bytes=max_entry_tensor_bytes)))
-    storage = StreamedBoundaryArtifacts(_policy(root / "replay"))
+    from produced_native_fixtures import publication as make_publication
+    publication = make_publication(root, group_size=arguments['group_size'],
+        tensor_bytes=arguments['max_entry_tensor_bytes'], spool_bytes=sealed)
+    monkeypatch.setattr(publication, 'finalize', lambda *a, **k: None)
+    storage = StreamedBoundaryArtifacts(_policy(Path(publication.output_prefix) / 'replay'))
     storage.bind({"fixture": "replay"}, n_probes=n_probes, published=True)
-    with monkeypatch.context() as patch:
-        patch.setattr(produced_output_spool.ProducedOutputSpool,
-                      "from_publication",
-                      staticmethod(lambda publication: spool))
-        try:
-            storage.bind_produced_output(publication, **arguments)
-            return storage._produced_plan["local_window_bytes"]
-        finally:
-            storage._produced_stop_stager()
+    with storage:
+        storage.bind_produced_output(publication, **arguments)
+        return storage._produced_plan['local_window_bytes']
 
 
 def test_the_dispatcher_and_the_capture_bind_agree_on_the_planes_it_writes(

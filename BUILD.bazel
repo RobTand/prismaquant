@@ -6978,7 +6978,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/cost_stage_checkpoint",
         ":prismaquant/digests",
-        "@pq_pip//torch",
     ],
 )
 
@@ -10872,7 +10871,7 @@ pq_py_library(
         "tools/band_serial_handoff_live_pair.py",
     ],
     deps = [
-        "//tests:test_quantum_executable_readset_lib_cycle",
+        "//tests:test_quantum_executable_readset_lib",
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
@@ -10988,6 +10987,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/campaign_data_manifests",
     ],
 )
 
@@ -13248,6 +13248,7 @@ pq_py_library(
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
         "@pq_pip//torch",
     ],
 )

@@ -59,13 +59,13 @@ class BoundaryMaterializationIncomplete(RuntimeError):
     pass
 
 
-def _fields(value, keys, label):
+def require_produced_fields(value, keys, label):
     if not isinstance(value, dict) or set(value) != set(keys):
         raise BoundaryProducedBindingError(f'{label}: exact fields required')
     return value
 
 
-def _name(value):
+def produced_identifier(value):
     if not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,256}', value) or value in ('.', '..'):
         raise BoundaryProducedBindingError('bounded bare identifier required')
     return value
@@ -77,21 +77,21 @@ def _limit(value, maximum, *, zero=False):
     return value
 
 
-def _decode(raw):
+def decode_produced_document(raw):
     def invalid(key):
         return BoundaryProducedBindingError(f'invalid produced JSON: {key}')
     return strict_json_loads(raw, duplicate=invalid, constant=invalid)
 
 
 def read_bound_document(binding, *, limit=MAX_DOCUMENT_BYTES):
-    _fields(binding, ('path', 'sha256', 'bytes'), 'document binding')
+    require_produced_fields(binding, ('path', 'sha256', 'bytes'), 'document binding')
     checked_path(binding['path']); digest(binding['sha256'])
     _limit(binding['bytes'], limit)
     raw, first = read_document(binding['path'], limit)
     if (len(raw) != binding['bytes'] or bytes_sha256hex(raw) != binding['sha256']
             or file_stat_signature(os.stat(binding['path'], follow_symlinks=False)) != first):
         raise BoundaryProducedBindingError('immutable document changed')
-    return _decode(raw)
+    return decode_produced_document(raw)
 
 
 def publish_document(filename, document, *, limit=MAX_DOCUMENT_BYTES):
@@ -119,13 +119,13 @@ def boundary_group_ceiling_bytes(*, group_size, max_entry_tensor_bytes,
 
 
 def validate_declaration(value):
-    _fields(value, _DECLARATION_KEYS, 'declaration')
+    require_produced_fields(value, _DECLARATION_KEYS, 'declaration')
     if value['schema'] != DECLARATION_SCHEMA or type(value['write_only']) is not bool:
         raise BoundaryProducedBindingError('unsupported produced declaration')
     for field in ('template_id', 'slot'):
-        _name(value[field])
+        produced_identifier(value[field])
     checked_path(value['output_prefix'])
-    _fields(value['durable_maxima'], ('payload_max_bytes', 'checkpoint_max_bytes', 'temp_max_bytes'), 'maxima')
+    require_produced_fields(value['durable_maxima'], ('payload_max_bytes', 'checkpoint_max_bytes', 'temp_max_bytes'), 'maxima')
     for name, maximum in value['durable_maxima'].items():
         _limit(maximum, MAX_PAYLOAD_BYTES, zero=name != 'payload_max_bytes')
     _limit(value['group_size'], MAX_GROUP_ENTRIES)
@@ -137,7 +137,7 @@ def validate_declaration(value):
     if not value['write_only'] and value['window_groups'] < 2:
         raise BoundaryProducedBindingError('readback needs at least two bounded groups')
     if value['spool'] is not None:
-        _fields(value['spool'], ('root', 'max_bytes'), 'spool')
+        require_produced_fields(value['spool'], ('root', 'max_bytes'), 'spool')
         checked_path(value['spool']['root'])
         _limit(value['spool']['max_bytes'], MAX_PAYLOAD_BYTES)
     inputs = value['inputs']
@@ -145,8 +145,8 @@ def validate_declaration(value):
         raise BoundaryProducedBindingError('finite distinct input roles required')
     total, paths = 0, set()
     for role, binding in inputs.items():
-        _name(role)
-        _fields(binding, ('path', 'sha256', 'bytes'), 'input')
+        produced_identifier(role)
+        require_produced_fields(binding, ('path', 'sha256', 'bytes'), 'input')
         checked_path(binding['path']); digest(binding['sha256'])
         total += _limit(binding['bytes'], 1 << 30)
         if binding['path'] in paths:
@@ -199,7 +199,7 @@ def current_declaration(*, producer=None):
 def declaration_launch_arguments(filename):
     """Bind validated immutable application intent to a native argv."""
     raw, _ = read_document(str(filename), MAX_DOCUMENT_BYTES)
-    validate_declaration(_decode(raw))
+    validate_declaration(decode_produced_document(raw))
     return [DECLARATION_FLAG, str(checked_path(str(filename))),
             DECLARATION_SHA_FLAG, bytes_sha256hex(raw)]
 
@@ -209,13 +209,13 @@ def add_declaration_arguments(parser):
     parser.add_argument(DECLARATION_SHA_FLAG)
 
 
-def _session(value):
-    _fields(value, ('generation', 'run_identity_sha256'), 'session')
-    _name(value['generation']); digest(value['run_identity_sha256'])
+def require_produced_session(value):
+    require_produced_fields(value, ('generation', 'run_identity_sha256'), 'session')
+    produced_identifier(value['generation']); digest(value['run_identity_sha256'])
     return value
 
 
-def _file_identity(filename):
+def produced_file_identity(filename):
     fd = open_regular(str(filename))
     try:
         return list(file_stat_signature(os.fstat(fd)))
@@ -224,11 +224,11 @@ def _file_identity(filename):
 
 
 def validate_descriptor(row, declaration):
-    _fields(row, _DESCRIPTOR_KEYS, 'descriptor')
+    require_produced_fields(row, _DESCRIPTOR_KEYS, 'descriptor')
     if (row['schema'] != DESCRIPTOR_SCHEMA or row['slot'] != declaration['slot']
             or row['artifact_class'] not in ('payload', 'checkpoint')):
         raise BoundaryProducedBindingError('foreign descriptor slot or class')
-    _name(row['producer_generation']); checked_path(row['path']); digest(row['sha256'])
+    produced_identifier(row['producer_generation']); checked_path(row['path']); digest(row['sha256'])
     _limit(row['bytes'], MAX_FILE_BYTES)
     if not Path(row['path']).is_relative_to(declaration['output_prefix']):
         raise BoundaryProducedBindingError('descriptor escapes declared output')
@@ -298,7 +298,7 @@ class BoundaryProducedPublication:
             return False
 
     def bind_session(self, session):
-        _session(session)
+        require_produced_session(session)
         if self.session is not None and self.session != session:
             raise BoundaryProducedBindingError('publication session changed')
         self.session = dict(session)
@@ -318,14 +318,14 @@ class BoundaryProducedPublication:
             _limit(number, MAX_ENTRIES, zero=True)
         if probe_index is not None:
             _limit(probe_index, MAX_ENTRIES, zero=True)
-        _name(kind)
+        produced_identifier(kind)
         coordinate = [kind, boundary_index, group_index, probe_index, self.producer['launch_sha256']]
         readable = f'b{boundary_index}' + ('' if probe_index is None else f'p{probe_index}')
         return f'stagea-{kind}-{readable}-g{group_index}-{self.generation}-{DIRECT_ASCII_STRICT.sha256(coordinate)[:12]}'
 
     def require_prewrite(self, *, batch_id, payload_ceiling_bytes, paths,
                          temp_ceiling_bytes=0, checkpoint_ceiling_bytes=0):
-        _name(batch_id)
+        produced_identifier(batch_id)
         ceilings = {'payload_max_bytes': payload_ceiling_bytes,
                     'checkpoint_max_bytes': checkpoint_ceiling_bytes, 'temp_max_bytes': temp_ceiling_bytes}
         for value in ceilings.values():
@@ -397,7 +397,7 @@ class BoundaryProducedPublication:
         row = {'schema': DESCRIPTOR_SCHEMA, 'slot': self.declaration['slot'],
             'artifact_class': artifact_class, 'path': reference.path,
             'bytes': reference.file_bytes, 'sha256': reference.sha256,
-            'producer_generation': producer_generation, 'file_identity': _file_identity(reference.path)}
+            'producer_generation': producer_generation, 'file_identity': produced_file_identity(reference.path)}
         return validate_descriptor(row, self.declaration)
 
     def manifest_digest_for(self, descriptors):
@@ -415,7 +415,7 @@ class BoundaryProducedPublication:
                 if (row['producer_generation'] != batch_id or row['path'] in paths
                         or row['path'] not in prewrite['paths'] or not self.contains(row['path'])):
                     raise BoundaryProducedPublicationFailed('descriptor roster differs from prewrite')
-                if _file_identity(row['path']) != row['file_identity']:
+                if produced_file_identity(row['path']) != row['file_identity']:
                     raise BoundaryProducedPublicationFailed('destination identity changed')
                 native_results.verify_result_artifact(row, max_bytes=MAX_FILE_BYTES)
                 paths.add(row['path']); classes[row['artifact_class']] += row['bytes']
@@ -426,7 +426,7 @@ class BoundaryProducedPublication:
             document = {'schema': BATCH_SCHEMA, 'batch_id': batch_id,
                 'producer': self.producer, 'declaration': self.binding, 'session': self.session,
                 'lifetime': lifetime, 'entries': descriptors}
-            bound = publish_document(self._directory / 'batches' / f'{_name(batch_id)}.json', document)
+            bound = publish_document(self._directory / 'batches' / f'{produced_identifier(batch_id)}.json', document)
             self._groups[batch_id] = bound
             return {'ok': True, 'ref': bound}
 
@@ -483,7 +483,7 @@ def read_produced_selection(selection, *, checkpoint_exit=None, verify_payloads=
                 native_results.read_selected_checkpoint(selection, payload_exit=checkpoint_exit))
     if set(selected.artifact_payloads) != {'produced_index'}:
         raise BoundaryProducedBindingError('selected result is not an exact produced index')
-    index = _fields(_decode(selected.artifact_payloads['produced_index']),
+    index = require_produced_fields(decode_produced_document(selected.artifact_payloads['produced_index']),
         ('schema', 'producer', 'declaration', 'session', 'checkpoint_exit', 'groups'), 'index')
     declaration = validate_declaration(read_bound_document(index['declaration']))
     _launch_binding(selected.publication['producer'], index['declaration'])
@@ -495,23 +495,23 @@ def read_produced_selection(selection, *, checkpoint_exit=None, verify_payloads=
         raise BoundaryProducedBindingError('native index producer/input/declaration differs')
     if checkpoint_exit is not None and declaration['checkpoint_exit'] != checkpoint_exit:
         raise BoundaryProducedBindingError('failed checkpoint not explicitly declared by launch')
-    _session(index['session'])
+    require_produced_session(index['session'])
     bindings = index['groups']
     if not isinstance(bindings, list):
         raise BoundaryProducedBindingError('finite group bindings required')
     _limit(len(bindings), declaration['max_groups'])
     metadata_bytes = 0
     for binding in bindings:
-        _fields(binding, ('path', 'sha256', 'bytes'), 'group binding')
+        require_produced_fields(binding, ('path', 'sha256', 'bytes'), 'group binding')
         checked_path(binding['path']); digest(binding['sha256'])
         metadata_bytes += _limit(binding['bytes'], MAX_DOCUMENT_BYTES)
         _limit(metadata_bytes, 64 << 20)
     groups, batches, paths, total, count = [], set(), set(), 0, 0
     # Validate the entire finite metadata roster before reading any payload.
     for binding in bindings:
-        group = _fields(read_bound_document(binding),
+        group = require_produced_fields(read_bound_document(binding),
             ('schema', 'batch_id', 'producer', 'declaration', 'session', 'lifetime', 'entries'), 'batch')
-        _name(group['batch_id'])
+        produced_identifier(group['batch_id'])
         if (group['schema'] != BATCH_SCHEMA or group['batch_id'] in batches
                 or group['producer'] != index['producer'] or group['declaration'] != index['declaration']
                 or group['session'] != index['session'] or group['lifetime'] not in ('retain', 'consumed')

@@ -1,7 +1,7 @@
 """Metadata shared by exact activation writers and finite recovery planning."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 EXACT_ACTIVATION_SCHEMA = 'prismaquant.exact_activation_entry.v1'
 
@@ -18,3 +18,4 @@ class ExactActivationReference:
     tensor_bytes: int
     file_bytes: int
     sha256: str
+    writer_file_identity: tuple[int, ...] | None = field(default=None, compare=False, repr=False)

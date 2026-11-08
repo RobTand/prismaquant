@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from test_produced_render_publication import _bind, render_owner, _isolated_launch_context
+from test_produced_render_publication import _bind, render_owner
 
 pytestmark = pytest.mark.own_process
 
@@ -36,26 +36,22 @@ def test_prewrite_plan_uses_existing_budget_and_abort(render_owner):
     publication = _bind(render_owner)
     plan = _plan(publication)
     first = publication.require_render_prewrite(plan)
-    directory = render_owner.po.instance_dir(
-        render_owner.queue.root, publication.instance) / "prewrites"
-    before = sorted((p.name, p.read_bytes()) for p in directory.glob("*.prewrite.json"))
-    assert len(before) == 1
+    before = dict(publication._prewrites[plan.batch_id])
     second = publication.require_render_prewrite(plan)
     assert first["ok"] and second["ok"]
     # Identical immutable records can succeed without a diagnostic duplicate
     # flag; observe the private fixture's reservation, not an invented API.
-    assert {k: first[k] for k in ("batch_id", "class_bytes", "paths")} == {
-        k: second[k] for k in ("batch_id", "class_bytes", "paths")}
-    assert sorted((p.name, p.read_bytes()) for p in directory.glob("*.prewrite.json")) == before
-    assert first["class_bytes"] == {"payload": 17, "checkpoint": 0, "temp": 17}
-    assert set(first["paths"]) == {plan.final_path, plan.temporary_path}
+    assert publication._prewrites[plan.batch_id] == before
+    assert before['ceilings'] == {'payload_max_bytes': 17, 'checkpoint_max_bytes': 0, 'temp_max_bytes': 17}
+    assert set(before['paths']) == {plan.final_path, plan.temporary_path}
     changed = _plan(publication, archive_max_bytes=19)
-    with pytest.raises(BoundaryProducedPrewriteRefused, match="prewrite-conflict"):
+    with pytest.raises(BoundaryProducedPrewriteRefused, match="changed or released prewrite"):
         publication.require_render_prewrite(changed)
-    assert publication.abort_prewrite(batch_id=plan.batch_id)["aborted"] is True
-    assert list(directory.glob("*.prewrite.json")) == []
-    assert publication.abort_prewrite(batch_id=plan.batch_id)["aborted"] is False
-    assert publication.require_render_prewrite(changed)["ok"] is True
+    assert publication.abort_prewrite(batch_id=plan.batch_id)['ok']
+    assert plan.batch_id in publication._released
+    # Released immutable batch identities cannot acquire a different ceiling.
+    with pytest.raises(BoundaryProducedPrewriteRefused):
+        publication.require_render_prewrite(changed)
     assert publication.abort_prewrite(batch_id=plan.batch_id)["ok"] is True
     assert list(render_owner.prefix.iterdir()) == []
 
@@ -73,10 +69,9 @@ def test_planning_is_pure_and_frozen(render_owner, monkeypatch):
     monkeypatch.setattr(Path, "mkdir", forbidden)
     plan = _plan(publication)
     assert plan.payload_ceiling_bytes == plan.temp_ceiling_bytes == 17
-    assert plan.owner_nonce == render_owner.env["PRISMABUILD_ACTION_NONCE"]
-    assert plan.owner_scope_id == render_owner.env["PRISMABUILD_ACTION_SCOPE"]
-    assert plan.owner_action_key == publication.instance["owner_action_key"]
-    assert plan.template_sha256 == publication.instance["template_sha256"]
+    assert plan.job_id == '123'
+    assert plan.launch_sha256 == 'a' * 64
+    assert plan.declaration_sha256 == render_owner.binding['sha256']
     assert plan.origin_root == str(render_owner.prefix)
     with pytest.raises(FrozenInstanceError):
         setattr(plan, "final_path", "elsewhere")
@@ -117,10 +112,10 @@ def test_unsafe_or_overlong_archive_leaves_refuse(render_owner, qname, fmt):
 
 @pytest.mark.parametrize("field,value", [
     ("qname", "other"), ("fmt", "FP8"),
-    ("owner_action_key", "foreign"), ("owner_nonce", "foreign"),
-    ("owner_scope_id", "foreign"), ("template_sha256", "0" * 64),
+    ("job_id", "foreign"), ("launch_sha256", "0" * 64),
+    ("declaration_sha256", "0" * 64),
     ("batch_id", "foreign"), ("origin_root", "/outside"),
-    ("attempt_component", "foreign"), ("relative_final_path", "../outside"),
+    ("launch_component", "foreign"), ("relative_final_path", "../outside"),
     ("final_path", "/outside"), ("temporary_path", "/outside.tmp"),
     ("payload_ceiling_bytes", 18), ("temp_ceiling_bytes", 18),
     ("producer_generation", "foreign"),
@@ -180,7 +175,7 @@ def test_present_payload_keeps_abort_accounting(render_owner):
     final.write_bytes(b"fixture")
     refused = publication.abort_prewrite(batch_id=plan.batch_id)
     assert refused["ok"] is False
-    assert refused["refusal"] == "abort-files-present-retain"
+    assert refused["refusal"] == "owned paths remain"
     assert final.read_bytes() == b"fixture"
     final.unlink()
-    assert publication.abort_prewrite(batch_id=plan.batch_id)["aborted"] is True
+    assert publication.abort_prewrite(batch_id=plan.batch_id)['ok']

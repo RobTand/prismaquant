@@ -16,7 +16,7 @@ import threading
 from . import io_engine
 from .staged_manifest import open_directory
 from .stage_a_produced_output import (MAX_GROUPS, MAX_GROUP_ENTRIES, MAX_PAYLOAD_BYTES,
-    _file_identity, _limit, _name)
+    produced_file_identity, _limit, produced_identifier)
 
 ARTIFACT_CLASSES = ('payload', 'checkpoint')
 ENTRY_HEADER_ENVELOPE_BYTES = 65536
@@ -72,7 +72,7 @@ class ProducedOutputSpool:
         if (not base.is_absolute() or not base.is_dir() or base.resolve() != base
                 or str(base).startswith('/mnt/shared')):
             raise ProducedOutputSpoolRefused('explicit provisioned host-local spool root required')
-        job_component = _name(publication.producer['job_id'].replace('ƒ', 'f', 1))
+        job_component = produced_identifier(publication.producer['job_id'].replace('ƒ', 'f', 1))
         namespace = base / job_component
         namespace.mkdir(mode=0o700, exist_ok=True)
         if namespace.is_symlink() or namespace.resolve() != namespace:
@@ -92,7 +92,7 @@ class ProducedOutputSpool:
         return None if config is None else cls(publication, **config)
 
     def reserve(self, batch_id, ceiling_bytes, *, wait=True):
-        _name(batch_id); _limit(ceiling_bytes, self.max_bytes)
+        produced_identifier(batch_id); _limit(ceiling_bytes, self.max_bytes)
         with self._cond:
             self._check_root()
             if batch_id in self._groups:
@@ -151,7 +151,7 @@ class ProducedOutputSpool:
                     or not self.publication.contains(canonical.path)
                     or canonical.path in self._local):
                 raise ProducedOutputSpoolRefused('foreign, duplicate or completed local entry')
-            identity = _file_identity(local_reference.path)
+            identity = produced_file_identity(local_reference.path)
             if (identity[2] != local_reference.file_bytes or
                     sum(row[1].file_bytes for row in group['references']) + canonical.file_bytes > group['ceiling_bytes']):
                 raise ProducedOutputSpoolRefused('writer exceeded local prewrite ceiling')
@@ -236,8 +236,19 @@ class ProducedOutputSpool:
         manifest = read_bound_document(group['binding'])
         for row in manifest['entries']:
             verify_result_artifact(row, max_bytes=MAX_PAYLOAD_BYTES)
+        self._discard_local(group)
+
+    def discard_unsubmitted(self, batch_id):
+        with self._cond:
+            group = self._groups[batch_id]
+            if group['future'] is not None or group['reading']:
+                raise ProducedOutputSpoolRefused('copy or reader still owns local files')
+            self._discard_local(group)
+
+    def _discard_local(self, group):
+        self._check_root()
         for local, _canonical, _artifact_class, identity in group['references']:
-            if _file_identity(local.path) != identity:
+            if produced_file_identity(local.path) != identity:
                 raise ProducedOutputSpoolRefused('local file changed before release')
         directory = group['directory']
         descriptor = open_directory(str(directory))

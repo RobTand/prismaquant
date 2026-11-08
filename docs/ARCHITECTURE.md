@@ -1,11 +1,8 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-08, Unit4B application publication lifecycle under review.
+As of: 2026-11-08, Unit4B joined lifecycle and scientific consumer migration under review.
 Source: `prismaquant/{stage_a_produced_output,produced_output_spool,stage_a_retirement,joint_forward_resume,io_engine}.py`,
 based on `a185df89c66db4085f59417e9bd491b0ba6f4bfe`.
-Metadata directory setup now opens each component through the existing
-descriptor-based nofollow directory owner before creating children. Both
-produced-directory and batches-directory symlinks refuse before foreign mutation.
 An immutable produced declaration is bound by actual native argv. Finite batch
 manifests carry the authenticated producer, session, complete descriptor roster,
 inline writer digests and exact file identities. Prewrite ceilings are application
@@ -20,7 +17,7 @@ actual terminal native evidence. Explicit launch-declared failed checkpoints
 use a separate reader that retains the failed verdict. Running, canceled,
 dependency-failed and unknown executions cannot authorize independent recovery.
 Recovery v2 uses a finite selected-publication chain and a launch-bound scientific
-state input; legacy PB capsules refuse. Batch metadata is bounded at 64 MiB per
+state input; legacy PB capsules refuse. Batch metadata is bounded at 16 MiB per
 index and recovery coordinate maps at 65536 entries before allocation.
 Retirement v2 joins every recorded native
 producer, successor/session and whole declared consumer binding scan, then seals
@@ -31,6 +28,17 @@ warm and consumer phases use native dependencies through `flux_jobs`.
 Checkpoint abandonment seals the planned file roster under the writer's recorded
 directory identity; disposal refuses unknown files and replacements. Native
 dependency proofs submit consumers before releasing producer completion events.
+Writer file identities are transient disposal fences and never serialized into
+scientific references. Active reader aliases hold local and canonical copies
+until their existing IO window closes. Read-ahead only stages the current owner's
+produced index; borrowed recovery inputs retain their existing reader authority.
+Publication metadata directories open through the existing descriptor-based
+nofollow owner before creation. Removed service queue/funding/stager telemetry
+has no replacement backend. Stage A progress remains local to its log and writer.
+The historical PB905 pacing experiment's execution entrypoints refuse; its
+offline packet checks and verified tensor-byte readers remain. Its lifecycle
+positive uses the actual native application spool. The opt-in CPU IO profile
+also uses that existing engine, with no simulated exporter or readiness sleeps.
 
 ```mermaid
 flowchart LR
@@ -34032,7 +34040,7 @@ layers' entries) reaches a quantum or its identity.
 carries the run header, one checkpoint record and the boundary entries of the
 layers that checkpoint serves: from the next lower stride boundary (or 0) up
 to `b-1`. `python3 -m prismaquant.joint_adjoint_band` builds one from a Stage A
-request and the sealed checkpoint directory, as a read-only CPU PB action, and
+request and the sealed checkpoint directory, in an admitted CPU phase, and
 refuses a checkpoint that does not seal its manifest. Its output equals the
 band that the completed receipt implies, field for field; the gate runs real
 fixture Stage A captures, uninterrupted and resumed from a recovery capsule.
@@ -34523,8 +34531,8 @@ checkpoint, so the file's existence implies the tail's. It carries the run
 header (`run_identity`, `stride`, `boundary_storage` with the session and any
 forward-recovery binding), the bind identity, the arithmetic stamp, every
 forward boundary entry record, the batch and layer counts, the artifact budget
-override, the tail checkpoint's digest and the PrismaBuild owner of the attempt
-(`producer`, or `null` outside PrismaBuild). It seals itself
+override, the tail checkpoint's digest and the active native launch context
+(`producer`, or `null` in offline scientific fixtures). It seals itself
 (`chain_state_sha256`) and is never rewritten. A fresh run refuses, before its
 forward pass, an output root that already holds a chain state or resume
 records. A run started before #1001 has no chain state and cannot resume its
@@ -34569,8 +34577,8 @@ and the resume adopts the chain state's stored run and bind identities.
   under the run's session, with the tail matching the chain state's digest,
   and no unsealed checkpoint directory sits at or above `b`;
 - `--resume-from-checkpoint`, when given, is `b`;
-- every PrismaBuild owner recorded for the run is contained
-  (`require_contained`, as forward recovery asks).
+- every recorded native producer's exact scope has stopped, with verified
+  cleanup (`require_contained`, as forward recovery asks).
 
 After the rebind, the forward-recovery capsule the relaunch binds must be the
 one the chain state records.
@@ -34611,12 +34619,12 @@ is recorded outside the header digest: in the receipt's top-level
 checkpoint lies below the switch. Slices and band-set headers are unchanged
 by it. The receipt's telemetry carries `chain_resume`.
 
-**Limits.** A relaunch under PrismaBuild is a new owner. Its dispatcher must
-declare the original's boundary entries, the checkpoint entries and the chain
-state as inputs, contain the original owner first, and give it an output
-prefix that holds the run's generation directory (`bind_produced_output`
-refuses an own-generation path outside it). The fixture tests do not exercise
-that dispatcher contract.
+**Native dispatch.** A relaunch has a new native launch. Its selected inputs
+authenticate the original boundary entries, checkpoint entries and chain state.
+The original producer's scope must stop with verified cleanup before reuse.
+The immutable declaration's output prefix must contain the reopened generation.
+Local scientific fixtures prove tensor and chain transitions; separate native
+proofs exercise selected-input authority, known-ID resume and scope containment.
 
 ### Stage A seed mode (#1016)
 
@@ -35008,7 +35016,15 @@ against 2, 4 and 8 quanta; on its CPU fixture the critical path fell from
 11.2 s to 3.7 s at 4 quanta, dominated by entry `fsync`, and every split's
 chain state equals the single owner's.
 
-### Stage A dispatch requires the paced spool (#1012)
+### Historical PB paced spool (#1012)
+
+The following records the retired PB design and its original measurements.
+Since the 2026-11-08 Unit4B migration, native launches bind the immutable
+application declaration through actual argv. That declaration carries the
+provisioned local spool root, finite byte bound and two-plane window. The
+existing IO engine owns copies and immutable publication. PB environment,
+funding, pacing and capacity-ledger settings below cannot authorize a native
+run. The current joined lifecycle is described at the start of this document.
 
 A bound `StreamedBoundaryArtifacts` owner writes its produced groups through
 PrismaBuild's local output spool (`prismaquant/produced_output_spool.py`)
@@ -35069,6 +35085,18 @@ the spec's 32 GiB bound; see "Same-box readback and write-behind export
 spec's bound.)
 
 ### Same-box readback and write-behind export (#1110)
+
+Current ownership, 2026-11-08: the application spool uses the existing IO engine
+and its completion futures. Durable publication verifies destination bytes and
+inline writer digests before release. Reader holds and aliases retain local
+copies; deferred canonical unlinks wait for release and the last possible read.
+Rematerialization uses the existing immutable batch and reader. No service
+stager, export queue, progress exemption or persistent capacity ledger remains.
+The two-plane prewrite bounds and exact tensor readers remain in force.
+
+The account below preserves the historical PB implementation, measurements and
+issue rationale. Its PB protocol names and limits are historical, superseded by
+the native lifecycle above; they are not current execution instructions.
 
 The reverse chain retires plane L+1 entry by entry while it writes plane L,
 and it reads each plane one layer after writing it. Before #1110 every read
@@ -35266,7 +35294,7 @@ the two allowances are equal.
 Stage A (`joint_cost_stage_a.run_adjoint_capture`) needs these facts from its
 head: the unit roster, whose digest names the campaign in the run identity;
 the unit and measured-cell counts its result records; and the unit count its
-PrismaBuild progress starts from. Until #1051 it re-derived them by walking
+local progress starts from. Until #1051 it re-derived them by walking
 the whole anchor catalog (`tessera_joint_aura.load_measured_anchor_input`) on
 every root. On R12 the walk held the GPU claim for about 78 minutes, judging
 by its `head-walk/` and `run/` directory timestamps. The prepare action had

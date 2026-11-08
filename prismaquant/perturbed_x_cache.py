@@ -1096,7 +1096,7 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
             release_activation_cache_file_pages(path, expected_stat=published_stat,
                                                 durable=durable)
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
-            str(inputs.dtype), nbytes, signature[2], digest.hexdigest())
+            str(inputs.dtype), nbytes, signature[2], digest.hexdigest(), signature)
     except BaseException:
         for candidate in (path, path.with_suffix(".pt.tmp")):
             if preallocate:

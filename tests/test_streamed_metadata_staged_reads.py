@@ -94,7 +94,9 @@ def _activate(tmp_path, monkeypatch, manifest, *, skip=(), corrupt=()):
         'read_contract_path': str(contract), 'read_contract_sha256': read_sha})
     for extent in resolver.manifest.extents:
         if extent.source_path in corrupt:
-            Path(extent.object_path).write_bytes(b'corrupt')
+            path = Path(extent.object_path)
+            path.chmod(0o600)
+            path.write_bytes(b'corrupt')
     activate_staged_tier_policy('ssd')
 
 
