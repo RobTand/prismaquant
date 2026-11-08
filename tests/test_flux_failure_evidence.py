@@ -78,6 +78,53 @@ def test_failed_collection_is_monotone_but_success_is_not(case):
     assert observed.status == 'unknown', observed
 
 
+@pytest.mark.parametrize('native,expected,finish,exception', [
+    (2, 'failed', 7 << 8, None), (4, 'canceled', 15, 'cancel'),
+    (2, 'dependency-failed', None, 'dependency')])
+@pytest.mark.parametrize('name', ['eventlog', 'status', 'R'])
+@pytest.mark.parametrize('fault', ['nonzero-empty', 'malformed'])
+def test_failed_recollection_preserves_original_native_bytes(case, native, expected, finish, exception, name, fault):
+    positive = case.collect_fixture(finish=finish, result=native, exception=exception,
+                                   allocated=expected != 'dependency-failed')
+    assert positive.status == expected and positive.query_error is None
+    saved = jobs.load_submission(case.record)
+    held = {key: (case.record / (key + '.json')).read_bytes() for key in ('eventlog', 'status', 'R')}
+    def queried(args, **kwargs):
+        if args[0] == 'getattr': return case.completed('123.5\n')
+        if args[1] == 'wait-event': return case.completed()
+        key = 'R' if args[1] == 'info' else args[1]
+        if key == name:
+            return case.completed('' if fault == 'nonzero-empty' else '{broken',
+                                  1 if fault == 'nonzero-empty' else 0, 'retained query diagnostic')
+        return case.completed(held[key].decode(), 125 if key == 'status' else 0)
+    with patch.object(jobs, '_flux_run', side_effect=queried):
+        result = jobs.collect_job(saved)
+    assert result.status == expected and result.payload_exit == positive.payload_exit
+    # No R is expected for an unallocated dependency failure. Its unsuccessful
+    # allocation query is retained as absence evidence, not a new query error.
+    assert result.query_error or (expected == 'dependency-failed' and name == 'R')
+    assert {key: (case.record / (key + '.json')).read_bytes() for key in held} == held
+    assert (case.record / (name + '.recollection.stderr')).read_text() == 'retained query diagnostic'
+    assert (case.record / (name + '.recollection.json')).read_text() == ('' if fault == 'nonzero-empty' else '{broken')
+
+
+@pytest.mark.parametrize('fault', ['nonzero-empty', 'malformed'])
+def test_failed_fresh_query_cannot_reuse_success(case, fault):
+    assert case.collect_fixture().status == 'succeeded'
+    saved = jobs.load_submission(case.record)
+    held = {key: (case.record / (key + '.json')).read_text() for key in ('eventlog', 'status', 'R')}
+    def queried(args, **kwargs):
+        if args[0] == 'getattr': return case.completed('123.5\n')
+        if args[1] == 'wait-event': return case.completed()
+        key = 'R' if args[1] == 'info' else args[1]
+        if key == 'status':
+            return case.completed('' if fault == 'nonzero-empty' else '{broken', 1 if fault == 'nonzero-empty' else 0)
+        return case.completed(held[key])
+    with patch.object(jobs, '_flux_run', side_effect=queried):
+        result = jobs.collect_job(saved)
+    assert result.status == 'unknown' and result.query_error
+
+
 def test_cancel_error_preserves_observed_failure(case):
     assert case.collect_fixture(finish=7 << 8, result=2, status_rc=7).status == 'failed'
     saved = jobs.load_submission(case.record)

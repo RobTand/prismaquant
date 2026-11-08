@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, retained failure evidence after independent review.
+Source: `prismaquant/flux_jobs.py`, based on `f7125cf36`.
+Recollection of a launch-bound failed/canceled/dependency-failed result retains
+its original eventlog/status/allocation bytes and diagnostics. Fresh native
+responses go to separate `*.recollection.*` diagnostic files, and still drive
+the current collection. Malformed or unsuccessful responses cannot overwrite
+the retained proof. Saved success is never reused when fresh queries fail.
+There is no result cache, query history service or new scheduling state.
+
 As of: 2026-11-08, bounded installed runtime metadata after independent review.
 Source: `prismaquant/native_results.py`, based on `bb3d8e345`.
 Only filesystem PathDistribution dist-info owners are supported. METADATA and

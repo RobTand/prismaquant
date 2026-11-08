@@ -527,17 +527,20 @@ def verify_current_job(*, job_id, record_dir, source):
     return saved, launch
 
 
-def _query(submission, name, args, errors, *, required=True, timeout=30):
+def _query(submission, name, args, errors, *, required=True, timeout=30, preserve=False):
     try:
         result = _flux_run(args, timeout=timeout)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         errors.append(f'{name}: {type(exc).__name__}')
         return None
     out = submission.record_dir
+    # A bound terminal failure keeps its original native proof. Reconnection
+    # still queries fresh facts, retaining its latest response separately.
+    retained = name + '.recollection' if preserve else name
     try:
-        (out / f'{name}.json').write_text(result.stdout)
-        (out / f'{name}.stderr').write_text(result.stderr)
-        (out / f'{name}.returncode').write_text(str(result.returncode) + '\n')
+        (out / f'{retained}.json').write_text(result.stdout)
+        (out / f'{retained}.stderr').write_text(result.stderr)
+        (out / f'{retained}.returncode').write_text(str(result.returncode) + '\n')
     except OSError as exc:
         errors.append(f'{name}: persistence {type(exc).__name__}')
     if required and result.returncode:
@@ -606,8 +609,10 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
         errors.append(f'identity: {type(exc).__name__}: {exc}')
     if identity_ok:
         if wait:
-            _query(submission, 'wait', ['job', 'wait-event', submission.job_id, 'clean'], errors, timeout=None)
-        raw = _query(submission, 'eventlog', ['job', 'eventlog', '--format=json', submission.job_id], errors)
+            _query(submission, 'wait', ['job', 'wait-event', submission.job_id, 'clean'], errors,
+                   timeout=None, preserve=previous is not None)
+        raw = _query(submission, 'eventlog', ['job', 'eventlog', '--format=json', submission.job_id], errors,
+                     preserve=previous is not None)
         if raw is not None:
             try:
                 events = [_native_document(line) for line in raw.stdout.splitlines()]
@@ -627,7 +632,8 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
             except (KeyError, ValueError, TypeError):
                 errors.append('eventlog: invalid payload waitstatus')
         allocated = 'alloc' in names
-        raw_r = _query(submission, 'R', ['job', 'info', submission.job_id, 'R'], errors, required=allocated)
+        raw_r = _query(submission, 'R', ['job', 'info', submission.job_id, 'R'], errors, required=allocated,
+                       preserve=previous is not None)
         if allocated and raw_r is not None:
             try:
                 allocation = _native_document(raw_r.stdout)
@@ -637,7 +643,8 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                 errors.append('R: invalid allocation JSON')
         if 'clean' in names:
             raw_status = _query(submission, 'status', ['job', 'status', '--json', '--exception-exit-code=125',
-                                                       submission.job_id], errors, required=False)
+                                                       submission.job_id], errors, required=False,
+                                preserve=previous is not None)
             try:
                 native = _native_document(raw_status.stdout) if raw_status is not None else None
                 if (not isinstance(native, dict) or type(native.get('id')) is not int or
