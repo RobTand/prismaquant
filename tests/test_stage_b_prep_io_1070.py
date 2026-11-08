@@ -28,6 +28,7 @@ import os
 import struct
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -131,8 +132,19 @@ sys.addaudithook(_audit)
 def _recorded_reads(call):
     global _RECORDING
     _RECORDING = []
+    real_open = os.open
+    def observed_open(path, flags, mode=0o777, *, dir_fd=None):
+        fd = real_open(path, flags, mode, dir_fd=dir_fd)
+        try:
+            if flags & os.O_ACCMODE in (os.O_RDONLY, os.O_RDWR):
+                _RECORDING.append(os.readlink(f'/proc/self/fd/{fd}'))
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
     try:
-        result = call()
+        with patch.object(os, 'open', observed_open):
+            result = call()
     finally:
         seen, _RECORDING = _RECORDING, None
     return result, seen

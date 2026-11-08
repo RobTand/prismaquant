@@ -61,6 +61,8 @@ def _deny_pool_opens(monkeypatch, root, *, names=(
         def opened(path, *args, **kwargs):
             if isinstance(path, (str, bytes, os.PathLike)):
                 value = os.fsdecode(os.fspath(path))
+                if not os.path.isabs(value) and kwargs.get('dir_fd') is not None:
+                    value = os.path.join(os.readlink(f"/proc/self/fd/{kwargs['dir_fd']}"), value)
                 if os.path.abspath(value) in paths:
                     raise AssertionError(f"undeclared pool metadata open: {value}")
             return original(path, *args, **kwargs)
@@ -69,6 +71,17 @@ def _deny_pool_opens(monkeypatch, root, *, names=(
     monkeypatch.setattr(builtins, "open", guard(builtins.open))
     monkeypatch.setattr(io, "open", guard(io.open))
     monkeypatch.setattr(os, "open", guard(os.open))
+
+
+def test_canonical_guard_observes_a_relative_open(checkpoint, monkeypatch):
+    root, _config, _index, _manifest = checkpoint
+    _deny_pool_opens(monkeypatch, root)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(AssertionError, match='undeclared pool metadata open'):
+            os.open('config.json', os.O_RDONLY, dir_fd=fd)
+    finally:
+        os.close(fd)
 
 
 def _activate(tmp_path, monkeypatch, manifest, *, skip=(), corrupt=()):

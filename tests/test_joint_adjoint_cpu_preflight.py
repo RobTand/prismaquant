@@ -15,6 +15,7 @@ from test_stage_a_head_skip import _calibration
 from test_streamed_metadata_staged_reads import _activate, _deny_pool_opens
 from test_streamed_metadata_staged_reads import _forget_state  # noqa: F401
 from prismaquant.staged_manifest import READ_ENV
+from prismaquant.residency_map import StagedReadRefused
 from test_stagea_readset_source_coverage import campaign  # noqa: F401
 
 pytestmark = pytest.mark.own_process
@@ -210,7 +211,7 @@ def test_preflight_reads_the_actual_independent_fisher_draw(
     plan, args, output = _case(tmp_path, monkeypatch, evaluation=True)
     if bad_own_digest:
         plan['joint_eval_draw']['calibration_input']['sha256'] = '0' * 64
-        with pytest.raises(TierPolicyRefused, match='readset-not-staged'):
+        with pytest.raises(StagedReadRefused, match='source digest differs from requested identity'):
             entry.main(args)
     else:
         assert entry.main(args) == 0

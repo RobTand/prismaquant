@@ -103,7 +103,12 @@ def test_head_extra_tensor_is_never_skipped(tmp_path, kind):
 
 def test_complete_unindexed_source_uses_the_loaders_real_header_keys(tmp_path, monkeypatch):
     config, root, manifest, _extras = _source(tmp_path, indexed=False)
-    _activate(tmp_path, monkeypatch, manifest)
+    # The scientific schedule repeats head slices inside a whole-shard row.
+    # A native read contract has one nonoverlapping full-shard extent; keep
+    # the original scientific schedule unchanged for the source auditor.
+    native = {'entries': [entry for number, entry in enumerate(manifest['entries'])
+                          if number == 0 or entry['path'] != manifest['entries'][0]['path']]}
+    _activate(tmp_path, monkeypatch, native)
     _deny_pool_opens(monkeypatch, tmp_path / 'source')
     report = stage_a.audit_stage_a_source_spans(config, manifest, source_model=root)
     assert report['uncovered_spans'] == 0
