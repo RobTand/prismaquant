@@ -15,7 +15,8 @@ one strict reader and field checks (``schemas.strict_json_loads`` and
 ``schemas.Contract``) rather than introducing second copies.
 Scientific task payload validation also lives here. The finite native roster
 in :mod:`prismaquant.quality_prefill_flux` uses that same scientific meaning.
-Execution-bearing manifest, observation and driver migration remains separate.
+Native observation and phase-result provenance is authenticated by that I/O
+owner. Pure envelope validation alone does not establish execution or coverage.
 
 Three rules the specification states and this module enforces mechanically:
 
@@ -54,10 +55,10 @@ from prismaquant.schemas import Contract, strict_json_loads
 MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v2"
 PRICE_TABLE_SCHEMA = "prismaquant.quality_prefill_experiment.price_table.v1"
 CANDIDATE_SCHEMA = "prismaquant.quality_prefill_experiment.candidate.v1"
-OBSERVATION_SCHEMA = "prismaquant.quality_prefill_experiment.observation.v1"
+OBSERVATION_SCHEMA = "prismaquant.quality_prefill_experiment.observation.v2"
 SCREEN_DECISION_SCHEMA = "prismaquant.quality_prefill_experiment.screen_decision.v1"
 TRANSFER_SEAL_SCHEMA = "prismaquant.quality_prefill_experiment.transfer_seal.v1"
-PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_experiment.phase_result.v1"
+PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_phase_result.v2"
 ASSIGNMENT_SCHEMA = "prismaquant.quality_prefill_experiment.assignment.v1"
 FRONTIER_REPORT_SCHEMA = "prismaquant.quality_prefill_experiment.frontier_report.v1"
 TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
@@ -1154,9 +1155,10 @@ _OBSERVATION_KEYS = frozenset(
         "measurement_status",
         "value",
         "artifacts",
-        "action_key",
+        "child_id",
+        "selection",
         "attempt",
-        "receipt_sha256",
+        "value_sha256",
         "validity",
         "unknown_reason",
     }
@@ -1204,7 +1206,7 @@ _PHASE_RESULT_KEYS = frozenset(
         "refusal_reasons",
     }
 )
-_CHILD_RECEIPT_KEYS = frozenset({"task_id", "action_key", "receipt_sha256"})
+_CHILD_RECEIPT_KEYS = frozenset({"task_id", "child_id", "selection", "value_sha256"})
 _ASSIGNMENT_KEYS = frozenset(
     {
         "schema",
@@ -1310,12 +1312,25 @@ def validate_task_measurement(value: object, *, payload: dict) -> dict:
     return body
 
 
+def _selected_child_fields(body: Mapping[str, object], *, where: str) -> None:
+    """Check finite provenance structure; this grants no execution authority."""
+    child = prefill_identifier(body['child_id'], where=where + '.child_id')
+    selection = body['selection']
+    if not isinstance(selection, dict) or len(canonical_json_bytes(selection)) > 16 << 20:
+        _fail(f'{where}.selection must be a finite native selection')
+    if (selection.get('schema') != 'prismaquant.flux_result_selection.v1' or
+            selection.get('producer_id') != child):
+        _fail(f'{where}.selection producer differs from child')
+    _sha256(body['value_sha256'], where=where + '.value_sha256')
+
+
 def validate_observation(value: object, *, where: str = "observation") -> dict[str, object]:
     body = _envelope(
         value, keys=_OBSERVATION_KEYS, schema=OBSERVATION_SCHEMA, where=where
     )
-    for field in ("observation_id", "candidate_id", "phase_id", "task_id"):
+    for field in ("observation_id", "candidate_id", "phase_id"):
         _string(body[field], where=f"{where}.{field}", pattern=_ID_RE)
+    prefill_identifier(body['task_id'], where=where + '.task_id')
     if body["phase_id"] not in PHASE_BY_NAME:
         _fail(f"{where}.phase_id is not a phase of the v1 DAG")
     _sha256(body["context_sha256"], where=f"{where}.context_sha256")
@@ -1336,9 +1351,8 @@ def validate_observation(value: object, *, where: str = "observation") -> dict[s
     artifacts = _sequence(body["artifacts"], where=f"{where}.artifacts", minimum=1)
     for index, raw in enumerate(artifacts):
         _artifact_reference(raw, where=f"{where}.artifacts[{index}]")
-    _string(body["action_key"], where=f"{where}.action_key", pattern=_TOKEN_RE)
+    _selected_child_fields(body, where=where)
     _integer(body["attempt"], where=f"{where}.attempt", minimum=1)
-    _sha256(body["receipt_sha256"], where=f"{where}.receipt_sha256")
     validity = _enum(body["validity"], where=f"{where}.validity", allowed=VALIDITY)
     reason = body["unknown_reason"]
     if type(reason) is not str:
@@ -1470,18 +1484,17 @@ def validate_phase_result(
             f"{where}.parent_phase_ids must be "
             f"{list(PHASE_BY_NAME[phase_id].dependencies)}"
         )
-    expected = _unique_ids(
-        _sequence(body["expected_task_ids"], where=f"{where}.expected_task_ids", minimum=1),
-        where=f"{where}.expected_task_ids",
-    )
+    expected = tuple(prefill_identifier(item, where=where + '.expected_task_ids')
+        for item in _sequence(body['expected_task_ids'], where=where + '.expected_task_ids', minimum=1))
+    if len(set(expected)) != len(expected) or len(expected) > MAX_PREFILL_TASKS:
+        _fail(f'{where}.expected_task_ids repeats or exceeds the finite limit')
     receipts = _sequence(body["child_receipts"], where=f"{where}.child_receipts")
     covered: list[str] = []
     for index, raw in enumerate(receipts):
         entry_where = f"{where}.child_receipts[{index}]"
         entry = _exact_mapping(raw, keys=_CHILD_RECEIPT_KEYS, where=entry_where)
-        covered.append(_string(entry["task_id"], where=f"{entry_where}.task_id", pattern=_ID_RE))
-        _string(entry["action_key"], where=f"{entry_where}.action_key", pattern=_TOKEN_RE)
-        _sha256(entry["receipt_sha256"], where=f"{entry_where}.receipt_sha256")
+        covered.append(prefill_identifier(entry['task_id'], where=entry_where + '.task_id'))
+        _selected_child_fields(entry, where=entry_where)
     if len(set(covered)) != len(covered):
         _fail(f"{where}.child_receipts contains a duplicate task_id")
     foreign = sorted(set(covered) - set(expected))
@@ -1716,12 +1729,15 @@ def transition(
                 "expected task set"
             )
         covered = [
-            _string(entry["task_id"], where="receipt.task_id", pattern=_ID_RE)
+            prefill_identifier(entry['task_id'], where='receipt.task_id')
             for entry in receipts
         ]
         if len(set(covered)) != len(covered):
             _fail(f"{current.phase}: duplicate child receipt task_id")
-        expected = set(_unique_ids(list(expected_task_ids), where="expected_task_ids"))
+        expected_rows = [prefill_identifier(item, where='expected_task_ids') for item in expected_task_ids]
+        if len(set(expected_rows)) != len(expected_rows):
+            _fail('expected_task_ids repeats a task')
+        expected = set(expected_rows)
         if set(covered) != expected:
             missing = sorted(expected - set(covered))
             foreign = sorted(set(covered) - expected)

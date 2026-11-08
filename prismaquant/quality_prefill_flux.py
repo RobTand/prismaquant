@@ -577,6 +577,87 @@ def collect_phase(manifest_binding: dict, *, phase: str, record_dir: Path, wait:
         children=children, task_results=task_results, errors=errors)
 
 
+def collect_phase_result(manifest_binding: dict, *, phase: str, record_dir: Path,
+                         wait: bool = True) -> tuple[dict, dict | None]:
+    """Seal scientific coverage from native facts and the independent frozen roster."""
+    manifest, _, roster = _read_phase(manifest_binding, phase)
+    collection = collect_phase(manifest_binding, phase=phase, record_dir=record_dir, wait=wait)
+    if collection['state'] not in {'complete', 'failed'}:
+        return collection, None
+    expected = [task['task_id'] for task in roster['tasks']]
+    by_task = {task['task_id']: task for task in roster['tasks']}
+    coverage = dict.fromkeys(scientific.COVERAGE_TYPES, 0)
+    receipts, covered = [], set()
+    for result in collection['task_results']:
+        task_id = result['task_id']
+        _check.require(task_id in by_task and task_id not in covered,
+                       'scientific collection has duplicate or foreign tasks')
+        covered.add(task_id)
+        value = scientific.validate_task_measurement(result['value'], payload=by_task[task_id]['payload'])
+        _check.require(scientific.canonical_sha256(value) == result['value_sha256'],
+                       'scientific value digest differs')
+        coverage[value['measurement_status']] += 1
+        receipts.append({key: result[key] for key in
+                         ('task_id', 'child_id', 'selection', 'value_sha256')})
+    if collection['state'] == 'complete':
+        _check.require(covered == set(expected) and not collection['errors'],
+                       'scientific complete requires independent exact task cover')
+    reasons = list(collection['errors'])
+    if collection['state'] == 'failed' and not reasons:
+        reasons = [f"child {child['child_id']}: {child['execution']['status']}"
+                   for child in collection['children'] if child['execution'] and
+                   child['execution']['status'] in {'failed', 'canceled', 'dependency-failed'}]
+        if not reasons:
+            reasons = ['declared ancestor has conclusive native failure']
+    result = scientific.seal_envelope('phase_result', dict(phase_id=phase,
+        plan_identity_sha256=manifest['identity_sha256'],
+        parent_phase_ids=manifest['execution']['phases'][phase]['dependencies'],
+        expected_task_ids=expected, child_receipts=receipts,
+        merged_output_sha256=scientific.canonical_sha256(collection['task_results']),
+        terminal_state=collection['state'], coverage=coverage, refusal_reasons=reasons))
+    return collection, result
+
+
+_OBSERVATION_METADATA = frozenset({'observation_id', 'candidate_id', 'context_sha256',
+    'inner_schema', 'attempt', 'validity', 'unknown_reason'})
+
+
+def observe_task(manifest_binding: dict, *, phase: str, record_dir: Path,
+                 task_id: str, metadata: dict) -> dict:
+    """Join explicit scientific labels to an authenticated selected measurement."""
+    labels = _check.exact_mapping(metadata, keys=_OBSERVATION_METADATA, where='observation metadata')
+    _check.require(type(labels['attempt']) is int and labels['attempt'] == 1,
+                   'native prefill has one explicit attempt and no retry')
+    _, _, roster = _read_phase(manifest_binding, phase)
+    tasks = [task for task in roster['tasks'] if task['task_id'] == task_id]
+    _check.require(len(tasks) == 1, 'observation task is outside frozen population')
+    collection = collect_phase(manifest_binding, phase=phase, record_dir=record_dir)
+    _check.require(collection['state'] == 'complete' and not collection['errors'],
+                   'observation requires complete authenticated native phase')
+    results = [row for row in collection['task_results'] if row['task_id'] == task_id]
+    _check.require(len(results) == 1, 'observation task lacks exactly one selected value')
+    result = results[0]
+    value = scientific.validate_task_measurement(result['value'], payload=tasks[0]['payload'])
+    _check.require(scientific.canonical_sha256(value) == result['value_sha256'],
+                   'observation value digest differs')
+    return scientific.seal_envelope('observation', dict(labels, phase_id=phase, task_id=task_id,
+        currency=tasks[0]['payload']['currency'],
+        **{key: value[key] for key in ('units', 'measurement_status', 'value')},
+        artifacts=[{key: artifact[key] for key in ('path', 'sha256')}
+                   for artifact in value['artifacts']],
+        **{key: result[key] for key in ('child_id', 'selection', 'value_sha256')}))
+
+
+def read_observation(value: object, *, manifest_binding: dict, record_dir: Path) -> dict:
+    """Reconstruct selected provenance; a supplied selection cannot authorize itself."""
+    observation = scientific.validate_observation(value)
+    expected = observe_task(manifest_binding, phase=observation['phase_id'], record_dir=record_dir,
+        task_id=observation['task_id'],
+        metadata={key: observation[key] for key in _OBSERVATION_METADATA})
+    _check.require(observation == expected, 'observation differs from authenticated selected measurement')
+    return expected
+
+
 def cancel_phase(manifest_binding: dict, *, phase: str, record_dir: Path) -> dict:
     """Cancel only authenticated acknowledged children; never parents or discovered work."""
     records = _phase_records(manifest_binding, phase, record_dir)

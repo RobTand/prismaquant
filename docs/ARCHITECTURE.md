@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native prefill scientific consumers, slice3c.
+Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py` and
+`experiments/tessera_quality_prefill.py`, based on `85ffade23`.
+The driver submits explicit frozen native phases and collects saved IDs.
+Expected tasks come from the manifest roster. Caller receipt files cannot
+authorize completion. Native selected measurements supply observation values
+and phase-result coverage; explicit scientific labels retain their declared
+meaning and do not imply numerical qualification. Structural seals alone
+grant no execution authority. Partial, unknown and failed outcomes stay
+separate. Saved state is a presentation record, not native success evidence.
+The PB prefill adapter and its decomposition/SDK/queue/group-only tests are
+retired. Existing scientific validators and finite native owners retain
+currency, measured-estimate, exact-cover, publication and failure gates.
+CPU and actual native proof of this consumer change is still pending.
+GPU prefill remains a separately approved Unit4E canary obligation.
+
 As of: 2026-11-08, native prefill sibling recovery boundary.
 Source: `prismaquant/quality_prefill_flux.py`, based on `6bc747549`.
 Common sealed manifests, structural rosters and phase submissions independently

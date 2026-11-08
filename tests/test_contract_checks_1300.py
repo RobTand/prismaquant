@@ -34,7 +34,6 @@ from prismaquant import (
     quality_prefill_contract,
     quality_prefill_coverage,
     quality_prefill_knee,
-    quality_prefill_pb_adapter,
     quality_prefill_screen,
     runtime_provenance,
     schemas,
@@ -72,7 +71,6 @@ BYTE_DOCUMENTS = tuple(text.encode("utf-8") for text in DOCUMENTS) + (b"\xff\xfe
 
 TEXT_LOADERS = {
     "quality_prefill_contract": lambda text: quality_prefill_contract.decode_strict_json(text, where="manifest"),
-    "quality_prefill_pb_adapter": lambda text: quality_prefill_pb_adapter.load_strict_json(text, where="adapter"),
     "runtime_provenance": lambda text: runtime_provenance._strict_json(text, "/p/m.json", "manifest"),
     "tessera_campaign": campaign_table.parse_family_restriction,
 }
@@ -80,7 +78,6 @@ TEXT_LOADERS = {
 BYTE_LOADERS = {
     "joint_cost_read_schedule": joint_cost_read_schedule._decode_unique,
     "prismasnap_validation": lambda data: prismasnap_validation._json_from_bytes(data, where="evidence"),
-    "quality_prefill_pb_adapter": lambda data: quality_prefill_pb_adapter.load_strict_json(data, where="adapter"),
     "runtime_provenance": lambda data: runtime_provenance._strict_json(data, "/p/m.json", "manifest"),
 }
 
@@ -140,17 +137,11 @@ _ALL_SIX = {name: name for name in (
     "_fail", "_exact_mapping", "_string", "_integer", "_sha256", "_absolute_posix_path")}
 
 # module -> (module, its exception, {old helper: the name the module binds it to}).
-# The PB adapter moved only these two; its own _integer and _sha256 differ.
 CONTRACT_MODULES = {
     "quality_prefill_contract": (
         quality_prefill_contract,
         quality_prefill_contract.QualityPrefillContractError,
         _ALL_SIX,
-    ),
-    "quality_prefill_pb_adapter": (
-        quality_prefill_pb_adapter,
-        quality_prefill_pb_adapter.QualityPrefillAdapterError,
-        {"_fail": "_fail", "_exact_mapping": "_exact_mapping"},
     ),
 }
 

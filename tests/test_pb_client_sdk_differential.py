@@ -3,7 +3,7 @@
 Decoupling step 2 moves five modules off PrismaBuild internals and onto
 ``prismabuild.client`` (PB #1254): ``staged_lease``,
 ``stage_a_produced_output``, ``glm_capture_compatibility``,
-``residency_map`` and ``quality_prefill_pb_adapter``. Each test here runs the
+``residency_map``. Each test here runs the
 OLD path and the NEW path on the same corpus and requires the same decision
 and the same bytes.
 
@@ -626,109 +626,3 @@ def test_residency_map_adoption_decides_like_the_restated_rules(client, tmp_path
             assert old[0] == "_OldRefused", (label, old)
             assert new[0] == ResidencyMapRefused.__name__, (label, old, new)
     assert accepted == {label for label in corpus if label.startswith("valid")}
-
-
-# ---------------------------------------------------------------------------
-# quality_prefill_pb_adapter: grammars, identity digest, capability probe
-# ---------------------------------------------------------------------------
-
-#: The patterns the adapter restated at c36c02e1e76.
-_OLD_PB_ID_RE = re.compile(r"[a-z0-9][a-z0-9._/-]{0,255}\Z")
-_OLD_PB_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-
-_TEXTS = (
-    "a", "0", "abc.def/ghi-jkl_mno", "A", "_x", "x" * 256, "x" * 257, "a/", "-a",
-    ".a", "a b", "a\n", "é", "PATH", "PRISMABUILD_QUEUE_ROOT", "9LIVES", "x-y",
-    "", "a" * 300, "gpu", "mem_gb", "a..b", "a//b", "ab\u0000",
-)
-
-
-def test_adapter_grammars_are_pbs(client):
-    from prismaquant import quality_prefill_pb_adapter as adapter
-
-    assert client.ID_PATTERN.pattern == _OLD_PB_ID_RE.pattern
-    assert client.ENV_NAME_PATTERN.pattern == _OLD_PB_ENV_RE.pattern
-    for text in _TEXTS:
-        old = _outcome(lambda: adapter._text(text, where="w", pattern=_OLD_PB_ID_RE))
-        new = _outcome(lambda: adapter._identifier(text, where="w"))
-        assert new == old, (text, old, new)
-        old_env = _OLD_PB_ENV_RE.fullmatch(text) is not None
-        assert (client.ENV_NAME_PATTERN.fullmatch(text) is not None) == old_env, text
-
-
-_DOCUMENTS = (
-    {}, [], "text", 0, -1, 1.5, 1e300, True, None,
-    {"b": 1, "a": [1, 2.0, "é", None, True]},
-    {"nested": {"z": {"y": [{"x": "\u2603"}]}}, "emoji": "\U0001f600"},
-    {"quote": "\"\\/\b\f\n\r\t", "ctl": "\u0001"},
-    {"big": 2 ** 70, "neg": -(2 ** 70), "tiny": 5e-324},
-    [{"k": v} for v in range(5)],
-)
-
-
-def test_adapter_identity_digest_is_the_old_bytes(client):
-    from prismaquant import quality_prefill_pb_adapter as adapter
-    from prismaquant.digests import canonical_json_sha256
-
-    for document in _DOCUMENTS:
-        old = canonical_json_sha256(document, where="quality-prefill document")
-        assert adapter.canonical_sha256(document) == old, document
-    for bad in (float("nan"), {"x": float("inf")}, {1, 2}, object()):
-        old = _outcome(lambda: adapter._fail("document is not canonical JSON data: x"))
-        new = _outcome(lambda: adapter.canonical_sha256(bad))
-        assert new[0] == old[0], (bad, old, new)
-
-
-def _runtime_tree(root: Path, *, old_halves: bool, client_tags):
-    """A PB runtime tree: the files the old probe looked for, a client, both."""
-
-    if old_halves:
-        (root / "src/prismabuild").mkdir(parents=True, exist_ok=True)
-        (root / "src/prismabuild/decomposition.py").write_text("")
-        (root / "tools/fleet").mkdir(parents=True, exist_ok=True)
-        (root / "tools/fleet/pbcampaign.py").write_text("def decompose(args):\n    pass\n")
-    if client_tags is not None:
-        from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
-        package = root / "src/prismabuild"
-        package.mkdir(parents=True, exist_ok=True)
-        (package / "__init__.py").write_text("")
-        (package / "client.py").write_text(textwrap.dedent(f"""\
-            SDK_VERSION = {PB_CLIENT_SDK_VERSION}
-            CAPABILITIES = frozenset({sorted(client_tags)!r})
-        """))
-    return root
-
-
-def _old_decomposition_supported(root: Path) -> bool:
-    """``decomposition_support(root)["supported"]`` at c36c02e1e76."""
-
-    module = (root / "src/prismabuild/decomposition.py").is_file()
-    tool = root / "tools/fleet/pbcampaign.py"
-    entry = tool.is_file() and "def decompose(" in tool.read_text(
-        encoding="utf-8", errors="replace")
-    return bool(module and entry)
-
-
-def test_decomposition_probe_agrees_on_every_tree_that_carries_the_client(tmp_path):
-    from prismaquant import quality_prefill_pb_adapter as adapter
-
-    trees = {
-        "both": _runtime_tree(tmp_path / "both", old_halves=True,
-                              client_tags={"reader-lease-v1", "progress-v1",
-                                           "decomposition-v1"}),
-        "neither": _runtime_tree(tmp_path / "neither", old_halves=False,
-                                 client_tags={"reader-lease-v1", "progress-v1"}),
-        "empty": tmp_path / "empty",
-    }
-    for label, root in trees.items():
-        root.mkdir(parents=True, exist_ok=True)
-        new = adapter.decomposition_support(root)
-        assert new["supported"] == _old_decomposition_supported(root), (label, new)
-    # The one tree the two probes read differently, recorded rather than
-    # hidden: the files are there but the runtime publishes no client. The
-    # capability is PB's to advertise, so the new probe says unsupported.
-    transitional = _runtime_tree(tmp_path / "transitional", old_halves=True,
-                                 client_tags=None)
-    assert _old_decomposition_supported(transitional) is True
-    answer = adapter.decomposition_support(transitional)
-    assert answer["supported"] is False and answer["sdk_error"]

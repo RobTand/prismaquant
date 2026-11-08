@@ -526,9 +526,10 @@ def test_submit_collect_and_solve_refuse_an_unfrozen_manifest(tmp_path):
     path = tmp_path / "draft.json"
     path.write_text(json.dumps(draft_manifest()), encoding="utf-8")
     for argv in (
-        ("submit", "--manifest", str(path), "--phase", PHASE_DAG[0].phase),
+        ("submit", "--manifest", str(path), "--phase", PHASE_DAG[0].phase,
+         "--record-dir", str(tmp_path / 'records')),
         ("collect", "--manifest", str(path), "--phase", PHASE_DAG[0].phase,
-         "--receipts", str(path)),
+         "--record-dir", str(tmp_path / 'records')),
         ("solve", "--manifest", str(path), "--price-table", str(path)),
     ):
         result = _run(*argv)
@@ -554,21 +555,24 @@ def _frozen_with_roster(tmp_path, digest: str | None = None):
     return frozen, phase
 
 
-def test_the_submit_seam_is_unimplemented_and_says_so(tmp_path):
+def test_submit_refuses_a_malformed_frozen_roster_before_native_submission(tmp_path):
     frozen, phase = _frozen_with_roster(tmp_path)
-    result = _run("submit", "--manifest", str(frozen), "--phase", phase)
-    assert result.returncode == 3
-    assert "separate work package" in result.stderr
+    result = _run("submit", "--manifest", str(frozen), "--phase", phase,
+                  '--record-dir', str(tmp_path / 'records'))
+    assert result.returncode == 2
+    assert 'missing' in result.stderr
+    assert not (tmp_path / 'records').exists()
 
 
 def test_submit_refuses_a_roster_whose_bytes_do_not_match_its_reference(tmp_path):
     """A path string is not an identity: the declared digest is checked."""
 
     frozen, phase = _frozen_with_roster(tmp_path, digest=_A)
-    result = _run("submit", "--manifest", str(frozen), "--phase", phase)
+    result = _run("submit", "--manifest", str(frozen), "--phase", phase,
+                  '--record-dir', str(tmp_path / 'records'))
     assert result.returncode == 2
     assert "REFUSED" in result.stderr
-    assert "sha256" in result.stderr
+    assert "digest" in result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -605,9 +609,10 @@ def envelope_body(kind: str) -> dict:
             "measurement_status": "measured",
             "value": 0.25,
             "artifacts": [_ref("obs-1")],
-            "action_key": "f" * 64,
+            "child_id": "child-1",
+            "selection": {'schema': 'prismaquant.flux_result_selection.v1', 'producer_id': 'child-1'},
             "attempt": 1,
-            "receipt_sha256": _B,
+            "value_sha256": _B,
             "validity": "valid",
             "unknown_reason": "",
         }
@@ -652,7 +657,8 @@ def envelope_body(kind: str) -> dict:
             "parent_phase_ids": list(PHASE_DAG[0].dependencies),
             "expected_task_ids": ["task-1"],
             "child_receipts": [
-                {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
+                {"task_id": "task-1", "child_id": "child-1", "value_sha256": _B,
+                 "selection": {'schema': 'prismaquant.flux_result_selection.v1', 'producer_id': 'child-1'}}
             ],
             "merged_output_sha256": _C,
             "terminal_state": "complete",
@@ -782,7 +788,7 @@ def test_a_point_is_never_both_proposed_and_served():
         seal_envelope("frontier_report", body)
 
 
-def test_collect_walks_the_legal_chain_and_publishes_the_advanced_state(tmp_path):
+def test_collect_walks_the_legal_chain_and_publishes_the_advanced_state(tmp_path, monkeypatch, capsys):
     """A submitted phase reaches 'complete' only via running -> collecting."""
 
     frozen = tmp_path / "frozen.json"
@@ -798,29 +804,29 @@ def test_collect_walks_the_legal_chain_and_publishes_the_advanced_state(tmp_path
     states[phase] = {"state": "submitted", "attempt": 1, "reason": ""}
     state_in.write_text(json.dumps(states), encoding="utf-8")
 
-    receipts = tmp_path / "receipts.json"
-    receipts.write_text(
-        json.dumps(
-            {
-                "task_ids": ["task-1"],
-                "receipts": [
-                    {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    from experiments import tessera_quality_prefill as cli
+    result_body = seal_envelope('phase_result', envelope_body('phase_result'))
+    # This is the state-projection seam. Actual driver/child authority is proved
+    # separately by the admitted native lifecycle, never by this fixture.
+    monkeypatch.setattr(cli.quality_prefill_flux, 'collect_phase_result',
+        lambda *args, **kwargs: ({'state': 'complete'}, result_body))
+    traversed = []
+    def observed(current, target, **kwargs):
+        traversed.append((current.state, target))
+        return transition(current, target, **kwargs)
+    monkeypatch.setattr(cli, 'transition', observed)
     state_out = tmp_path / "state-out.json"
-    result = _run(
+    result = cli.main([
         "collect",
         "--manifest", str(frozen),
         "--phase", phase,
         "--state", str(state_in),
-        "--receipts", str(receipts),
+        "--record-dir", str(tmp_path / 'records'),
         "--state-out", str(state_out),
-    )
-    assert result.returncode == 0, result.stderr
+    ])
+    assert result == 0, capsys.readouterr().err
     assert json.loads(state_out.read_text())[phase]["state"] == "complete"
+    assert traversed[-3:] == [('submitted', 'running'), ('running', 'collecting'), ('collecting', 'complete')]
 
 
 def test_collect_refuses_a_phase_that_was_never_submitted(tmp_path):
@@ -828,26 +834,15 @@ def test_collect_refuses_a_phase_that_was_never_submitted(tmp_path):
     frozen.write_text(
         json.dumps(freeze_manifest(resolved_manifest())), encoding="utf-8"
     )
-    receipts = tmp_path / "receipts.json"
-    receipts.write_text(
-        json.dumps(
-            {
-                "task_ids": ["task-1"],
-                "receipts": [
-                    {"task_id": "task-1", "action_key": "f" * 64, "receipt_sha256": _B}
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
     result = _run(
         "collect",
         "--manifest", str(frozen),
         "--phase", PHASE_DAG[0].phase,
-        "--receipts", str(receipts),
+        "--record-dir", str(tmp_path / 'never-submitted'),
     )
     assert result.returncode == 2
-    assert "not a legal transition" in result.stderr
+    assert "REFUSED" in result.stderr
+    assert not (tmp_path / 'never-submitted').exists()
 
 
 def test_a_state_file_may_not_carry_an_unknown_phase_state(tmp_path):
