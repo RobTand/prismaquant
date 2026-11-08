@@ -203,6 +203,7 @@ def write_checkpoint_cotangent_entry(
         identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
         directory_identity=(None if writer_directories is None else
                             writer_directories[str(checkpoint_dir / 'entries')]),
+        writer_identities=writer_identities,
     )
     if writer_identities is not None:
         writer_identities[reference.path] = reference.writer_file_identity
@@ -513,7 +514,9 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
         handle = (temporary.open('wb') if directory_fd is None else
                   os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                     0o600, dir_fd=directory_fd), 'wb'))
-        with handle:
+        from .file_identity import capture_writer_identity
+        with handle, capture_writer_identity(handle, (temporary, path), writer_identities,
+                                             directory_fd=directory_fd):
             created = os.fstat(handle.fileno())
             owned_temporary = (created.st_dev, created.st_ino)
             body(sink.sink(handle))
@@ -542,17 +545,20 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
                     writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
             finally:
                 os.close(fsync_directory)
-    except BaseException:
-        if directory_fd is None:
-            temporary.unlink(missing_ok=True)
-        elif owned_temporary is not None:
-            # A replaced pathname cannot redirect this attempt's cleanup.
-            try:
-                current = os.stat(temporary.name, dir_fd=directory_fd, follow_symlinks=False)
-                if (current.st_dev, current.st_ino) == owned_temporary:
-                    os.unlink(temporary.name, dir_fd=directory_fd)
-            except FileNotFoundError:
-                pass
+    except BaseException as error:
+        try:
+            if directory_fd is None:
+                temporary.unlink(missing_ok=True)
+            elif owned_temporary is not None:
+                # A replaced pathname cannot redirect this attempt's cleanup.
+                try:
+                    current = os.stat(temporary.name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == owned_temporary:
+                        os.unlink(temporary.name, dir_fd=directory_fd)
+                except FileNotFoundError:
+                    pass
+        except BaseException as cleanup:
+            error.add_note('checkpoint temporary cleanup also failed: ' + repr(cleanup))
         raise
     finally:
         if directory_fd is not None:
@@ -1085,8 +1091,11 @@ def write_adjoint_checkpoint(
             for key in sorted(cotangents):
                 attempt.reference_activation(key[0], key[1], cotangents[key])
             return attempt.seal()
-        except BaseException:
-            attempt.abandon()
+        except BaseException as error:
+            try:
+                attempt.abandon()
+            except BaseException as cleanup:
+                error.add_note('checkpoint abandonment also refused: ' + repr(cleanup))
             raise
     if owner is None:
         checkpoint_dir.mkdir(parents=True, exist_ok=False)
@@ -1167,8 +1176,11 @@ def write_adjoint_checkpoint(
                         # Release before the window closes/reuses its scratch.
                         tensor = None
         return attempt.seal()
-    except BaseException:
-        attempt.abandon()
+    except BaseException as error:
+        try:
+            attempt.abandon()
+        except BaseException as cleanup:
+            error.add_note('checkpoint abandonment also refused: ' + repr(cleanup))
         raise
 
 
@@ -1220,11 +1232,11 @@ class AdjointCheckpointAttempt:
         self._activation_entries = {}
         self._shared_state_entries = None
         self._record = None
-        self._writer_identities = {} if owner._produced is not None else None
-        self._writer_directories = None
+        cleanup = owner._checkpoint_reservations[reservation]
+        self._writer_identities = cleanup['writer_identities']
+        self._writer_directories = cleanup['writer_directories']
         if self._writer_identities is not None:
             from .staged_manifest import open_directory
-            self._writer_directories = {}
             recorded = owner._checkpoint_reservations[reservation]['directory_identity']
             root_fd = open_directory(str(checkpoint_dir), identity=recorded)
             try:

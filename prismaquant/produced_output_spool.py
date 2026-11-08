@@ -120,7 +120,7 @@ class ProducedOutputSpool:
                 'identity': (directory.stat().st_dev, directory.stat().st_ino),
                 'references': [], 'future': None, 'durable': False, 'released': False,
                 'reading': 0, 'retired': set(), 'read_back': False, 'failure': None,
-                'binding': None}
+                'binding': None, 'destinations': {}}
             return directory
 
     def _held_bytes(self):
@@ -151,7 +151,8 @@ class ProducedOutputSpool:
             finally:
                 os.close(descriptor)
 
-    def record(self, batch_id, local_reference, canonical_directory, *, artifact_class='payload', read_back=False):
+    def record(self, batch_id, local_reference, canonical_directory, *, canonical_directory_identity,
+               artifact_class='payload', read_back=False):
         if artifact_class not in ARTIFACT_CLASSES or type(read_back) is not bool:
             raise ProducedOutputSpoolRefused('invalid artifact class/readback policy')
         canonical = dataclasses.replace(local_reference,
@@ -159,6 +160,10 @@ class ProducedOutputSpool:
         with self._cond:
             self._check_root()
             group = self._groups[batch_id]
+            parent = str(Path(canonical.path).parent)
+            destination_identity = tuple(canonical_directory_identity)
+            if group['destinations'].get(parent, destination_identity) != destination_identity:
+                raise ProducedOutputSpoolRefused('canonical writer directory identity changed')
             if (group['future'] is not None or len(group['references']) >= MAX_GROUP_ENTRIES
                     or Path(local_reference.path).parent != group['directory']
                     or not self.publication.contains(canonical.path)
@@ -170,6 +175,7 @@ class ProducedOutputSpool:
                     sum(row[1].file_bytes for row in group['references']) + canonical.file_bytes > group['ceiling_bytes']):
                 raise ProducedOutputSpoolRefused('writer exceeded local prewrite ceiling')
             group['references'].append((local_reference, canonical, artifact_class, identity))
+            group['destinations'][parent] = destination_identity
             group['read_back'] |= read_back
             self._local[canonical.path] = (batch_id, local_reference)
         return canonical
@@ -189,7 +195,8 @@ class ProducedOutputSpool:
         descriptors = []
         for local, canonical, artifact_class, identity in group['references']:
             identity = io_engine.publish_copy(local.path, canonical.path, length=canonical.file_bytes,
-                sha256=canonical.sha256, source_identity=identity)
+                sha256=canonical.sha256, source_identity=identity,
+                destination_directory_identity=group['destinations'][str(Path(canonical.path).parent)])
             descriptors.append(self.publication.descriptor_for(canonical,
                 producer_generation=batch_id, artifact_class=artifact_class, file_identity=identity))
         return self.publication.publish(batch_id=batch_id, descriptors=descriptors, lifetime=lifetime)['ref']
@@ -335,7 +342,8 @@ class ProducedOutputSpool:
                             descriptor = by_path[canonical.path]
                             identity = io_engine.publish_copy(canonical.path, local.path,
                                 length=canonical.file_bytes, sha256=canonical.sha256,
-                                source_identity=descriptor['file_identity'])
+                                source_identity=descriptor['file_identity'],
+                                destination_directory_identity=group['identity'])
                             restored.append((local, canonical, kind, identity))
                     except BaseException:
                         # A partial restore remains owned and charged, and

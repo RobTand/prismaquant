@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, copy destination and failed checkpoint cleanup ownership.
+Source: `prismaquant/{io_engine,produced_output_spool,streamed_boundary_artifacts,joint_adjoint_checkpoints,file_identity,perturbed_x_cache,cost_stage_checkpoint,staged_manifest}.py`,
+based on `c7a50d4d431830d5e9ee1894b8d932d99a4f79ab`.
+Canonical export and rematerialization copies require the saved destination
+directory identity on the same nofollow FD used to create temporary bytes.
+Checkpoint reservations share original writer and created-directory sidecars
+from the attempt's first write, including partial temporary files. Cleanup
+scans can validate or refuse those identities, never grant new ownership to
+planned-name files or directories. Exact reclamation rechecks saved parent
+identities and retains reservations on uncertainty. Secondary abandonment
+refusals cannot replace the original checkpoint error. Scientific JSON and
+standalone journal replacement semantics remain unchanged.
+
 As of: 2026-11-08, produced writer directory and file ownership.
 Source: `prismaquant/{perturbed_x_cache,produced_output_spool,streamed_boundary_artifacts,stage_b_prep_io,joint_adjoint_checkpoints,cost_stage_checkpoint,stage_a_produced_output,file_identity,staged_manifest}.py`,
 based on `98c1ded0346ad67697ee32c2fe7ca808c3347c26`.

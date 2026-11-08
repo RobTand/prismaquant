@@ -140,7 +140,8 @@ def test_checkpoint_and_payload_classes_survive_actual_copy(tmp_path):
         path = local / target.name
         identity = _write_new_file(path, content)
         spool.record('mixed', ProducedFileReference(str(path), path.name,
-            len(content), hashlib.sha256(content).hexdigest(), identity), root, artifact_class=kind)
+            len(content), hashlib.sha256(content).hexdigest(), identity), root, artifact_class=kind,
+            canonical_directory_identity=(root.stat().st_dev, root.stat().st_ino))
     spool.submit('mixed'); spool.await_group('mixed')
     group = read_bound_document(pub._groups['mixed'])
     assert [(row['artifact_class'], Path(row['path']).read_bytes()) for row in group['entries']] == [

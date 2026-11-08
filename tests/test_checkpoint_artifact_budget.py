@@ -133,7 +133,7 @@ def test_rollback_retains_then_reclaims(tmp_path, monkeypatch):
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
 
-    def fail_manifest(path, payload):
+    def fail_manifest(path, payload, **writer):
         raise RuntimeError("boom: simulated manifest failure")
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)
@@ -349,11 +349,11 @@ def test_retained_partial_blocks_ordinary_until_reclaimed(tmp_path, monkeypatch)
     real_atomic = checkpoints.atomic_write_bytes
     calls = []
 
-    def fail_first_pickle(path, payload):
+    def fail_first_pickle(path, payload, **writer):
         calls.append(str(path))
         if len(calls) == 1:
             raise RuntimeError("boom: simulated pickle failure")
-        return real_atomic(path, payload)
+        return real_atomic(path, payload, **writer)
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_first_pickle)
     with pytest.raises(RuntimeError, match="boom"):
@@ -559,7 +559,7 @@ def test_close_disposes_retained_attempt(tmp_path, monkeypatch):
     space = adjoint_space(tmp_path / "out")
     real_atomic = checkpoints.atomic_write_bytes
 
-    def fail_manifest(path, payload):
+    def fail_manifest(path, payload, **writer):
         raise RuntimeError("boom: simulated manifest failure")
 
     monkeypatch.setattr(checkpoints, "atomic_write_bytes", fail_manifest)

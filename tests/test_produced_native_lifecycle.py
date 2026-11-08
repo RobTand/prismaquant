@@ -25,7 +25,9 @@ def raw_group(pub, spool, batch='known', payload=b'\x00independent\xffbytes'):
     local = directory / destination.name
     identity = _write_new_file(local, payload)
     ref = spool.record(batch, ProducedFileReference(str(local), local.name,
-        len(payload), hashlib.sha256(payload).hexdigest(), identity), destination.parent, read_back=True)
+        len(payload), hashlib.sha256(payload).hexdigest(), identity), destination.parent,
+        canonical_directory_identity=(destination.parent.stat().st_dev, destination.parent.stat().st_ino),
+        read_back=True)
     return ref, local
 
 
@@ -203,7 +205,8 @@ def test_exclusive_temporary_collision_never_removes_foreign_file(tmp_path, monk
             source = tmp_path / 'source'
             source.write_bytes(b'known')
             io_engine.publish_copy(source, target, length=5,
-                sha256=hashlib.sha256(b'known').hexdigest(), source_identity=produced_file_identity(source))
+                sha256=hashlib.sha256(b'known').hexdigest(), source_identity=produced_file_identity(source),
+                destination_directory_identity=(tmp_path.stat().st_dev, tmp_path.stat().st_ino))
     assert temporary.read_bytes() == b'foreign-owner-bytes'
     assert not target.exists()
 
@@ -272,6 +275,7 @@ def test_group_directory_is_still_owned_before_second_write(tmp_path, spool, rep
         second = storage.write(torch.arange(8, dtype=torch.float32) + 10,
                                batch_index=1, boundary_index=0)
         storage._join_produced_copies()
+        storage._require_produced_copies()
         with storage.prefetch([first, second]) as window:
             assert torch.equal(storage.get(window, first), torch.arange(8, dtype=torch.float32))
             assert torch.equal(storage.get(window, second), torch.arange(8, dtype=torch.float32) + 10)
@@ -440,6 +444,15 @@ def test_checkpoint_group_keeps_each_writer_identity(tmp_path, monkeypatch, pack
         assert pub._groups == prior_groups and preserved
         for saved, path, payload in preserved:
             assert saved.read_bytes() == path.read_bytes() == payload
+        retained = next(entry for entry in storage._checkpoint_reservations.values()
+                        if entry['state'] == 'retained')
+        before = _owned_group_roster(Path(retained['dir']))
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            storage.reclaim_checkpoint_artifact(space, 5)
+        assert _owned_group_roster(Path(retained['dir'])) == before
+        assert retained['produced_batch'] not in pub._released
+        for saved, path, payload in preserved:
+            assert saved.read_bytes() == path.read_bytes() == payload
         return
     record = write()
     tensors = checkpoint.read_exact_entry_tensors(record['activation_entries'],
@@ -575,9 +588,198 @@ def test_native_small_file_publication_never_replaces_a_collision(tmp_path, monk
     if collision:
         with pytest.raises(FileExistsError):
             publish()
-        assert path.read_bytes() == foreign and not identities
+        assert path.read_bytes() == foreign and str(path) not in identities
+        foreign_inode = (path.stat().st_dev, path.stat().st_ino)
+        for filename, identity in identities.items():
+            assert filename.startswith(str(path) + '.tmp') and tuple(identity[:2]) != foreign_inode
+            if Path(filename).exists():
+                assert Path(filename).read_bytes() == b'known writer bytes'
     else:
         publish()
         assert path.read_bytes() == b'known writer bytes'
         from prismaquant.stage_a_produced_output import produced_file_identity
         assert list(identities[str(path)]) == produced_file_identity(path)
+
+
+@pytest.mark.parametrize('replacement', ['intact', 'directory', 'symlink'])
+def test_canonical_copy_parent_is_owned_before_copy_creation(tmp_path, monkeypatch, replacement):
+    import os
+    storage, pub = owner(tmp_path, spool_bytes=1 << 20)
+    first = storage.write(torch.arange(8, dtype=torch.float32), batch_index=0, boundary_index=0)
+    directory = Path(first.path).parent
+    original, foreign = tmp_path / 'original-canonical', tmp_path / 'foreign-canonical'
+    foreign.mkdir(); (foreign / 'sentinel').write_bytes(b'foreign canonical bytes')
+    if replacement != 'intact':
+        directory.rename(original)
+        if replacement == 'directory':
+            directory.mkdir(); (directory / 'sentinel').write_bytes(b'replacement canonical bytes')
+        else:
+            directory.symlink_to(foreign, target_is_directory=True)
+        before = [_owned_group_roster(root) for root in (original, foreign, directory)]
+    creations = []
+    actual = os.open
+    def observe(path, flags, *args, **kwargs):
+        if isinstance(path, str) and path.startswith('.copy-'):
+            creations.append(path)
+        return actual(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, 'open', observe)
+    refused = False
+    try:
+        second = storage.write(torch.arange(8, dtype=torch.float32) + 10,
+                               batch_index=1, boundary_index=0)
+        storage._join_produced_copies()
+        storage._require_produced_copies()
+    except (OSError, ValueError, RuntimeError):
+        refused = True
+    if replacement == 'intact':
+        assert not refused and len(pub._groups) == 1
+        with storage.prefetch([first, second]) as window:
+            assert torch.equal(storage.get(window, first), torch.arange(8, dtype=torch.float32))
+            assert torch.equal(storage.get(window, second), torch.arange(8, dtype=torch.float32) + 10)
+        assert len(creations) == 2
+    else:
+        assert not creations, 'copy temporary creation attempted in a replaced canonical directory'
+        assert [_owned_group_roster(root) for root in (original, foreign, directory)] == before
+        assert refused and not pub._groups
+
+
+@pytest.mark.parametrize('replacement', ['intact', 'directory', 'symlink'])
+def test_rematerialization_parent_is_owned_before_copy_creation(tmp_path, monkeypatch, replacement):
+    import os
+    pub = publication(tmp_path, spool_bytes=1024)
+    pub.bind_session({'generation': 'known', 'run_identity_sha256': 'b' * 64})
+    spool = ProducedOutputSpool.from_publication(pub)
+    ref, local = raw_group(pub, spool)
+    spool.submit('known'); spool.await_group('known'); spool.retire_entry('known', ref)
+    assert spool.released('known') and not local.parent.exists()
+    original, foreign = tmp_path / 'original-restoration', tmp_path / 'foreign-restoration'
+    foreign.mkdir(); (foreign / 'sentinel').write_bytes(b'foreign restore bytes')
+    snapshots, creations = {}, []
+    copy, actual_open = io_engine.publish_copy, os.open
+    def observe(path, flags, *args, **kwargs):
+        if isinstance(path, str) and path.startswith('.copy-'):
+            creations.append(path)
+        return actual_open(path, flags, *args, **kwargs)
+    def restore(source, destination, **kwargs):
+        directory = Path(destination).parent
+        if replacement != 'intact':
+            directory.rename(original)
+            if replacement == 'directory':
+                directory.mkdir(); (directory / 'sentinel').write_bytes(b'replacement restore bytes')
+            else:
+                directory.symlink_to(foreign, target_is_directory=True)
+            snapshots['before'] = [_owned_group_roster(root) for root in (original, foreign, directory)]
+        return copy(source, destination, **kwargs)
+    monkeypatch.setattr(io_engine, 'publish_copy', restore)
+    monkeypatch.setattr(os, 'open', observe)
+    refused = False
+    try:
+        spool.prepare_reads([ref])
+    except (OSError, ValueError, RuntimeError):
+        refused = True
+    if replacement == 'intact':
+        assert not refused
+        with spool.local_reads([ref]) as held:
+            assert held[ref].read_bytes() == b'\x00independent\xffbytes'
+        assert len(creations) == 1 and len(pub._groups) == 1
+    else:
+        assert not creations, 'restore temporary creation attempted in a replacement'
+        assert [_owned_group_roster(root) for root in (original, foreign, local.parent)] == snapshots['before']
+        assert refused and spool._groups['known']['failure'] is not None
+        assert Path(ref.path).read_bytes() == b'\x00independent\xffbytes'
+
+
+@pytest.mark.parametrize('mutation', ['intact', 'occupied', 'same-byte', 'directory', 'symlink'])
+def test_checkpoint_reclaim_uses_writer_and_created_directory_ownership(tmp_path, mutation):
+    import os
+    from prismaquant import joint_adjoint_checkpoints as checkpoint
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    session = {**storage.session, 'kind': 'adjoint_checkpoint'}
+    space = Path(pub.output_prefix) / 'reclaim-space'
+    attempt = checkpoint.open_adjoint_checkpoint(space, boundary=5, session=session,
+        specs={(0, 0): (16, [2, 2], 'torch.float32')},
+        shared_adjoint_keys=[], shared_pass_keys=[], owner=storage)
+    reservation = attempt.reservation
+    entry = storage._checkpoint_reservations[reservation]
+    batch = entry['produced_batch']
+    directory = attempt.checkpoint_dir / 'entries'
+    path = Path(attempt.activation_plan[0]['path'])
+    saved = tmp_path / 'live-original'
+    foreign = tmp_path / 'foreign-checkpoint'; foreign.mkdir()
+    if mutation == 'occupied':
+        path.write_bytes(b'independently known occupied file')
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            attempt.write_activation(0, 0, torch.tensor([[2., 4.], [6., 8.]]))
+    elif mutation in ('intact', 'same-byte'):
+        attempt.write_activation(0, 0, torch.tensor([[2., 4.], [6., 8.]]))
+        if mutation == 'same-byte':
+            raw = path.read_bytes(); path.rename(saved); path.write_bytes(raw)
+            attempt.write_shared_states({}, {})
+            with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity changed'):
+                attempt.seal()
+    else:
+        directory.rename(saved)
+        if mutation == 'directory':
+            directory.mkdir()
+        else:
+            directory.symlink_to(foreign, target_is_directory=True)
+    if mutation == 'intact':
+        attempt.abandon()
+        outcome = storage.reclaim_checkpoint_artifact(space, 5)
+        assert outcome['reclaimed'] and not attempt.checkpoint_dir.exists()
+        assert reservation not in storage._checkpoint_reservations and batch in pub._released
+        return
+    before = _owned_group_roster(attempt.checkpoint_dir)
+    before_directory = (directory.lstat().st_dev, directory.lstat().st_ino)
+    before_saved = (saved.read_bytes() if saved.is_file() else _owned_group_roster(saved)) if saved.exists() else None
+    before_foreign = _owned_group_roster(foreign)
+    try:
+        attempt.abandon()
+    except (OSError, ValueError, RuntimeError):
+        pass
+    refused = False
+    try:
+        storage.reclaim_checkpoint_artifact(space, 5)
+    except (OSError, ValueError, RuntimeError):
+        refused = True
+    assert refused, 'checkpoint reclamation adopted an unowned file or directory'
+    assert _owned_group_roster(attempt.checkpoint_dir) == before
+    assert (directory.lstat().st_dev, directory.lstat().st_ino) == before_directory
+    assert ((saved.read_bytes() if saved.is_file() else _owned_group_roster(saved)) if saved.exists() else None) == before_saved
+    assert _owned_group_roster(foreign) == before_foreign
+    assert reservation in storage._checkpoint_reservations and batch not in pub._released
+
+
+@pytest.mark.parametrize('referenced', [False, True])
+def test_checkpoint_partial_temporary_keeps_writer_identity_and_original_error(tmp_path, monkeypatch, referenced):
+    import os
+    from prismaquant import joint_adjoint_checkpoints as checkpoint
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    session = {**storage.session, 'kind': 'adjoint_checkpoint'}
+    space = Path(pub.output_prefix) / 'partial-space'
+    attempt = checkpoint.open_adjoint_checkpoint(space, boundary=5, session=session,
+        specs={(0, 0): (16, [2, 2], 'torch.float32')}, shared_adjoint_keys=[(0, 0)],
+        shared_pass_keys=[], owner=storage, referenced=referenced, packed=referenced)
+    original = os.unlink
+    def fail_dump(value, stream, **kwargs):
+        stream.write(b'independent partially written checkpoint')
+        raise RuntimeError('original checkpoint serialization failed')
+    def fail_unlink(path, *args, **kwargs):
+        if isinstance(path, str) and '.tmp' in path:
+            raise PermissionError('owned temporary cleanup blocked')
+        return original(path, *args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(checkpoint.pickle, 'dump', fail_dump)
+        patch.setattr(os, 'unlink', fail_unlink)
+        with pytest.raises(RuntimeError, match='original checkpoint serialization failed') as error:
+            attempt.write_shared_states({(0, 0): {'known': torch.arange(4)}}, {})
+    assert any('temporary cleanup also failed' in note for note in error.value.__notes__)
+    entry = storage._checkpoint_reservations[attempt.reservation]
+    partial = [Path(path) for path in entry['writer_identities'] if Path(path).exists()]
+    assert len(partial) == 1
+    assert partial[0].read_bytes().endswith(b'independent partially written checkpoint')
+    attempt.abandon()
+    assert storage.reclaim_checkpoint_artifact(space, 5)['reclaimed']
+    assert not attempt.checkpoint_dir.exists()
+    assert attempt.reservation not in storage._checkpoint_reservations
+    assert entry['produced_batch'] in pub._released

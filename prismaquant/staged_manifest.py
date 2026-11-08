@@ -96,10 +96,10 @@ def read_document(filename, limit):
         os.close(fd)
 
 
-def unlink_owned(filename, identity, *, missing_ok=False):
+def unlink_owned(filename, identity, *, missing_ok=False, directory_identity=None):
     """Remove only the recorded regular file through its canonical parent."""
     filename = Path(path(os.fspath(filename)))
-    directory = open_directory(str(filename.parent))
+    directory = open_directory(str(filename.parent), identity=directory_identity)
     try:
         try:
             observed = os.stat(filename.name, dir_fd=directory, follow_symlinks=False)

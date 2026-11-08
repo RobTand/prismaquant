@@ -248,7 +248,7 @@ class SerializedEntryDigest:
 
 def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x",
                                  durable=False, serialized_digest=None,
-                                 preallocate_bytes=None, directory_fd=None, **metadata):
+                                 preallocate_bytes=None, directory_fd=None, writer_identities=None, **metadata):
     """Atomically store already-selected rows without changing their precision."""
     import os
     path = Path(cache_dir) / activation_cache_filename(name)
@@ -259,7 +259,9 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
               if directory_fd is None else os.fdopen(os.open(temporary.name,
                   os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                   0o600, dir_fd=directory_fd), 'wb'))
-    with handle:
+    from .file_identity import capture_writer_identity
+    with handle, capture_writer_identity(handle, (temporary, path), writer_identities,
+                                         directory_fd=directory_fd):
         if serialized_digest is not None:
             created = os.fstat(handle.fileno())
             serialized_digest.file_identity = (created.st_dev, created.st_ino)
@@ -1059,7 +1061,7 @@ def _is_compact_host_tensor(tensor, nbytes):
 def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                        max_tensor_bytes, max_file_bytes,
                                        release_file_pages=True, preallocate=False,
-                                       durable=True, directory_identity=None):
+                                       durable=True, directory_identity=None, writer_identities=None):
     """Extend the ordinary atomic writer with an exact tensor/identity receipt.
 
     The caller reserves the one compact CPU copy before entering. No dtype,
@@ -1106,7 +1108,8 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
         path = write_activation_cache_entry(cache_dir, name, compact,
             source="exact_activation", durable=durable, exact=metadata,
             serialized_digest=digest,
-            preallocate_bytes=max_file_bytes if preallocate else None, directory_fd=directory)
+            preallocate_bytes=max_file_bytes if preallocate else None, directory_fd=directory,
+            writer_identities=writer_identities)
         del compact
         compact = None
         published_stat = path.lstat()
@@ -1124,15 +1127,18 @@ def write_exact_activation_cache_entry(cache_dir, name, inputs, *, identity,
                                                 durable=durable)
         return ExactActivationReference(str(path), name, encoded, tuple(inputs.shape),
             str(inputs.dtype), nbytes, signature[2], digest.hexdigest(), signature)
-    except BaseException:
-        for candidate in (path, path.with_suffix(".pt.tmp")):
-            owned = getattr(digest, 'file_identity', None)
-            try:
-                current = os.stat(candidate.name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                continue
-            if owned == (current.st_dev, current.st_ino):
-                os.unlink(candidate.name, dir_fd=directory)
+    except BaseException as error:
+        try:
+            for candidate in (path, path.with_suffix(".pt.tmp")):
+                owned = getattr(digest, 'file_identity', None)
+                try:
+                    current = os.stat(candidate.name, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if owned == (current.st_dev, current.st_ino):
+                    os.unlink(candidate.name, dir_fd=directory)
+        except BaseException as cleanup:
+            error.add_note('exact writer cleanup also failed: ' + repr(cleanup))
         raise
     finally:
         compact = None

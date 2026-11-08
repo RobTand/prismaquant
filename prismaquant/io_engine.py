@@ -1497,10 +1497,15 @@ def copy_extent(source_fd, destination_fd, source_offset, length, *, chunk_bytes
     return chunks_sha256hex(copied_chunks())
 
 
-def publish_copy(source, destination, *, length, sha256, source_identity):
+def publish_copy(source, destination, *, length, sha256, source_identity,
+                 destination_directory_identity):
     """Copy and hash on the existing IO owner, then publish without replacement."""
     import secrets
     from .staged_manifest import open_regular, open_directory
+    if (not isinstance(destination_directory_identity, (tuple, list)) or
+            len(destination_directory_identity) != 2 or
+            any(type(value) is not int or value <= 0 for value in destination_directory_identity)):
+        raise ValueError('copy requires the saved destination directory identity')
     source, destination = Path(source), Path(destination)
     fd = open_regular(str(source))
     directory = target_fd = None
@@ -1509,7 +1514,7 @@ def publish_copy(source, destination, *, length, sha256, source_identity):
         before = _stat_signature(os.fstat(fd))
         if list(before) != list(source_identity) or before[2] != length:
             raise RuntimeError('copy source identity differs from writer')
-        directory = open_directory(str(destination.parent), create=True)
+        directory = open_directory(str(destination.parent), identity=destination_directory_identity)
         candidate = '.copy-' + secrets.token_hex(16)
         target_fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                             0o600, dir_fd=directory)
@@ -1542,12 +1547,22 @@ def publish_copy(source, destination, *, length, sha256, source_identity):
         return list(observed)
     finally:
         os.close(fd)
-        if target_fd is not None:
-            os.close(target_fd)
-        if directory is not None:
-            if temporary is not None:
-                os.unlink(temporary, dir_fd=directory)
-            os.close(directory)
+        try:
+            if directory is not None:
+                try:
+                    if temporary is not None:
+                        try:
+                            current = os.stat(temporary, dir_fd=directory, follow_symlinks=False)
+                            owned = os.fstat(target_fd)
+                            if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino):
+                                os.unlink(temporary, dir_fd=directory)
+                        except FileNotFoundError:
+                            pass
+                finally:
+                    os.close(directory)
+        finally:
+            if target_fd is not None:
+                os.close(target_fd)
 
 
 class FixedBudget:

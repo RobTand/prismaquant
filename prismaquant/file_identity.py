@@ -9,7 +9,9 @@ tuple; it never builds its own from the ``stat_result``.
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from pathlib import Path
+import sys
 
 
 def durable_package_path(relative: Path) -> bool:
@@ -27,6 +29,30 @@ def file_stat_signature(value: os.stat_result) -> tuple[int, int, int, int, int]
     """``(st_dev, st_ino, st_size, st_mtime_ns, st_ctime_ns)`` of one stat."""
     return (value.st_dev, value.st_ino, value.st_size,
             value.st_mtime_ns, value.st_ctime_ns)
+
+
+@contextmanager
+def capture_writer_identity(handle, paths, identities, *, directory_fd):
+    """Retain only aliases of the held writer, including a failed partial file."""
+    try:
+        yield
+    finally:
+        if identities is not None:
+            original = sys.exception()
+            try:
+                handle.flush()
+                identity = file_stat_signature(os.fstat(handle.fileno()))
+                for path in paths:
+                    try:
+                        current = os.stat(Path(path).name, dir_fd=directory_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    if (current.st_dev, current.st_ino) == identity[:2]:
+                        identities[str(path)] = identity
+            except BaseException as error:
+                if original is None:
+                    raise
+                original.add_note('writer ownership capture also failed: ' + repr(error))
 
 
 def open_nofollow_directory(filename, *, create=False, identity=None):

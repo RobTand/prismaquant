@@ -934,6 +934,7 @@ class StreamedBoundaryArtifacts:
                     # export lands, for this box's own reads (PQ #1110).
                     reference = self._local_output_spool.record(
                         produced_group["batch_id"], reference, self.directory / "entries",
+                        canonical_directory_identity=self._entry_directory_identity,
                         read_back=read_back)
         finally:
             self._reserve(-nbytes)
@@ -1143,7 +1144,8 @@ class StreamedBoundaryArtifacts:
                     path = Path(local) / name
                     identity = _write_new_file(path, payload, directory_identity=directory_identity)
                     spool.record(batch_id, dataclasses.replace(
-                        reference, path=str(path), writer_file_identity=identity), self.directory)
+                        reference, path=str(path), writer_file_identity=identity), self.directory,
+                        canonical_directory_identity=self._generation_directory_identity)
                 spool.submit(batch_id, lifetime=self._produced_plan["origin_lifetime"])
                 # The handoff record's barrier: on the export's own state,
                 # never a clock (PQ #1110).
@@ -1553,6 +1555,7 @@ class StreamedBoundaryArtifacts:
             "receipt_digest": None,
             "produced_batch": produced_batch,
             "directory_identity": None, "retained_files": None,
+            "writer_identities": {}, "writer_directories": {},
         }
         self._checkpoint_active = reservation
         self.telemetry["checkpoint_reservations"] += 1
@@ -1567,6 +1570,7 @@ class StreamedBoundaryArtifacts:
             if entry['directory_identity'] is not None:
                 raise RuntimeError('checkpoint directory ownership already recorded')
             entry['directory_identity'] = (info.st_dev, info.st_ino)
+            entry['writer_directories'][entry['dir']] = entry['directory_identity']
         finally:
             os.close(descriptor)
 
@@ -1584,20 +1588,33 @@ class StreamedBoundaryArtifacts:
                 raise RuntimeError('checkpoint directory ownership changed')
         finally:
             os.close(descriptor)
-        allowed = {str(directory / 'checkpoint.json'), str(directory / 'checkpoint.json.tmp')}
-        allowed.update(p for row in entry['files'] for p in (row['path'], row['path'] + '.tmp'))
         records = {}
-        for parent, directories, files in os.walk(directory, followlinks=False):
-            for name in directories:
-                child = Path(parent) / name
-                if child != directory / 'entries' or child.is_symlink():
-                    raise RuntimeError('unknown checkpoint directory retains reservation')
-            for name in files:
-                child = Path(parent) / name
-                info = child.lstat()
-                if str(child) not in allowed or not stat.S_ISREG(info.st_mode):
-                    raise RuntimeError('unknown checkpoint file retains reservation')
-                records[str(child)] = list(file_stat_signature(info))
+        owned_directories = entry['writer_directories']
+        owned_files = entry['writer_identities']
+        for parent, identity in owned_directories.items():
+            if Path(parent) not in (directory, directory / 'entries'):
+                raise RuntimeError('unknown checkpoint writer directory')
+            try:
+                descriptor = open_directory(parent, identity=identity)
+            except FileNotFoundError:
+                continue
+            try:
+                with os.scandir(descriptor) as children:
+                    for index, child in enumerate(children):
+                        if index > len(owned_files) + len(owned_directories):
+                            raise RuntimeError('checkpoint cleanup roster exceeds ownership')
+                        filename = str(Path(parent) / child.name)
+                        info = child.stat(follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            if owned_directories.get(filename) != (info.st_dev, info.st_ino):
+                                raise RuntimeError('unknown checkpoint directory retains reservation')
+                        elif (not stat.S_ISREG(info.st_mode) or
+                              tuple(owned_files.get(filename, ())) != file_stat_signature(info)):
+                            raise RuntimeError('unknown checkpoint file retains reservation')
+                        else:
+                            records[filename] = list(owned_files[filename])
+            finally:
+                os.close(descriptor)
         return records
 
     def extend_checkpoint_artifact(self, reservation_id, *, files,
@@ -1767,10 +1784,14 @@ class StreamedBoundaryArtifacts:
 
         def _fail(message):
             entry["state"] = "retained"
-            entry['retained_files'] = self._checkpoint_retained_files(entry)
             if self._checkpoint_active == reservation_id:
                 self._checkpoint_active = None
-            raise RuntimeError(message)
+            error = RuntimeError(message)
+            try:
+                entry['retained_files'] = self._checkpoint_retained_files(entry)
+            except (OSError, ValueError, RuntimeError) as cleanup:
+                error.add_note('checkpoint cleanup ownership also refused: ' + repr(cleanup))
+            raise error
 
         planned = {row["name"]: row for row in entry["files"]}
         rows = []
@@ -1964,11 +1985,29 @@ class StreamedBoundaryArtifacts:
                     self._checkpoint_retained_files(entry) != entry['retained_files']):
                 raise RuntimeError('checkpoint retained roster changed; retaining its bytes')
             for path, identity in entry['retained_files'].items():
-                unlink_owned(path, identity)
+                unlink_owned(path, identity, directory_identity=entry['writer_directories'][str(Path(path).parent)])
             entries = directory / 'entries'
-            if entries.exists():
-                entries.rmdir()
-            directory.rmdir()
+            from .staged_manifest import open_directory
+            descriptor = open_directory(str(directory), identity=entry['directory_identity'])
+            try:
+                try:
+                    child = os.stat('entries', dir_fd=descriptor, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    if (child.st_dev, child.st_ino) != entry['writer_directories'].get(str(entries)):
+                        raise RuntimeError('checkpoint entries directory ownership changed')
+                    os.rmdir('entries', dir_fd=descriptor)
+            finally:
+                os.close(descriptor)
+            parent = open_directory(str(directory.parent))
+            try:
+                current = os.stat(directory.name, dir_fd=parent, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) != entry['directory_identity']:
+                    raise RuntimeError('checkpoint directory ownership changed')
+                os.rmdir(directory.name, dir_fd=parent)
+            finally:
+                os.close(parent)
             if directory.exists():
                 raise RuntimeError(
                     "exact boundary checkpoint reclaim could not dispose "

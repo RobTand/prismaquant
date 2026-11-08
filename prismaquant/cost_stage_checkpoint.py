@@ -27,7 +27,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256_normalized,
 )
 from .digests import bytes_sha256hex, text_sha256hex
-from .file_identity import file_stat_signature, open_nofollow_directory as open_directory
+from .file_identity import file_stat_signature, capture_writer_identity, open_nofollow_directory as open_directory
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -83,7 +83,8 @@ def atomic_write_bytes(path: Path, payload: bytes, *, writer_identities=None,
         handle = (temporary.open('wb') if writer_directories is None else
                   os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                     0o600, dir_fd=directory_fd), 'wb'))
-        with handle:
+        with handle, capture_writer_identity(handle, (temporary, path), writer_identities,
+                                             directory_fd=directory_fd):
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
