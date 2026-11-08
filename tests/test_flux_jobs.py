@@ -95,7 +95,7 @@ class FluxJobsTests(unittest.TestCase):
             with self.subTest(argv=argv), patch.object(jobs, '_flux_run') as run, self.assertRaises(ValueError):
                 jobs.submit_job(argv, checkout=self.checkout, resources=self.resources, record_dir=self.record)
             run.assert_not_called()
-        for dependencies in (('foo',), ('--help',), ('123', '123')):
+        for dependencies in (('not-a-native-ID',), ('--help',), ('123', '123'), ('f1',)):
             with self.subTest(dependencies=dependencies), self.assertRaises(ValueError):
                 jobs.submit_job(['/bin/true'], checkout=self.checkout, resources=self.resources,
                                 record_dir=self.record, afterok=dependencies)

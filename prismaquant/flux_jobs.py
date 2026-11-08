@@ -156,23 +156,28 @@ def _source_identity(checkout):
 
 
 def _job_id(value):
-    if not isinstance(value, str) or not re.fullmatch(r'(?:[1-9][0-9]*|[fƒ][1-9A-HJ-NP-Za-km-z]+)', value):
-        raise ValueError('expected a saved native Flux job ID')
+    job_id_number(value)
     return 'ƒ' + value[1:] if value.startswith('f') else value
 
 
 def job_id_number(value):
     """The native numeric identity shared by Unicode/ASCII f58 and decimal IDs."""
-    value = _job_id(value)
-    if not value.startswith('ƒ'):
-        return int(value)
-    number = 0
-    alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-    for digit in value[1:]:
-        number = number * 58 + alphabet.index(digit)
+    if not isinstance(value, str) or not re.fullmatch(r'(?:[1-9][0-9]*|[fƒ][1-9A-HJ-NP-Za-km-z]+)', value):
+        raise ValueError('expected a saved native Flux job ID')
+    number = int(value) if value[0] not in 'fƒ' else 0
+    if value[0] in 'fƒ':
+        alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+        for digit in value[1:]:
+            number = number * 58 + alphabet.index(digit)
     if not 0 < number < 2**64:
-        raise ValueError('native job ID exceeds uint64')
+        raise ValueError('native job ID exceeds uint64 or is zero')
     return number
+
+
+def _saved_submission_matches(submission):
+    saved = load_submission(submission.record_dir)
+    return (saved.record_dir == submission.record_dir and saved.launch_sha256 == submission.launch_sha256
+            and job_id_number(saved.job_id) == job_id_number(submission.job_id))
 
 
 def _environment(record_dir, supplied):
@@ -221,7 +226,7 @@ actual_fs = subprocess.check_output(['/usr/bin/findmnt', '-n', '-o', 'FSTYPE', '
 if actual_fs != expected_fs:
     raise RuntimeError('unqualified scratch filesystem')
 os.environ['FLUX_SCRATCH'] = root
-scratch = pathlib.Path(root) / os.environ['FLUX_JOB_ID']
+scratch = pathlib.Path(root) / os.environ['FLUX_JOB_ID'].replace('ƒ', 'f', 1)
 child = None
 received = None
 def stop(signum, frame):
@@ -352,7 +357,7 @@ def load_submission(record_dir: Path) -> FluxSubmission:
 
 
 def _validate_submission(submission):
-    if load_submission(submission.record_dir) != submission:
+    if not _saved_submission_matches(submission):
         raise ValueError('submission does not match saved launch and ID')
     intent = json.loads((submission.record_dir / 'launch.json').read_bytes())
     if intent.get('staged_input') is not None:
@@ -370,7 +375,7 @@ def validate_dependency(submission: FluxSubmission):
 def validate_launch(submission: FluxSubmission, *, argv, source, resources,
                     afterok=(), environment=None, staged_input=None):
     """Bind application intent to every saved execution setting on resume/merge."""
-    if load_submission(submission.record_dir) != submission:
+    if not _saved_submission_matches(submission):
         raise ValueError('submission differs from saved launch and ID')
     launch = json.loads((submission.record_dir / 'launch.json').read_bytes())
     if launch.get('staged_input') != staged_input:
