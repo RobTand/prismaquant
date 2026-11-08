@@ -12907,27 +12907,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/pwc_window_load_bench",
-    srcs = [
-        "tools/pwc_window_load_bench.py",
-    ],
-    data = [
-        "tools/pwc_window_load_bench.py",
-    ],
-    deps = [
-        "//tests:test_joint_cost_quantum_runtime_lib",
-        "//tests:test_quantum_probe_identity_once_1183_lib",
-        "//tests:test_strict_reader_tier_enforcement_lib",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
-        "@pq_pip//numpy",
-        "@pq_pip//pytest",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "tools/qualify_t4_overlay",
     srcs = [
         "tools/qualify_t4_overlay.py",
