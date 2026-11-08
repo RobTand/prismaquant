@@ -231,7 +231,7 @@ def test_measurement_is_detached_and_retains_zero_and_exact_frozen_payload():
 
 @pytest.mark.parametrize('kind', ['schema', 'extra', 'missing', 'foreign-payload',
     'joint-predicted', 'joint-pending', 'status', 'units', 'negative', 'bool',
-    'nan', 'infinite', 'artifacts-empty', 'artifacts-many', 'artifact-large',
+    'nan', 'infinite', 'overflow', 'artifacts-empty', 'artifacts-many', 'artifact-large',
     'artifact-duplicate', 'artifact-relative', 'artifact-extra'])
 def test_measurement_refuses_invalid_science_and_unbounded_artifacts(kind):
     value = measurement()
@@ -248,6 +248,7 @@ def test_measurement_refuses_invalid_science_and_unbounded_artifacts(kind):
     elif kind == 'bool': value['value'] = True
     elif kind == 'nan': value['value'] = float('nan')
     elif kind == 'infinite': value['value'] = float('inf')
+    elif kind == 'overflow': value['value'] = 1 << 4096
     elif kind == 'artifacts-empty': value['artifacts'] = []
     elif kind == 'artifacts-many': value['artifacts'] *= 33
     elif kind == 'artifact-large': value['artifacts'][0]['bytes'] = (1 << 20) + 1

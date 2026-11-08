@@ -291,7 +291,10 @@ def _finite_number(
 ) -> float:
     if type(value) not in (int, float):
         _fail(f"{where} must be a finite number")
-    number = float(value)  # type: ignore[arg-type]
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except OverflowError:
+        _fail(f"{where} must be a finite representable number")
     if not math.isfinite(number):
         _fail(f"{where} must be a finite number")
     if minimum is not None and number < minimum:
