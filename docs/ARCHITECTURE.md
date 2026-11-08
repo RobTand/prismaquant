@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native executor Python startup policy.
+Source: `prismaquant/flux_jobs.py`, based on `884b79fda`.
+The owned native wrapper and staged-input launcher explicitly use Python `-s`.
+Saved original argv authenticates that setting. This follows the migration's
+no-user-site rule without adding inherited environment settings or changing
+the selected numerical runtime's qualification.
+
 As of: 2026-11-08, retained failure evidence after independent review.
 Source: `prismaquant/flux_jobs.py`, based on `f7125cf36`.
 Recollection of a launch-bound failed/canceled/dependency-failed result retains

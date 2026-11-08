@@ -17,6 +17,16 @@ class FluxJobsTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(jobs.job_unit_name(value), 'shell-fE23pNdDTV:sys.service')
 
+    def test_generated_native_python_boundaries_disable_user_site(self):
+        source = {'checkout': '/owned/source', 'commit': 'a' * 40}
+        resources = jobs.FluxResources(1, 1, 0, 30)
+        args = jobs._native_arguments(['/bin/true'], source, resources, Path('/owned/record'), (), {}, None)
+        start = args.index('/usr/bin/python3')
+        self.assertEqual(args[start:start + 3], ['/usr/bin/python3', '-s', '-c'])
+        args = jobs._native_arguments(['/bin/true'], source, resources, Path('/owned/record'), (), {}, {'fixture': True})
+        start = args.index('/usr/bin/python3', args.index(jobs._PAYLOAD))
+        self.assertEqual(args[start:start + 4], ['/usr/bin/python3', '-s', '-m', 'prismaquant.staged_launch'])
+
     def test_native_allocation_sets_are_finite_and_unique(self):
         self.assertEqual(jobs._allocation_ids('1-3,7'), {1, 2, 3, 7})
         for value in ('', '1-999999999', '2-1', '1,1', '1-2,2-3', '-1', '0-4096', 1):

@@ -278,7 +278,7 @@ sys.exit(128 - code if code < 0 else code)
 def _native_arguments(argv, source, resources, record_dir, dependencies, environment, staged_input):
     command = list(argv)
     if staged_input is not None:
-        command = ['/usr/bin/python3', '-m', 'prismaquant.staged_launch',
+        command = ['/usr/bin/python3', '-s', '-m', 'prismaquant.staged_launch',
                    DIRECT_ASCII_SPACED_LAX.text(staged_input), *command]
     args = ['submit', '--env=-*', *(f'--env={key}={value}' for key, value in sorted(environment.items())),
             f'--resources-shape={_shape(resources)}', f'--time-limit={resources.walltime_s}s',
@@ -287,7 +287,7 @@ def _native_arguments(argv, source, resources, record_dir, dependencies, environ
     if resources.placement != 'portable':
         args.append(f'--requires={resources.placement}')
     args.extend(f'--dependency=afterok:{value}' for value in dependencies)
-    args.extend(['/usr/bin/python3', '-c', _PAYLOAD, source['commit'], *command])
+    args.extend(['/usr/bin/python3', '-s', '-c', _PAYLOAD, source['commit'], *command])
     return args
 
 
