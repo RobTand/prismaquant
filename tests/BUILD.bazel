@@ -116114,9 +116114,9 @@ pq_py_library(
         "//:tools/__init__",
         "//:tools/prepare_extended_joint_quanta",
         "//:tools/regenerate_joint_quanta",
+        ":staged_native_fixtures",
         ":test_joint_stageb_resources_lib",
         ":test_stageb_prepared_inputs_bridge_lib",
-        ":test_strict_reader_tier_enforcement_lib",
         "@pq_pip//pytest",
     ],
 )
@@ -123280,7 +123280,6 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
-        ":fullstack_pb_generation",
         ":test_quantum_executable_readset_lib",
         ":test_stageb_prepared_render_inputs_lib",
         "@pq_pip//pytest",
