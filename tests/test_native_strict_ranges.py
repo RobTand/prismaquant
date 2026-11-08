@@ -45,7 +45,8 @@ def test_whole_consumers_read_only_the_declared_nonzero_object_extent(tmp_path, 
             assert got == raw and digest == sha(raw)
         elif consumer == 'activation':
             got, receipt = pxc.load_verified_activation_cache_entry(source,
-                expected_sha256=sha(raw), policy={'max_buffer_bytes': 8 << 20,
+                expected_sha256=sha(raw), policy={'schema': 'prismaquant.verified_activation_load.v1',
+                'max_buffer_bytes': 8 << 20,
                 'max_scratch_bytes': 8 << 20}, max_storage_bytes=1 << 20)
             assert torch.equal(got['inputs'].view(torch.uint8), expected.view(torch.uint8))
             assert receipt['source_read_bytes'] == len(raw)
