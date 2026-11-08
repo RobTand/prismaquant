@@ -12,7 +12,7 @@ from pathlib import Path
 import sys
 
 from prismaquant.digests import bytes_sha256hex, canonical_json_sha256
-from prismaquant.file_identity import file_stat_signature
+from prismaquant.file_identity import file_stat_signature, open_nofollow_directory
 from prismaquant.stage_a_produced_output import (BoundaryProducedPublication,
     add_declaration_arguments, read_bound_document)
 from prismaquant.produced_output_spool import ProducedOutputSpool
@@ -43,6 +43,13 @@ def main(argv=None):
     if spool is None:
         raise RuntimeError('byte fixture requires explicit same-box scratch spool')
     directory = Path(publication.output_prefix) / session['generation'] / 'entries'
+    directory.mkdir(parents=True, exist_ok=False)
+    descriptor = open_nofollow_directory(str(directory))
+    try:
+        created = os.fstat(descriptor)
+        directory_identity = (created.st_dev, created.st_ino)
+    finally:
+        os.close(descriptor)
     for boundary in range(2):
         batch = publication.batch_id_for(boundary_index=boundary, group_index=0)
         paths = [directory / f'boundary-{i}-{boundary}-at-{boundary}.pt' for i in range(2)]
@@ -59,7 +66,8 @@ def main(argv=None):
                 os.fsync(stream.fileno())
                 identity = file_stat_signature(os.fstat(stream.fileno()))
             ref = spool.record(batch, FixtureReference(str(source), path.name,
-                len(raw), bytes_sha256hex(raw), identity), directory, read_back=True)
+                len(raw), bytes_sha256hex(raw), identity), directory,
+                canonical_directory_identity=directory_identity, read_back=True)
             references.append(ref)
         spool.submit(batch)
         spool.await_group(batch)
