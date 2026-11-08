@@ -8,6 +8,7 @@ import torch
 
 from staged_native_fixtures import bind, native_staged_state, publish_inputs
 from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from test_streamed_metadata_staged_reads import _deny_pool_opens
 
 
 pytestmark = pytest.mark.usefixtures('native_staged_state')
@@ -30,9 +31,9 @@ def test_engine_and_activation_group_reads_share_exact_process_counters(tmp_path
         for i, tensor in enumerate(tensors)]
     wire = {ref.path: Path(ref.path).read_bytes() for ref in refs}
     resolver = bind(monkeypatch, publish_inputs(tmp_path, wire))
-    # Removing every canonical entry makes accidental pool reads observable.
-    for ref in refs:
-        Path(ref.path).unlink()
+    # Exact references retain canonical metadata fences but never read its bytes.
+    _deny_pool_opens(monkeypatch, directory,
+                     names=[Path(ref.path).name for ref in refs])
     before = staged_lease.exact_lease_counters()
     live = []
     descriptors = []
