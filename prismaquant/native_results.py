@@ -27,7 +27,7 @@ _contract = Contract(ValueError, 'native result: ')
 SELECTION_SCHEMA = 'prismaquant.flux_result_selection.v1'
 PUBLICATION_SCHEMA = 'prismaquant.flux_result_publication.v1'
 PRODUCER_SCHEMA = 'prismaquant.flux_result_producer.v1'
-RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v3'
+RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v4'
 ANNOUNCEMENT_SCHEMA = 'prismaquant.flux_result_announcement.v1'
 ANNOUNCEMENT_PREFIX = b'FLUX_RESULT_PUBLICATION '
 SELECTION_KEYS = frozenset({'schema', 'job_id', 'record_dir', 'launch_sha256', 'publication',
@@ -190,12 +190,19 @@ def _runtime_module_location(module):
         origin = filename
     elif origin not in (None, 'built-in', 'frozen'):
         origin = _runtime_path(origin)
-    locations = sorted(_runtime_path(p) for p in getattr(module, '__path__', ()))
+    locations = []
+    for location in getattr(module, '__path__', ()):
+        if len(locations) >= MAX_RUNTIME_ROOTS:
+            raise ValueError('native runtime import root count exceeds bound')
+        locations.append(_runtime_path(location))
+    locations.sort()
     loader = getattr(spec, 'loader', None)
     supported = (importlib.machinery.SourceFileLoader, importlib.machinery.ExtensionFileLoader)
     if loader is not None and not (isinstance(loader, supported) or
             loader in (importlib.machinery.BuiltinImporter, importlib.machinery.FrozenImporter)):
         raise ValueError('native runtime unsupported imported loader')
+    if loader is None and origin not in {None, 'built-in', 'frozen'} and getattr(module, '__name__', None) != '__main__':
+        raise ValueError('native runtime unsupported specless imported file owner')
     cached = getattr(module, '__cached__', None)
     cached = _runtime_path(cached) if cached and os.path.lexists(cached) else None
     return {'origin': origin, 'locations': locations,
@@ -271,6 +278,8 @@ def _runtime_distribution(name):
         entries.append(Path(entry))
     roots, modules = set(), {}
     for entry in entries:
+        if entry.suffix in {'.pth', '.egg-link'}:
+            raise ValueError('native runtime unsupported editable/path-injection owner')
         if entry.is_absolute() or '..' in entry.parts or not entry.parts:
             # Installed console scripts live outside site-packages, but must
             # still be measured and stay inside this interpreter's bin root.
@@ -295,6 +304,8 @@ def _runtime_distribution(name):
                     break
     metadata = [str(base / e) for e in entries if str(e).endswith('.dist-info/METADATA')]
     record = [str(base / e) for e in entries if str(e).endswith('.dist-info/RECORD')]
+    if len(roots) > MAX_RUNTIME_ROOTS or len(modules) > MAX_RUNTIME_ROOTS:
+        raise ValueError('native runtime distribution root count exceeds bound')
     if len(metadata) != 1 or len(record) != 1 or not modules:
         raise ValueError(f'native runtime requires installed metadata and importable owner: {name}')
     owners = {}
@@ -392,7 +403,7 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
 
 
 def validate_runtime(value):
-    """Validate v3 evidence structurally; equality requires independent measurement."""
+    """Validate v4 evidence structurally; equality requires independent measurement."""
     _result_fields(value, {'schema', 'python', 'dependencies', 'stdlib', 'imports',
                            'libraries', 'files'}, 'runtime')
     _contract.require(value['schema'] == RUNTIME_SCHEMA, 'runtime schema differs')

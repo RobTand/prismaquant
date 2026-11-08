@@ -1,4 +1,4 @@
-"""Real finite content and import-owner checks for native runtime v2."""
+"""Real finite content and import-owner checks for native runtime v4."""
 import copy
 import hashlib
 import importlib
@@ -207,7 +207,8 @@ def test_bounded_stream_hash_allocates_chunks_and_refuses_growth():
     assert file_digest_sha256hex(Bounded(b''), max_bytes=0) == hashlib.sha256(b'').hexdigest()
 
 
-@pytest.mark.parametrize('schema', ['prismaquant.flux_result_runtime.v1', 'prismaquant.flux_result_runtime.v2'])
+@pytest.mark.parametrize('schema', ['prismaquant.flux_result_runtime.v1',
+    'prismaquant.flux_result_runtime.v2', 'prismaquant.flux_result_runtime.v3'])
 def test_old_runtime_evidence_is_not_restamped(runtime_layout, schema):
     runtime = observe()
     old = copy.deepcopy(runtime)
@@ -374,7 +375,8 @@ def test_imported_spec_and_file_must_have_same_actual_owner(runtime_layout, monk
         nr._runtime_module_location(module)
 
 
-@pytest.mark.parametrize('mutation', ['named-code', 'unnamed-code', 'wrong-device', 'wrong-inode', 'deleted', 'added-library'])
+@pytest.mark.parametrize('mutation', ['named-code', 'executable-stack', 'unnamed-code',
+    'wrong-device', 'wrong-inode', 'deleted', 'added-library'])
 def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkeypatch, mutation):
     import builtins
     root = runtime_layout['root']
@@ -394,6 +396,8 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
     assert real() == {str(library):nr.file_stat_signature(known)}
     if mutation == 'named-code':
         raw += b'3000-4000 r-xp 00000000 00:00 0 [anon:numerical-code]\n'
+    elif mutation == 'executable-stack':
+        raw += b'3000-4000 rwxp 00000000 00:00 0 [stack]\n'
     elif mutation == 'unnamed-code':
         raw += b'3000-4000 r-xp 00000000 00:00 0\n'
     elif mutation == 'wrong-device':
@@ -410,3 +414,21 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
         return
     with pytest.raises(ValueError, match='unsupported|replaced'):
         real()
+
+
+def test_editable_path_injection_is_not_a_complete_distribution_owner(runtime_layout):
+    observe()
+    root = runtime_layout['root']
+    (root/'reviewpkg-editable.pth').write_bytes(b'import unmeasured_editable_finder\n')
+    with (root/'reviewpkg-1.dist-info/RECORD').open('ab') as record:
+        record.write(b'reviewpkg-editable.pth,,\n')
+    with pytest.raises(ValueError, match='unsupported editable/path-injection owner'):
+        observe()
+
+
+def test_specless_file_cannot_claim_an_imported_implementation(runtime_layout, monkeypatch):
+    module = runtime_layout['numerics']
+    assert nr._runtime_module_location(module)['origin'].endswith('/reviewpkg/numerics.py')
+    monkeypatch.setattr(module,'__spec__',None)
+    with pytest.raises(ValueError, match='unsupported specless'):
+        nr._runtime_module_location(module)

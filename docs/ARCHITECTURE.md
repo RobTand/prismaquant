@@ -1,10 +1,10 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-08, R1 native runtime v3 content authority under review.
+As of: 2026-11-08, R1 native runtime v4 content authority under review.
 Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
 based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
 `measure_runtime` and `validate_runtime` retain their public signatures and use
-`prismaquant.flux_result_runtime.v3`; old v1/v2 runtime evidence is refused.
+`prismaquant.flux_result_runtime.v4`; old v1/v2/v3 runtime evidence is refused.
 The finite declared distribution roster measures complete durable package,
 metadata and bundled-library contents, including nested code/data and empty files.
 Actual directory census detects additions/removals outside RECORD. Declared
@@ -16,7 +16,9 @@ measured file owners and an exact observed roster. New imports/mappings change
 identity or refuse; this does not claim a closure for arbitrary future code.
 Existing loaded bytecode caches are separately measured. Custom loaders and
 unverifiable mapping owners, including the current x86 Btrfs device-alias case,
-refuse. The positive native CPU proof uses a scoped verified static interpreter.
+refuse, as do executable anonymous stacks and editable/path-injection owners.
+The positive native CPU proof uses a scoped static fixture interpreter with
+its GNU_STACK executable permission removed and the exact binary digest recorded.
 Original-source declarations include safetensors, numpy, sympy and mpmath beside
 torch, transformers and Tessera. Descriptor streaming, finite file/root/count/byte
 budgets, pre/post file identity and final roster/import/mapping checks refuse

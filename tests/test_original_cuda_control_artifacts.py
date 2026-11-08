@@ -7,10 +7,11 @@ import pytest
 
 from experiments.original_cuda_control import publish_control_artifacts
 from prismaquant import native_results as nr, source_generation as sg
+from native_runtime_fixtures import runtime_layout, nonqualifying_runtime  # noqa: F401
 
 
 @pytest.fixture
-def sidecars(tmp_path, monkeypatch):
+def sidecars(tmp_path, monkeypatch, nonqualifying_runtime):
     # Unit fixture for the writer only. Real native provenance is exercised by
     # tools/native_result_cpu_proof.py through the admitted native proof.
     monkeypatch.setattr(nr, 'execution_context', lambda: {'unit_fixture': True})
