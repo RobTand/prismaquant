@@ -101,11 +101,10 @@ from .residency_shard_reader import staged_shard_opener
 def _source_safe_open(path, *, source_authentication=None, **kwargs):
     """Use the existing reader, optionally through its complete-capture owner.
 
-    PrismaBuild stages the byte ranges this run's data manifest declares, and
-    a shard's tensors are served off that stage when its residency map covers
-    them (PQ #732). With no map, or none naming this shard, the opener is
-    ``safe_open`` itself and both branches below are what they have always
-    been -- the redirect is a different reader, never a different call.
+    The native staged reader serves declared headers and tensor extents
+    through immutable input bindings. Under strict policy undeclared inputs
+    refuse when read; inactive policy retains the ordinary opener. A qualified
+    original-material owner supplies its own complete-capture reader.
     """
     if source_authentication is not None and getattr(
             source_authentication, 'is_qualified_original_material', False):

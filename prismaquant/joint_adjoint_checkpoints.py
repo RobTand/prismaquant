@@ -1009,7 +1009,7 @@ def _checkpoint_window_references(cotangents, plans):
 
 
 def _checkpoint_tensor_window(cotangents, plans, owner):
-    """Reuse the owner's bounded read grouping, including PB group retirement.
+    """Reuse the owner's bounded read grouping and native reader lifetime.
 
     A one-entry window would retire and restage a complete produced group
     for each of its entries. Match the existing prefetch batch width, keeping

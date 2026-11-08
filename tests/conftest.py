@@ -277,8 +277,7 @@ def _no_prismabuild_import_carried_between_modules():
 
     The per-test restore below cannot see an import made by a module-scoped
     fixture: that fixture is set up before the test's own snapshot is taken.
-    ``tests/test_fleet_acceptance_level1.py``'s and
-    ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
+    ``tests/test_fleet_acceptance_level1.py``'s ``pb`` fixture imports from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
     teardown puts the imports back. This module explicitly owns a detached,

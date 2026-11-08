@@ -338,14 +338,12 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     instead, unless the allowed-tier policy is active, in which case it
     refuses.
 
-    Under the active policy the staged copy is read through a lifetime-pinned
-    window: ``lease`` (a group pin from :func:`pin_group`, as
-    ``(lease window, key, staged entry)``) when one pinned this file, else one
-    per read. The RAM leg needs RAM-mover covers the composed map does not
-    carry and refuses fast, the SSD copy acquires honestly with the map's
-    leads, payload comes from the held descriptor, and the SDK's own serving
-    record is registered at the successful actual open. Inactive policy keeps
-    the legacy stage-only open order.
+    Native staged entries use an owned descriptor window: ``lease`` from
+    :func:`pin_group`, as ``(lease window, key, staged entry)``, when supplied,
+    otherwise one window per read. The reader authenticates object bounds,
+    descriptor identity and bytes before returning. The resolver records
+    serving identity at the actual open. External cache pins or retained
+    phase ownership protect the object's lifetime.
 
     ``timing``, when given, receives ``read_s``: the seconds spent opening and
     reading the bytes, without the hash, so a caller can measure its
