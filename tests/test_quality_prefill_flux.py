@@ -451,6 +451,100 @@ def test_result_measurement_artifacts_use_actual_known_bytes(tmp_path, kind):
         prefill._authenticate_measurements(document)
 
 
+def phase_records_fixture(tmp_path):
+    manifest, roster_value, original = envelope_fixture(tmp_path)
+    root = tmp_path / 'phase'
+    root.mkdir()
+    children = []
+    for index, (child, tasks) in enumerate(zip(roster_value['children'],
+                                             [roster_value['tasks'][:2], roster_value['tasks'][2:]])):
+        envelope = dict(original, phase_record_dir=str(root), child_id=child['child_id'],
+                        tasks=tasks, result_path=str(root / f'results-{index:04d}.json'))
+        binding = prefill._publish_document(envelope, root / f'envelope-{index:04d}.json', 1 << 20)
+        children.append(dict(child_id=child['child_id'], task_ids=child['task_ids'],
+                             envelope=binding, record_dir=str(root / f'native-{index:04d}')))
+    submission = dict(schema=prefill.SUBMISSION_SCHEMA, phase_id=original['phase_id'],
+        plan_identity_sha256=manifest['identity_sha256'], roster_sha256=original['roster']['sha256'],
+        afterok=[], children=children)
+    filename = root / 'submission.json'
+    filename.write_bytes(scientific.canonical_json_bytes(submission) + b'\n')
+    return original['manifest'], original['phase_id'], root, submission
+
+
+def test_phase_records_match_independently_written_finite_layout(tmp_path):
+    binding, phase, root, submission = phase_records_fixture(tmp_path)
+    records = prefill._phase_records(binding, phase, root)
+    assert records['submission'] == submission
+    assert [row['child_id'] for row in records['submission']['children']] == ['child/0', 'child/2']
+    assert [row['record_dir'] for row in records['submission']['children']] == [
+        str(root / 'native-0000'), str(root / 'native-0001')]
+    assert [task['task_id'] for envelope in records['envelopes'] for task in envelope['tasks']] == [
+        'task/0', 'task/1', 'task/2']
+    authenticated = prefill._authenticate_graph(binding, phase, root)
+    assert authenticated['parents'] == []
+    assert not list(root.glob('native-*'))
+
+
+@pytest.mark.parametrize('kind', ['schema', 'phase', 'identity', 'roster', 'missing-child',
+    'duplicate-child', 'order', 'task', 'record-dir', 'envelope-path', 'envelope-digest',
+    'extra', 'afterok-type', 'afterok-large', 'parent-extra', 'parent-duplicate',
+    'parent-duplicate-id', 'parent-digest', 'parent-id', 'parent-relative'])
+def test_phase_records_refuse_resealed_foreign_or_partial_metadata(tmp_path, kind):
+    binding, phase, root, submission = phase_records_fixture(tmp_path)
+    prefill._phase_records(binding, phase, root)
+    parent = dict(phase_id=phase, child_id='child/0', job_id='f2',
+                  record_dir=str(root / 'parent-native'), launch_sha256='a' * 64)
+    if kind == 'schema': submission['schema'] = 'legacy.v1'
+    elif kind == 'phase': submission['phase_id'] = 'foreign'
+    elif kind == 'identity': submission['plan_identity_sha256'] = '0' * 64
+    elif kind == 'roster': submission['roster_sha256'] = '0' * 64
+    elif kind == 'missing-child': submission['children'].pop()
+    elif kind == 'duplicate-child': submission['children'].append(copy.deepcopy(submission['children'][0]))
+    elif kind == 'order': submission['children'].reverse()
+    elif kind == 'task': submission['children'][0]['task_ids'].pop()
+    elif kind == 'record-dir': submission['children'][0]['record_dir'] = str(tmp_path / 'foreign')
+    elif kind == 'envelope-path': submission['children'][0]['envelope']['path'] = str(tmp_path / 'foreign')
+    elif kind == 'envelope-digest': submission['children'][0]['envelope']['sha256'] = '0' * 64
+    elif kind == 'extra': submission['claim'] = 'extra'
+    elif kind == 'afterok-type': submission['afterok'] = {}
+    elif kind == 'afterok-large': submission['afterok'] = [parent] * 4097
+    else:
+        submission['afterok'] = [parent]
+        if kind == 'parent-extra': parent['claim'] = 'extra'
+        elif kind == 'parent-duplicate': submission['afterok'].append(copy.deepcopy(parent))
+        elif kind == 'parent-duplicate-id':
+            submission['afterok'].append(dict(parent, child_id='child/2', job_id='1'))
+        elif kind == 'parent-digest': parent['launch_sha256'] = 'not-a-digest'
+        elif kind == 'parent-id': parent['job_id'] = 'not-an-id'
+        else: parent['record_dir'] = 'relative'
+    (root / 'submission.json').write_bytes(scientific.canonical_json_bytes(submission) + b'\n')
+    with pytest.raises((ValueError, OSError)):
+        prefill._phase_records(binding, phase, root)
+
+
+def test_dependency_phase_must_belong_to_declared_dag_before_native_lookup(tmp_path, monkeypatch):
+    binding, phase, root, submission = phase_records_fixture(tmp_path)
+    submission['afterok'] = [dict(phase_id=scientific.PHASE_DAG[1].phase, child_id='child/0',
+        job_id='f2', record_dir=str(root / 'foreign'), launch_sha256='a' * 64)]
+    (root / 'submission.json').write_bytes(scientific.canonical_json_bytes(submission) + b'\n')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('foreign dependency must refuse before native lookup')
+    monkeypatch.setattr(prefill.flux_jobs, 'load_submission', forbidden)
+    with pytest.raises(scientific.QualityPrefillContractError, match='foreign parent phase'):
+        prefill._authenticate_graph(binding, phase, root)
+
+
+@pytest.mark.parametrize('kind', ['changed-envelope', 'missing-envelope', 'duplicate-json'])
+def test_phase_records_require_actual_original_envelope_and_strict_document(tmp_path, kind):
+    binding, phase, root, _ = phase_records_fixture(tmp_path)
+    prefill._phase_records(binding, phase, root)
+    if kind == 'changed-envelope': (root / 'envelope-0000.json').write_bytes(b'{}')
+    elif kind == 'missing-envelope': (root / 'envelope-0001.json').unlink()
+    else: (root / 'submission.json').write_bytes(b'{"schema":"x","schema":"y"}')
+    with pytest.raises((ValueError, OSError)):
+        prefill._phase_records(binding, phase, root)
+
+
 def test_ordered_cover_is_detached_and_preserves_scientific_meaning():
     value = roster()
     checked = prefill.validate_phase_roster(value)

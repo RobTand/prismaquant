@@ -9,8 +9,10 @@ its envelope and result paths must belong to that canonical directory. The
 measurement body retains exact task payload, currency/status rules, finite
 nonnegative value and bounded artifact bindings. The native publisher checks
 actual admission, frozen source/runtime and complete task results through the
-existing result owner. Phase submission, independent dependency authentication
-and collection remain unfinished; this wiring has no native prefill proof yet.
+existing result owner. Explicit phase records constrain envelope/native paths
+and route only through the declared parent DAG, verifying original native
+parent launches against their own frozen phase records. Phase submission and
+collection remain unfinished; this wiring has no native prefill proof yet.
 The scientific driver and numerical qualification remain separate slice3 work.
 
 As of: 2026-11-08, native Flux profile v2.

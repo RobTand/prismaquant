@@ -20,6 +20,7 @@ from .staged_manifest import digest, open_directory, path as _path, read_documen
 ROSTER_SCHEMA = 'prismaquant.quality_prefill_roster.v1'
 ENVELOPE_SCHEMA = 'prismaquant.quality_prefill_envelope.v1'
 RESULTS_SCHEMA = 'prismaquant.quality_prefill_results.v1'
+SUBMISSION_SCHEMA = 'prismaquant.quality_prefill_submission.v1'
 MAX_ROSTER_BYTES = 16 << 20
 MAX_ENVELOPE_BYTES = 1 << 20
 MAX_RESULT_BYTES = 1 << 20
@@ -251,6 +252,133 @@ def _child_argv(envelope_binding: dict, roster: dict) -> list:
             '--envelope', envelope_binding['path'], '--envelope-sha256', envelope_binding['sha256']]
 
 
+def _phase_layout(root: Path, manifest_binding: dict, manifest: dict,
+                  roster_binding: dict, roster: dict) -> tuple:
+    root = Path(_path(os.fspath(root)))
+    tasks = {task['task_id']: task for task in roster['tasks']}
+    envelopes, children = [], []
+    for index, child in enumerate(roster['children']):
+        envelope = dict(schema=ENVELOPE_SCHEMA, phase_id=roster['phase_id'],
+            plan_identity_sha256=manifest['identity_sha256'], manifest=manifest_binding,
+            roster=roster_binding, phase_record_dir=str(root), child_id=child['child_id'],
+            tasks=[tasks[task] for task in child['task_ids']],
+            result_path=str(root / f'results-{index:04d}.json'))
+        raw = scientific.canonical_json_bytes(envelope) + b'\n'
+        _check.require(len(raw) <= MAX_ENVELOPE_BYTES, 'child envelope exceeds1MiB')
+        binding = dict(path=str(root / f'envelope-{index:04d}.json'),
+                       sha256=bytes_sha256hex(raw), bytes=len(raw))
+        envelopes.append(envelope)
+        children.append(dict(child_id=child['child_id'], task_ids=child['task_ids'],
+                             envelope=binding, record_dir=str(root / f'native-{index:04d}')))
+    return envelopes, children
+
+
+def _phase_records(manifest_binding: dict, phase: str, root: Path) -> dict:
+    root = Path(_path(os.fspath(root)))
+    directory = open_directory(str(root))
+    os.close(directory)
+    manifest, roster_binding, roster = _read_phase(manifest_binding, phase)
+    envelopes, children = _phase_layout(root, manifest_binding, manifest, roster_binding, roster)
+    raw, _ = read_document(root / 'submission.json', 1 << 20)
+    submission = scientific.decode_strict_json(raw.decode('utf-8'), where='phase submission')
+    _check.exact_mapping(submission, keys=frozenset({
+        'schema', 'phase_id', 'plan_identity_sha256', 'roster_sha256', 'afterok', 'children',
+    }), where='phase submission')
+    expected = dict(schema=SUBMISSION_SCHEMA, phase_id=phase,
+        plan_identity_sha256=manifest['identity_sha256'], roster_sha256=roster_binding['sha256'],
+        afterok=submission['afterok'], children=children)
+    _check.require(submission == expected, 'phase submission differs from frozen layout')
+    parents = submission['afterok']
+    _check.require(isinstance(parents, list) and len(parents) <= 4096,
+                   'afterok must be a finite list of at most4096')
+    ids, coordinates = set(), set()
+    for parent in parents:
+        _check.exact_mapping(parent, keys=frozenset({
+            'phase_id', 'child_id', 'job_id', 'record_dir', 'launch_sha256',
+        }), where='parent coordinate')
+        _identifier(parent['phase_id'], 'parent phase'); _identifier(parent['child_id'], 'parent child')
+        _path(parent['record_dir']); digest(parent['launch_sha256'])
+        number = flux_jobs.job_id_number(parent['job_id'])
+        key = (parent['phase_id'], parent['child_id'])
+        _check.require(number not in ids and key not in coordinates, 'duplicate parent coordinate')
+        ids.add(number); coordinates.add(key)
+    for expected_envelope, child in zip(envelopes, children):
+        _check.require(read_task_envelope(child['envelope']) == expected_envelope,
+                       'phase envelope differs from frozen layout')
+    return dict(root=root, manifest_binding=manifest_binding, manifest=manifest,
+                roster_binding=roster_binding, roster=roster, envelopes=envelopes,
+                submission=submission)
+
+
+def _parent_from_native(submission: flux_jobs.FluxSubmission, manifest_binding: dict) -> dict:
+    launch = flux_jobs._saved_launch(submission)
+    argv = launch['argv']
+    _check.require(isinstance(argv, list) and len(argv) == 8 and
+                   argv[1:3] == ['-s', '-m'] and argv[4] == '--envelope' and
+                   argv[6] == '--envelope-sha256', 'parent has no exact prefill envelope argv')
+    _path(argv[5]); digest(argv[7])
+    raw, _ = read_document(argv[5], MAX_ENVELOPE_BYTES)
+    _check.require(bytes_sha256hex(raw) == argv[7], 'parent envelope digest differs from launch')
+    binding = dict(path=argv[5], sha256=argv[7], bytes=len(raw))
+    envelope = read_task_envelope(binding)
+    _check.require(envelope['manifest'] == manifest_binding, 'parent belongs to a different manifest')
+    _, _, roster = _read_phase(manifest_binding, envelope['phase_id'])
+    _check.require(argv == _child_argv(binding, roster), 'parent command differs from declared roster')
+    return envelope
+
+
+def _expected_child(records: dict, index: int) -> dict:
+    child = records['roster']['children'][index]
+    return dict(argv=_child_argv(records['submission']['children'][index]['envelope'], records['roster']),
+        source=_prefill_source(records['manifest']), resources=FluxResources(**child['resources']),
+        afterok=[parent['job_id'] for parent in records['submission']['afterok']],
+        environment=None, staged_input=child['staged_input'])
+
+
+def _authenticate_graph(manifest_binding: dict, phase: str, root: Path) -> dict:
+    cached, active = {}, set()
+    def visit(selected_phase, selected_root):
+        selected_root = Path(selected_root)
+        _check.require(selected_phase not in active, 'dependency cycle')
+        if selected_phase in cached:
+            _check.require(cached[selected_phase]['root'] == selected_root,
+                           'phase has conflicting record roots')
+            return cached[selected_phase]
+        active.add(selected_phase)
+        records = _phase_records(manifest_binding, selected_phase, selected_root)
+        dependencies = records['manifest']['execution']['phases'][selected_phase]['dependencies']
+        expected_cover, observed_cover, parents = [], [], []
+        for dependency in dependencies:
+            _, _, parent_roster = _read_phase(manifest_binding, dependency)
+            expected_cover.extend((dependency, child['child_id']) for child in parent_roster['children'])
+        for coordinate in records['submission']['afterok']:
+            parent_phase = coordinate['phase_id']
+            _check.require(parent_phase in dependencies, 'foreign parent phase')
+            saved = flux_jobs.load_submission(Path(coordinate['record_dir']))
+            _check.require(saved.launch_sha256 == coordinate['launch_sha256'] and
+                flux_jobs.job_id_number(saved.job_id) == flux_jobs.job_id_number(coordinate['job_id']),
+                'parent native coordinates differ')
+            envelope = _parent_from_native(saved, manifest_binding)
+            _check.require((envelope['phase_id'], envelope['child_id']) ==
+                           (parent_phase, coordinate['child_id']), 'parent envelope coordinate differs')
+            parent_records = visit(parent_phase, Path(envelope['phase_record_dir']))
+            index = next((i for i, child in enumerate(parent_records['roster']['children'])
+                          if child['child_id'] == coordinate['child_id']), None)
+            _check.require(index is not None and
+                parent_records['submission']['children'][index]['record_dir'] == str(saved.record_dir),
+                'parent record is outside its frozen population')
+            flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
+                                          **_expected_child(parent_records, index))
+            observed_cover.append((parent_phase, coordinate['child_id']))
+            parents.append((parent_records, index, saved))
+        _check.require(observed_cover == expected_cover, 'parent child cover differs from declared DAG')
+        records['parents'] = parents
+        cached[selected_phase] = records
+        active.remove(selected_phase)
+        return records
+    return visit(phase, root)
+
+
 def publish_task_results(envelope_binding: dict, *, results: list[dict],
                          dependencies: tuple[str, ...] = ()) -> dict:
     """Publish actual admitted task bytes; selection still requires terminal success."""
@@ -262,6 +390,15 @@ def publish_task_results(envelope_binding: dict, *, results: list[dict],
     source = _prefill_source(manifest)
     child = next(child for child in roster['children'] if child['child_id'] == envelope['child_id'])
     context = native_results.execution_context()
+    records = _authenticate_graph(envelope['manifest'], envelope['phase_id'],
+                                   Path(envelope['phase_record_dir']))
+    index = next(index for index, row in enumerate(records['submission']['children'])
+                 if row['child_id'] == envelope['child_id'])
+    _check.require(records['submission']['children'][index]['envelope'] == envelope_binding and
+        context['record_dir'] == records['submission']['children'][index]['record_dir'] and
+        [flux_jobs.job_id_number(value) for value in context['afterok']] ==
+        [flux_jobs.job_id_number(parent['job_id']) for parent in records['submission']['afterok']],
+        'current phase record or dependencies differ from frozen submission')
     _check.require(context['source'] == source and context['argv'] == _child_argv(envelope_binding, roster)
         and context['resources'] == child['resources'] and context['staged_input'] == child['staged_input'],
         'current native launch differs from frozen prefill child')
