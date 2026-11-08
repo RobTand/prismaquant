@@ -20,9 +20,8 @@ import re
 from typing import TypedDict
 
 from .schemas import Contract, strict_json_loads
-from .dev_mode import NOT_COMPUTED, dev_mode_enabled
 from .digests import (
-    DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, canonical_json_sha256, is_sha256hex,
+    DIRECT_ASCII_SPACED_STRICT, canonical_json_sha256, is_sha256hex,
 )
 from .stage_inputs import read_bound, recorded_same, require_source_identity, same
 from .memory_management import reserve_allocation
@@ -358,6 +357,8 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
     finally:
         control.close()
     entries = {(row['path'], row['offset']): row for row in readset['entries']}
+    _same(set(entries), {(path, 0) for path in source_paths.values()},
+          'original whole-file readset exact publisher roster')
     coordinates = {}
     for name, row in native.items():
         path = source_paths[name]

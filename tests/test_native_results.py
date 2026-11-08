@@ -36,7 +36,7 @@ def test_owned_artifact_starts_with_independent_positive_bytes(tmp_path, mutatio
     path = tmp_path / 'artifact'
     raw = b'known-artifact\x00\xff'
     path.write_bytes(raw)
-    row = nr.artifact_binding(path, max_bytes=128)
+    row = nr.bind_result_artifact(path, max_bytes=128)
     binding = {key: row[key] for key in ('path', 'sha256', 'bytes')}
     assert nr._owned(binding, 128, identity=row['file_identity']) == raw
     if mutation == 'oversize':

@@ -569,10 +569,9 @@ def test_d32_consumers_add_no_run_identity_refusals():
 READER_JOINS = {
     # Target, readset, calibration, model and dispatch: which data the proof is about.
     "_require_original_reader_target": (1, 0),
-    # The SDK answer's own mirrors, the SDK policy and the model config refuse in
-    # both modes. The helper root and generation, the reservation, every delivery
-    # claim, the launch label and the helper-tree digest are producer-run seals.
-    "_require_original_reader_producer": (8, 6),
+    # Actual native runtime, config, reservation and staged delivery binding
+    # are correctness joins. Native execution facts refuse in every mode.
+    "_require_original_reader_producer": (4, 0),
     # The row against its own executed request, the family's compatibility and the
     # target source and runtime refuse in both modes. The restamp join is a seal.
     "_require_original_qualified_source": (4, 1),
@@ -614,7 +613,7 @@ def test_a_new_original_reader_join_fails_the_classification():
     source = (ROOT / "prismaquant/source_generation.py").read_text()
     marker = "    _same(runtime['config'], reader_authority['source_model_identity']['config'],\n"
     assert marker in source
-    added = "    _same(runtime['prismabuild']['nonce'], context['nonce'], 'selected reader nonce')\n"
+    added = "    _same(runtime['native_runtime'], result.publication['runtime'], 'selected reader nonce')\n"
     assert _reader_join_counts(source.replace(marker, added + marker, 1)) != READER_JOINS
 
 

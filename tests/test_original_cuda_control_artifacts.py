@@ -52,7 +52,7 @@ def test_publication_binds_all_actual_node_sidecars(tmp_path, sidecars, capsys):
 
 
 @pytest.mark.parametrize('kind', ['empty', 'directory', 'symlink'])
-def test_artifact_binding_refuses_nonregular_empty_or_indirect_bytes(tmp_path, kind):
+def test_bind_result_artifact_refuses_nonregular_empty_or_indirect_bytes(tmp_path, kind):
     path = tmp_path / 'artifact'
     if kind == 'directory':
         path.mkdir()
@@ -61,7 +61,7 @@ def test_artifact_binding_refuses_nonregular_empty_or_indirect_bytes(tmp_path, k
     else:
         path.touch()
     with pytest.raises((OSError, ValueError)):
-        nr.artifact_binding(path, max_bytes=4096)
+        nr.bind_result_artifact(path, max_bytes=4096)
 
 
 @pytest.mark.parametrize('count', [0, 2])

@@ -37,23 +37,8 @@ def validate_read_contract(binding, filename, *, manifest=None):
     if bytes_sha256hex(raw) != manifest.read_contract_sha256:
         raise ValueError('data manifest digest differs from scientific read contract')
     data = read_contract_document(raw)
-    # Only the published finite file/range read contract is qualified here.
-    # Dynamic phases, produced reads and unknown declarations retain their hold.
-    if data.get('schema') == 'prismaquant.prismabuild.data_manifest.v1':
-        fields = {'schema', 'produced_by', 'mount_prefix', 'entries', 'entry_count', 'total_bytes', 'annotations'}
-        if set(data) != fields or type(data['entry_count']) is not int or data['entry_count'] != len(data['entries']) or type(data['total_bytes']) is not int or data['total_bytes'] != sum(e['bytes'] for e in data['entries']):
-            raise ValueError('unsupported legacy scientific read requirements')
-    elif set(data) != {'schema', 'entries'} or data['schema'] != 'prismaquant.read_contract.v1':
-        raise ValueError('scientific read-contract schema is unqualified')
     expected = []
     for row in data['entries']:
-        if not isinstance(row, dict) or set(row) != {'path', 'offset', 'bytes', 'sha256'}:
-            raise ValueError('unsupported scientific read requirements')
-        path(row['path']); integer(row['offset']); integer(row['bytes'], positive=True); digest(row['sha256'])
-        if data['schema'] == 'prismaquant.prismabuild.data_manifest.v1':
-            prefix = path(data['mount_prefix'])
-            if not Path(row['path']).is_relative_to(prefix):
-                raise ValueError('scientific source is outside its declared mount prefix')
         expected.append((row['path'], row['offset'], row['bytes'], row['sha256']))
     actual = [(e.source_path, e.source_offset, e.length, e.sha256) for e in manifest.extents]
     if sorted(expected) != sorted(actual):
@@ -64,15 +49,40 @@ def validate_read_contract(binding, filename, *, manifest=None):
 def read_contract_document(raw):
     import gzip
     import io
-    from .staged_manifest import MAX_BYTES, decode_document
+    from .staged_manifest import MAX_BYTES, path, integer, digest
+    from .schemas import strict_json_loads
     if raw.startswith(b'\x1f\x8b'):
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
             raw = stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise ValueError('scientific read contract exceeds decompressed bound')
-    value = decode_document(raw)
+    def invalid(key):
+        return ValueError(f'invalid scientific read-contract JSON: {key}')
+    value = strict_json_loads(raw, duplicate=invalid, constant=invalid)
     if not isinstance(value, dict) or not isinstance(value.get('entries'), list) or not value['entries']:
         raise ValueError('scientific read contract must declare nonempty entries')
+    if value.get('schema') == 'prismaquant.prismabuild.data_manifest.v1':
+        fields = {'schema', 'produced_by', 'mount_prefix', 'entries', 'entry_count', 'total_bytes', 'annotations'}
+        if set(value) != fields or type(value['entry_count']) is not int or value['entry_count'] != len(value['entries']):
+            raise ValueError('unsupported legacy scientific read requirements')
+    elif set(value) != {'schema', 'entries'} or value['schema'] != 'prismaquant.read_contract.v1':
+        raise ValueError('scientific read-contract schema is unqualified')
+    extents = {}
+    for row in value['entries']:
+        if not isinstance(row, dict) or set(row) != {'path', 'offset', 'bytes', 'sha256'}:
+            raise ValueError('unsupported scientific read requirements')
+        path(row['path']); integer(row['offset']); integer(row['bytes'], positive=True); digest(row['sha256'])
+        if value['schema'] == 'prismaquant.prismabuild.data_manifest.v1':
+            if not Path(row['path']).is_relative_to(path(value['mount_prefix'])):
+                raise ValueError('scientific source is outside its declared mount prefix')
+        extents.setdefault(row['path'], []).append((row['offset'], row['offset'] + row['bytes']))
+    for ranges in extents.values():
+        ordered = sorted(ranges)
+        if any(start < previous_end for (_, previous_end), (start, _) in zip(ordered, ordered[1:])):
+            raise ValueError('scientific read contract repeats or overlaps ranges')
+    if value['schema'] == 'prismaquant.prismabuild.data_manifest.v1' and (
+            type(value['total_bytes']) is not int or value['total_bytes'] != sum(row['bytes'] for row in value['entries'])):
+        raise ValueError('unsupported legacy scientific read requirements')
     return value
 
 

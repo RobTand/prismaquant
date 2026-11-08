@@ -49,7 +49,7 @@ class SelectedResult:
     execution: flux_jobs.ExecutionResult
 
 
-def _fields(value, keys, label):
+def _result_fields(value, keys, label):
     return _contract.exact_mapping(value, keys=frozenset(keys), where=label)
 
 
@@ -59,15 +59,15 @@ def _document(raw):
         constant=lambda key: ValueError(f'native result: invalid constant {key}'))
 
 
-def _binding(value):
-    _fields(value, {'path', 'sha256', 'bytes'}, 'file binding')
+def _result_file_binding(value):
+    _result_fields(value, {'path', 'sha256', 'bytes'}, 'file binding')
     from .staged_manifest import path, digest, integer
     path(value['path']); digest(value['sha256']); integer(value['bytes'], positive=True)
     return value
 
 
 def _owned(binding, limit, *, identity=None):
-    _binding(binding)
+    _result_file_binding(binding)
     if binding['bytes'] > limit:
         raise ValueError('native result: file exceeds selected byte budget')
     raw, observed = read_document(binding['path'], binding['bytes'])
@@ -78,7 +78,7 @@ def _owned(binding, limit, *, identity=None):
     return raw
 
 
-def artifact_binding(filename, *, max_bytes):
+def bind_result_artifact(filename, *, max_bytes):
     """Measure bounded owned bytes using the shared strict file reader."""
     raw, identity = read_document(filename, max_bytes)
     if not raw or file_stat_signature(os.stat(filename, follow_symlinks=False)) != identity:
@@ -109,25 +109,37 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
             if len(matches) != 1:
                 raise ValueError(f'native runtime requires installed {role}: {name}')
             bindings[role] = _runtime_file(dist.locate_file(matches[0]))
-        packages[name] = {'version': dist.version, **bindings}
+        # Observe actual installed entry modules as well as wheel declarations.
+        # RECORD alone describes expected bytes and cannot measure executing code.
+        modules = {str(entry): _runtime_file(dist.locate_file(entry)) for entry in files
+                   if (len(Path(entry).parts) == 2 and Path(entry).name == '__init__.py')
+                   or (len(Path(entry).parts) == 1 and str(entry).endswith(('.py', '.so')))}
+        if not 0 < len(modules) <= 64:
+            raise ValueError(f'native runtime requires finite installed entry modules: {name}')
+        packages[name] = {'version': dist.version, **bindings, 'modules': modules}
     return {'schema': RUNTIME_SCHEMA,
             'python': {**_runtime_file(sys.executable), 'version': platform.python_version()},
             'dependencies': packages}
 
 
 def validate_runtime(value):
-    _fields(value, {'schema', 'python', 'dependencies'}, 'runtime')
+    _result_fields(value, {'schema', 'python', 'dependencies'}, 'runtime')
     _contract.require(value['schema'] == RUNTIME_SCHEMA, 'runtime schema differs')
-    python = _fields(value['python'], {'path', 'sha256', 'bytes', 'version'}, 'interpreter')
-    _binding({k: python[k] for k in ('path', 'sha256', 'bytes')})
+    python = _result_fields(value['python'], {'path', 'sha256', 'bytes', 'version'}, 'interpreter')
+    _result_file_binding({k: python[k] for k in ('path', 'sha256', 'bytes')})
     _contract.string(python['version'], where='interpreter version')
     deps = _contract.mapping(value['dependencies'], where='dependencies')
     _contract.require(len(deps) <= 64, 'dependency roster exceeds bound')
     for name, package in deps.items():
         _contract.string(name, where='dependency name')
-        _fields(package, {'version', 'metadata', 'record'}, 'dependency')
+        _result_fields(package, {'version', 'metadata', 'record', 'modules'}, 'dependency')
         _contract.string(package['version'], where='dependency version')
-        _binding(package['metadata']); _binding(package['record'])
+        _result_file_binding(package['metadata']); _result_file_binding(package['record'])
+        modules = _contract.mapping(package['modules'], where='installed dependency entry modules')
+        _contract.require(0 < len(modules) <= 64, 'finite measured entry modules required')
+        for module, binding in modules.items():
+            _contract.string(module, where='installed entry module')
+            _result_file_binding(binding)
     return value
 
 
@@ -151,13 +163,13 @@ def _roster(value, *, limit, artifacts=False):
     for role, row in value.items():
         _contract.string(role, where='role')
         if artifacts:
-            _fields(row, {'path', 'sha256', 'bytes', 'file_identity'}, 'artifact')
+            _result_fields(row, {'path', 'sha256', 'bytes', 'file_identity'}, 'artifact')
             identity = row['file_identity']
             _contract.require(isinstance(identity, list) and len(identity) == 5 and
                 all(type(item) is int and item >= 0 for item in identity), 'invalid artifact identity')
         else:
-            _fields(row, {'path', 'sha256', 'bytes'}, 'input')
-        _binding({key: row[key] for key in ('path', 'sha256', 'bytes')})
+            _result_fields(row, {'path', 'sha256', 'bytes'}, 'input')
+        _result_file_binding({key: row[key] for key in ('path', 'sha256', 'bytes')})
         _contract.require(row['path'] not in paths, 'role roster repeats a physical path')
         paths.add(row['path']); total += row['bytes']
     _contract.require(total <= limit, 'aggregate owned byte budget exceeded')
@@ -173,9 +185,11 @@ def publish_result(path: Path, *, producer_id: str, inputs: dict,
         _owned(binding, max_artifact_bytes)
     if not isinstance(artifacts, dict) or not 0 < len(artifacts) <= 64:
         raise ValueError('native result: finite artifact roster required')
-    measured = {role: artifact_binding(filename, max_bytes=max_artifact_bytes)
+    measured = {role: bind_result_artifact(filename, max_bytes=max_artifact_bytes)
                 for role, filename in artifacts.items()}
     _roster(measured, limit=max_artifact_bytes, artifacts=True)
+    if sum(row['bytes'] for row in [*inputs.values(), *measured.values()]) > max_artifact_bytes:
+        raise ValueError('native result: aggregate input/artifact budget exceeded')
     publication = {'schema': PUBLICATION_SCHEMA, 'producer_id': producer_id,
         'producer': execution_context(), 'runtime': measure_runtime(dependencies=dependencies),
         'inputs': inputs, 'artifacts': measured}
@@ -196,15 +210,15 @@ def _ceiling(value, maximum):
 def read_selected_result(selection: dict) -> SelectedResult:
     """Read one publication only after authenticating actual terminal execution."""
     try:
-        _fields(selection, SELECTION_KEYS, 'selection')
+        _result_fields(selection, SELECTION_KEYS, 'selection')
         _contract.require(selection['schema'] == SELECTION_SCHEMA, 'selection schema differs')
         for key, maximum in (('max_publication_bytes', 16 << 20), ('max_evidence_bytes', 64 << 20),
                              ('max_artifact_bytes', 1 << 30)):
             _ceiling(selection[key], maximum)
         from .staged_manifest import path, digest
         path(selection['record_dir']); digest(selection['launch_sha256'])
-        _binding(selection['publication'])
-        expected = _fields(selection['expected_launch'],
+        _result_file_binding(selection['publication'])
+        expected = _result_fields(selection['expected_launch'],
             {'argv', 'source', 'resources', 'afterok', 'environment', 'staged_input'}, 'expected launch')
         saved = flux_jobs.load_submission(Path(selection['record_dir']))
         if (flux_jobs.job_id_number(saved.job_id) != flux_jobs.job_id_number(selection['job_id']) or
@@ -226,7 +240,7 @@ def read_selected_result(selection: dict) -> SelectedResult:
             if name == 'stdout':
                 stdout = stream
         raw = _owned(selection['publication'], selection['max_publication_bytes'])
-        publication = _fields(_document(raw),
+        publication = _result_fields(_document(raw),
             {'schema', 'producer_id', 'producer', 'runtime', 'inputs', 'artifacts'}, 'publication')
         announcement = {'schema': ANNOUNCEMENT_SCHEMA, **selection['publication']}
         lines = [line[len(ANNOUNCEMENT_PREFIX):] for line in stdout.splitlines()
@@ -238,7 +252,8 @@ def read_selected_result(selection: dict) -> SelectedResult:
             **{key: launch[key] for key in ('source', 'argv', 'resources', 'afterok')},
             'staged_input': launch.get('staged_input')}
         observed_producer = dict(publication['producer'])
-        observed_producer['job_id'] = flux_jobs._job_id(observed_producer['job_id'])
+        observed_producer['job_id'] = flux_jobs.job_id_number(observed_producer['job_id'])
+        producer['job_id'] = flux_jobs.job_id_number(producer['job_id'])
         if (publication['schema'] != PUBLICATION_SCHEMA or publication['producer_id'] != selection['producer_id']
                 or observed_producer != producer or publication['inputs'] != selection['inputs']
                 or validate_runtime(publication['runtime']) != validate_runtime(selection['runtime'])):

@@ -242,21 +242,30 @@ for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGALRM, signal
 scratch.mkdir(mode=0o700)
 try:
     os.environ['TMPDIR'] = str(scratch)
-    (out / 'scratch.json').write_text(json.dumps({'schema': 'pq.flux.scratch.v1',
+    observation = {'schema': 'pq.flux.scratch.v1',
         'job_id': os.environ['FLUX_JOB_ID'], 'host': host, 'path': str(scratch),
-        'affinity': sorted(os.sched_getaffinity(0))}))
+        'wrapper_pid': os.getpid(), 'affinity': sorted(os.sched_getaffinity(0))}
+    (out / 'scratch.json').write_text(json.dumps(observation))
     if received is None:
         child = subprocess.Popen(command, start_new_session=True)
+        observation['child_pid'] = child.pid
+        (out / 'scratch.json').write_text(json.dumps(observation))
         if received is not None:
             stop(received, None)
         code = child.wait()
     else:
         code = 128 + received
 finally:
+    process_group_empty = child is None
+    if child is not None:
+        try:
+            os.killpg(child.pid, 0)
+        except ProcessLookupError:
+            process_group_empty = True
     shutil.rmtree(scratch)
     (out / 'cleanup.json').write_text(json.dumps({'schema': 'pq.flux.cleanup.v1',
         'job_id': os.environ['FLUX_JOB_ID'], 'path': str(scratch), 'removed': not scratch.exists(),
-        'signal': received}))
+        'process_group_empty': process_group_empty, 'signal': received}))
 sys.exit(128 - code if code < 0 else code)
 '''
 
@@ -511,7 +520,8 @@ def collect_job(submission: FluxSubmission, *, wait: bool = True) -> ExecutionRe
                 cleanup = json.loads((submission.record_dir / 'cleanup.json').read_bytes())
                 if (job_id_number(scratch['job_id']) != job_id_number(submission.job_id) or
                         job_id_number(cleanup['job_id']) != job_id_number(submission.job_id) or
-                        cleanup['path'] != scratch['path'] or cleanup['removed'] is not True):
+                        cleanup['path'] != scratch['path'] or cleanup['removed'] is not True or
+                        cleanup['process_group_empty'] is not True):
                     raise ValueError('scratch cleanup unverified')
             except (OSError, ValueError, KeyError, TypeError):
                 cleanup_errors.append('scratch: cleanup unverified; reconcile owned descendants and path')

@@ -426,6 +426,23 @@ def test_native_runtime_is_measured_and_independently_selected(authority_case):
         sg.validate_original_source_runtime(changed, binding)
 
 
+def _seal(monkeypatch, capsys, mode, join, refusal):
+    """Run one D32 seal under ``mode``; return the ``[DEV-MODE]`` output it printed.
+
+    Certified mode refuses with ``refusal`` and prints no stamp. Dev mode
+    completes the join and stamps the mismatch instead (CEO D32).
+    """
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    capsys.readouterr()
+    if mode == CERTIFIED:
+        with pytest.raises(RuntimeError, match=refusal):
+            join()
+        assert '[DEV-MODE]' not in capsys.readouterr().out
+        return ''
+    assert join() is None
+    return capsys.readouterr().out
+
+
 @MODES
 @pytest.mark.parametrize('damage', [None, 'foreign-node', 'restamped-snapshot',
                                     'null-compatibility', 'target-source', 'target-runtime'])

@@ -164,8 +164,8 @@ def main():
         profile_errors=[]
         if not a.cpu_preflight:
             try:
-                from prismaquant.native_results import artifact_binding
-                measured=artifact_binding(Path(profile), max_bytes=a.max_artifact_bytes)
+                from prismaquant.native_results import bind_result_artifact
+                measured=bind_result_artifact(Path(profile), max_bytes=a.max_artifact_bytes)
                 profile_evidence={key: measured[key] for key in ('path', 'sha256', 'bytes')}
             except BaseException as exc:
                 profile_errors.append(dict(path=profile,error=f'{type(exc).__name__}: {exc}'))

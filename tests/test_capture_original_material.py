@@ -364,14 +364,12 @@ def test_peak_admission_callback_cannot_reap_material_the_new_window_reuses(mate
     owner.close()
 
 
-def test_control_validation_requires_generation_bound_client_before_original_material(material, monkeypatch):
-    from prismaquant import staged_lease, staged_whole_file
-
-    def unavailable():
-        raise RuntimeError('generation-bound control client unavailable')
+def test_control_validation_requires_immutable_contract_before_original_material(material, monkeypatch):
+    from prismaquant import staged_whole_file
     def original_read(*args, **kwargs):
-        pytest.fail('original material read before control-client qualification')
-    monkeypatch.setattr(staged_lease, 'client_sdk', unavailable)
+        pytest.fail('original material read before immutable control validation')
+    malformed = dict(material['readset'], schema='foreign.read_contract')
+    material['options']['readset_input'] = _bound(material['tmp'] / 'foreign-readset.json', malformed)
     monkeypatch.setattr(staged_whole_file, 'read_staged_sealed_file', original_read)
-    with pytest.raises(RuntimeError, match='generation-bound control client'):
+    with pytest.raises(ValueError, match='read-contract schema'):
         _owner(material)

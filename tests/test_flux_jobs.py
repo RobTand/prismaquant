@@ -176,13 +176,13 @@ class FluxJobsTests(unittest.TestCase):
             jobs.load_submission(self.record)
 
     def collect_fixture(self, *, finish=0, result=1, exception=None, malformed=None,
-                        clean=True, allocated=True, status_rc=None):
+                        clean=True, allocated=True, status_rc=None, wrong_id=False, cleanup_ok=True):
         submission, _ = self.submit_fixture()
         events = [{'name': 'submit'}]
         if allocated:
             events += [{'name': 'alloc'}, {'name': 'start'}]
             (self.record / 'scratch.json').write_text(json.dumps({'job_id': submission.job_id, 'path': '/fixture'}))
-            (self.record / 'cleanup.json').write_text(json.dumps({'job_id': submission.job_id, 'path': '/fixture', 'removed': True}))
+            (self.record / 'cleanup.json').write_text(json.dumps({'job_id': submission.job_id, 'path': '/fixture', 'removed': cleanup_ok, 'process_group_empty': cleanup_ok}))
         if finish is not None:
             events.append({'name': 'finish', 'context': {'status': finish}})
         if exception:
@@ -197,7 +197,7 @@ class FluxJobsTests(unittest.TestCase):
             if args[1] == 'info':
                 return self.completed(json.dumps({'version': 1, 'execution': {'R_lite': [{'rank': '0'}]}}), 0 if allocated else 1)
             if args[1] == 'status':
-                native = {'id': jobs.job_id_number(submission.job_id), 'exception_occurred': exception is not None, 'result': result, 'waitstatus': finish}
+                native = {'id': 123 if wrong_id else jobs.job_id_number(submission.job_id), 'exception_occurred': exception is not None, 'result': result, 'waitstatus': finish}
                 return self.completed('bad-json' if malformed == 'status' else json.dumps(native),
                                       status_rc if status_rc is not None else (0 if result == 1 else 125))
             if args[1] == 'wait-event':
@@ -215,6 +215,21 @@ class FluxJobsTests(unittest.TestCase):
     def test_payload_failure_is_separate_from_query_failure(self):
         result = self.collect_fixture(finish=7 << 8, result=2, status_rc=7)
         self.assertEqual((result.status, result.payload_exit, result.query_error), ('failed', 7, None))
+
+    def test_other_native_status_id_never_authorizes_selected_job(self):
+        result = self.collect_fixture(wrong_id=True)
+        self.assertEqual(result.status, 'unknown')
+        self.assertIn('status:', result.query_error)
+
+    def test_conclusive_failure_survives_cleanup_error(self):
+        result = self.collect_fixture(finish=7 << 8, result=2, status_rc=7, cleanup_ok=False)
+        self.assertEqual((result.status, result.payload_exit), ('failed', 7))
+        self.assertIn('cleanup unverified', result.query_error)
+
+    def test_success_without_cleanup_stays_unavailable(self):
+        result = self.collect_fixture(cleanup_ok=False)
+        self.assertEqual((result.status, result.payload_exit), ('unknown', 0))
+        self.assertIn('cleanup unverified', result.query_error)
 
     def test_query_failure_keeps_observed_payload_exit(self):
         result = self.collect_fixture(finish=7 << 8, result=2, malformed='status')
