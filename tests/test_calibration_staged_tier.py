@@ -9,7 +9,7 @@ import torch
 from safetensors.torch import save_file
 
 from prismaquant.residency_map import (
-    residency_resolver,
+    StagedReadRefused, residency_resolver,
 )
 from prismaquant.staged_tier_policy import (
     TierPolicyRefused, activate_staged_tier_policy,
@@ -108,6 +108,16 @@ def _stage_calibration(tmp_path, monkeypatch, path):
     return Path(resolver.manifest.extents[0].object_path), resolver
 
 
+def _close_reader(resolver):
+    assert resolver._windows == 0
+    witnesses = [fd for fd, _signature in resolver._fds.values()]
+    resolver.close()
+    assert resolver._fds == {}
+    for fd in witnesses:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
 # -- RED: the pool-reading hole ----------------------------------------------
 
 def test_strict_unmapped_calibration_refuses_without_pool_bytes(tmp_path, monkeypatch):
@@ -152,8 +162,7 @@ def test_strict_calibration_stage_serves_pinned_with_exact_release(tmp_path, mon
     assert report['bytes_from_pool'] == 0
     assert report['bytes_from_stage'] == path.stat().st_size
     assert any(row.get('pin_id') for row in report['serving_tiers'])
-    assert resolver._windows == 0 and resolver._fds == {}
-    resolver.close()
+    _close_reader(resolver)
     assert torch.equal(got_ids, ids), 'decoded tokens must survive owner closure'
 
 
@@ -177,8 +186,8 @@ def test_strict_calibration_uses_only_the_declared_object(tmp_path, monkeypatch)
     assert report['bytes_from_stage'] == len(raw)
     assert report['bytes_from_pool'] == 0
     row = report['serving_tiers'][-1]
-    assert row['serving_tier'] == 'stage' and row['pin_id'] and row['range_ref']
-    assert resolver._windows == 0 and resolver._fds == {}
+    assert row['tier'] == 'stage' and row['pin_id'] and row['range_ref']
+    _close_reader(resolver)
     assert alternative.read_bytes() == b'X' + raw[1:]
 
 
@@ -198,7 +207,7 @@ def test_strict_calibration_never_falls_back_from_a_changed_declared_object(tmp_
     assert opened_os == [] and opened_io == [] and safe_opens == []
     report = resolver.report()
     assert report['bytes_from_pool'] == 0
-    assert resolver._windows == 0 and resolver._fds == {}
+    _close_reader(resolver)
     assert alternative.read_bytes() == raw
     # The ordinary decoder independently proves that the ignored copy is valid.
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
@@ -237,7 +246,7 @@ def test_strict_calibration_corrupt_stage_fails_clear(tmp_path, monkeypatch):
         load_calibration_input(path, expected_sha256=sha, n_samples=4, seqlen=8)
     assert opened_os == [] and opened_io == [] and safe_opens == []
     assert resolver.report()['bytes_from_pool'] == 0
-    assert resolver._windows == 0 and resolver._fds == {}
+    _close_reader(resolver)
 
 
 def test_strict_calibration_wrong_pin_refuses_without_pool_bytes(tmp_path, monkeypatch):
@@ -246,7 +255,7 @@ def test_strict_calibration_wrong_pin_refuses_without_pool_bytes(tmp_path, monke
     path, _sha, _ids = _artifact(tmp_path)
     _staged, resolver = _stage_calibration(tmp_path, monkeypatch, path)
     opened_os, opened_io, safe_opens = _guard_pool(monkeypatch, path)
-    with pytest.raises(TierPolicyRefused):
+    with pytest.raises(StagedReadRefused, match='source digest differs from requested identity'):
         load_calibration_input(path, expected_sha256="0" * 64, n_samples=4, seqlen=8)
     assert opened_os == [] and opened_io == [] and safe_opens == []
     assert resolver.report()['bytes_from_pool'] == 0
@@ -333,4 +342,4 @@ def test_strict_malformed_calibration_refuses_parity(tmp_path, monkeypatch, make
         load_calibration_input(path, expected_sha256=sha, n_samples=4, seqlen=8)
     assert opened_os == [] and opened_io == [] and safe_opens == []
     assert resolver.report()['bytes_from_pool'] == 0
-    assert resolver._windows == 0 and resolver._fds == {}
+    _close_reader(resolver)
