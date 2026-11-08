@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, retired PB lease-comparison benchmark.
+Source: deletion of `tools/pwc_window_load_bench.py`, based on `0a725806a`.
+The historical cross-tree PB claim/map comparison has been removed. Native
+strict-reader, prepared-render and bridge tests retain tensor, receipt and
+reader-lifetime obligations. Power-window and page-cache helper controls remain
+in their existing shared owners. This retirement makes no performance claim.
+
 As of: 2026-11-08, unpublished native declaration dry-run.
 Source: `prismaquant/{joint_quantum_row,stage_a_produced_output}.py` and
 `tools/dispatch_joint_quanta.py`, based on `c4d031c70`.

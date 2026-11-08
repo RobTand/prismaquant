@@ -9,7 +9,6 @@ checked against its frozen row.
 from __future__ import annotations
 
 import io
-import statistics
 import subprocess
 
 import pytest
@@ -223,7 +222,6 @@ def test_gpu_power_sampler_loop_argument(monkeypatch, interval, loop):
 
 
 def test_power_windows_are_unchanged(monkeypatch):
-    from tools import pwc_window_load_bench as pwc
     from tools import render_window_bench as rwb
 
     monkeypatch.setattr(subprocess, "Popen",
@@ -233,16 +231,18 @@ def test_power_windows_are_unchanged(monkeypatch):
     sampler.stop()
     assert sampler.samples == [30.25, 12.5, 41.0] and len(sampler.times) == 3
     sampler.times = [100.0, 100.1, 100.2]
-    pairs = list(zip(sampler.times, sampler.samples))
-    for start, end in ((100.0, 100.2), (100.05, 100.2), (100.1, 100.1), (101.0, 102.0)):
+    for start, end, expected in (
+        (100.0, 100.2, [30.25, 12.5, 41.0]),
+        (100.05, 100.2, [12.5, 41.0]),
+        (100.1, 100.1, [12.5]),
+        (101.0, 102.0, []),
+    ):
+        assert sampler.watts_between(start, end) == expected
         GOLDEN.value(rwb._power_summary(sampler.watts_between(start, end)))
-        values = [w for when, w in pairs if start <= when <= end]
-        assert pwc._power_between(sampler, start, end) == (
-            statistics.fmean(values) if values else None, len(values))
 
 
 @pytest.mark.parametrize("name", [
-    "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head", "pwc_window_load_bench",
+    "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head",
     "render_window_bench", "stage_fed_demonstration", "staged_exact_read_bench",
     "staged_read_stream_ab", "unit_journal_bench"])
 def test_migrated_tool_imports(name):
