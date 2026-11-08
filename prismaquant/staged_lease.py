@@ -12,15 +12,6 @@ import threading
 from .staged_tier_policy import TierPolicyRefused, tier_is_allowed
 from .residency_map import residency_map_key
 
-# Historical authority pin. Unit4 still owns source/result authentication and
-# its build-time pin consumers. These constants admit no reader runtime.
-PB_READER_LEASE_PIN_COMMIT = "027103d9a8417e06c7f13356e58779a313cd7088"
-PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
-PB_READER_LEASE_ARCHIVE_SHA256 = "e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970"
-PB_CLIENT_SDK_VERSION = 5
-HELPER_ROOT_ENV_VAR = 'PRISMABUILD_READER_HELPER_ROOT'
-
-
 class LeaseRefused(TierPolicyRefused):
     def __init__(self, reason, *, kind):
         super().__init__(reason)

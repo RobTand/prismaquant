@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native private pin/bootstrap, slice4a.
+Source: `tools/{check_tessera_dev_install,provision_tessera_pin,
+accept_tessera_pin_provisioner,resolve_tessera_dev_pin}.py`, based on
+`84850aed9`. The install check derives expected package and contract bytes
+from the unchanged reviewed Git commit and measures the target interpreter's
+actual import owner and contents under isolated Python. Provenance alone
+cannot authorize execution. Private bootstrap uses explicit owned prefixes,
+and acceptance refuses preexisting work roots. Shared operator provisioning
+remains an operator action. The PB pin resolver, reader pin aliases and
+original-CUDA dependency-pack entry are retired. Remaining PB test/build
+dependencies stay explicit until their callers migrate; the existing Bazel
+provenance document owns that temporary build dependency. No numerical,
+serving, source-runtime, GPU or production qualification follows from this
+bootstrap migration. Per-step proofs and caller/PB audits are recorded in
+the migration evidence, not inferred from this description.
+
 As of: 2026-11-08, native prefill scientific consumers, slice3c.
 Source: `prismaquant/{quality_prefill_contract,quality_prefill_flux}.py` and
 `experiments/tessera_quality_prefill.py`, based on `85ffade23`.

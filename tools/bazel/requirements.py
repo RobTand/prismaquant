@@ -16,7 +16,6 @@ its markers for each Linux architecture. It generates:
 and pin every package the constraints pin, and Tessera at the pinned commit.
 """
 import argparse
-import ast
 import json
 from pathlib import Path
 import re
@@ -34,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from prismaquant.digests import bytes_sha256hex  # noqa: E402
 
-SOURCES = ('pyproject.toml', 'uv.lock', '.github/ci-constraints.txt', 'prismaquant/tessera_runtime_contract.py', 'prismaquant/staged_lease.py')
+SOURCES = ('pyproject.toml', 'uv.lock', '.github/ci-constraints.txt', 'prismaquant/tessera_runtime_contract.py', 'tools/bazel/prismabuild_source.json')
 PLATFORMS = {'linux_x86_64': 'x86_64-manylinux_2_28', 'linux_aarch64': 'aarch64-manylinux_2_28'}
 EXPORT = 'tools/bazel/requirements_{}.txt'
 MODULES = 'tools/bazel/pip_modules.json'
@@ -57,7 +56,7 @@ def pins(text):
 
 def _literal_pin(root):
     """The Tessera commit, read the way tools/resolve_tessera_dev_pin.py reads it."""
-    output = subprocess.run([sys.executable, str(root / 'tools/resolve_tessera_dev_pin.py')], cwd=root,
+    output = subprocess.run([sys.executable, '-s', str(root / 'tools/resolve_tessera_dev_pin.py')], cwd=root,
                             capture_output=True, text=True, check=True).stdout.strip()
     if not re.fullmatch(r'[0-9a-f]{40}', output):
         raise SystemExit(f'tools/resolve_tessera_dev_pin.py printed {output!r}, not a commit')
@@ -76,20 +75,20 @@ def header(root, platform):
 
 def sdk_source(root):
     """Bazel's archive is the lock's exact Git pin, with an independently pinned hash."""
-    tree = ast.parse((root / 'prismaquant/staged_lease.py').read_text())
-    values = {target.id: ast.literal_eval(node.value)
-              for node in tree.body if isinstance(node, ast.Assign)
-              for target in node.targets if isinstance(target, ast.Name)
-              and target.id in ('PB_READER_LEASE_PIN_COMMIT', 'PB_READER_LEASE_ARCHIVE_SHA256')}
-    commit = values['PB_READER_LEASE_PIN_COMMIT']
+    values = json.loads((root / SDK_PROVENANCE).read_text())
+    if (set(values) != {'schema', 'commit', 'url', 'sha256'}
+            or values['schema'] != 'prismaquant.bazel-sdk-source.v1'
+            or re.fullmatch('[0-9a-f]{40}', values['commit']) is None
+            or re.fullmatch('[0-9a-f]{64}', values['sha256']) is None
+            or values['url'] != f"https://github.com/RobTand/prismabuild/archive/{values['commit']}.tar.gz"):
+        raise RuntimeError('invalid retained Bazel dependency source')
+    commit = values['commit']
     lock = tomllib.loads((root / 'uv.lock').read_text())
     sdk = [package for package in lock['package'] if package['name'] == 'prismabuild']
     source = f'https://github.com/RobTand/prismabuild?rev={commit}#{commit}'
     if len(sdk) != 1 or sdk[0]['source'].get('git') != source:
         raise RuntimeError('uv.lock must retain the reviewed immutable PrismaBuild Git source')
-    return {'schema': 'prismaquant.bazel-sdk-source.v1', 'commit': commit,
-            'url': f'https://github.com/RobTand/prismabuild/archive/{commit}.tar.gz',
-            'sha256': values['PB_READER_LEASE_ARCHIVE_SHA256']}
+    return values
 
 
 def export_blocks(text):

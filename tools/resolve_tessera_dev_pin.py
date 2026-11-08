@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Print PrismaQuant's reviewed Tessera commit without importing PrismaQuant.
 
-``resolve_literal_pin`` is also the body of
-``tools/resolve_prismabuild_dev_pin.py``: both resolvers read one literal
-commit out of its owning source file, and pbtest's pin guard runs each
-``tools/resolve_<module>_dev_pin.py`` before pytest starts.
+The resolver reads one literal commit from its owning source file without
+loading the numerical or serving runtime.
 """
 from __future__ import annotations
 

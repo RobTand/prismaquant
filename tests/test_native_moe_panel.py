@@ -9,7 +9,6 @@ import torch
 
 from prismaquant.joint_aura import arithmetic_identity
 from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
-from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
 from prismaquant.native_moe_panel import (EXECUTION, FORMAT, INPUT_SCHEMA, ROLES, consume_moe_receipt,
     freeze_moe_panel, packed_reference, validate_routing, validate_transport, _validate_phase_tensors)
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity as tensor_id
@@ -919,7 +918,7 @@ def original_protocol_case(tmp_path, layer=3):
         'material_pipeline': {'decoder': 'safetensors.safe_open', 'framework': 'pt', 'decoder_device': 'cpu',
                              'cast_owner': 'prismaquant.layer_streaming', 'direct_gpu_decode': False,
                              'target_dtype': 'torch.bfloat16', 'tensor_dtypes': {}, 'scale_inv_map': {}},
-        'prismabuild': {'sdk_version': PB_CLIENT_SDK_VERSION, 'helper_root': '/synthetic-sdk5', 'runtime_generation': 'synthetic-sdk5',
+        'prismabuild': {'sdk_version': 5, 'helper_root': '/synthetic-sdk5', 'runtime_generation': 'synthetic-sdk5',
                        'source_tree': {'package_sha256': 'e' * 64, 'helper_tree_sha256': None}}}
     resources = {'schema': 'prismaquant.original_source_resources.v1', 'material_bytes': 1024,
         'cpu_bytes': 128 * 1024**2, 'source_cache_bytes': 1024, 'copy_bytes': 1024, 'gpu_bytes': 0,

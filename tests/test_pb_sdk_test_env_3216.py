@@ -6,8 +6,8 @@ skipped on every hosted run with ``fleet_sdk.SKIP_REASON`` and only the
 fleet's pbtest shards ran them.
 
 The reviewed commit lives in one place,
-``staged_lease.PB_READER_LEASE_PIN_COMMIT``, which pbtest's pin guard and
-``staged_lease.reviewed_installed_distribution`` already enforce. The
+``tools/bazel/prismabuild_source.json`` until its remaining test consumers
+migrate in slice4. This retained build dependency grants no reader authority. The
 ``pbsdk`` dependency group in ``pyproject.toml`` and its ``uv.lock`` entry
 must name that same commit. The hosted exception suite installs the group;
 Remote Bazel suites install the same reviewed archive with its authoritative
@@ -26,12 +26,10 @@ from packaging.requirements import Requirement
 import pytest
 import yaml
 
-from prismaquant.staged_lease import (
-    PB_READER_LEASE_ARCHIVE_SHA256,
-    PB_READER_LEASE_PIN_COMMIT,
-)
-
 ROOT = Path(__file__).resolve().parents[1]
+SDK_SOURCE = json.loads((ROOT / 'tools/bazel/prismabuild_source.json').read_text())
+PB_READER_LEASE_PIN_COMMIT = SDK_SOURCE['commit']
+PB_READER_LEASE_ARCHIVE_SHA256 = SDK_SOURCE['sha256']
 REPOSITORY = "https://github.com/RobTand/prismabuild"
 GROUP = "pbsdk"
 #: The one install line every suite-running hosted job uses.

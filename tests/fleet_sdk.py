@@ -2,7 +2,7 @@
 
 The reviewed ``prismabuild`` distribution is a test dependency: the ``pbsdk``
 dependency group in ``pyproject.toml`` installs it as a non-editable Git
-install at ``staged_lease.PB_READER_LEASE_PIN_COMMIT`` (PQ #3216). The hosted
+install at the retained Bazel dependency source pin (PQ #3216). The hosted
 gate, the post-merge suite and the fleet's pbtest shards all provide it; on
 the fleet the pbtest pin guard also proves it before pytest starts. Before
 PQ #3216 no hosted job installed it, and these tests skipped there.
@@ -118,14 +118,14 @@ def require_lease_helper() -> None:
     wrong-commit install.
     """
 
-    from prismaquant.staged_lease import HELPER_ROOT_ENV_VAR, LeaseRefused, sdk_submodule
+    from prismaquant.staged_lease import LeaseRefused, sdk_submodule
 
     try:
         sdk_submodule("reader_lease")
     except LeaseRefused as exc:
         if exc.kind != "availability":
             raise
-        pytest.skip(f"{LEASE_HELPER_SKIP_REASON} (set {HELPER_ROOT_ENV_VAR}: {exc.reason})")
+        pytest.skip(f"{LEASE_HELPER_SKIP_REASON} (set PRISMABUILD_READER_HELPER_ROOT: {exc.reason})")
 
 
 @contextlib.contextmanager
@@ -144,7 +144,7 @@ def installed_client_bound(monkeypatch):
     require_prismabuild_sdk()
     from prismaquant import staged_lease
 
-    monkeypatch.delenv(staged_lease.HELPER_ROOT_ENV_VAR, raising=False)
+    monkeypatch.delenv('PRISMABUILD_READER_HELPER_ROOT', raising=False)
     staged_lease.set_lease_helper_root(None)
     module = staged_lease.inject_installed_sdk_for_tests()
     try:
