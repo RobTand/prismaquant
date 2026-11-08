@@ -613,8 +613,12 @@ def cancel_job(submission: FluxSubmission) -> ExecutionResult:
     try:
         _validate_submission(submission)
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        result = _execution_errors(collect_job(submission, wait=False),
-                                   [f'cancel identity: {type(exc).__name__}: {exc}'])
+        result = ExecutionResult('unknown', submission.job_id, submission.record_dir)
+        try:
+            result = _previous_failure(submission) or result
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+            pass
+        result = _execution_errors(result, [f'cancel identity: {type(exc).__name__}: {exc}'])
         return _persist_execution(submission, result, 'cancel-result.json')
     errors = []
     _query(submission, 'cancel', ['cancel', submission.job_id], errors)

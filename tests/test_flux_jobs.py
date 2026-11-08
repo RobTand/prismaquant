@@ -148,10 +148,7 @@ class FluxJobsTests(unittest.TestCase):
             result = jobs.cancel_job(submission)
         self.assertEqual((result.status, result.payload_exit), ('unknown', None))
         self.assertIn('cancel identity:', result.query_error)
-        # Cancel preflight and collection each check identity; neither cancels
-        # or manufactures a verdict when only the broker query is unavailable.
-        self.assertEqual([call.args[0] for call in run.call_args_list],
-                         [['getattr', 'broker.starttime'], ['getattr', 'broker.starttime']])
+        self.assertEqual([call.args[0] for call in run.call_args_list], [['getattr', 'broker.starttime']])
 
     def test_saved_launch_requires_exact_placement_and_effective_environment(self):
         environment = {'XDG_RUNTIME_DIR': '/run/user/1000'}
