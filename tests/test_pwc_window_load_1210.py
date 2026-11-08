@@ -1,20 +1,4 @@
-"""A retained PWC window's per-file load overhead (PQ #1210).
-
-On GLM-5.3 Stage B row 041 the main thread spent 27% of every render window
-waiting on its own window's loads, and the loader threads spent about 55% of
-their time on work repeated for every 16 MiB file rather than on reading it:
-one reader-lease acquire and release per file (the lease's ``retiring_for``
-scan and its lock), a second parse of every archive's central directory on
-the pool path, a fresh loader pool per four-file quantum, and one PrismaBuild
-cover lookup per entry before the window opened.
-
-These tests run the real strict chain the quantum runs: the pinned
-PrismaBuild SDK, real fragments and material from the real writers, a real
-claim row, the strict tier policy and a digest-bound PWC. They pin what each
-load still does -- every file opened through the SDK under a live pin, its
-bytes hashed against the bound digest, released when the window's loads are
-done -- and what it no longer repeats.
-"""
+"""Retained PWC bytes, budgets and native descriptor lifetimes (PQ #1210)."""
 from __future__ import annotations
 
 import hashlib
@@ -26,8 +10,9 @@ from pathlib import Path
 import pytest
 import torch
 
-import test_strict_reader_tier_enforcement as strict
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from test_streamed_metadata_staged_reads import _deny_pool_opens
 
 from prismaquant import io_engine
 from prismaquant import perturbed_x_cache as pxc
@@ -37,6 +22,12 @@ FMT = "TESSERA_E4M3_K1_R1024"
 #: Six files at two loaders make three load quanta, so a per-quantum cost
 #: shows up as three of something and a per-window cost as one.
 COUNT = 6
+
+
+@pytest.fixture(autouse=True)
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context('ssd'):
+        yield
 
 
 @pytest.fixture
@@ -51,20 +42,17 @@ def _render(index, shape=(8, 16)):
 
 
 def _strict_window(tmp_path, monkeypatch, *, count=COUNT, shape=(8, 16)):
-    """A digest-bound PWC whose renders are staged and leased for real."""
+    """A digest-bound PWC backed by real immutable published renders."""
     pool = tmp_path / "pool"
     pool.mkdir(parents=True, exist_ok=True)
-    stage = strict._stage_root(tmp_path)
-    paths, expected, staged_files = {}, {}, {}
+    paths, expected = {}, {}
     for index in range(count):
         key = (f"model.layers.41.mlp.experts.{index}.down_proj", FMT)
         path = pool / f"unit{index}.pt"
         tensor = _render(index, shape)
         torch.save(tensor, path)
         paths[key], expected[key] = path, tensor
-        staged_files[f"u{index}"] = (path, strict._stage_whole(stage, path), None)
-    resolver, consumer, _mover = strict._leased_fixture(
-        tmp_path, monkeypatch, staged_files)
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, paths.values()))
     cache = pwc.ProductionWeightCache(
         weights={key: str(path) for key, path in paths.items()}, levers={})
     total = sum(path.stat().st_size for path in paths.values())
@@ -73,7 +61,7 @@ def _strict_window(tmp_path, monkeypatch, *, count=COUNT, shape=(8, 16)):
         {key: hashlib.sha256(path.read_bytes()).hexdigest()
          for key, path in paths.items()},
         max_file_bytes=max(path.stat().st_size for path in paths.values()))
-    return cache, paths, expected, resolver, consumer, total
+    return cache, paths, expected, resolver, total
 
 
 def _open_window(cache, paths, total, workers, **kwargs):
@@ -82,19 +70,43 @@ def _open_window(cache, paths, total, workers, **kwargs):
         max_load_buffer_bytes=2 * total, release_file_pages=True, **kwargs)
 
 
-def _sdk_calls(monkeypatch, *names):
-    """Count calls into the pinned SDK the strict reader actually makes."""
-    sdk = strict._pb()[0]
-    calls = {name: [] for name in names}
-    for name in names:
-        original = getattr(sdk, name)
+def _observe_windows(monkeypatch, resolver):
+    """Observe actual opens, live-owner barriers and immediate FD closure."""
+    from prismaquant.staged_lease import LeaseWindow
+    entered, exited, opened = [], [], []
+    real_enter, real_exit = LeaseWindow.__enter__, LeaseWindow.__exit__
+    real_open, real_close = LeaseWindow.open, LeaseWindow.close_fd
 
-        def counted(*args, _name=name, _original=original, **kwargs):
-            calls[_name].append(threading.current_thread().name)
-            return _original(*args, **kwargs)
+    def enter(window):
+        result = real_enter(window)
+        entered.append(window)
+        with pytest.raises(RuntimeError, match='live reader windows'):
+            resolver.close()
+        return result
 
-        monkeypatch.setattr(sdk, name, counted)
-    return calls
+    def exit(window, *args):
+        try:
+            return real_exit(window, *args)
+        finally:
+            assert not window._fds
+            exited.append(window)
+
+    def open(window, key):
+        fd, serving = real_open(window, key)
+        assert os.fstat(fd).st_size == window.entries[key]['object_bytes']
+        opened.append(window)
+        return fd, serving
+
+    def close(window, fd):
+        real_close(window, fd)
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+    monkeypatch.setattr(LeaseWindow, '__enter__', enter)
+    monkeypatch.setattr(LeaseWindow, '__exit__', exit)
+    monkeypatch.setattr(LeaseWindow, 'open', open)
+    monkeypatch.setattr(LeaseWindow, 'close_fd', close)
+    return entered, exited, opened
 
 
 def _loaded(cache, paths):
@@ -113,25 +125,24 @@ def _loaded(cache, paths):
 
 def test_a_retained_window_pins_its_staged_renders_under_one_lease(
         tmp_path, monkeypatch, workers):
-    cache, paths, expected, resolver, consumer, total = _strict_window(
+    cache, paths, expected, resolver, total = _strict_window(
         tmp_path, monkeypatch)
-    calls = _sdk_calls(monkeypatch, "acquire_for", "open_pinned", "release")
+    digests = {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in paths.items()}
+    entered, exited, opened = _observe_windows(monkeypatch, resolver)
+    _deny_pool_opens(monkeypatch, tmp_path / 'pool', names=[p.name for p in paths.values()])
     with _open_window(cache, paths, total, workers) as receipt:
         # The window's loads are done and the pin is gone before the consumer
         # runs: a pin protects the reads, not the consumer's compute.
-        assert strict._pins_live(tmp_path, consumer) == []
+        assert resolver._windows == 0
         loaded = _loaded(cache, paths)
         assert receipt["resident_bytes"] <= receipt["budget_bytes"]
     # One acquire and one release for the window, not one per file ...
-    assert len(calls["acquire_for"]) == 1, calls["acquire_for"]
-    assert len(calls["release"]) == 1
-    # ... and still one SDK open per file, each under that pin.
-    assert len(calls["open_pinned"]) == len(paths)
+    assert len(entered) == 1 and entered == exited
+    assert opened == [entered[0]] * len(paths)
     for key, (tensor, file_receipt, _identity) in loaded.items():
         assert torch.equal(tensor.view(torch.uint8), expected[key].view(torch.uint8))
         assert file_receipt["serving_tier"] == "stage"
-        assert file_receipt["sha256"] == hashlib.sha256(
-            paths[key].read_bytes()).hexdigest()
+        assert file_receipt["sha256"] == digests[key]
     report = resolver.report()
     assert report["bytes_from_pool"] == 0
     assert report["bytes_from_stage"] == sum(p.stat().st_size for p in paths.values())
@@ -139,24 +150,18 @@ def test_a_retained_window_pins_its_staged_renders_under_one_lease(
     assert all(isinstance(value, str) for value in cache.weights.values())
 
 
-def test_a_refused_window_lease_reads_each_render_under_its_own_lease(
+def test_an_ungrouped_window_reads_each_render_under_its_own_lease(
         tmp_path, monkeypatch, workers):
-    """The batched lease is an optimization: a refusal re-reads per entry."""
-    from prismaquant import staged_lease
-
-    cache, paths, expected, _resolver, consumer, total = _strict_window(
+    """An absent optional grouping still uses real per-entry windows."""
+    cache, paths, expected, resolver, total = _strict_window(
         tmp_path, monkeypatch)
-
-    def refuse(*_args, **_kwargs):
-        raise staged_lease.LeaseRefused("unpublished: forced", kind="availability")
-
-    monkeypatch.setattr(staged_lease, "acquire_entries_window", refuse)
-    calls = _sdk_calls(monkeypatch, "acquire_for", "release")
+    monkeypatch.setattr(io_engine, 'pin_group', lambda *_args, **_kwargs: None)
+    entered, exited, opened = _observe_windows(monkeypatch, resolver)
     with _open_window(cache, paths, total, workers):
         loaded = _loaded(cache, paths)
-    assert len(calls["acquire_for"]) == len(paths)
-    assert len(calls["release"]) == len(paths)
-    assert strict._pins_live(tmp_path, consumer) == []
+    assert len(entered) == len(exited) == len(opened) == len(paths)
+    assert set(entered) == set(exited) == set(opened)
+    assert resolver._windows == 0
     for key, (tensor, file_receipt, _identity) in loaded.items():
         assert torch.equal(tensor.view(torch.uint8), expected[key].view(torch.uint8))
         assert file_receipt["serving_tier"] == "stage"
@@ -167,9 +172,8 @@ def test_failed_read_closes_its_descriptor_without_releasing_group_pin(
         tmp_path, monkeypatch, failure_point):
     from prismaquant.staged_lease import LeaseWindow
 
-    _cache, paths, _expected, resolver, consumer, _total = _strict_window(
+    _cache, paths, _expected, resolver, _total = _strict_window(
         tmp_path, monkeypatch, count=2)
-    calls = _sdk_calls(monkeypatch, "acquire_for", "release")
     members = [(path, hashlib.sha256(path.read_bytes()).hexdigest())
                for path in paths.values()]
     live_leases = []
@@ -182,7 +186,7 @@ def test_failed_read_closes_its_descriptor_without_releasing_group_pin(
         return fd, serving
 
     def refuse_setup(*args, **kwargs):
-        assert strict._pins_live(tmp_path, consumer)
+        assert resolver._windows == 1
         raise MemoryError("read setup failed")
 
     monkeypatch.setattr(LeaseWindow, "open", record_open)
@@ -201,12 +205,12 @@ def test_failed_read_closes_its_descriptor_without_releasing_group_pin(
         assert len(descriptors) == 1
         with pytest.raises(OSError):
             os.fstat(descriptors[0])
-        assert strict._pins_live(tmp_path, consumer)
-        assert calls["release"] == []
+        assert resolver._windows == 1 and not live_leases[0]._fds
+        with pytest.raises(RuntimeError, match='live reader windows'):
+            resolver.close()
     finally:
         io_engine.unpin(live_leases)
-    assert strict._pins_live(tmp_path, consumer) == []
-    assert len(calls["acquire_for"]) == len(calls["release"]) == 1
+    assert resolver._windows == 0
     assert resolver.report()["bytes_from_pool"] == 0
 
 
@@ -215,29 +219,32 @@ def test_a_bad_staged_copy_fails_its_window_by_name_and_releases_the_pin(
     """A copy that no longer matches its pin refuses; nothing falls back."""
     from prismaquant.staged_tier_policy import TierPolicyRefused
 
-    cache, paths, _expected, resolver, consumer, total = _strict_window(
+    from prismaquant.staged_lease import LeaseWindow
+    cache, paths, _expected, resolver, total = _strict_window(
         tmp_path, monkeypatch)
     victim = list(paths.values())[3]
-    staged = strict._stage_root(tmp_path) / victim.name
+    staged = Path(resolver.staged_read(victim)['stage_path'])
     raw = bytearray(staged.read_bytes())
     raw[-40] ^= 0xFF
-    real_open = strict._pb()[0].open_pinned
+    real_open = LeaseWindow.open
     corrupted = []
 
-    def open_then_damage(queue, pin, ref_id, key, **kwargs):
+    def open_then_damage(window, key):
         # Damage after the acquire proved the copy, so the check that
         # refuses is the read's own, on the bytes it hashed.
-        if str(victim) in key and not corrupted:
+        fd, serving = real_open(window, key)
+        if window.entries[key]['declared_path'] == str(victim) and not corrupted:
+            staged.chmod(0o600)
             staged.write_bytes(bytes(raw))
             corrupted.append(key)
-        return real_open(queue, pin, ref_id, key, **kwargs)
+        return fd, serving
 
-    monkeypatch.setattr(strict._pb()[0], "open_pinned", open_then_damage)
+    monkeypatch.setattr(LeaseWindow, "open", open_then_damage)
     with pytest.raises((TierPolicyRefused, RuntimeError)):
         with _open_window(cache, paths, total, workers):
             pass
     assert corrupted
-    assert strict._pins_live(tmp_path, consumer) == []
+    assert resolver._windows == 0
     assert resolver.report()["bytes_from_pool"] == 0
     assert getattr(cache, "_resident_window_files", None) is None
     assert all(isinstance(value, str) for value in cache.weights.values())
@@ -249,7 +256,7 @@ def test_a_bad_staged_copy_fails_its_window_by_name_and_releases_the_pin(
 
 def test_each_render_archive_is_parsed_once_on_the_bytes_it_loads(
         tmp_path, monkeypatch, workers):
-    cache, paths, _expected, _resolver, _consumer, total = _strict_window(
+    cache, paths, _expected, _resolver, total = _strict_window(
         tmp_path, monkeypatch)
     scans = []
     original = pxc.torch_archive_storage_bytes
@@ -272,7 +279,7 @@ def test_each_render_archive_is_parsed_once_on_the_bytes_it_loads(
 def test_a_retained_window_still_charges_every_file_before_its_first_load(
         tmp_path, monkeypatch, workers):
     """The priced bound is the file length the sealed plan charges."""
-    cache, paths, _expected, _resolver, _consumer, total = _strict_window(
+    cache, paths, _expected, _resolver, total = _strict_window(
         tmp_path, monkeypatch)
     budgets = []
 
@@ -305,7 +312,7 @@ def test_a_retained_window_loads_on_the_io_engines_one_pool(
     The pool is the IO engine's (PQ #1294): its width follows the CPUs this
     process was given, and no caller states a worker count.
     """
-    cache, paths, _expected, _resolver, _consumer, total = _strict_window(
+    cache, paths, _expected, _resolver, total = _strict_window(
         tmp_path, monkeypatch)
     threads = []
     original = io_engine.load_file
@@ -330,7 +337,7 @@ def test_the_load_buffers_in_flight_never_exceed_the_windows_buffer_cap(
     leave room for it under the window's cap (PQ #1291), so however many
     reads run at once, their buffers stay within what the window charged.
     """
-    cache, paths, _expected, _resolver, _consumer, total = _strict_window(
+    cache, paths, _expected, _resolver, total = _strict_window(
         tmp_path, monkeypatch)
     sizes = {str(path.absolute()): path.stat().st_size for path in paths.values()}
     live = []
@@ -366,21 +373,16 @@ def test_the_load_buffers_in_flight_never_exceed_the_windows_buffer_cap(
 def test_the_window_lease_serves_the_same_bytes_as_per_file_leases(
         tmp_path, monkeypatch, workers):
     """Real-shaped renders: one 16 MiB bf16 expert projection per file."""
-    from prismaquant import staged_lease
-
     arms = {}
     for arm in ("per_file", "window"):
         with monkeypatch.context() as patch:
-            cache, paths, expected, _resolver, consumer, total = _strict_window(
+            cache, paths, expected, resolver, total = _strict_window(
                 tmp_path / arm, patch, count=3, shape=(2048, 4096))
             if arm == "per_file":
-                def refuse(*_args, **_kwargs):
-                    raise staged_lease.LeaseRefused("unpublished: arm",
-                                                    kind="availability")
-                patch.setattr(staged_lease, "acquire_entries_window", refuse)
+                patch.setattr(io_engine, 'pin_group', lambda *_args, **_kwargs: None)
             with _open_window(cache, paths, total, workers, render_identities=True):
                 loaded = _loaded(cache, paths)
-            assert strict._pins_live(tmp_path / arm, consumer) == []
+            assert resolver._windows == 0
         arms[arm] = {
             key[0]: (hashlib.sha256(tensor.view(torch.uint8).numpy().tobytes()).hexdigest(),
                      tuple(tensor.shape), str(tensor.dtype),
@@ -407,16 +409,25 @@ def test_the_window_readiness_proves_its_entries_in_one_cover_lookup(
         tmp_path, monkeypatch):
     from prismaquant.joint_cost_quantum import prepare_retained_window_read
 
-    _cache, paths, _expected, _resolver, _consumer, _total = _strict_window(
+    from prismaquant import staged_lease
+    _cache, paths, _expected, resolver, _total = _strict_window(
         tmp_path, monkeypatch)
     record = {"executable_readset": {"prepared_input": {"windows": [{
         "window_index": 3,
         "entries": [{"path": str(path), "offset": 0, "bytes": path.stat().st_size}
                     for path in paths.values()]}]}}}
-    calls = _sdk_calls(monkeypatch, "covers_for_keys")
+    calls = []
+    real_batch = staged_lease.stage_covers_are_published
+
+    def observed(owner, items):
+        calls.append(list(items))
+        return real_batch(owner, calls[-1])
+
+    monkeypatch.setattr(staged_lease, 'stage_covers_are_published', observed)
     progress = _Progress()
     assert prepare_retained_window_read(3, record=record, progress=progress) == "ready"
-    assert len(calls["covers_for_keys"]) == 1, calls
+    assert len(calls) == 1 and len(calls[0]) == len(paths)
+    assert all(entry['_resolver'] is resolver for _path, entry in calls[0])
     assert progress.phases
 
 
@@ -426,7 +437,7 @@ def test_the_window_readiness_asks_per_entry_when_the_batch_cannot_say(
     from prismaquant import staged_lease
     from prismaquant.joint_cost_quantum import prepare_retained_window_read
 
-    _cache, paths, _expected, _resolver, _consumer, _total = _strict_window(
+    _cache, paths, _expected, resolver, _total = _strict_window(
         tmp_path, monkeypatch)
     record = {"executable_readset": {"prepared_input": {"windows": [{
         "window_index": 0,
@@ -434,6 +445,30 @@ def test_the_window_readiness_asks_per_entry_when_the_batch_cannot_say(
                     for path in paths.values()]}]}}}
     monkeypatch.setattr(staged_lease, "stage_covers_are_published",
                         lambda resolver, items: None)
-    calls = _sdk_calls(monkeypatch, "covers_for_keys")
+    calls = []
+    real_single = staged_lease.stage_cover_is_published
+
+    def observed(owner, path, entry):
+        assert owner is resolver and entry['_resolver'] is resolver
+        calls.append(path)
+        return real_single(owner, path, entry)
+
+    monkeypatch.setattr(staged_lease, 'stage_cover_is_published', observed)
     assert prepare_retained_window_read(0, record=record, progress=_Progress()) == "ready"
-    assert len(calls["covers_for_keys"]) == len(paths)
+    assert set(calls) == {str(p) for p in paths.values()} and len(calls) == len(paths)
+
+
+def test_an_active_group_refusal_is_not_hidden_by_single_entry_reads(tmp_path, monkeypatch, workers):
+    from prismaquant import staged_lease
+    cache, paths, _expected, resolver, total = _strict_window(tmp_path, monkeypatch)
+
+    def refuse(*_args, **_kwargs):
+        raise staged_lease.LeaseRefused('unpublished: forced', kind='availability')
+
+    monkeypatch.setattr(staged_lease, 'acquire_entries_window', refuse)
+    with pytest.raises(staged_lease.LeaseRefused, match='unpublished: forced'):
+        with _open_window(cache, paths, total, workers):
+            pytest.fail('refused group became readable')
+    assert resolver._windows == 0
+    assert resolver.report()['bytes_from_stage'] == resolver.report()['bytes_from_pool'] == 0
+    assert all(isinstance(value, str) for value in cache.weights.values())
