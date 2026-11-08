@@ -85166,6 +85166,7 @@ pq_py_library(
         ":staged_native_fixtures",
         ":test_native_strict_reader_contract_lib",
         "@pq_pip//pytest",
+        "@pq_pip//torch",
     ],
 )
 
