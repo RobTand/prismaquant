@@ -10048,6 +10048,9 @@ pq_py_library(
     srcs = [
         "prismaquant/quality_prefill_flux.py",
     ],
+    data = [
+        "prismaquant/quality_prefill_flux.py",
+    ],
     deps = [
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
