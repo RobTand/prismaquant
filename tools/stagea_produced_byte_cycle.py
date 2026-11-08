@@ -43,13 +43,18 @@ def main(argv=None):
     if spool is None:
         raise RuntimeError('byte fixture requires explicit same-box scratch spool')
     directory = Path(publication.output_prefix) / session['generation'] / 'entries'
-    directory.mkdir(parents=True, exist_ok=False)
-    descriptor = open_nofollow_directory(str(directory))
+    parent = open_nofollow_directory(str(directory.parent), create=True)
     try:
-        created = os.fstat(descriptor)
-        directory_identity = (created.st_dev, created.st_ino)
+        os.mkdir(directory.name, mode=0o700, dir_fd=parent)
+        descriptor = os.open(directory.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=parent)
+        try:
+            created = os.fstat(descriptor)
+            directory_identity = (created.st_dev, created.st_ino)
+        finally:
+            os.close(descriptor)
     finally:
-        os.close(descriptor)
+        os.close(parent)
     for boundary in range(2):
         batch = publication.batch_id_for(boundary_index=boundary, group_index=0)
         paths = [directory / f'boundary-{i}-{boundary}-at-{boundary}.pt' for i in range(2)]

@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, shipped byte-cycle caller directory ownership.
+Source: `tools/stagea_produced_byte_cycle.py`, based on `9326498bc`.
+The byte-cycle caller opens its generation through the shared nofollow owner
+before exclusively creating entries relative to that held directory. It saves
+the created directory identity for every spool record. Output or generation
+symlinks refuse before creating files or directories in their targets.
+
 As of: 2026-11-08, copy destination and failed checkpoint cleanup ownership.
 Source: `prismaquant/{io_engine,produced_output_spool,streamed_boundary_artifacts,joint_adjoint_checkpoints,file_identity,perturbed_x_cache,cost_stage_checkpoint,staged_manifest}.py`,
 based on `c7a50d4d431830d5e9ee1894b8d932d99a4f79ab`.
