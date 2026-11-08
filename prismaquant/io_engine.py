@@ -1497,6 +1497,59 @@ def copy_extent(source_fd, destination_fd, source_offset, length, *, chunk_bytes
     return chunks_sha256hex(copied_chunks())
 
 
+def publish_copy(source, destination, *, length, sha256, source_identity):
+    """Copy and hash on the existing IO owner, then publish without replacement."""
+    import secrets
+    from .staged_manifest import open_regular, open_directory
+    source, destination = Path(source), Path(destination)
+    fd = open_regular(str(source))
+    directory = target_fd = None
+    temporary = None
+    try:
+        before = _stat_signature(os.fstat(fd))
+        if list(before) != list(source_identity) or before[2] != length:
+            raise RuntimeError('copy source identity differs from writer')
+        directory = open_directory(str(destination.parent), create=True)
+        candidate = '.copy-' + secrets.token_hex(16)
+        target_fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                            0o600, dir_fd=directory)
+        temporary = candidate
+        actual = copy_extent(fd, target_fd, 0, length)
+        if actual != sha256 or _stat_signature(os.fstat(fd)) != before:
+            raise RuntimeError('copy source bytes changed')
+        check = open_regular(str(source))
+        try:
+            if _stat_signature(os.fstat(check)) != before:
+                raise RuntimeError('copy source path changed')
+        finally:
+            os.close(check)
+        os.fchmod(target_fd, 0o444)
+        os.fsync(target_fd)
+        os.link(temporary, destination.name, src_dir_fd=directory, dst_dir_fd=directory,
+                follow_symlinks=False)
+        # Unlink changes ctime through the link count. Publish the signature
+        # only after the temporary alias is gone, at the real lifetime boundary.
+        os.unlink(temporary, dir_fd=directory)
+        temporary = None
+        os.fsync(directory)
+        check = open_regular(str(destination))
+        try:
+            observed = _stat_signature(os.fstat(check))
+            if observed != _stat_signature(os.fstat(target_fd)):
+                raise RuntimeError('copy destination changed during publication')
+        finally:
+            os.close(check)
+        return list(observed)
+    finally:
+        os.close(fd)
+        if target_fd is not None:
+            os.close(target_fd)
+        if directory is not None:
+            if temporary is not None:
+                os.unlink(temporary, dir_fd=directory)
+            os.close(directory)
+
+
 class FixedBudget:
     """A budget of fixed numbers: ``headroom`` bytes ahead, ``buffer_bytes`` in flight.
 

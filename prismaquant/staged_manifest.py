@@ -54,6 +54,26 @@ def integer(value, *, positive=False):
     return value
 
 
+def open_directory(filename, *, create=False):
+    """Open a canonical directory without following any symlink component."""
+    filename = Path(path(os.fspath(filename)))
+    directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in filename.parts[1:]:
+            if create:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        return directory
+    except BaseException:
+        os.close(directory)
+        raise
+
+
 def open_regular(filename):
     """Refuse symlinks in every component, including a raced final component."""
     filename = Path(path(os.fspath(filename)))
@@ -84,6 +104,25 @@ def read_document(filename, limit):
         return raw, before
     finally:
         os.close(fd)
+
+
+def unlink_owned(filename, identity, *, missing_ok=False):
+    """Remove only the recorded regular file through its canonical parent."""
+    filename = Path(path(os.fspath(filename)))
+    directory = open_directory(str(filename.parent))
+    try:
+        try:
+            observed = os.stat(filename.name, dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return False
+            raise
+        if not stat.S_ISREG(observed.st_mode) or tuple(identity) != signature(observed):
+            raise ManifestRefused('owned unlink file identity changed')
+        os.unlink(filename.name, dir_fd=directory)
+        return True
+    finally:
+        os.close(directory)
 
 
 @dataclass(frozen=True)
@@ -194,18 +233,32 @@ def load_staged_manifest(filename, sha256):
 def publish_staged_json(filename, data):
     filename = Path(filename)
     raw = DIRECT_ASCII_LAX.encoded(data) + b'\n'
-    fd, temporary = tempfile.mkstemp(prefix='.publish-', dir=filename.parent)
+    import secrets
+    directory = open_directory(str(filename.parent))
+    temporary = None
     try:
+        candidate = '.publish-' + secrets.token_hex(16)
+        fd = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=directory)
+        temporary = candidate
         with os.fdopen(fd, 'wb') as stream:
             stream.write(raw); stream.flush(); os.fsync(stream.fileno())
-        os.link(temporary, filename)
-        directory = os.open(filename.parent, os.O_RDONLY | os.O_DIRECTORY)
+        os.link(temporary, filename.name, src_dir_fd=directory, dst_dir_fd=directory,
+                follow_symlinks=False)
+        os.unlink(temporary, dir_fd=directory)
+        temporary = None
+        os.fsync(directory)
+        observed = open_regular(str(filename))
         try:
-            os.fsync(directory)
+            if signature(os.fstat(observed)) != signature(os.stat(
+                    filename.name, dir_fd=directory, follow_symlinks=False)):
+                raise ManifestRefused('publication directory changed')
         finally:
-            os.close(directory)
+            os.close(observed)
     finally:
-        os.unlink(temporary)
+        if temporary is not None:
+            os.unlink(temporary, dir_fd=directory)
+        os.close(directory)
     return bytes_sha256hex(raw)
 
 
