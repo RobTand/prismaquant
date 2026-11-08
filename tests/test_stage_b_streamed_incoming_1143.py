@@ -160,28 +160,6 @@ def test_a_windowed_consumer_keeps_its_whole_plane_in_handoff_load(tmp_path):
     assert "streamed_incoming" not in derived["annotations"]["band_serial"]
 
 
-def test_the_streamed_plan_passes_the_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
-    consumer, checkpoint, handoff, _receipt = _spill_consumer(tmp_path)
-    derived = _derived(consumer, handoff, checkpoint)
-    prefix = str(tmp_path)
-    for entry in derived["entries"]:
-        if entry["path"].startswith("/fixture"):
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len("/fixture"):]
-        elif entry["path"].startswith(prefix):
-            entry["path"] = "/mnt/shared/fixture-run" + entry["path"][len(prefix):]
-    validated = core.validate_data_manifest(derived)
-    ranges = tiers.manifest_phase_ranges(validated)
-    assert [item["name"] for item in ranges] == [
-        phase["name"] for phase in derived["read_plan"]["phases"]]
-    assert ranges[-1]["end_bytes"] == derived["read_plan"]["read_bytes"]
-    # The movers walk each phase's entries in the order the pass reads them.
-    walked = [entry["path"] for entry in tiers.manifest_read_entries(validated)]
-    expanded = [derived["entries"][index]["path"]
-                for phase in derived["read_plan"]["phases"]
-                for index in phase["entry_indices"]]
-    assert walked == expanded
 
 
 def test_the_dispatcher_counts_a_spill_capture_by_its_boundary_entries(tmp_path):

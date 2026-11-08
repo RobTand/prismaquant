@@ -52,7 +52,6 @@ from prismaquant.joint_quantum_row import (
 )
 from prismaquant.perturbed_x_cache import (  # noqa: E402
     write_exact_activation_cache_entry)
-from fullstack_pb_generation import pinned_pb_source
 
 N_PROBES = 2
 N_BATCHES = 3
@@ -309,9 +308,7 @@ def test_build_refuses_incomplete_status(tmp_path):
             render_prerequisite=dict(RENDER_PREREQ))
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_seal_deterministic_and_pb_validated(tmp_path):
-    core, tiers, _plans = _pb()
+def test_seal_deterministic_and_phase_bytes_exact(tmp_path):
     record, receipt, parent = _layer2(tmp_path)
     kwargs = dict(strided_boundaries=STRIDED, n_probes=N_PROBES,
                   calib=dict(CALIB),
@@ -325,31 +322,13 @@ def test_seal_deterministic_and_pb_validated(tmp_path):
         record, receipt, parent, **kwargs)
     for entry in manifest["entries"]:
         entry["path"] = "/mnt/shared/fixture" + entry["path"][len("/fixture"):]
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
-    assert ranges, "published PB stages nothing for the executable manifest"
-    assert [r["name"] for r in ranges] == [
-        p["name"] for p in manifest["read_plan"]["phases"]]
-    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
+    phases = manifest["read_plan"]["phases"]
+    assert phases and phases[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+    assert all(phase["bytes"] == sum(manifest["entries"][i]["bytes"]
+               for i in phase["entry_indices"]) for phase in phases)
 
 
-def _pb():
-    """Resolve the same reviewed source pin the reader/SDK fixtures use."""
-    from fullstack_pb_generation import require_paths
 
-    src = Path(require_paths()["src"])
-    import prismabuild.core as core
-    import prismabuild.storage_tiers as tiers
-    import prismabuild.residency_plan as plans
-    for module in (core, tiers, plans):
-        if not Path(module.__file__).resolve().is_relative_to(src.resolve()):
-            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-            # site-packages prismabuild turn the test green without running it.
-            pytest.fail(
-                "a different prismabuild is already imported -- it shadows the "
-                "reviewed generation under test; the interpreter carries a stale "
-                "prismabuild (PQ #1109)")
-    return core, tiers, plans
 
 
 def _bound_inputs(tmp_path, root="/mnt/shared/run"):
@@ -1260,7 +1239,6 @@ def _expert_linears(model, runner):
         profile=runner.profile)
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
     """Real tiny-CPU quantum sequencing: phase before first payload read.
 
@@ -1270,9 +1248,8 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
     Layer 0 carries a nonempty chain ([1]); every run uses 4 probes; the
     replay corpus repeats per (window, probe); one resume run exercises the
     zero-pending window-zero convention. The actual ``QuantumProgress``
-    reporter is instrumented (not hand-appended phase names); the actual PB
-    ``residency_plan.accepted/remaining`` reader stages the manifest-derived
-    phases.
+    reporter is instrumented. The application manifest defines the phases;
+    no PB phase planner runs in this fixture.
 
     Proven legs: checkpoint-plane and boundary entries (verified prefetch
     path/bytes/sha), retained-window hold before replay phases, and
@@ -1316,7 +1293,6 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
 
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     """R3: real >=2 retained-window case on the existing expert runner.
 
@@ -1428,7 +1404,6 @@ def _reported(events):
 def _assert_acceptance_run(events, manifest, record, tmp_path,
                            expect_replay_windows,
                            require_window=True):
-    _, _, plans = _pb()
     names = [p["name"] for p in manifest["read_plan"]["phases"]]
     reported = _reported(events)
     assert reported and reported[0] == "head"
@@ -1463,12 +1438,6 @@ def _assert_acceptance_run(events, manifest, record, tmp_path,
     # fake streaming context (explicitly unqualified leg).
     units = [e[2] for e in events if e[0] == "report"]
     assert all(b >= a for a, b in zip(units, units[1:]))
-    plan_view = {"phases": [{"name": name} for name in names]}
-    for name in deduped:
-        assert plans.accepted(plan_view, name)
-    remaining = [p["name"] for p in plans.remaining(
-        plan_view, deduped[-1])]
-    assert remaining == names[names.index(deduped[-1]):]
     replayed = {int(n.split("-")[1])
                 for n in reported if n.startswith("replay-")}
     if expect_replay_windows == "all":

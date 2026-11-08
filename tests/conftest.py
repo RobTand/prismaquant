@@ -10,7 +10,7 @@ soon as that module's body has run, so it still wins as it did when the fixture
 imported the module itself. A test that never loads the module does not depend
 on it. Fixtures that only some tests use live in helper modules those tests
 import (``lane_table_fixtures``, ``graph_lane_fixtures``,
-``legacy_capture_fixtures``, ``fleet_sdk``, ``fullstack_pb_generation``).
+``legacy_capture_fixtures``, ``fleet_sdk``).
 ``tests/test_conftest_reach.py`` pins all of this.
 
 What is here: the autouse fixtures -- profile detection is process-global
@@ -277,7 +277,7 @@ def _no_prismabuild_import_carried_between_modules():
 
     The per-test restore below cannot see an import made by a module-scoped
     fixture: that fixture is set up before the test's own snapshot is taken.
-    ``tests/test_fleet_acceptance_level1.py``'s ``pb`` fixture imports from a
+    Retired PB source-bound fixtures imported from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
     teardown puts the imports back. This module explicitly owns a detached,
@@ -302,9 +302,8 @@ def _no_prismabuild_import_carried_between_tests():
     and ``sys.modules``. A test that imports PrismaBuild from a sealed
     generation tree left both pointing at it, and every later test on that
     worker then ran against the generation instead of the installed SDK
-    (``tests/test_stageb_one_pass_spill.py`` then
-    ``tests/test_strict_reader_tier_enforcement.py`` refused
-    ``no-claim-context``). ``prismabuild_imports.prismabuild_imports_restored`` says
+    Historical PB strict-reader fixtures then refused ``no-claim-context``.
+    ``prismabuild_imports.prismabuild_imports_restored`` says
     what is put back and why.
     """
     from prismabuild_imports import prismabuild_imports_restored

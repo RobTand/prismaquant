@@ -245,7 +245,6 @@ MOVED = {
         "legacy_v5_contract": "lane_table_fixtures",
         "installed_client_sdk": "fleet_sdk",
         "installed_helper_sdk": "fleet_sdk",
-        "pinned_pb_source": "fullstack_pb_generation",
     },
     "fleet_sdk": {
         "prismabuild_entries": "prismabuild_imports",

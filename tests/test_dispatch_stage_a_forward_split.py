@@ -48,7 +48,6 @@ from dispatch_stage_a_split import (
     seal_forward_round,
     submit,
 )
-from fullstack_pb_generation import pinned_pb_source
 
 TIER = "prismabuild-stage:fixture"
 BUDGET = 1 << 30
@@ -129,17 +128,15 @@ def test_the_prep_stages_the_head_and_each_quantum_the_forward_walk(tmp_path):
         "source_bytes"]
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_the_forward_manifests_pass_the_prismabuild_validator(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
+def test_the_forward_manifests_preserve_exact_phase_bytes(tmp_path):
     _plan, package = _package(tmp_path, tmp_path / "run")
     for described, names in [(package["prep"], ["head"]),
                              *((quantum, ["head", *FORWARD]) for quantum in package["quanta"])]:
         manifest, _ = _phases(described["data_manifest"]["path"])
-        for entry in manifest["entries"]:
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len(str(tmp_path)):]
-        ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(manifest))
+        ranges = manifest["read_plan"]["phases"]
+        assert ranges[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+        assert all(p["bytes"] == sum(manifest["entries"][i]["bytes"]
+                   for i in p["entry_indices"]) for p in ranges)
         assert [item["name"] for item in ranges] == names
 
 

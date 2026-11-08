@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, remaining native scientific fixture consumers.
+Source: `tests/{test_fleet_acceptance_level1,test_quantum_executable_readset,test_stage_minimal_covers,test_stage_cover_mid_copy_mover}.py`,
+based on `ee4a13ae6`.
+Scientific producer, tensor, stream, source-cleanliness, phase-order and recovery
+checks use existing application and immutable staged-input owners. PB-only fleet,
+broker, mover, SDK, pin and watchdog-protocol test support is retired. The
+historical conformance matrix and bundle pin JSON remain unchanged evidence.
+Native Flux has no PB watchdog or incremental mover discovery. Complete inputs
+precede consumers; source/runtime and GPU qualification gates remain separate.
+
 As of: 2026-11-08, native spill and retained-budget fixture bindings.
 Source: `tests/{test_spill_phase_plan_1011,test_stage_b_spill_ceiling_sealed,test_retained_budget_provenance_1022}.py`,
 based on `f81c8179d`.
