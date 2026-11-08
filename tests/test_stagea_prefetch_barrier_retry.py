@@ -24,13 +24,16 @@ from prismaquant.staged_tier_policy import staged_tier_policy_test_context
 from test_streamed_metadata_staged_reads import _deny_pool_opens
 
 
-@pytest.fixture(autouse=True)
+pytestmark = pytest.mark.usefixtures('native_staged_state')
+
+
+@pytest.fixture
 def _native_policy(native_staged_state):
     with staged_tier_policy_test_context('ssd'):
         yield
 
 
-def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monkeypatch):
+def test_stage_a_settles_landed_speculation_inside_loading_phase(tmp_path, monkeypatch, _native_policy):
     torch.manual_seed(85)
     model = _DenseTinyLM().eval()
     for parameter in model.parameters():

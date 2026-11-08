@@ -329,8 +329,9 @@ def test_uncovered_span_refuses_without_pool_reads(staged, campaign, tmp_path, m
     assert not resolver.stages(str(missing))
     _deny_pool_opens(monkeypatch, tmp_path, names=[missing.name])
     with pytest.raises(TierPolicyRefused):
-        with layer_streaming._source_safe_open(str(missing), framework='pt'):
-            pytest.fail('undeclared source granted a reader')
+        with layer_streaming._source_safe_open(str(missing), framework='pt') as reader:
+            reader.get_tensor('w0')
+            pytest.fail('undeclared source granted tensor bytes')
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0
 
 
