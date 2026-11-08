@@ -93,8 +93,8 @@ def _validate_admission(manifest: dict, phase: str, roster: dict) -> None:
         _owned(binding, scientific.MAX_ESTIMATE_EVIDENCE_BYTES)
 
 
-def validate_phase_roster(value: object) -> dict:
-    """Validate the finite ordered cover; staged files use their existing owner."""
+def _phase_roster_structure(value: object) -> dict:
+    """Derive the common finite population without opening child-local inputs."""
     raw = scientific.canonical_json_bytes(value)
     _check.require(len(raw) + 1 <= MAX_ROSTER_BYTES, 'document exceeds byte limit')
     body = scientific.decode_strict_json(raw.decode('utf-8'), where='prefill roster')
@@ -114,7 +114,7 @@ def validate_phase_roster(value: object) -> dict:
         _identifier(role, 'input role'); _binding(binding, f'input {role}')
     tasks = _sequence(body['tasks'], MAX_TASKS, 'tasks')
     children = _sequence(body['children'], MAX_CHILDREN, 'children')
-    task_ids, output_ids, child_ids, cover, staged = [], set(), set(), [], []
+    task_ids, output_ids, child_ids, cover = [], set(), set(), []
     for task in tasks:
         _check.exact_mapping(task, keys=frozenset({'task_id', 'output_id', 'payload'}), where='task')
         task_ids.append(_identifier(task['task_id'], 'task_id'))
@@ -135,13 +135,18 @@ def validate_phase_roster(value: object) -> dict:
         resources = _check.exact_mapping(child['resources'], keys=frozenset({
             'cores', 'memory_gib', 'gpus', 'walltime_s', 'placement',
         }), where='resources')
-        admitted = FluxResources(**resources)
-        if child['staged_input'] is not None:
-            staged.append((child['staged_input'], admitted.placement))
+        FluxResources(**resources)
     _check.require(cover == task_ids, 'children must cover every task exactly once in order')
     validate_runtime(body['runtime'])
-    for binding, placement in staged:
-        validate_staged_binding(binding, placement=placement)
+    return body
+
+
+def validate_phase_roster(value: object) -> dict:
+    """Validate the complete ordered cover and every child's staged admission."""
+    body = _phase_roster_structure(value)
+    for child in body['children']:
+        if child['staged_input'] is not None:
+            validate_staged_binding(child['staged_input'], placement=child['resources']['placement'])
     return body
 
 
@@ -164,7 +169,7 @@ def _read_phase(manifest_binding: dict, phase: str) -> tuple:
     _check.require(phase in scientific.PHASE_BY_NAME, 'unknown phase')
     manifest = scientific.validate_manifest(_read_bound_document(manifest_binding, MAX_ROSTER_BYTES))
     roster_binding = manifest['execution']['phases'][phase]['task_roster']
-    roster = validate_phase_roster(_read_bound_document(roster_binding, MAX_ROSTER_BYTES))
+    roster = _phase_roster_structure(_read_bound_document(roster_binding, MAX_ROSTER_BYTES))
     _check.require(roster['phase_id'] == phase, 'roster phase differs')
     _check.require(roster['plan_context_sha256'] == _plan_context_sha256(manifest),
                    'roster plan context differs')
@@ -203,6 +208,9 @@ def read_task_envelope(binding: dict) -> dict:
                  str(root / 'submission.json'),
                  *(row['path'] for row in roster['inputs'].values())}
     _check.require(body['result_path'] not in protected, 'result path aliases an input')
+    if children[0]['staged_input'] is not None:
+        validate_staged_binding(children[0]['staged_input'],
+                               placement=children[0]['resources']['placement'])
     return body
 
 
@@ -305,12 +313,15 @@ def _phase_records(manifest_binding: dict, phase: str, root: Path) -> dict:
         key = (parent['phase_id'], parent['child_id'])
         _check.require(number not in ids and key not in coordinates, 'duplicate parent coordinate')
         ids.add(number); coordinates.add(key)
-    for expected_envelope, child in zip(envelopes, children):
-        _check.require(read_task_envelope(child['envelope']) == expected_envelope,
-                       'phase envelope differs from frozen layout')
     return dict(root=root, manifest_binding=manifest_binding, manifest=manifest,
                 roster_binding=roster_binding, roster=roster, envelopes=envelopes,
                 submission=submission)
+
+
+def _authenticate_child(records: dict, index: int) -> None:
+    child = records['submission']['children'][index]
+    _check.require(read_task_envelope(child['envelope']) == records['envelopes'][index],
+                   'phase envelope differs from frozen layout')
 
 
 def _parent_from_native(submission: flux_jobs.FluxSubmission, manifest_binding: dict) -> dict:
@@ -456,6 +467,7 @@ def submit_phase(manifest_binding: dict, *, phase: str, checkout: Path,
 
 
 def _selected_child(records: dict, index: int, saved: flux_jobs.FluxSubmission) -> tuple:
+    _authenticate_child(records, index)
     child = records['submission']['children'][index]
     envelope = records['envelopes'][index]
     stdout, _ = read_document(saved.record_dir / 'stdout', 64 << 20)
@@ -534,6 +546,7 @@ def collect_phase(manifest_binding: dict, *, phase: str, record_dir: Path, wait:
             execution = flux_jobs.collect_job(saved, wait=wait)
             outcomes.append(execution)
             row['execution'] = _execution_value(execution)
+            _authenticate_child(records, index)
             flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
                                           **_expected_child(records, index))
             if execution.status == 'succeeded' and not execution.query_error and parents_ok:
@@ -579,6 +592,7 @@ def cancel_phase(manifest_binding: dict, *, phase: str, record_dir: Path) -> dic
     for index, child in enumerate(records['submission']['children']):
         try:
             saved = flux_jobs.load_submission(Path(child['record_dir']))
+            _authenticate_child(records, index)
             flux_jobs.verify_native_launch(saved, max_evidence_bytes=16 << 20,
                                           **_expected_child(records, index))
             outcome = flux_jobs.cancel_job(saved)

@@ -259,8 +259,9 @@ def test_measurement_refuses_invalid_science_and_unbounded_artifacts(kind):
         scientific.validate_task_measurement(value, payload=payload())
 
 
-def envelope_fixture(tmp_path):
+def envelope_fixture(tmp_path, *, staged=None):
     manifest, phase, value, _, _ = admission_fixture(tmp_path)
+    value['children'][0]['staged_input'] = staged
     value['plan_context_sha256'] = prefill._plan_context_sha256(manifest)
     roster_binding = prefill.write_phase_roster(value, tmp_path / 'roster.json')
     manifest['execution']['phases'][phase]['task_roster'] = roster_binding
@@ -452,8 +453,8 @@ def test_result_measurement_artifacts_use_actual_known_bytes(tmp_path, kind):
         prefill._authenticate_measurements(document)
 
 
-def phase_records_fixture(tmp_path):
-    manifest, roster_value, original = envelope_fixture(tmp_path)
+def phase_records_fixture(tmp_path, *, staged=None):
+    manifest, roster_value, original = envelope_fixture(tmp_path, staged=staged)
     root = tmp_path / 'phase'
     root.mkdir()
     children = []
@@ -536,14 +537,51 @@ def test_dependency_phase_must_belong_to_declared_dag_before_native_lookup(tmp_p
 
 
 @pytest.mark.parametrize('kind', ['changed-envelope', 'missing-envelope', 'duplicate-json'])
-def test_phase_records_require_actual_original_envelope_and_strict_document(tmp_path, kind):
+def test_child_authority_requires_original_envelope_and_common_strict_document(tmp_path, kind):
     binding, phase, root, _ = phase_records_fixture(tmp_path)
     prefill._phase_records(binding, phase, root)
     if kind == 'changed-envelope': (root / 'envelope-0000.json').write_bytes(b'{}')
     elif kind == 'missing-envelope': (root / 'envelope-0001.json').unlink()
     else: (root / 'submission.json').write_bytes(b'{"schema":"x","schema":"y"}')
     with pytest.raises((ValueError, OSError)):
-        prefill._phase_records(binding, phase, root)
+        records = prefill._phase_records(binding, phase, root)
+        prefill._authenticate_child(records, 1 if kind == 'missing-envelope' else 0)
+
+
+@pytest.mark.parametrize('kind', ['missing', 'changed'])
+def test_common_population_survives_child_local_envelope_refusal(tmp_path, kind):
+    binding, phase, root, submission = phase_records_fixture(tmp_path)
+    target = root / 'envelope-0000.json'
+    if kind == 'missing':
+        target.unlink()
+    else:
+        target.write_bytes(b'{}')
+    records = prefill._phase_records(binding, phase, root)
+    assert records['submission'] == submission
+    assert [child['child_id'] for child in records['submission']['children']] == ['child/0', 'child/2']
+    prefill._authenticate_child(records, 1)
+    with pytest.raises((OSError, ValueError)):
+        prefill._authenticate_child(records, 0)
+
+
+def test_child_local_staged_refusal_keeps_healthy_envelope_and_common_population(tmp_path):
+    from staged_native_fixtures import publish_inputs
+    stage = tmp_path / 'stage'
+    stage.mkdir()
+    source = stage / 'known.bin'
+    source.write_bytes(b'independent staged bytes')
+    staged = publish_inputs(stage, [source])
+    binding, phase, root, submission = phase_records_fixture(tmp_path, staged=staged)
+    prefill.read_task_envelope(submission['children'][0]['envelope'])
+    prefill.read_task_envelope(submission['children'][1]['envelope'])
+    Path(staged['read_contract_path']).write_bytes(b'changed owned read contract')
+    records = prefill._phase_records(binding, phase, root)
+    assert records['submission'] == submission
+    prefill._authenticate_child(records, 1)
+    with pytest.raises(ValueError):
+        prefill._authenticate_child(records, 0)
+    with pytest.raises(ValueError):
+        prefill.validate_phase_roster(records['roster'])
 
 
 def test_phase_writer_refuses_replacement_directory_before_writing(tmp_path):
