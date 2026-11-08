@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, scientific native-consumer coverage under parent review.
+Source: `prismaquant/source_generation.py` and its reader/admission tests,
+based on `983b08719`.
+Scientific reader controls independently join both runtime inputs, source
+config, every granted-resource axis and every actual staged delivery. CPU
+fixtures retain exact node/role/artifact binding refusals and cannot issue
+full64 or independent-root qualification. The parent native proof at `983b08719`
+feeds actual verified native bytes into these artifact consumers. Runtime v5
+and the scientific fixtures remain subject to independent review; the current
+Btrfs interpreter is unqualified by its mapped-device fence.
+
 As of: 2026-11-08, current execution-scope authentication.
 Source: `prismaquant/flux_jobs.py`, based on `cabd4b20e4f8a2c34dab64c77caabb21e440cb79`.
 Active original-source context additionally requires started nonterminal native

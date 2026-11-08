@@ -449,7 +449,8 @@ def _seal(monkeypatch, capsys, mode, join, refusal):
 
 @MODES
 @pytest.mark.parametrize('damage', [None, 'foreign-node', 'restamped-snapshot',
-                                    'null-compatibility', 'target-source', 'target-runtime'])
+                                    'null-compatibility', 'target-source', 'target-runtime',
+                                    'executed-commit-only', 'compatibility-binding-only'])
 def test_reader_source_snapshot_cannot_bridge_family_acceptance(
         authority_case, monkeypatch, capsys, damage, mode):
     """The reader's executed snapshot binds through the same family owner.
@@ -495,6 +496,12 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
     elif damage == 'target-source':
         accepted[reader['node_id']] = dict(family, target_prismaquant_source_sha256='0' * 64)
         expected = 'qualified member actual target source implementation'
+    elif damage == 'executed-commit-only':
+        request['source']['commit'] = 'e' * 40
+        expected = 'original actual qualified source snapshot'
+    elif damage == 'compatibility-binding-only':
+        reader['compatibility'] = _bound(case['tmp'] / 'independently-changed-compat.json', {'accepted': False})
+        expected = 'original source-family proof binding'
     else:
         accepted[reader['node_id']] = dict(family, target_runtime_sha256='0' * 64)
         expected = 'qualified member actual target runtime'

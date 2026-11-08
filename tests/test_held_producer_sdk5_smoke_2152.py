@@ -75,6 +75,21 @@ def _selected_runtime_input(selected):
 
 
 @pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('axis,value', [('cores', 2), ('memory_gib', 2), ('gpus', 1),
+                                      ('walltime_s', 61), ('placement', 'aarch64')])
+def test_reader_reservation_checks_each_native_resource_axis(authority_case, monkeypatch, mode, axis, value):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    launch = copy.deepcopy(selected.launch)
+    assert launch['resources'][axis] != value
+    launch['resources'][axis] = value
+    with pytest.raises(RuntimeError, match='selected reader actual producer reservation'):
+        sg._require_original_reader_producer(receipt, authority, replace(selected, launch=launch), expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
 @pytest.mark.parametrize('role', ['observed-runtime', 'selected-runtime'])
 @pytest.mark.parametrize('damage', ['missing', 'path', 'sha256', 'changed-bytes'])
 def test_each_reader_runtime_input_is_independently_bound(authority_case, monkeypatch, mode, role, damage):
