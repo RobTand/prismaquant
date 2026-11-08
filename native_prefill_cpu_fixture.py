@@ -44,7 +44,16 @@ def prepare(directory):
     assert value == 528
     # Resolve lazy metadata/platform imports exactly as the publication owner
     # does before recording the immutable expected runtime.
+    before = native_results.measure_runtime()
+    prefill.flux_jobs._source_git(Path.cwd(), 'rev-parse', 'HEAD')
+    prefill.flux_jobs._profile_identity()
+    native_results.publish_staged_json(root / 'prepared-native-document.json', {'fixture': 'native-writer'})
     runtime = native_results.measure_runtime()
+    (root / 'preflight-runtime-delta.json').write_text(json.dumps(dict(
+        added_imports=sorted(set(runtime['imports']) - set(before['imports'])),
+        removed_imports=sorted(set(before['imports']) - set(runtime['imports'])),
+        changed_imports=sorted(name for name in before['imports']
+            if before['imports'][name] != runtime['imports'].get(name))), sort_keys=True) + '\n')
     if runtime != native_results.measure_runtime():
         raise RuntimeError('fixture runtime measurement is not stable')
     (root / 'runtime.json').write_text(json.dumps(runtime, sort_keys=True) + '\n')
@@ -74,6 +83,7 @@ def execute(binding):
     artifact = Path(envelope['phase_record_dir']) / ('known-' + envelope['child_id'] + '.bin')
     with artifact.open('xb') as stream:
         stream.write(raw)
+    native_results.execution_context()
     measured = native_results.measure_runtime()
     (record / 'fixture-runtime.json').write_text(json.dumps(measured, sort_keys=True) + '\n')
     if measured != roster['runtime']:
@@ -87,7 +97,12 @@ def execute(binding):
             artifacts=[artifact_binding])
         results.append(dict(task_id=task['task_id'], output_id=task['output_id'],
             value=measurement, value_sha256=scientific.canonical_sha256(measurement)))
-    prefill.publish_task_results(binding, results=results)
+    try:
+        prefill.publish_task_results(binding, results=results)
+    except Exception:
+        (record / 'fixture-runtime-after-error.json').write_text(json.dumps(
+            native_results.measure_runtime(), sort_keys=True) + '\n')
+        raise
     print('fixture-published', flush=True)
     release(control['release_after'])
     if control['mode'] == 'late-failure':
