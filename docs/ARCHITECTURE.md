@@ -1,10 +1,10 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-08, R1 native runtime v4 content authority under review.
+As of: 2026-11-08, R1 native runtime v5 content authority under review.
 Source: `prismaquant/{native_results,file_identity,digests,source_generation}.py`,
 based on parent `ccf8ac2340f8f95b4268b60f0515e2b8624902c5`.
 `measure_runtime` and `validate_runtime` retain their public signatures and use
-`prismaquant.flux_result_runtime.v4`; old v1/v2/v3 runtime evidence is refused.
+`prismaquant.flux_result_runtime.v5`; old v1/v2/v3/v4 runtime evidence is refused.
 The finite declared distribution roster measures complete durable package,
 metadata and bundled-library contents, including nested code/data and empty files.
 Actual directory census detects additions/removals outside RECORD. Declared
@@ -21,7 +21,7 @@ The positive native CPU proof uses a scoped static fixture interpreter with
 its GNU_STACK executable permission removed and the exact binary digest recorded.
 Original-source declarations include safetensors, numpy, sympy and mpmath beside
 torch, transformers and Tessera. Descriptor streaming, finite file/root/count/byte
-budgets, pre/post file identity and final roster/import/mapping checks refuse
+budgets, pre/post file identity and full directory-stat/import/mapping checks refuse
 races and unsupported owners. There is no runtime cache or second source archive.
 The existing durable-package filter now lives in the light file_identity owner;
 the weight-cache roster and behavior are preserved. R2/R3/R5, scientific/full64,

@@ -27,7 +27,7 @@ _contract = Contract(ValueError, 'native result: ')
 SELECTION_SCHEMA = 'prismaquant.flux_result_selection.v1'
 PUBLICATION_SCHEMA = 'prismaquant.flux_result_publication.v1'
 PRODUCER_SCHEMA = 'prismaquant.flux_result_producer.v1'
-RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v4'
+RUNTIME_SCHEMA = 'prismaquant.flux_result_runtime.v5'
 ANNOUNCEMENT_SCHEMA = 'prismaquant.flux_result_announcement.v1'
 ANNOUNCEMENT_PREFIX = b'FLUX_RESULT_PUBLICATION '
 SELECTION_KEYS = frozenset({'schema', 'job_id', 'record_dir', 'launch_sha256', 'publication',
@@ -154,7 +154,7 @@ def _runtime_tree(root, *, stdlib=False):
             raise ValueError('native runtime tree has non-directory or symlink owner')
         # Opening through the shared component walker also rejects ancestor
         # symlinks; files themselves are opened again by the streaming owner.
-        directories[str(relative)] = (info.st_dev, info.st_ino)
+        directories[str(relative)] = file_stat_signature(info)
         if len(files) + len(directories) > MAX_RUNTIME_ENTRIES:
             raise ValueError('native runtime tree entry count exceeds bound')
         with os.scandir(current) as entries:
@@ -403,7 +403,7 @@ def measure_runtime(*, dependencies: tuple[str, ...] = ()) -> dict:
 
 
 def validate_runtime(value):
-    """Validate v4 evidence structurally; equality requires independent measurement."""
+    """Validate v5 evidence structurally; equality requires independent measurement."""
     _result_fields(value, {'schema', 'python', 'dependencies', 'stdlib', 'imports',
                            'libraries', 'files'}, 'runtime')
     _contract.require(value['schema'] == RUNTIME_SCHEMA, 'runtime schema differs')

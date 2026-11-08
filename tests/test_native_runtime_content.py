@@ -1,4 +1,4 @@
-"""Real finite content and import-owner checks for native runtime v4."""
+"""Real finite content and import-owner checks for native runtime v5."""
 import copy
 import hashlib
 import importlib
@@ -208,7 +208,8 @@ def test_bounded_stream_hash_allocates_chunks_and_refuses_growth():
 
 
 @pytest.mark.parametrize('schema', ['prismaquant.flux_result_runtime.v1',
-    'prismaquant.flux_result_runtime.v2', 'prismaquant.flux_result_runtime.v3'])
+    'prismaquant.flux_result_runtime.v2', 'prismaquant.flux_result_runtime.v3',
+    'prismaquant.flux_result_runtime.v4'])
 def test_old_runtime_evidence_is_not_restamped(runtime_layout, schema):
     runtime = observe()
     old = copy.deepcopy(runtime)
@@ -463,3 +464,34 @@ def test_runtime_fixture_restores_incoming_import_owners(tmp_path, monkeypatch, 
             assert sys.modules[name] is original[name]
     assert nr._runtime_imports is original_imports
     assert sys.path == original_path
+
+
+def test_transient_roster_mutation_refuses_after_names_are_restored(runtime_layout, monkeypatch):
+    before = observe()
+    directory = runtime_layout['root'] / 'reviewpkg/data'
+    original_names = sorted(p.name for p in directory.iterdir())
+    original_signature = nr.file_stat_signature(directory.stat())
+    digest = nr.file_digest_sha256hex
+    fired = False
+
+    def transient_mutation(handle, **kwargs):
+        nonlocal fired
+        result = digest(handle, **kwargs)
+        if not fired:
+            fired = True
+            temporary = directory / 'transient.py'
+            temporary.write_bytes(b'answer = 43\n')
+            temporary.unlink()
+            # Set an independently distinct timestamp; filesystem clock
+            # resolution cannot decide whether this regression exercises it.
+            current = directory.stat()
+            os.utime(directory, ns=(current.st_atime_ns, original_signature[3] + 1_000_000_000))
+            assert sorted(p.name for p in directory.iterdir()) == original_names
+            assert nr.file_stat_signature(directory.stat()) != original_signature
+        return result
+
+    assert before['files'][str(directory / 'table.bin')]['sha256'] == hashlib.sha256(b'\x01\x03\x05\x07').hexdigest()
+    monkeypatch.setattr(nr, 'file_digest_sha256hex', transient_mutation)
+    with pytest.raises(ValueError, match='roster changed'):
+        observe()
+    assert fired

@@ -87386,7 +87386,6 @@ pq_py_test(
         "native_carrier_fixture.py",
         "native_dispatch_fixture.py",
         "native_original_fixtures.py",
-        "native_runtime_fixtures.py",
         "native_runtime_observer.py",
         "native_source_contract_fixtures.py",
         "nvfp4_served_qdq_fixtures.py",
@@ -88801,6 +88800,7 @@ pq_py_library(
         "//:experiments/original_cuda_control",
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        ":native_runtime_fixtures",
         "@pq_pip//pytest",
     ],
 )
