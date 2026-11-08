@@ -12,7 +12,7 @@ from prismaquant.layer_streaming import _get_layer_list, _head_prefixes, _resolv
 from prismaquant.model_profiles import detect_profile
 from prismaquant.source_read_plan import read_safetensors_header, tensor_span
 from test_streamed_metadata_staged_reads import _activate, _deny_pool_opens
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from test_streamed_metadata_staged_reads import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 

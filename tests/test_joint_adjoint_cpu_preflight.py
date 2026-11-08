@@ -1,6 +1,7 @@
 """The same capture CLI can audit CPU startup without capture or price output."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,8 @@ from prismaquant.model_profiles import detect_profile
 from prismaquant.staged_tier_policy import TierPolicyRefused
 from test_stage_a_head_skip import _calibration
 from test_streamed_metadata_staged_reads import _activate, _deny_pool_opens
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from test_streamed_metadata_staged_reads import _forget_state  # noqa: F401
+from prismaquant.staged_manifest import READ_ENV
 from test_stagea_readset_source_coverage import campaign  # noqa: F401
 
 pytestmark = pytest.mark.own_process
@@ -71,8 +73,8 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
         *[{'name': f'{walk}-{layer:03d}', 'entry_indices': [source_indices[layer]]}
           for walk in ('forward', 'chain') for layer in range(layer_count)]]}
     _activate(tmp_path, monkeypatch, manifest, skip={str(root / name) for name in missing})
-    # Only the claim identity boundary is doubled; source selection and
-    # staged byte reads are real. The CAS decoder has separate byte tests.
+    # The source schedule is supplied at this seam; staged bytes and source
+    # selection are real. This fixture is not native launch authority evidence.
     monkeypatch.setattr('prismaquant.staged_lease.load_sealed_manifest',
                         lambda _digest: manifest)
     _deny_pool_opens(monkeypatch, root)
@@ -93,7 +95,7 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
     output = tmp_path / 'must-not-create-capture'
     args = ['--plan', str(tmp_path / 'plan.json'), '--plan-sha256', '1' * 64,
             '--prepared', str(prepared), '--prepared-sha256', manifest['entries'][0]['sha256'],
-            '--data-manifest-sha256', MANIFEST, '--output-root', str(output),
+            '--data-manifest-sha256', os.environ[READ_ENV], '--output-root', str(output),
             '--cpu-input-preflight']
     if diagnostic_path is not None:
         args += ['--selected-row-diagnostic', str(diagnostic_path),
@@ -156,7 +158,7 @@ def test_cpu_preflight_checks_each_selected_tensor_in_its_consumption_phase(
         tmp_path, monkeypatch, capsys, phase_name, defect):
     _plan, args, output = _case(tmp_path, monkeypatch)
     from prismaquant.staged_lease import load_sealed_manifest
-    manifest = load_sealed_manifest(MANIFEST)
+    manifest = load_sealed_manifest(os.environ[READ_ENV])
     phase = next(row for row in manifest['read_plan']['phases'] if row['name'] == phase_name)
     source_index = phase['entry_indices'][0]
     if defect == 'missing':
@@ -224,7 +226,7 @@ def test_preflight_reads_the_actual_independent_fisher_draw(
 def test_cli_does_not_derive_its_schedule_from_the_claim(tmp_path, monkeypatch, capsys, phase_name):
     _plan, args, output = _case(tmp_path, monkeypatch)
     from prismaquant.staged_lease import load_sealed_manifest
-    manifest = load_sealed_manifest(MANIFEST)
+    manifest = load_sealed_manifest(os.environ[READ_ENV])
     manifest['read_plan']['phases'] = [row for row in manifest['read_plan']['phases']
                                      if row['name'] != phase_name]
     assert entry.main(args) == stage_a.EXIT_IDENTITY_REFUSED
@@ -243,7 +245,7 @@ def test_cli_reads_and_honors_the_bound_diagnostic_variant(tmp_path, monkeypatch
         assert 'owned bytes' in reason
     else:
         from prismaquant.staged_lease import load_sealed_manifest
-        manifest = load_sealed_manifest(MANIFEST)
+        manifest = load_sealed_manifest(os.environ[READ_ENV])
         manifest['read_plan']['phases'] = [row for row in manifest['read_plan']['phases']
                                          if row['name'] != 'chain-000']
         assert entry.main(args) == 0

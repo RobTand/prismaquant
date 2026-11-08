@@ -13,11 +13,8 @@ has a config:
 * with the config's header read removed from the manifest, the run refuses,
   naming it, and never opens its pool path.
 
-The strict binding here is ``StagedPreparationReads`` over a resolver double
-that answers ``staged_read``/``staged_range`` with copies of exactly the
-manifest's entries; the lease read is replaced by a plain read of the copy.
-``test_stage_b_prep_staged_reads_1092`` drives the real residency map and
-reader lease under pbtest; this file needs no PrismaBuild.
+The strict binding uses the existing immutable materializer and real staged
+reader. The independently generated plain bounds remain the expected values.
 """
 from __future__ import annotations
 
@@ -36,6 +33,9 @@ for _entry in (ROOT, ROOT / "tools"):
         sys.path.insert(0, str(_entry))
 
 from prismaquant import stage_b_prep_io as io  # noqa: E402
+from prismaquant.staged_manifest import READ_ENV  # noqa: E402
+from staged_native_fixtures import native_staged_state  # noqa: E402
+from test_stage_b_prep_staged_reads_1092 import _stage_manifest  # noqa: E402
 from test_quantum_executable_readset import (  # noqa: E402
     _exec_campaign, _exec_receipt)
 from test_stage_b_prep_io_1070 import (  # noqa: E402
@@ -49,10 +49,8 @@ SPILL = ("--replay-mode", "spill", "--replay-regime", "capture_batch=2")
 
 
 @pytest.fixture(autouse=True)
-def _unbind_staged_reads():
-    io.reset_staged_reads_for_tests()
+def _unbind_staged_reads(native_staged_state):
     yield
-    io.reset_staged_reads_for_tests()
 
 
 def _sha(path) -> str:
@@ -83,51 +81,8 @@ def _spill_campaign(pool: Path):
     return campaign, receipt_path, model / "config.json"
 
 
-class _StageDouble:
-    """The residency resolver's two lookups, answered from stage copies."""
-
-    def __init__(self, entries: dict):
-        self.entries = entries
-
-    def staged_read(self, path, *, expected_sha256=None):
-        return self.entries.get((os.path.normpath(str(path)), 0))
-
-    def staged_range(self, path, offset, nbytes):
-        entry = self.entries.get((os.path.normpath(str(path)), offset))
-        return entry if entry is not None and entry["bytes"] >= nbytes else None
-
-
-def _bind_stage(tmp_path, monkeypatch, manifest, digest, *, skip=()):
-    """Copy every manifest entry to the stage and bind strict reads to it.
-
-    ``skip`` names declared paths left out, as if the manifest did not
-    declare them. Returns ``{declared path: stage copy}``.
-    """
-    from prismaquant import staged_whole_file
-
-    stage = tmp_path / "stage"
-    stage.mkdir()
-    entries, copies = {}, {}
-    for number, entry in enumerate(manifest["entries"]):
-        path = os.path.normpath(entry["path"])
-        if path in skip:
-            continue
-        with open(path, "rb") as handle:
-            handle.seek(entry["offset"])
-            blob = handle.read(entry["bytes"])
-        copy = stage / f"{number:03d}-{Path(path).name}"
-        copy.write_bytes(blob)
-        entries[(path, entry["offset"])] = {
-            "stage_path": str(copy), "offset": entry["offset"],
-            "bytes": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
-        copies[path] = str(copy)
-    monkeypatch.setattr(staged_whole_file, "read_staged_entry",
-                        lambda resolver, path, staged, *, label, max_bytes=None:
-                        Path(staged["stage_path"]).read_bytes())
-    reads = io.StagedPreparationReads(_StageDouble(entries), manifest_sha256=digest)
-    monkeypatch.setattr(io, "_STAGED_READS", reads)
-    io._install_bound_reader(reads)
-    return copies
+def _bind_stage(tmp_path, monkeypatch, manifest, *, skip=()):
+    return _stage_manifest(tmp_path, monkeypatch, manifest, skip=skip)
 
 
 def _layout(tmp_path):
@@ -167,8 +122,8 @@ def test_a_strict_run_seals_the_spill_bound_reading_the_config_off_the_stage(
     expected = _bounds(plain / "records")
     assert len(expected) == 4
 
-    copies = _bind_stage(tmp_path, monkeypatch, manifest,
-                         argv[argv.index("--data-manifest-sha256") + 1])
+    copies = _bind_stage(tmp_path, monkeypatch, manifest)
+    argv[argv.index('--data-manifest-sha256') + 1] = os.environ[READ_ENV]
     code, opened = _recorded_reads(lambda: regen.main(argv))
     assert code == 0
     bounds = _bounds(pool / "metadata-generation" / "records")
@@ -186,8 +141,8 @@ def test_a_strict_run_without_the_config_header_read_refuses(
     import regenerate_joint_quanta as regen
 
     _pool, _campaign, _receipt, config, manifest, argv = _layout(tmp_path)
-    _bind_stage(tmp_path, monkeypatch, manifest,
-                argv[argv.index("--data-manifest-sha256") + 1], skip={str(config)})
+    _bind_stage(tmp_path, monkeypatch, manifest, skip={str(config)})
+    argv[argv.index('--data-manifest-sha256') + 1] = os.environ[READ_ENV]
     capsys.readouterr()
     code, opened = _recorded_reads(lambda: regen.main(argv))
     assert code == regen.EXIT_REFUSED
