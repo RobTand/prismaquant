@@ -356,11 +356,21 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
     if staged is not None and '_resolver' in staged:
         from .staged_whole_file import read_staged_entry
         if declared_signature is not None:
-            raise StagedReadRefused('legacy canonical stat requirement needs native source-authority migration')
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode) or _stat_signature(before) != declared_signature:
+                raise StagedReadRefused('declared file changed before staged content read')
         started = time.monotonic()
         owner = staged['_resolver']
         raw = read_staged_entry(owner, path, staged, label='io-engine', sealed=sealed,
                                 max_bytes=limit, lease=lease)
+        try:
+            if declared_signature is not None:
+                after = path.lstat()
+                if not stat.S_ISREG(after.st_mode) or _stat_signature(after) != declared_signature:
+                    raise StagedReadRefused('declared file changed during staged content read')
+        except BaseException:
+            _close_sealed(raw)
+            raise
         if timing is not None:
             timing['read_s'] = time.monotonic() - started
         receipt = {'path': str(path), 'bytes': len(raw), 'sha256': staged['sha256'],

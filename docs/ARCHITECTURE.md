@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, native staged reads with declared metadata fences.
+Source: `prismaquant/io_engine.py`, based on `f4d4166b7`.
+Retained PWC windows keep their explicit canonical regular-file metadata fence
+before and after native staged reads. Payload bytes still come from the staged
+descriptor and pass the existing immutable size, digest and identity checks.
+Post-read metadata refusal closes a sealed buffer. Native callers without a
+declared metadata signature remain independent of the canonical path. This
+repairs the reached retained-window transport and grants no source/runtime,
+performance or production qualification.
+
 As of: 2026-11-08, failed staged-shard setup ownership.
 Source: `prismaquant/residency_shard_reader.py`, based on `9401b7e3f`.
 An entered reader window stays with shard setup until its checked descriptor

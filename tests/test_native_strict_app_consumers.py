@@ -18,6 +18,61 @@ from test_native_strict_reader_contract import _forbid_source
 pytestmark = pytest.mark.usefixtures('native_staged_state')
 
 
+@pytest.mark.parametrize('change', ['stable', 'before', 'during', 'missing', 'symlink'])
+def test_native_read_preserves_explicit_canonical_metadata_fence(tmp_path, monkeypatch, change):
+    from prismaquant import staged_whole_file
+    from prismaquant.file_identity import file_stat_signature
+    from prismaquant.residency_map import StagedReadRefused
+
+    expected = b'independently-known-prepared-render\x00\xff'
+    source = tmp_path / 'canonical.bin'
+    source.write_bytes(expected)
+    declared = file_stat_signature(source.lstat())
+    resolver = bind(monkeypatch, publish_inputs(tmp_path, [source]))
+    entry = resolver.staged_read(source, expected_sha256=sha(expected))
+    if change == 'before':
+        os.truncate(source, len(expected) + 1)
+    elif change == 'missing':
+        source.unlink()
+    elif change == 'symlink':
+        moved = source.with_suffix('.original')
+        source.rename(moved)
+        source.symlink_to(moved)
+    opened = _forbid_source(monkeypatch, source)
+    buffers = []
+    original = staged_whole_file.read_staged_entry
+
+    def changed_after_read(*args, **kwargs):
+        raw = original(*args, **kwargs)
+        buffers.append((raw, raw._fd))
+        os.truncate(source, len(expected) + 1)
+        return raw
+
+    if change == 'during':
+        monkeypatch.setattr(staged_whole_file, 'read_staged_entry', changed_after_read)
+    with staged_tier_policy_test_context('ssd'):
+        if change == 'stable':
+            raw, receipt, signature = io_engine.read_file(source, len(expected),
+                declared_signature=declared, staged=entry, sealed=True)
+            try:
+                raw.require_sealed()
+                assert bytes(raw) == expected
+                assert signature == declared
+                assert receipt['sha256'] == sha(expected) and receipt['serving_tier'] == 'stage'
+            finally:
+                raw.close()
+        else:
+            with pytest.raises((StagedReadRefused, FileNotFoundError)):
+                io_engine.read_file(source, len(expected),
+                    declared_signature=declared, staged=entry, sealed=True)
+    if change == 'during':
+        assert len(buffers) == 1 and buffers[0][0]._fd is None
+        with pytest.raises(OSError):
+            os.fstat(buffers[0][1])
+    assert opened == [] and resolver._windows == 0
+    assert resolver.report()['bytes_from_pool'] == 0
+
+
 def _pwc(tmp_path):
     key = ('unit0', 'TESSERA_E4M3_K1_R1024')
     expected = torch.arange(16, dtype=torch.bfloat16).reshape(4, 4)
