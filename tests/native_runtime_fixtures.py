@@ -38,11 +38,12 @@ def runtime_layout(tmp_path, monkeypatch):
     # not list its nested extension/data; the tree census must discover them.
     monkeypatch.syspath_prepend(str(root))
     for name in ('reviewpkg', 'reviewpkg.numerics'):
-        monkeypatch.delitem(sys.modules, name, raising=False)
+        # Record the incoming owner once; importing must not become the
+        # monkeypatch restoration target.
+        monkeypatch.setitem(sys.modules, name, None)
+        monkeypatch.delitem(sys.modules, name)
     package = importlib.import_module('reviewpkg')
     numerics = importlib.import_module('reviewpkg.numerics')
-    monkeypatch.setitem(sys.modules, 'reviewpkg', package)
-    monkeypatch.setitem(sys.modules, 'reviewpkg.numerics', numerics)
     assert package.answer() == 42
     real_imports = nr._runtime_imports
     real_libraries = nr._runtime_libraries

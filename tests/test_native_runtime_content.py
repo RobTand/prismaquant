@@ -234,9 +234,9 @@ def test_declared_distribution_alias_uses_only_its_fully_measured_roots(runtime_
     helper.write_bytes(raw)
     with (root / 'reviewpkg-1.dist-info/RECORD').open('ab') as record:
         record.write(b'reviewhelper.py,,\n')
-    monkeypatch.delitem(sys.modules, 'reviewhelper', raising=False)
+    monkeypatch.setitem(sys.modules, 'reviewhelper', None)
+    monkeypatch.delitem(sys.modules, 'reviewhelper')
     module = importlib.import_module('reviewhelper')
-    monkeypatch.setitem(sys.modules, 'reviewhelper', module)
     assert module.answer == 84
     runtime_layout['imported']['reviewpkg.helper_alias'] = nr._runtime_module_location(module)
     runtime = observe()
@@ -432,3 +432,34 @@ def test_specless_file_cannot_claim_an_imported_implementation(runtime_layout, m
     monkeypatch.setattr(module,'__spec__',None)
     with pytest.raises(ValueError, match='unsupported specless'):
         nr._runtime_module_location(module)
+
+
+@pytest.mark.parametrize('incoming_owner', ['absent', 'existing'])
+def test_runtime_fixture_restores_incoming_import_owners(tmp_path, monkeypatch, incoming_owner):
+    from types import ModuleType
+
+    names = ('reviewpkg', 'reviewpkg.numerics')
+    original = {name: ModuleType(name) for name in names}
+    for name in names:
+        monkeypatch.setitem(sys.modules, name, original[name])
+        if incoming_owner == 'absent':
+            monkeypatch.delitem(sys.modules, name)
+    original_imports = nr._runtime_imports
+    original_path = list(sys.path)
+    inner = pytest.MonkeyPatch()
+    fixture = runtime_layout.__wrapped__(tmp_path, inner)
+    try:
+        layout = next(fixture)
+        assert layout['package'].answer() == 42
+        for name in names:
+            assert sys.modules[name] is not original[name]
+    finally:
+        fixture.close()
+        inner.undo()
+    for name in names:
+        if incoming_owner == 'absent':
+            assert name not in sys.modules
+        else:
+            assert sys.modules[name] is original[name]
+    assert nr._runtime_imports is original_imports
+    assert sys.path == original_path
