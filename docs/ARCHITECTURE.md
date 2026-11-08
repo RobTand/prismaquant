@@ -6,10 +6,10 @@ Source: parent `6dc0d5e1bddd2aa81dc55f91f193fb57471e1dff`,
 and their direct CPU fixtures/qualification producers.
 The app-owned `prismaquant.flux_result_selection.v1` selects one known native
 ID, record directory, launch SHA256 and immutable publication path/digest/length.
-`native_results` joins independent launch intent to the actual original jobspec,
+`native_results` joins independent launch intent to the retained actual original jobspec,
 then requires successful native status, complete events, allocation and cleanup.
 The publication binds finite named input/artifact rosters, execution-measured
-interpreter and installed dependency metadata/RECORD, and exactly one retained
+interpreter, installed dependency metadata/RECORD and entry-module bytes, and exactly one retained
 publisher announcement. Artifact reads check length, digest and file identity.
 ASCII/Unicode f58 IDs share native identity. Resume reads the saved ID and never
 submits. Conclusive native failure survives cleanup errors; query/evidence errors

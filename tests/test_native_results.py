@@ -23,6 +23,12 @@ def test_measured_interpreter_is_the_actual_executable():
         raw = Path(package[role]['path']).read_bytes()
         assert package[role]['bytes'] == len(raw)
         assert package[role]['sha256'] == hashlib.sha256(raw).hexdigest()
+    import pytest as installed
+    entry = package['modules']['pytest/__init__.py']
+    raw = Path(installed.__file__).read_bytes()
+    assert entry['path'] == str(Path(installed.__file__).resolve())
+    assert entry['bytes'] == len(raw)
+    assert entry['sha256'] == hashlib.sha256(raw).hexdigest()
 
 
 @pytest.mark.parametrize('raw', [b'{"x":1,"x":2}', b'{"x":NaN}', b'{"x":Infinity}', b'{"x":-Infinity}'])

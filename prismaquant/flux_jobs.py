@@ -174,12 +174,6 @@ def job_id_number(value):
     return number
 
 
-def _saved_submission_matches(submission):
-    saved = load_submission(submission.record_dir)
-    return (saved.record_dir == submission.record_dir and saved.launch_sha256 == submission.launch_sha256
-            and job_id_number(saved.job_id) == job_id_number(submission.job_id))
-
-
 def _environment(record_dir, supplied):
     environment = {'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
                    'OUT': str(record_dir), 'FLUX_SCRATCH': '/tmp/flux-vanilla',
@@ -345,6 +339,10 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
 
 def load_submission(record_dir: Path) -> FluxSubmission:
     """Reconnect to a saved ID only; never submit or infer a producer by name."""
+    return _read_submission(record_dir)[0]
+
+
+def _read_submission(record_dir):
     record_dir = Path(record_dir).resolve()
     from .staged_manifest import read_document
     from .schemas import strict_json_loads
@@ -362,18 +360,25 @@ def load_submission(record_dir: Path) -> FluxSubmission:
         raise ValueError('invalid or modified Flux launch/submission receipt')
     if receipt.get('state') != 'submitted' or not receipt.get('job_id'):
         raise SubmissionUnknown(f'submission unknown in {record_dir}; reconcile, do not resubmit')
-    return FluxSubmission(_job_id(receipt['job_id']), record_dir, launch_sha)
+    return FluxSubmission(_job_id(receipt['job_id']), record_dir, launch_sha), intent
+
+
+def _saved_launch(submission):
+    saved, launch = _read_submission(submission.record_dir)
+    if (saved.record_dir != submission.record_dir or saved.launch_sha256 != submission.launch_sha256
+            or job_id_number(saved.job_id) != job_id_number(submission.job_id)):
+        raise ValueError('submission does not match saved launch and ID')
+    return launch
 
 
 def _validate_submission(submission):
-    if not _saved_submission_matches(submission):
-        raise ValueError('submission does not match saved launch and ID')
-    intent = json.loads((submission.record_dir / 'launch.json').read_bytes())
+    intent = _saved_launch(submission)
     if intent.get('staged_input') is not None:
         from .staged_launch import validate_binding
         validate_binding(intent['staged_input'], placement=intent['resources']['placement'])
     if intent['profile']['uri'] != _URI or intent['profile']['broker_starttime'] != _checked(['getattr', 'broker.starttime']).strip():
         raise RuntimeError('Flux instance changed; saved job identity cannot be assumed')
+    return intent
 
 
 def validate_dependency(submission: FluxSubmission):
@@ -384,9 +389,7 @@ def validate_dependency(submission: FluxSubmission):
 def validate_launch(submission: FluxSubmission, *, argv, source, resources,
                     afterok=(), environment=None, staged_input=None):
     """Bind application intent to every saved execution setting on resume/merge."""
-    if not _saved_submission_matches(submission):
-        raise ValueError('submission differs from saved launch and ID')
-    launch = json.loads((submission.record_dir / 'launch.json').read_bytes())
+    launch = _saved_launch(submission)
     if launch.get('staged_input') != staged_input:
         raise ValueError('saved staged-input binding differs from application intent')
     if staged_input is not None:
@@ -400,6 +403,7 @@ def validate_launch(submission: FluxSubmission, *, argv, source, resources,
             or launch['resources'] != asdict(resources) or launch['afterok'] != list(afterok)
             or launch['native_argv'] != expected):
         raise ValueError('saved execution differs from application intent')
+    return launch
 
 
 def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **intent):
@@ -408,11 +412,10 @@ def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **in
     Native environments are compared in memory and never included in errors.
     This queries the known ID only; it neither discovers nor submits jobs.
     """
-    from .staged_manifest import read_document, decode_document
-    validate_launch(submission, **intent)
-    _validate_submission(submission)
-    raw, _ = read_document(submission.record_dir / 'launch.json', max_evidence_bytes)
-    launch = decode_document(raw)
+    from .staged_manifest import read_document, decode_document, publish_staged_json
+    launch = validate_launch(submission, **intent)
+    if _validate_submission(submission) != launch:
+        raise ValueError('saved launch changed during native verification')
     args = launch['native_argv']
     expected = decode_document(_checked([args[0], '--dry-run', *args[1:]]))
     actual_raw = _checked(['job', 'info', '--original', submission.job_id, 'jobspec'])
@@ -421,6 +424,13 @@ def verify_native_launch(submission: FluxSubmission, *, max_evidence_bytes, **in
     actual = decode_document(actual_raw)
     if actual != expected:
         raise ValueError('original native jobspec differs from selected launch intent')
+    retained = submission.record_dir / 'original-jobspec.json'
+    try:
+        publish_staged_json(retained, actual)
+    except FileExistsError:
+        raw, _ = read_document(retained, max_evidence_bytes)
+        if decode_document(raw) != actual:
+            raise ValueError('retained original jobspec changed')
     return launch
 
 

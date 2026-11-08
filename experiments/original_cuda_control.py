@@ -1,24 +1,17 @@
 """Finite native original-source qualification in an explicitly admitted runtime."""
 import argparse
 import concurrent.futures
-import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import shlex
-import stat
 import socket
 import subprocess
 import sys
 import time
 import urllib.parse
 
-from tools.pq_profile_source import profile_source_owner
-
-file_stat_signature=profile_source_owner('file_identity').file_stat_signature
-
-PQ_IMAGE='d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_power_draw'}
 
 

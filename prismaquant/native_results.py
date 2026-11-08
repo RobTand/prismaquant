@@ -10,6 +10,7 @@ import importlib.metadata
 import os
 from pathlib import Path
 import platform
+import subprocess
 import sys
 
 from . import flux_jobs
@@ -149,7 +150,8 @@ def execution_context() -> dict:
     raw, _ = read_document(out / 'launch.json', 16 << 20)
     launch = _document(raw)
     source = flux_jobs._source_identity(Path.cwd().resolve())
-    if source != launch['source'] or str(out) != launch['record_dir']:
+    if (Path(__file__).resolve() != Path(source['checkout']) / 'prismaquant/native_results.py'
+            or source != launch['source'] or str(out) != launch['record_dir']):
         raise ValueError('native result: executing source/record differs from launch')
     return {'schema': PRODUCER_SCHEMA, 'job_id': flux_jobs._job_id(os.environ['FLUX_JOB_ID']),
             'record_dir': str(out), 'launch_sha256': bytes_sha256hex(raw), 'source': source,
@@ -221,7 +223,8 @@ def read_selected_result(selection: dict) -> SelectedResult:
         expected = _result_fields(selection['expected_launch'],
             {'argv', 'source', 'resources', 'afterok', 'environment', 'staged_input'}, 'expected launch')
         saved = flux_jobs.load_submission(Path(selection['record_dir']))
-        if (flux_jobs.job_id_number(saved.job_id) != flux_jobs.job_id_number(selection['job_id']) or
+        if (str(saved.record_dir) != selection['record_dir'] or
+                flux_jobs.job_id_number(saved.job_id) != flux_jobs.job_id_number(selection['job_id']) or
                 saved.launch_sha256 != selection['launch_sha256']):
             raise ValueError('native result: selected producer coordinates differ')
         launch = flux_jobs.verify_native_launch(saved,
@@ -271,5 +274,5 @@ def read_selected_result(selection: dict) -> SelectedResult:
         return SelectedResult(publication, artifact_payloads, input_payloads, launch, execution)
     except (ProducerFailed, ResultUnavailable):
         raise
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as exc:
         raise ResultUnavailable(str(exc)) from exc
