@@ -62,10 +62,10 @@ def selected_publications(monkeypatch):
     real_reader = native_results.read_selected_result
     finalize = BoundaryProducedPublication.finalize
 
-    def read(selection):
+    def read(selection, **kwargs):
         key = selection['record_dir']
         if key not in registry:
-            return real_reader(selection)
+            return real_reader(selection, **kwargs)
         return registry[key]
 
     monkeypatch.setattr(native_results, 'read_selected_result', read)

@@ -486,10 +486,13 @@ class VerifiedProducedPublication:
 
 
 def read_produced_selection(selection, *, checkpoint_exit=None, verify_payloads=True):
-    selected = (native_results.read_selected_result(selection) if checkpoint_exit is None else
-                native_results.read_selected_checkpoint(selection, payload_exit=checkpoint_exit))
+    limits = {'produced_index': MAX_DOCUMENT_BYTES}
+    selected = (native_results.read_selected_result(selection, artifact_limits=limits)
+                if checkpoint_exit is None else native_results.read_selected_checkpoint(
+                    selection, payload_exit=checkpoint_exit, artifact_limits=limits))
     if set(selected.artifact_payloads) != {'produced_index'}:
         raise BoundaryProducedBindingError('selected result is not an exact produced index')
+    _limit(len(selected.artifact_payloads['produced_index']), MAX_DOCUMENT_BYTES)
     index = require_produced_fields(decode_produced_document(selected.artifact_payloads['produced_index']),
         ('schema', 'producer', 'declaration', 'session', 'checkpoint_exit', 'groups'), 'index')
     declaration = validate_declaration(read_bound_document(index['declaration']))

@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, selected produced-index byte admission.
+Source: `prismaquant/{native_results,stage_a_produced_output}.py`,
+based on `774fd155dbfebbda6e22590b4110cd7b46b49680`.
+Produced consumers require the sole produced_index artifact role at at most
+16 MiB before the authenticated reader reads its bytes. This bound is separate
+from the native aggregate input/artifact ceiling and applies to successful
+results and explicitly selected failed checkpoints.
+
 As of: 2026-11-08, checkpoint cancellation ownership.
 Source: `prismaquant/{streamed_boundary_artifacts,stage_a_produced_output}.py`,
 based on `e41094b825374d33f94c48d21bcb52f33f3b208c`.

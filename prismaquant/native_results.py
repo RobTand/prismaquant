@@ -614,12 +614,12 @@ def _ceiling(value, maximum):
     _contract.require(type(value) is int and 0 < value <= maximum, 'invalid finite byte ceiling')
 
 
-def read_selected_result(selection: dict) -> SelectedResult:
+def read_selected_result(selection: dict, *, artifact_limits=None) -> SelectedResult:
     """Read one publication only after authenticating actual terminal execution."""
-    return _read_selected_result(selection, checkpoint_exit=None)
+    return _read_selected_result(selection, checkpoint_exit=None, artifact_limits=artifact_limits)
 
 
-def read_selected_checkpoint(selection: dict, *, payload_exit: int) -> SelectedResult:
+def read_selected_checkpoint(selection: dict, *, payload_exit: int, artifact_limits=None) -> SelectedResult:
     """Read an explicitly selected failed checkpoint without declaring success.
 
     The application must additionally bind its checkpoint policy to the native
@@ -628,10 +628,10 @@ def read_selected_checkpoint(selection: dict, *, payload_exit: int) -> SelectedR
     """
     if type(payload_exit) is not int or not 1 <= payload_exit <= 124:
         raise ResultUnavailable('checkpoint requires an explicit nonzero payload exit in 1..124')
-    return _read_selected_result(selection, checkpoint_exit=payload_exit)
+    return _read_selected_result(selection, checkpoint_exit=payload_exit, artifact_limits=artifact_limits)
 
 
-def _read_selected_result(selection, *, checkpoint_exit):
+def _read_selected_result(selection, *, checkpoint_exit, artifact_limits):
     try:
         _result_fields(selection, SELECTION_KEYS, 'selection')
         _contract.require(selection['schema'] == SELECTION_SCHEMA, 'selection schema differs')
@@ -691,10 +691,19 @@ def _read_selected_result(selection, *, checkpoint_exit):
         if sum(row['bytes'] for roster in ('inputs', 'artifacts')
                for row in publication[roster].values()) > selection['max_artifact_bytes']:
             raise ValueError('native result: aggregate input/artifact budget exceeded')
+        if artifact_limits is not None:
+            if not isinstance(artifact_limits, dict) or set(artifact_limits) != set(publication['artifacts']):
+                raise ValueError('native result: artifact role roster differs from consumer')
+            for role, limit in artifact_limits.items():
+                _ceiling(limit, 1 << 30)
+                if publication['artifacts'][role]['bytes'] > limit:
+                    raise ValueError('native result: artifact exceeds role byte bound')
         input_payloads = {role: _owned(binding, selection['max_artifact_bytes'])
                           for role, binding in publication['inputs'].items()}
         artifact_payloads = {role: _owned({k: row[k] for k in ('path', 'sha256', 'bytes')},
-                            selection['max_artifact_bytes'], identity=row['file_identity'])
+                            min(selection['max_artifact_bytes'], artifact_limits[role])
+                            if artifact_limits is not None else selection['max_artifact_bytes'],
+                            identity=row['file_identity'])
                              for role, row in publication['artifacts'].items()}
         return SelectedResult(publication, artifact_payloads, input_payloads, launch, execution)
     except (ProducerFailed, ResultUnavailable):
