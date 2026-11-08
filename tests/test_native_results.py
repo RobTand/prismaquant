@@ -49,11 +49,16 @@ def test_owned_artifact_starts_with_independent_positive_bytes(tmp_path, mutatio
         binding['bytes'] = 129
     elif mutation == 'changed':
         path.write_bytes(b'wrong-artifact\x00\xff')
+    elif mutation == 'replaced':
+        # Both inodes coexist before replacement. No inode-reuse or clock
+        # assumption supplies the distinction this fence must observe.
+        replacement = tmp_path / 'replacement'
+        replacement.write_bytes(raw)
+        assert replacement.stat().st_ino != path.stat().st_ino
+        replacement.replace(path)
     else:
         path.unlink()
-        if mutation == 'replaced':
-            path.write_bytes(raw)
-        elif mutation == 'symlink':
+        if mutation == 'symlink':
             target = tmp_path / 'target'; target.write_bytes(raw); path.symlink_to(target)
     with pytest.raises((OSError, ValueError)):
         nr._owned(binding, 128, identity=row['file_identity'])
