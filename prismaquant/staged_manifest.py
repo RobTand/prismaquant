@@ -11,6 +11,7 @@ import tempfile
 from types import MappingProxyType
 
 from .file_identity import file_stat_signature as signature
+from .file_identity import open_directory as _open_directory
 from .digests import bytes_sha256hex, file_digest_sha256hex, DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.staged_input_manifest.v1'
@@ -54,24 +55,13 @@ def integer(value, *, positive=False):
     return value
 
 
-def open_directory(filename, *, create=False):
+def open_directory(filename, *, create=False, identity=None):
     """Open a canonical directory without following any symlink component."""
-    filename = Path(path(os.fspath(filename)))
-    directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    filename = path(os.fspath(filename))
     try:
-        for part in filename.parts[1:]:
-            if create:
-                try:
-                    os.mkdir(part, mode=0o700, dir_fd=directory)
-                except FileExistsError:
-                    pass
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
-            os.close(directory)
-            directory = child
-        return directory
-    except BaseException:
-        os.close(directory)
-        raise
+        return _open_directory(filename, create=create, identity=identity)
+    except ValueError as exc:
+        raise ManifestRefused(str(exc)) from exc
 
 
 def open_regular(filename):

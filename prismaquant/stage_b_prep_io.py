@@ -374,6 +374,7 @@ class PreparationPublication:
         publication.bind_session({'generation': publication.generation,
             'run_identity_sha256': publication.binding['sha256']})
         self.batches, self._kinds = [], set()
+        self._writer_directories = {}
 
     @property
     def output_prefix(self):
@@ -401,6 +402,18 @@ class PreparationPublication:
         self.batches.append({'kind': kind, 'batch_id': batch, 'files': len(descriptors),
             'bytes': sum(len(payload) for _, payload in created), 'ref': out['ref']})
         return out
+
+    def prepare_directories(self, paths):
+        from .staged_manifest import open_directory
+        for directory in dict.fromkeys([self.output_prefix, *(str(Path(path).parent) for path in paths)]):
+            prior = self._writer_directories.get(directory)
+            descriptor = open_directory(directory, create=prior is None, identity=prior)
+            try:
+                info = os.fstat(descriptor)
+                self._writer_directories[directory] = (info.st_dev, info.st_ino)
+            finally:
+                os.close(descriptor)
+        return self._writer_directories
 
     def finalize(self, path):
         return self.publication.finalize(path)
@@ -497,8 +510,11 @@ def publish_files(publication: PreparationPublication | None, kind: str,
                 f"the preparation's {kind!r} batch: {exc}") from exc
     created: list[tuple[str, bytes]] = []
     writer_identities = {}
+    if publication is not None:
+        publication.prepare_directories([path for path, _, _ in planned])
     for path, payload, where in planned:
-        writer_kwargs = ({'nofollow': True, 'writer_identities': writer_identities}
+        writer_kwargs = ({'nofollow': True, 'writer_identities': writer_identities,
+                          'writer_directories': publication.prepare_directories([path])}
                          if publication is not None else {})
         if publish_new_bytes(path, payload, **writer_kwargs):
             created.append((os.path.normpath(os.path.abspath(str(path))), payload))

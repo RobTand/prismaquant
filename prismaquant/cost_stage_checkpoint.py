@@ -27,7 +27,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256_normalized,
 )
 from .digests import bytes_sha256hex, text_sha256hex
-from .file_identity import file_stat_signature
+from .file_identity import file_stat_signature, open_directory
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -70,47 +70,38 @@ def unique_temp_suffix() -> str:
     return _TEMP_SUFFIX[1]
 
 
-def atomic_write_bytes(path: Path, payload: bytes, *, writer_identities=None) -> None:
+def atomic_write_bytes(path: Path, payload: bytes, *, writer_identities=None,
+                       writer_directories=None) -> None:
     """Publish bytes durably; a crash leaves either the old or new file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + unique_temp_suffix())
-    with temporary.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-        os.replace(temporary, path)
+    if writer_directories is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
+    else:
+        directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
+    try:
+        handle = (temporary.open('wb') if writer_directories is None else
+                  os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                    0o600, dir_fd=directory_fd), 'wb'))
+        with handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+            if writer_directories is None:
+                os.replace(temporary, path)
+            else:
+                os.link(temporary.name, path.name, src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd, follow_symlinks=False)
+                os.unlink(temporary.name, dir_fd=directory_fd)
             os.fsync(directory_fd)
             if writer_identities is not None:
                 writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
-        finally:
-            os.close(directory_fd)
-
-
-def _publication_parent_nofollow(parent: Path) -> int:
-    """Create/open the publication parent without following any component."""
-    if not parent.is_absolute():
-        raise ValueError("no-follow publication needs an absolute destination")
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    fd = os.open("/", flags)
-    try:
-        for component in parent.parts[1:]:
-            try:
-                os.mkdir(component, dir_fd=fd)
-            except FileExistsError:
-                pass
-            next_fd = os.open(component, flags, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return fd
-    except BaseException:
-        os.close(fd)
-        raise
+    finally:
+        os.close(directory_fd)
 
 
 def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
-                      writer_identities=None) -> bool:
+                      writer_identities=None, writer_directories=None) -> bool:
     """Publish ``payload`` at ``path`` as a NEW file; never replace one already there.
 
     ``os.link`` is the atomic no-clobber publication on one filesystem: the
@@ -136,8 +127,11 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
     temporary = None
     owns_temporary = False
     try:
-        if nofollow:
-            directory_fd = _publication_parent_nofollow(path.parent)
+        if writer_directories is not None or nofollow:
+            if writer_directories is not None:
+                directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
+            else:
+                directory_fd = open_directory(str(path.parent), create=True)
             target = path.name
             try:
                 os.stat(target, dir_fd=directory_fd, follow_symlinks=False)
@@ -175,7 +169,7 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
                             dst_dir_fd=directory_fd, follow_symlinks=False)
             except FileExistsError:
                 return False
-            if nofollow:
+            if nofollow or writer_directories is not None:
                 os.unlink(temporary, dir_fd=directory_fd)
             else:
                 temporary.unlink()
@@ -190,7 +184,7 @@ def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False,
         try:
             if owns_temporary:
                 try:
-                    if nofollow:
+                    if nofollow or writer_directories is not None:
                         os.unlink(temporary, dir_fd=directory_fd)
                     else:
                         temporary.unlink()

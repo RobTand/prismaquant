@@ -365,8 +365,8 @@ def test_metadata_origin_retains_writer_identity_until_group_seal(tmp_path, monk
     storage, pub = owner(tmp_path, write_only=True, spool_bytes=None)
     actual = artifacts._link_new_file
     preserved = []
-    def publish(path, payload):
-        identity = actual(path, payload)
+    def publish(path, payload, **kwargs):
+        identity = actual(path, payload, **kwargs)
         if replace and path.name == 'first.json':
             saved = path.with_name('original-first')
             path.rename(saved)
@@ -465,3 +465,119 @@ def test_generic_descriptor_refuses_missing_writer_identity(tmp_path):
     with pytest.raises(BoundaryProducedPublicationFailed, match='writer destination identity required'):
         pub.descriptor_for(ref, producer_generation='unowned')
     assert target.read_bytes() == b'known generic bytes' and not pub._groups
+
+
+@pytest.mark.parametrize('spool', [None, 1 << 20])
+@pytest.mark.parametrize('replacement', ['directory', 'symlink'])
+def test_metadata_parent_replacement_refuses_before_next_file(tmp_path, monkeypatch, spool, replacement):
+    from prismaquant import streamed_boundary_artifacts as artifacts
+    storage, pub = owner(tmp_path, write_only=True, spool_bytes=spool)
+    actual = artifacts._write_new_file
+    original, foreign = tmp_path / 'original-metadata-parent', tmp_path / 'foreign-metadata-parent'
+    foreign.mkdir()
+    (foreign / 'sentinel').write_bytes(b'independent foreign file')
+    snapshots = {}
+    def write(path, payload, **kwargs):
+        identity = actual(path, payload, **kwargs)
+        if path.name in ('first.json', 'first.json.tmp'):
+            parent = path.parent
+            parent.rename(original)
+            if replacement == 'directory':
+                parent.mkdir()
+                (parent / 'sentinel').write_bytes(b'independent replacement file')
+            else:
+                parent.symlink_to(foreign, target_is_directory=True)
+            snapshots['original'] = _owned_group_roster(original)
+            snapshots['foreign'] = _owned_group_roster(foreign)
+            snapshots['replacement'] = _owned_group_roster(parent)
+            snapshots['path'] = parent
+        return identity
+    monkeypatch.setattr(artifacts, '_write_new_file', write)
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        storage.write_produced_files([('first.json', b'independent first'), ('second.json', b'second')],
+                                    kind='metadata', boundary_index=0)
+    assert not pub._groups and snapshots
+    assert _owned_group_roster(original) == snapshots['original']
+    assert _owned_group_roster(foreign) == snapshots['foreign']
+    assert _owned_group_roster(snapshots['path']) == snapshots['replacement']
+
+
+@pytest.mark.parametrize('boundary', ['entries', 'manifest'])
+@pytest.mark.parametrize('replacement', ['intact', 'directory', 'symlink'])
+def test_checkpoint_parent_replacement_precedes_next_write(tmp_path, boundary, replacement):
+    from prismaquant import joint_adjoint_checkpoints as checkpoint
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    session = {**storage.session, 'kind': 'adjoint_checkpoint'}
+    attempt = checkpoint.open_adjoint_checkpoint(Path(pub.output_prefix) / 'space',
+        boundary=5, session=session, specs={(0, batch): (16, [2, 2], 'torch.float32') for batch in range(2)},
+        shared_adjoint_keys=[], shared_pass_keys=[], owner=storage)
+    known = torch.tensor([[2., 4.], [6., 8.]])
+    attempt.write_activation(0, 0, known)
+    if boundary == 'manifest':
+        attempt.write_activation(0, 1, known + 1)
+        attempt.write_shared_states({}, {})
+    directory = attempt.checkpoint_dir / 'entries' if boundary == 'entries' else attempt.checkpoint_dir
+    original, foreign = tmp_path / 'original-checkpoint-parent', tmp_path / 'foreign-checkpoint-parent'
+    foreign.mkdir()
+    (foreign / 'sentinel').write_bytes(b'independent foreign file')
+    if replacement != 'intact':
+        directory.rename(original)
+        if replacement == 'directory':
+            directory.mkdir()
+            (directory / 'sentinel').write_bytes(b'independent replacement file')
+        else:
+            directory.symlink_to(foreign, target_is_directory=True)
+        before = [_owned_group_roster(root) for root in (original, foreign, directory)]
+    def finish():
+        if boundary == 'entries':
+            attempt.write_activation(0, 1, known + 1)
+            attempt.write_shared_states({}, {})
+        return attempt.seal()
+    if replacement == 'intact':
+        record = finish()
+        tensors = checkpoint.read_exact_entry_tensors(record['activation_entries'], expected_session=session)
+        assert torch.equal(tensors['cotangent-0-0'], known)
+        assert torch.equal(tensors['cotangent-0-1'], known + 1)
+        assert len(pub._groups) == 1
+    else:
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            finish()
+        assert [_owned_group_roster(root) for root in (original, foreign, directory)] == before
+        assert not pub._groups
+
+
+@pytest.mark.parametrize('writer', ['manifest', 'shared'])
+@pytest.mark.parametrize('collision', [False, True])
+def test_native_small_file_publication_never_replaces_a_collision(tmp_path, monkeypatch, writer, collision):
+    import os
+    from prismaquant import cost_stage_checkpoint as journal
+    from prismaquant import joint_adjoint_checkpoints as checkpoint
+    info = tmp_path.stat()
+    directories, identities = {str(tmp_path): (info.st_dev, info.st_ino)}, {}
+    path = tmp_path / 'known.bin'
+    actual = os.link
+    foreign = b'independently known foreign bytes'
+    def link(source, destination, **kwargs):
+        if collision and destination == path.name:
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                 0o600, dir_fd=kwargs['dst_dir_fd'])
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(foreign)
+        return actual(source, destination, **kwargs)
+    monkeypatch.setattr(os, 'link', link)
+    def publish():
+        if writer == 'manifest':
+            journal.atomic_write_bytes(path, b'known writer bytes',
+                writer_identities=identities, writer_directories=directories)
+        else:
+            checkpoint._publish_streamed_file(path, 'known', lambda sink: sink.write(b'known writer bytes'),
+                max_file_bytes=100, label='known', writer_identities=identities, writer_directories=directories)
+    if collision:
+        with pytest.raises(FileExistsError):
+            publish()
+        assert path.read_bytes() == foreign and not identities
+    else:
+        publish()
+        assert path.read_bytes() == b'known writer bytes'
+        from prismaquant.stage_a_produced_output import produced_file_identity
+        assert list(identities[str(path)]) == produced_file_identity(path)

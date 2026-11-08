@@ -159,3 +159,41 @@ def test_preparation_retains_first_writer_identity_until_commit(tmp_path, monkey
             assert [row['sha256'] for row in rows] == [hashlib.sha256(raw).hexdigest() for _, raw, _ in files]
     finally:
         io.reset_preparation_publications_for_tests()
+
+
+@pytest.mark.parametrize('replacement', ['directory', 'symlink'])
+def test_preparation_parent_replacement_precedes_second_write(tmp_path, monkeypatch, replacement):
+    from prismaquant import cost_stage_checkpoint as writer
+    metadata = tmp_path / 'metadata'
+    declaration = io.build_preparation_template(metadata_root=metadata,
+        payload_max_bytes=io.preparation_payload_ceiling(1))
+    admitted_owner(tmp_path, declaration, monkeypatch)
+    io.reset_preparation_publications_for_tests()
+    original, foreign = tmp_path / 'original', tmp_path / 'foreign'
+    foreign.mkdir()
+    (foreign / 'sentinel').write_bytes(b'foreign bytes')
+    actual = writer.publish_new_bytes
+    before = {}
+    def publish(path, payload, **kwargs):
+        result = actual(path, payload, **kwargs)
+        if path.name == 'first.json':
+            metadata.rename(original)
+            if replacement == 'directory':
+                metadata.mkdir()
+                (metadata / 'sentinel').write_bytes(b'replacement bytes')
+            else:
+                metadata.symlink_to(foreign, target_is_directory=True)
+            before.update(original=_files_under(original), foreign=_files_under(foreign), replaced=_files_under(metadata))
+        return result
+    monkeypatch.setattr(writer, 'publish_new_bytes', publish)
+    try:
+        publication = io.bind_preparation_publication(metadata, required=True)
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            io.publish_files(publication, 'known', [(metadata / 'first.json', b'first', 'first'),
+                                                   (metadata / 'second.json', b'second', 'second')])
+        assert not publication.publication._groups and before
+        assert _files_under(original) == before['original']
+        assert _files_under(foreign) == before['foreign']
+        assert _files_under(metadata) == before['replaced']
+    finally:
+        io.reset_preparation_publications_for_tests()

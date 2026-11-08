@@ -175,6 +175,7 @@ def adjoint_receipt_path(space: str | os.PathLike) -> Path:
 def write_checkpoint_cotangent_entry(
     checkpoint_dir: Path, *, probe_index: int, batch_index: int, tensor: torch.Tensor,
     session: dict, max_file_bytes: int | None = None, writer_identities=None,
+    writer_directories=None,
 ) -> dict:
     """Publish one activation cotangent as a digest-checked exact entry.
 
@@ -200,6 +201,8 @@ def write_checkpoint_cotangent_entry(
     reference = write_exact_activation_cache_entry(
         checkpoint_dir / "entries", name, tensor,
         identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
+        directory_identity=(None if writer_directories is None else
+                            writer_directories[str(checkpoint_dir / 'entries')]),
     )
     if writer_identities is not None:
         writer_identities[reference.path] = reference.writer_file_identity
@@ -449,7 +452,8 @@ def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes)
 
 
 def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
-                                  *, max_file_bytes: int, writer_identities=None) -> dict:
+                                  *, max_file_bytes: int, writer_identities=None,
+                                  writer_directories=None) -> dict:
     """Stream one shared state to its pickle file with an admitted bound.
 
     Standard ``pickle.dump`` into the existing ``SerializedEntryDigest``
@@ -470,11 +474,12 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
         pickle.dump(state, sink, protocol=pickle.HIGHEST_PROTOCOL)
 
     return _publish_streamed_file(path, name, body, max_file_bytes=max_file_bytes,
-                                  label=f"shared state {name}", writer_identities=writer_identities)
+                                  label=f"shared state {name}", writer_identities=writer_identities,
+                                  writer_directories=writer_directories)
 
 
 def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
-                           label: str, writer_identities=None) -> dict:
+                           label: str, writer_identities=None, writer_directories=None) -> dict:
     """Publish what ``body(sink)`` streams as one new file; returns its row.
 
     The one atomic-publication shape of the checkpoint's own small files: a
@@ -482,6 +487,8 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
     (the admitted envelope refuses before the handle can cross it), one
     fsync, ``os.replace``, one directory fsync. A failure unlinks the temp;
     an existing ``path`` refuses before anything is written.
+    Native sidecar mode uses exclusive links and saved directory identities
+    through the held nofollow directory FD instead of path replacement.
     """
     from .cost_stage_checkpoint import unique_temp_suffix
     from .perturbed_x_cache import SerializedEntryDigest
@@ -494,10 +501,21 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
     if path.exists():
         raise RuntimeError("exact boundary checkpoint entry already exists")
     sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes, label=label)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    directory_fd = None
+    if writer_directories is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        from .staged_manifest import open_directory
+        directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
     temporary = path.with_name(path.name + unique_temp_suffix())
+    owned_temporary = None
     try:
-        with temporary.open("wb") as handle:
+        handle = (temporary.open('wb') if directory_fd is None else
+                  os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                    0o600, dir_fd=directory_fd), 'wb'))
+        with handle:
+            created = os.fstat(handle.fileno())
+            owned_temporary = (created.st_dev, created.st_ino)
             body(sink.sink(handle))
             handle.flush()
             os.fsync(handle.fileno())
@@ -510,17 +528,35 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
                 raise RuntimeError(
                     "exact boundary checkpoint shared-state file exceeds its "
                     f"admitted envelope for {name}")
-            os.replace(temporary, path)
-            directory_fd = os.open(path.parent, os.O_RDONLY)
+            if directory_fd is None:
+                os.replace(temporary, path)
+                fsync_directory = os.open(path.parent, os.O_RDONLY)
+            else:
+                os.link(temporary.name, path.name, src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd, follow_symlinks=False)
+                os.unlink(temporary.name, dir_fd=directory_fd)
+                fsync_directory = os.dup(directory_fd)
             try:
-                os.fsync(directory_fd)
+                os.fsync(fsync_directory)
                 if writer_identities is not None:
                     writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
             finally:
-                os.close(directory_fd)
+                os.close(fsync_directory)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        if directory_fd is None:
+            temporary.unlink(missing_ok=True)
+        elif owned_temporary is not None:
+            # A replaced pathname cannot redirect this attempt's cleanup.
+            try:
+                current = os.stat(temporary.name, dir_fd=directory_fd, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == owned_temporary:
+                    os.unlink(temporary.name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
         raise
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
     return {
         "name": name,
         "path": str(path),
@@ -592,7 +628,8 @@ def _shared_state_pack_envelope(estimates) -> int:
             + _SHARED_STATE_PACK_TRAILER_BYTES)
 
 
-def _write_shared_state_pack(plan: dict, states: dict, *, hold, writer_identities=None) -> dict:
+def _write_shared_state_pack(plan: dict, states: dict, *, hold, writer_identities=None,
+                             writer_directories=None) -> dict:
     """Stream every shared state into the one pack file ``plan`` admits.
 
     ``states`` maps state name -> state and must name exactly the members
@@ -633,7 +670,7 @@ def _write_shared_state_pack(plan: dict, states: dict, *, hold, writer_identitie
     return _publish_streamed_file(
         Path(plan["path"]), plan["name"], body,
         max_file_bytes=plan["file_envelope"], label="shared-state pack",
-        writer_identities=writer_identities)
+        writer_identities=writer_identities, writer_directories=writer_directories)
 
 
 def unpack_shared_states(payload) -> list:
@@ -1184,6 +1221,23 @@ class AdjointCheckpointAttempt:
         self._shared_state_entries = None
         self._record = None
         self._writer_identities = {} if owner._produced is not None else None
+        self._writer_directories = None
+        if self._writer_identities is not None:
+            from .staged_manifest import open_directory
+            self._writer_directories = {}
+            recorded = owner._checkpoint_reservations[reservation]['directory_identity']
+            root_fd = open_directory(str(checkpoint_dir), identity=recorded)
+            try:
+                self._writer_directories[str(checkpoint_dir)] = recorded
+                os.mkdir('entries', mode=0o700, dir_fd=root_fd)
+                descriptor = os.open('entries', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+                try:
+                    info = os.fstat(descriptor)
+                    self._writer_directories[str(checkpoint_dir / 'entries')] = (info.st_dev, info.st_ino)
+                finally:
+                    os.close(descriptor)
+            finally:
+                os.close(root_fd)
         #: Seconds spent in ``write_activation``: the checkpoint's share of
         #: the pass that feeds it.
         self.write_seconds = 0.0
@@ -1359,7 +1413,8 @@ class AdjointCheckpointAttempt:
         self._shared_state_entries = entries
 
     def _writer_kwargs(self):
-        return {} if self._writer_identities is None else {'writer_identities': self._writer_identities}
+        return {} if self._writer_identities is None else {
+            'writer_identities': self._writer_identities, 'writer_directories': self._writer_directories}
 
     def seal(self) -> dict:
         """Write the manifest and commit the receipt; returns the record."""

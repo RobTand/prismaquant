@@ -49,11 +49,11 @@ class ProducedFileReference:
     writer_file_identity: tuple | None = dataclasses.field(default=None, compare=False, repr=False)
 
 
-def _write_new_file(path: Path, payload: bytes, *, publish_to=None) -> tuple:
+def _write_new_file(path: Path, payload: bytes, *, publish_to=None, directory_identity=None) -> tuple:
     """Write ``payload`` to a file that must not exist yet, then fsync it."""
     from .file_identity import file_stat_signature
     from .staged_manifest import open_directory
-    directory_fd = open_directory(str(path.parent))
+    directory_fd = open_directory(str(path.parent), identity=directory_identity)
     try:
         fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o644, dir_fd=directory_fd)
@@ -76,10 +76,10 @@ def _write_new_file(path: Path, payload: bytes, *, publish_to=None) -> tuple:
         os.close(directory_fd)
 
 
-def _link_new_file(path: Path, payload: bytes) -> tuple:
+def _link_new_file(path: Path, payload: bytes, *, directory_identity=None) -> tuple:
     """Publish a new file through its planned ``.tmp`` name; never replace one."""
     temporary = Path(str(path) + ".tmp")
-    return _write_new_file(temporary, payload, publish_to=path)
+    return _write_new_file(temporary, payload, publish_to=path, directory_identity=directory_identity)
 
 
 BOUNDARY_STORAGE_SCHEMA = "prismaquant.aura.boundary_storage.v1"
@@ -1132,14 +1132,16 @@ class StreamedBoundaryArtifacts:
         try:
             if spool is None:
                 for index, (name, payload) in enumerate(files):
-                    identity = _link_new_file(self.directory / name, payload)
+                    identity = _link_new_file(self.directory / name, payload,
+                        directory_identity=self._generation_directory_identity)
                     references[index] = dataclasses.replace(
                         references[index], writer_file_identity=identity)
             else:
                 local = spool.reserve(batch_id, total)
                 for (name, payload), reference in zip(files, references):
+                    local, directory_identity = spool.writer_directory(batch_id)
                     path = Path(local) / name
-                    identity = _write_new_file(path, payload)
+                    identity = _write_new_file(path, payload, directory_identity=directory_identity)
                     spool.record(batch_id, dataclasses.replace(
                         reference, path=str(path), writer_file_identity=identity), self.directory)
                 spool.submit(batch_id, lifetime=self._produced_plan["origin_lifetime"])
@@ -1730,7 +1732,7 @@ class StreamedBoundaryArtifacts:
         return waited
 
     def commit_checkpoint_artifact(self, reservation_id, record, *, references=None,
-                                   writer_identities=None):
+                                   writer_identities=None, writer_directories=None):
         """Commit a writer receipt's ACTUAL bytes/digests against its reservation.
 
         Verifies every receipt-listed file exists at its receipted size plus
@@ -1862,6 +1864,11 @@ class StreamedBoundaryArtifacts:
         unused = entry["envelope_bytes"] - actual
         if entry['produced_batch'] is not None:
             from .joint_adjoint_slices import checkpoint_manifest_entry
+            from .staged_manifest import open_directory
+            if writer_directories is not None:
+                for directory, identity in writer_directories.items():
+                    descriptor = open_directory(directory, identity=identity)
+                    os.close(descriptor)
             manifest = checkpoint_manifest_entry(record)
             batch_id = entry['produced_batch']
             descriptors = [self._produced.descriptor_for(ProducedFileReference(
@@ -2078,6 +2085,12 @@ class StreamedBoundaryArtifacts:
                 raise ValueError("read window exceeds declaration or cannot hold its required groups")
         publication.bind_session(self.session)
         from .staged_manifest import open_directory
+        descriptor = open_directory(str(self.directory))
+        try:
+            info = os.fstat(descriptor)
+            self._generation_directory_identity = (info.st_dev, info.st_ino)
+        finally:
+            os.close(descriptor)
         descriptor = open_directory(str(self.directory / 'entries'), create=True)
         try:
             info = os.fstat(descriptor)
