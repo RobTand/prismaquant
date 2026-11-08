@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, checkpoint cancellation ownership.
+Source: `prismaquant/{streamed_boundary_artifacts,stage_a_produced_output}.py`,
+based on `e41094b825374d33f94c48d21bcb52f33f3b208c`.
+An unwritten checkpoint cancellation releases its native prewrite before
+forgetting the application reservation. Occupied or uncertain paths retain
+both records. Explicitly released paths may be reserved by a new batch.
+
 As of: 2026-11-08, composed preparation publication ownership.
 Source: `tools/{prepare_extended_joint_quanta,regenerate_joint_quanta}.py`,
 based on `063b1972f615b2409f5485f8344a0a488175b8ef`.

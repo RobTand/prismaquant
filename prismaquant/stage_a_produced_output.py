@@ -349,7 +349,8 @@ class BoundaryProducedPublication:
             for filename in paths:
                 if os.path.lexists(filename):
                     raise BoundaryProducedPrewriteRefused(batch_id=batch_id, refusal='prewrite path already occupied')
-            existing = {p for row in self._prewrites.values() for p in row['paths']}
+            existing = {p for key, row in self._prewrites.items()
+                        if key not in self._released for p in row['paths']}
             if existing.intersection(paths):
                 raise BoundaryProducedPrewriteRefused(batch_id=batch_id, refusal='path already owned by another group')
             self._prewrites[batch_id] = request
@@ -358,7 +359,12 @@ class BoundaryProducedPublication:
     def abort_prewrite(self, *, batch_id):
         with self._lock:
             row = self._prewrites[batch_id]
-            if any(os.path.lexists(p) for p in row['paths']):
+            for filename in row['paths']:
+                try:
+                    descriptor = open_regular(filename)
+                except FileNotFoundError:
+                    continue
+                os.close(descriptor)
                 return {'ok': False, 'refusal': 'owned paths remain'}
             self._released.add(batch_id)
             return {'ok': True}
@@ -377,7 +383,8 @@ class BoundaryProducedPublication:
                     len(set(paths)) != len(paths) or
                     any(not self.contains(p) or os.path.lexists(p) for p in paths)):
                 raise BoundaryProducedPrewriteRefused(batch_id=batch_id, refusal='invalid checkpoint extension')
-            existing = {p for row in self._prewrites.values() for p in row['paths']}
+            existing = {p for key, row in self._prewrites.items()
+                        if key not in self._released for p in row['paths']}
             if existing.intersection(paths):
                 raise BoundaryProducedPrewriteRefused(batch_id=batch_id, refusal='extension repeats owned paths')
             ceilings = dict(prior['ceilings'])

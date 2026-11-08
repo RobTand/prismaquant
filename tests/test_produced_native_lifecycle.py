@@ -15,7 +15,7 @@ from prismaquant.stage_a_produced_output import (BoundaryProducedPrewriteRefused
 from prismaquant.produced_output_spool import ProducedOutputSpool, ProducedExportRefused, ProducedWindowRefused
 from prismaquant.streamed_boundary_artifacts import (ProducedFileReference,
     StreamedBoundaryArtifacts, BOUNDARY_STORAGE_SCHEMA)
-from produced_native_fixtures import publication, owner
+from produced_native_fixtures import publication, owner, selected_publications
 
 
 def raw_group(pub, spool, batch='known', payload=b'\x00independent\xffbytes'):
@@ -223,3 +223,35 @@ def test_replaced_spool_root_retains_original_and_foreign_files(tmp_path):
         spool.retire_entry('known', ref)
     assert (saved / 'known' / local.name).read_bytes() == b'\x00independent\xffbytes'
     assert (foreign / local.name).read_bytes() == b'foreign-owner-bytes'
+@pytest.mark.parametrize('occupied', [False, True])
+def test_checkpoint_cancel_releases_native_reservation_only_on_absence(tmp_path, monkeypatch, occupied):
+    register = selected_publications(monkeypatch)
+    storage, pub = owner(tmp_path, spool_bytes=None)
+    directory = Path(pub.output_prefix) / 'checkpoints' / 'attempt'
+    plan = {'files': [{'name': 'f', 'path': str(directory / 'f.pt'), 'envelope_bytes': 100}],
+            'manifest_bytes': 100, 'temp_overlap_bytes': 100, 'envelope_bytes': 300}
+    def reserve():
+        return storage.reserve_checkpoint_artifact(label='known checkpoint', envelope_bytes=300,
+            file_plan=plan, checkpoint_dir=directory)
+    reservation = reserve()
+    batch = storage._checkpoint_reservations[reservation]['produced_batch']
+    if occupied:
+        directory.mkdir(parents=True)
+        (directory / 'f.pt').write_bytes(b'foreign occupied bytes')
+        occupied_path = directory / 'f.pt'
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            storage.cancel_checkpoint_artifact(reservation)
+        assert storage._checkpoint_active == reservation
+        assert reservation in storage._checkpoint_reservations and batch not in pub._released
+        assert set(directory.iterdir()) == {occupied_path}
+        assert occupied_path.read_bytes() == b'foreign occupied bytes'
+        return
+    storage.cancel_checkpoint_artifact(reservation)
+    assert batch in pub._released, 'native reservation remained active after application cancellation'
+    again = reserve()
+    storage.cancel_checkpoint_artifact(again)
+    refs = [storage.write(torch.arange(8, dtype=torch.float32) + i, batch_index=i, boundary_index=0)
+            for i in range(2)]
+    with storage.prefetch(refs) as window:
+        assert torch.equal(storage.get(window, refs[1]), torch.arange(8, dtype=torch.float32) + 1)
+    register(pub)

@@ -1909,6 +1909,12 @@ class StreamedBoundaryArtifacts:
             raise RuntimeError(
                 "exact boundary checkpoint reservation is not active; "
                 "only a pre-write attempt cancels cleanly")
+        if os.path.lexists(entry['dir']):
+            raise RuntimeError('checkpoint cancellation requires an absent attempt directory')
+        if entry['produced_batch'] is not None:
+            outcome = self._produced.abort_prewrite(batch_id=entry['produced_batch'])
+            if not outcome['ok']:
+                raise RuntimeError('checkpoint native reservation remains occupied')
         del self._checkpoint_reservations[reservation_id]
         if self._checkpoint_active == reservation_id:
             self._checkpoint_active = None
