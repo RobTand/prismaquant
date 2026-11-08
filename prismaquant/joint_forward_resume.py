@@ -90,7 +90,9 @@ def validate_forward_state(document, *, bind_identity, campaign_identity):
         raise ForwardRecoveryRefused('original forward session identity mismatch')
     frontier = document['frontier']
     count = document['n_batches']
-    if (type(frontier) is not int or frontier < 1 or type(count) is not int or count < 1
+    if (type(frontier) is not int or not 1 <= frontier < MAX_ENTRIES
+            or type(count) is not int or not 1 <= count <= MAX_ENTRIES
+            or (frontier + 1) * count > MAX_ENTRIES
             or count != old['execution_partition']['partition_count']):
         raise ForwardRecoveryRefused('forward coverage geometry differs')
     return frontier, count
@@ -106,6 +108,11 @@ def _records(document, entries):
         raise ForwardRecoveryRefused('unsupported exact boundary geometry')
     width = {'torch.bfloat16': 2, 'torch.float16': 2, 'torch.float32': 4}[dtype]
     tensor_bytes = math.prod(shape) * width
+    frontier, count = document['frontier'], document['n_batches']
+    if (type(frontier) is not int or not 1 <= frontier < MAX_ENTRIES
+            or type(count) is not int or not 1 <= count <= MAX_ENTRIES
+            or (frontier + 1) * count > MAX_ENTRIES):
+        raise ForwardRecoveryRefused('finite whole-draw geometry required')
     first = document.get('first_boundary', 0)
     if type(first) is not int or not 0 <= first <= document['frontier']:
         raise ForwardRecoveryRefused('forward recovery segment range is invalid')
@@ -132,10 +139,6 @@ def _records(document, entries):
         raise ForwardRecoveryRefused('incomplete whole-draw forward boundary coverage')
     return {boundary: [rows[i] for i in range(document['n_batches'])]
             for boundary, rows in result.items()}
-
-
-MAX_CHAIN_SEGMENTS = 16
-
 
 
 def _campaign(document):

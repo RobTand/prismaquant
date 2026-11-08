@@ -499,6 +499,12 @@ def read_produced_selection(selection, *, checkpoint_exit=None, verify_payloads=
     if not isinstance(bindings, list):
         raise BoundaryProducedBindingError('finite group bindings required')
     _limit(len(bindings), declaration['max_groups'])
+    metadata_bytes = 0
+    for binding in bindings:
+        _fields(binding, ('path', 'sha256', 'bytes'), 'group binding')
+        checked_path(binding['path']); digest(binding['sha256'])
+        metadata_bytes += _limit(binding['bytes'], MAX_DOCUMENT_BYTES)
+        _limit(metadata_bytes, 64 << 20)
     groups, batches, paths, total, count = [], set(), set(), 0, 0
     # Validate the entire finite metadata roster before reading any payload.
     for binding in bindings:
@@ -518,6 +524,7 @@ def read_produced_selection(selection, *, checkpoint_exit=None, verify_payloads=
                 raise BoundaryProducedBindingError('duplicate or foreign descriptor')
             paths.add(row['path']); total += row['bytes']; count += 1
         groups.append(group)
+        _limit(count, MAX_ENTRIES); _limit(total, MAX_PAYLOAD_BYTES)
     _limit(count, MAX_ENTRIES); _limit(total, MAX_PAYLOAD_BYTES)
     if verify_payloads:
         for group in groups:

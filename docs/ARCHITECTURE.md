@@ -17,12 +17,17 @@ actual terminal native evidence. Explicit launch-declared failed checkpoints
 use a separate reader that retains the failed verdict. Running, canceled,
 dependency-failed and unknown executions cannot authorize independent recovery.
 Recovery v2 uses a finite selected-publication chain and a launch-bound scientific
-state input; legacy PB capsules refuse. Retirement v2 joins every recorded native
+state input; legacy PB capsules refuse. Batch metadata is bounded at 64 MiB per
+index and recovery coordinate maps at 65536 entries before allocation.
+Retirement v2 joins every recorded native
 producer, successor/session and whole declared consumer binding scan, then seals
 exact file targets before unlinking. Crash continuation rechecks all barriers
 and cannot acquire additional targets. Chain-state active launch records establish
 later stopped-scope checks, never selected output authority. Separate producer,
 warm and consumer phases use native dependencies through `flux_jobs`.
+Checkpoint abandonment seals the planned file roster under the writer's recorded
+directory identity; disposal refuses unknown files and replacements. Native
+dependency proofs submit consumers before releasing producer completion events.
 
 ```mermaid
 flowchart LR

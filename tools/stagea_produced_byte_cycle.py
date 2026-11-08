@@ -29,6 +29,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     add_declaration_arguments(parser)
     parser.add_argument('--payload-exit', type=int, default=0)
+    parser.add_argument('--completion-ready', type=Path)
+    parser.add_argument('--completion-release', type=Path)
     args = parser.parse_args(argv)
     publication = BoundaryProducedPublication.bind_from_admitted_owner()
     state = read_bound_document(publication.declaration['inputs']['forward_state'])
@@ -67,6 +69,21 @@ def main(argv=None):
             assert [held[ref].read_bytes() for ref in references] == payloads
         assert [path.read_bytes() for path in paths] == payloads
     spool.join_copies()
+    if (args.completion_ready is None) != (args.completion_release is None):
+        raise ValueError('completion gate requires both explicit FIFO paths')
+    if args.completion_ready is not None:
+        import select
+        ready = os.open(args.completion_ready, os.O_WRONLY | os.O_NOFOLLOW)
+        try:
+            os.write(ready, b'ready')
+        finally:
+            os.close(ready)
+        release = os.open(args.completion_release, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        try:
+            if not select.select([release], [], [], 60)[0] or os.read(release, 16) != b'release':
+                raise RuntimeError('completion gate did not publish explicit release')
+        finally:
+            os.close(release)
     publication.finalize(Path(publication.producer['record_dir']) / 'publication.json',
                          checkpoint_exit=args.payload_exit or None)
     print('PASS byte fixture: actual native declaration, copies, local readback and rematerialization', flush=True)
