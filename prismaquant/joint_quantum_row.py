@@ -464,9 +464,12 @@ class QuantumRow:
     environment: Sequence[tuple[str, str]] = ()
     produced_declaration: str | None = None
     container_image: str | None = None
+    produced_declaration_wire: bytes | None = None
 
     def row(self, *, checkout: str) -> dict:
         """Scientific launch intent. Admission and resource rendering belong to Flux."""
+        if self.produced_declaration is None and self.produced_declaration_wire is not None:
+            raise ValueError('unpublished declaration bytes need an explicit path')
         from decimal import Decimal
         def number(text):
             value = Decimal(text)
@@ -487,7 +490,8 @@ class QuantumRow:
                "progress_phases": [f"{name}={grace}" for name, grace in self.progress]}
         if self.produced_declaration is not None:
             from .stage_a_produced_output import declaration_launch_arguments
-            row['argv'] += declaration_launch_arguments(self.produced_declaration)
+            row['argv'] += declaration_launch_arguments(
+                self.produced_declaration, wire=self.produced_declaration_wire)
         if self.container_image is not None:
             row["container_images"] = [self.container_image]
         return row

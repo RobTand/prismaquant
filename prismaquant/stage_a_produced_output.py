@@ -196,9 +196,14 @@ def current_declaration(*, producer=None):
     return validate_declaration(read_bound_document(binding)), binding
 
 
-def declaration_launch_arguments(filename):
-    """Bind validated immutable application intent to a native argv."""
-    raw, _ = read_document(str(filename), MAX_DOCUMENT_BYTES)
+def declaration_launch_arguments(filename, *, wire=None):
+    """Bind file intent, or bounded unpublished dry-run bytes, to a native argv."""
+    if wire is None:
+        raw, _ = read_document(str(filename), MAX_DOCUMENT_BYTES)
+    else:
+        if not isinstance(wire, bytes) or not 0 < len(wire) <= MAX_DOCUMENT_BYTES:
+            raise BoundaryProducedBindingError('bounded declaration bytes required')
+        raw = wire
     validate_declaration(decode_produced_document(raw))
     return [DECLARATION_FLAG, str(checked_path(str(filename))),
             DECLARATION_SHA_FLAG, bytes_sha256hex(raw)]

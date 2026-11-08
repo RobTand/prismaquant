@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-08, unpublished native declaration dry-run.
+Source: `prismaquant/{joint_quantum_row,stage_a_produced_output}.py` and
+`tools/dispatch_joint_quanta.py`, based on `c4d031c70`.
+Fresh band-producer dry-runs derive declaration arguments from their bounded,
+validated unpublished bytes, preserving the no-write contract. Normal launches
+read the published file. Actual native consumers still authenticate that file
+against the argv digest. No new executor, publication schema or runtime
+qualification follows from a hypothetical row.
+
 As of: 2026-11-08, native staged reads with declared metadata fences.
 Source: `prismaquant/io_engine.py`, based on `f4d4166b7`.
 Retained PWC windows keep their explicit canonical regular-file metadata fence

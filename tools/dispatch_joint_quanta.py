@@ -2170,7 +2170,8 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
                    ("PRISMAQUANT_DEV_MODE", "1")]
     return quantum_row.QuantumRow(
         str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
-        produced_declaration=emit_template, container_image=container_image).row(
+        produced_declaration=emit_template, container_image=container_image,
+        produced_declaration_wire=(band or {}).get("emit_template_wire")).row(
             checkout=sealed_spec.get("cwd", str(Path(__file__).resolve().parents[1])))
 
 
@@ -2687,6 +2688,8 @@ def fresh_band_role(record: Mapping, *, roles: Mapping, by_id: Mapping,
             output_root=output_root)
         if publish:
             _publish_control_bytes(path, payload, what="handoff template")
+        else:
+            band["emit_template_wire"] = payload
         band["emit_template"] = path
         band["emit_template_sha256"] = _sha_bytes(payload)
         band["emit_template_document"] = json.loads(payload)
