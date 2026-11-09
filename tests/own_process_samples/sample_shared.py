@@ -1,7 +1,7 @@
 """A plain sample for ``tests/test_own_process_isolation.py``.
 
-Importing it plants a module that stands in for a second ``prismabuild``:
-an ``own_process`` test that shares this process would see it.
+Importing it plants a foreign module in this process: an ``own_process``
+test that shares this process would see it.
 """
 import os
 from pathlib import Path

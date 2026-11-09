@@ -25,10 +25,11 @@ python_runner = load('bazel_python_runner', 'tools/bazel/python_runner.py')
 runtime = load('bazel_runtime', 'tools/bazel/runtime.py')
 
 
-def test_sdk_admission_state_uses_the_actions_private_local_scratch(tmp_path):
-    environ = runtime.gate_environment({'PRISMABUILD_BOX_STATE_ROOT': '/ambient/state'},
-                                       ROOT, tmp_path)
-    assert environ['PRISMABUILD_BOX_STATE_ROOT'] == str(tmp_path / 'pb-box-state')
+def test_the_gate_environment_is_private_scratch_and_names_no_box_state(tmp_path):
+    environ = runtime.gate_environment({'PATH': '/usr/bin', 'TEST_TMPDIR': '/bazel/tmp'}, ROOT, tmp_path)
+    assert environ['TMPDIR'] == environ['HOME'] == str(tmp_path)
+    assert 'TEST_TMPDIR' not in environ
+    assert not [name for name in environ if name.startswith('PRISMABUILD_')]
 
 
 def test_every_generated_input_has_a_check_and_one_fix():

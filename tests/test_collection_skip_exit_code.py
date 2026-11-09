@@ -30,7 +30,7 @@ def _run(directory: Path, *args: str) -> subprocess.CompletedProcess:
     # PYTEST_XDIST_WORKER_COUNT, and a child that inherits them starts as a
     # worker and blocks on a controller channel that is not there.
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("PYTEST_", "PRISMABUILD_"))}
+           if not key.startswith("PYTEST_")}
     env["PYTHONPATH"] = str(REPO)
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:xdist", "-o", "addopts=",

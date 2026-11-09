@@ -228,7 +228,7 @@ def test_when_loaded_patches_a_loaded_module_at_once_and_a_later_one_on_load(tmp
             sys.modules.pop(name, None)
 
 
-#: Names that left ``tests/conftest.py`` or ``tests/fleet_sdk.py``, and their
+#: Names that left ``tests/conftest.py``, and their
 #: one home now. A name kept in both places would let a test patch the old
 #: copy and silently miss the code that reads the new one (PrismaBuild #2582's
 #: lesson); with the old name gone, such a patch raises ``AttributeError``.
@@ -243,13 +243,6 @@ MOVED = {
         "project_lane_cells_onto_structures": "lane_table_fixtures",
         "legacy_v4_contract": "lane_table_fixtures",
         "legacy_v5_contract": "lane_table_fixtures",
-        "installed_client_sdk": "fleet_sdk",
-        "installed_helper_sdk": "fleet_sdk",
-    },
-    "fleet_sdk": {
-        "prismabuild_entries": "prismabuild_imports",
-        "_hosts_prismabuild": "prismabuild_imports",
-        "prismabuild_imports_restored": "prismabuild_imports",
     },
 }
 

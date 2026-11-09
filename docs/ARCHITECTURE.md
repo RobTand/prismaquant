@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, test-runtime closure, slice4f.
+Source: `tests/conftest.py`, `tests/test_own_process_isolation.py`, `tools/bazel/runtime.py`, based on `5373e63da`. The test runtime no longer
+carries PrismaBuild: `tests/fleet_sdk.py` and `tests/prismabuild_imports.py` are deleted, and `tests/conftest.py` has no PB import, name or control
+(no module restore, no queue-environment injection, no PB bound plugin, no PB distribution in the environment line). The requested per-test bound is
+pytest-timeout's own `--timeout`, a declared test dependency; a requested bound without the plugin is a usage error (exit 4) or a child that exits
+non-zero and fails its proxies by exit status, never a skip. An own-process child gets `-p pytest_timeout` only when its parent registered the plugin
+under that explicit name; a parent that autoloaded it registered it as `timeout`, and naming it again made pytest refuse "Plugin already registered under
+a different name" (the base failure of `test_own_process_isolation`, reproduced in a native session). Lazy reset reach, the certified default, the
+`fleet_data`/`task_suite` opt-ins, collection-skip exit status, own-process modules and golden rows are unchanged. The `pbsdk` dependency group, its pins
+and manifests, and two local-scratch pricing tests stay for slice 5. No numerical, GPU, serving or production qualification follows.
+
 As of: 2026-11-09, pilot/result callers on native authority and the PB-only demonstrations retired, slice4e.
 Source: `tools/{dispatch_joint_quanta,paired_trade_report_proof,tessera_campaign_container}.py`,
 `prismaquant/{joint_dispatch_pilot,joint_cost_quantum,campaign_container_spec}.py`, based on
