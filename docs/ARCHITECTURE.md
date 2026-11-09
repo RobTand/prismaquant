@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, G3 and staged-reader callers on the native staged manifest, slice4d.
+Source: `tools/g3job/{g3_residency,g3_launch,g3_progress_launch,g3_submit}.py`,
+`tools/tessera_campaign_container.py`, `prismaquant/campaign_container_spec.py`, based on
+`4033a2246`. The PB residency map, reader helper/queue/lease client and mover protocol are
+gone from the shipped readers. The container adapter forwards the five native staged names
+(`PRISMAQUANT_STAGED_MANIFEST` and its digest, the read-contract digest and path, the
+allowed tier) with container-translated paths and binds the `retained_shared_phase` namespace
+read-only; a `host_local_cache` manifest refuses at the container boundary, because its pins
+are process descriptors and the descriptor transfer is an unbuilt unit 4D obligation, never
+an implicit fallback. G3's `StagedReader` reads through the existing resolver and
+`LeaseWindow`: an undeclared range reads its declared origin, a declared range that fails an
+integrity check raises and never reads another copy, and a phase's descriptors are held until it
+finishes. `g3_launch` takes an explicit digest-checked read plan equal to the bound manifest's
+extents. `g3_submit` submits through `flux_jobs.submit_job` with a staged-launch binding and
+resumes from the saved ID; a GPU or over-16 GiB request fails closed in the native profile's own
+limits, so the GPU/GLM G3 run remains held for unit 4E and is not claimed. Progress is the 4b
+local log. `tools/stage_fed_demonstration.py` is deleted. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
 As of: 2026-11-09, native container admission and namespace provenance v2, slice4c.
 Source: `tools/{tessera_campaign_container,tessera_campaign_namespace}.py`,
 `prismaquant/campaign_container_spec.py`, based on `989d3ef46`. The campaign

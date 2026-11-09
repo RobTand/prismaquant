@@ -534,6 +534,8 @@ def _run_to_the_device_envelope(campaign, binding, monkeypatch):
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **k: None)
     monkeypatch.setattr(memory_management, "enforce_device_envelope", envelope)
     monkeypatch.delenv(residency_map.ENV_VAR, raising=False)
+    # The staged manifest bind is another owner's seam; this runner is about the device envelope.
+    monkeypatch.setattr(residency_map, "bind_residency_manifest", lambda digest: None)
     residency_map.reset_residency_resolver_for_tests()
     try:
         with pytest.raises(_EnvelopeReached):

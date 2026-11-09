@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+import readset_oracles
 import torch
 
 pytestmark = pytest.mark.own_process
@@ -237,56 +239,13 @@ def test_resume_reads_a_subset(tmp_path):
     assert all(by_name[n]["bytes"] > 0 for n in resumed)
 
 
-def test_pb_validation_admits_repeated_schedule(tmp_path):
-    data_manifest, manifest_layout = _pb()
+def test_repeated_schedule_validates_and_every_phase_has_a_range(tmp_path):
     record, receipt = _fixture(tmp_path)
-    manifest = _build(record, receipt)
-    # PB admits only paths under the sealed mount prefix; production
-    # entries always live there, so the test re-roots the fixture paths
-    # (test-only scaffolding) and reseals before validating.
-    root = str(tmp_path)
-    for entry in manifest["entries"]:
-        assert entry["path"].startswith(root)
-        entry["path"] = "/mnt/shared/fixture" + entry["path"][len(root):]
-    normalized = data_manifest.validate_data_manifest(manifest)
-    ranges = manifest_layout.manifest_phase_ranges(normalized)
-    assert ranges, "published PB stages nothing for the bound readset"
-    assert [r["name"] for r in ranges] == [
-        p["name"] for p in manifest["read_plan"]["phases"]]
+    manifest = readset_oracles.validate_plan(_build(record, receipt))
+    ranges = readset_oracles.phase_ranges(manifest)
+    assert ranges, "no phase range for the bound readset"
+    assert [r["name"] for r in ranges] == [p["name"] for p in manifest["read_plan"]["phases"]]
     assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
-
-
-def _pb():
-    from pathlib import Path as _Path
-    fleet = _Path("/mnt/shared/prismabuild-fleet")
-    try:
-        receipt = json.loads(
-            (fleet / "repo" / "RUNTIME_VERSION.json").read_text())
-        generation = str(receipt["generation"])
-        pinned = dict(receipt["files"])
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        pytest.skip(f"no PB runtime receipt: {exc}")
-    src = fleet / "runtime-generations" / generation / "src"
-    try:
-        actual = hashlib.sha256(
-            (src / "prismabuild" / "core.py").read_bytes()).hexdigest()
-    except OSError as exc:
-        pytest.skip(f"unreadable PB generation: {exc}")
-    if actual != pinned.get("src/prismabuild/core.py"):
-        pytest.skip("PB generation is not the published bytes")
-    if str(src) not in sys.path:
-        sys.path.insert(0, str(src))
-    import prismabuild.data_manifest as data_manifest
-    import prismabuild.manifest_layout as manifest_layout
-    for module in (data_manifest, manifest_layout):
-        if not _Path(module.__file__).resolve().is_relative_to(src.resolve()):
-            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
-            # site-packages prismabuild turn the test green without running it.
-            pytest.fail(
-                "a different prismabuild is already imported -- it shadows the "
-                "published generation under test; the interpreter carries a stale "
-                "prismabuild (PQ #1109)")
-    return data_manifest, manifest_layout
 
 
 def test_seal_deterministic_wire(tmp_path):

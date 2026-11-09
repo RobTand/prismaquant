@@ -34,13 +34,10 @@
 # --produced-output commits every metadata file at its origin as a produced
 # output.
 #
-# --residency stage is load-bearing, not only a staging choice: PrismaBuild
-# sets PRISMABUILD_RESIDENCY_MAP only for an action with a residency plan
-# (pool.residency_map_environment), and the produced-output binding derives
-# the queue root from it (stage_a_produced_output.launch_queue_root). With
-# --residency none the action would refuse before writing anything. The
-# strict read flags (--data-manifest-sha256, --allowed-tiers) need the map
-# too: every declared input is read off the stage, digest-checked (PQ #1092).
+# A bound staged manifest is load-bearing, not only a staging choice: the
+# strict read flags (--data-manifest-sha256, --allowed-tiers) need
+# PRISMAQUANT_STAGED_MANIFEST (exported by staged_launch): every declared input
+# is read off the immutable stage, digest-checked (PQ #1092).
 #
 # The read manifest is a v2 read plan, and pbrun refuses one unless every read
 # phase is also a progress phase, in the same order

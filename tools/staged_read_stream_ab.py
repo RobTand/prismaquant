@@ -60,14 +60,9 @@ def main():
     ap.add_argument("--json-out", default=None)
     args = ap.parse_args()
 
-    named = os.environ.get("PRISMABUILD_RESIDENCY_MAP")
-    if not named:
-        print("REFUSED: no residency map in the environment.", flush=True)
+    if not os.environ.get("PRISMAQUANT_STAGED_MANIFEST"):
+        print("REFUSED: no staged manifest in the environment.", flush=True)
         return 2
-    if not os.path.isdir("/stage/prewarm"):
-        print("REFUSED: /stage/prewarm is not mounted.", flush=True)
-        return 2
-    body = json.load(open(named))
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import torch
@@ -75,28 +70,32 @@ def main():
     from prismaquant import residency_shard_reader
     from prismaquant.io_spans import nfs_read_bytes, read_proc_io
     from prismaquant.layer_streaming import _source_safe_open
-    from prismaquant.residency_map import bind_residency_manifest, residency_resolver
+    from prismaquant.residency_map import residency_resolver
 
-    bind_residency_manifest(body["manifest_sha256"])
     resolver = residency_resolver()
     if resolver is None:
-        print("REFUSED: the map did not bind.", flush=True)
+        print("REFUSED: the staged manifest did not bind.", flush=True)
+        return 2
+    life = resolver.manifest.lifetime
+    stage_root = life.get("namespace") or life["root"]
+    if not os.path.isdir(stage_root):
+        print(f"REFUSED: {stage_root} is not available.", flush=True)
         return 2
 
     from prismaquant.mount_facts import find_mount
-    mount = find_mount("/stage/prewarm", table=residency_shard_reader.MOUNTS_PATH)
-    print(f"[mount] /stage/prewarm {mount.filesystem if mount else '?'} "
+    mount = find_mount(stage_root, table=residency_shard_reader.MOUNTS_PATH)
+    stage_mount = mount.point if mount else stage_root
+    print(f"[mount] {stage_root} {mount.filesystem if mount else '?'} "
           f"{dict(mount.options) if mount else '?'}", flush=True)
     print(f"[mount] read shape from the mount: "
-          f"{residency_shard_reader._read_shape('/stage/prewarm')}", flush=True)
+          f"{residency_shard_reader._read_shape(stage_root)}", flush=True)
 
     # The tensors to read: the largest ones a staged range covers outright.
     targets = []
-    for shard in sorted({k.split(":", 1)[1] for k in body["entries"]}):
-        ranges = [(int(v["offset"]), int(v["offset"]) + int(v["bytes"]),
-                   v["stage_path"])
-                  for k, v in body["entries"].items()
-                  if k.split(":", 1)[1] == shard]
+    extents = resolver.manifest.extents
+    for shard in sorted({e.source_path for e in extents}):
+        ranges = [(e.source_offset, e.source_offset + e.length, e.object_path)
+                  for e in extents if e.source_path == shard]
         header, base, _ = residency_shard_reader._read_shard_header(shard)
         rows = []
         for name, row in header.items():
@@ -139,8 +138,8 @@ def main():
         r1 = resource.getrusage(resource.RUSAGE_SELF)
         m1, i1 = nfs_read_bytes(), read_proc_io()
         digest = digest_tensor(tensor, torch)
-        stage_client = m1["/stage/prewarm"][0] - m0["/stage/prewarm"][0]
-        stage_server = m1["/stage/prewarm"][1] - m0["/stage/prewarm"][1]
+        stage_client = m1[stage_mount][0] - m0[stage_mount][0]
+        stage_server = m1[stage_mount][1] - m0[stage_mount][1]
         pool_server = (m1.get("/mnt/shared", (0, 0))[1]
                        - m0.get("/mnt/shared", (0, 0))[1])
         row = {

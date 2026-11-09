@@ -42,126 +42,67 @@ from tools.tessera_campaign_namespace import (
 )
 
 
-#: The transitional residency map name (deleted by unit 4d with the resolver
-#: map): where this action's declared inputs were staged.  The consumer half is
-#: ``prismaquant.residency_map`` (``ENV_VAR`` there); the literal is repeated
-#: here so the host adapter imports no package.  ``podman create``
-#: inherits nothing from the launcher, so a map that stops at this boundary
-#: leaves the resolver inside inert and every read on the pool -- which is
-#: exactly what the GLM-5.3-Flash joint run did for its whole life on
-#: 2026-09-18 (PQ #732): the launcher held the variable, its argv named it
-#: nowhere.
-RESIDENCY_MAP_ENV = "PRISMABUILD_RESIDENCY_MAP"
-#: The key of the map whose value is the directory every staged copy lives
-#: under, bound read-only into the container at the same path.
-STAGE_ROOT_KEY = "stage_root"
+#: The native staged-input names (``staged_launch.launch`` exports the same five). The
+#: manifest is immutable and published offline; the adapter forwards only what a
+#: ``retained_shared_phase`` manifest can honestly cross into a container.
+STAGED_ENV = _spec_contract["LAUNCHER_STAGED_ENV"]
+STAGED_MANIFEST_ENV, STAGED_SHA_ENV, STAGED_READ_SHA_ENV, STAGED_READ_PATH_ENV, STAGED_TIERS_ENV = STAGED_ENV
 
 
-#: The owner's rapid-iteration switch (Rob, 2026-09-19): when the submitting
-#: environment holds ``PRISMAQUANT_DEV_MODE=1``, the provenance gates inside
-#: the container -- the joint pass's source-proof, prepared-digest and
-#: checkpoint-lineage gates -- stamp and record instead of refusing. The
-#: submitter (``dispatch_tessera_campaign._submit_gpu_action``) seals it into
-#: the spec env it hands this launcher, which is exactly how
-#: ``PRISMAQUANT_LAYER_READ_THREADS`` travels: a hand-sealed spec that
-#: declares it reaches the container the same way, with no dispatch-side
-#: merge. The launcher itself neither requires nor interprets the value; the
-#: gates in ``prismaquant.dev_mode`` do. The name is held together with
-#: ``prismaquant.dev_mode.DEV_MODE_ENV`` by
-#: ``tests/test_dev_mode_provenance_gates.py``.
-DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE"
-
-
-def _read_residency_map(path: str) -> dict:
-    """The map's JSON object, or raise ``RuntimeError`` with the reason."""
-
-    try:
-        with open(path) as stream:
-            payload = json.load(stream)
-    except OSError as exc:
-        raise RuntimeError(
-            f"the PrismaBuild residency map {path} cannot be read on this host "
-            f"({exc.strerror}); the launcher named it, so this row's staged inputs "
-            "cannot be located and it would read the pool for its whole life") from exc
-    except ValueError as exc:
-        raise RuntimeError(
-            f"the PrismaBuild residency map {path} is not JSON: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"the PrismaBuild residency map {path} is not a JSON object")
-    return payload
-
-
-def _stage_root_mounted(stage_root: str) -> bool:
-    """Whether the stage root is a mounted directory here, triggering autofs.
-
-    The Sparks reach ``/stage/prewarm`` through an automount; binding an
-    untriggered placeholder hands the container an empty directory and every
-    staged read falls back to the pool with the map looking perfectly healthy.
-    Listing the directory triggers the mount; ``ismount`` is the fact.
-    """
-
-    try:
-        os.listdir(stage_root)
-    except OSError:
-        return False
-    return os.path.ismount(stage_root)
-
-
-def residency_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
-    """The residency map this container reads, and the stage mount it needs.
-
-    Returns the environment to forward and the mounts to add.  Both are empty
-    when the launcher named no map: an action outside PrismaBuild's residency
-    contract keeps a byte-identical ``podman create``.
-
-    Refused at launch, never dropped, when the map is not inside a declared
-    mount (the resolver inside opens it by this same path), when it cannot be
-    read or names no absolute ``stage_root``, or when that root is not a
-    mounted directory on this host.  A row whose stage is invisible reads the
-    pool for hours while its receipts say ``resident``; Rob's ruling for the
-    campaign is stage-fed only, so a launch that cannot be is a refusal, like
-    the progress channel's.  Per-file misses stay the resolver's own fallback.
-    """
-
-    named = environ.get(RESIDENCY_MAP_ENV)
-    if not named:
-        return {}, []
-    map_path = PurePosixPath(named)
-    if not map_path.is_absolute():
-        raise RuntimeError(
-            f"the PrismaBuild residency map path {named!r} is not absolute")
-    mounts = spec["container"].get("mounts", [])
-    inside = None
+def _declared_target(mounts, path: PurePosixPath, label: str) -> PurePosixPath:
+    """The container path one host path appears at, through a declared mount."""
     for mount in mounts:
         source = PurePosixPath(mount["source"])
-        if map_path == source or source in map_path.parents:
-            inside = PurePosixPath(mount["target"]) / map_path.relative_to(source)
-            break
-    if inside is None:
+        if path == source or source in path.parents:
+            return PurePosixPath(mount["target"]) / path.relative_to(source)
+    raise RuntimeError(
+        f"the staged {label} {path} is not inside any declared container mount, so the "
+        "reader inside could not open it; declare a mount covering it")
+
+
+def staged_input_environment(spec: dict, environ) -> "tuple[dict, list[dict]]":
+    """The immutable staged manifest this container reads, and the mount it needs.
+
+    Empty when the launcher bound no manifest. Otherwise all five names must be
+    present, the manifest must load against its digest, and its lifetime must be
+    ``retained_shared_phase``: a host-local cache descriptor cannot cross the
+    container boundary, and that descriptor transfer is an unbuilt unit 4D
+    obligation, never an implicit fallback. The manifest and read-contract paths
+    must sit inside declared mounts; the phase namespace is bound read-only at its
+    own path because the manifest names its objects by absolute path.
+    """
+    if not environ.get(STAGED_MANIFEST_ENV):
+        return {}, []
+    missing = [name for name in STAGED_ENV if not environ.get(name)]
+    if missing:
+        raise RuntimeError("the launcher holds a partial staged-input binding "
+                           f"(missing {', '.join(missing)}); refusing rather than guessing")
+    if environ[STAGED_TIERS_ENV] != "ssd":
+        raise RuntimeError("staged inputs are admitted from the ssd tier only")
+    from prismaquant.staged_manifest import load_staged_manifest
+    manifest = load_staged_manifest(environ[STAGED_MANIFEST_ENV], environ[STAGED_SHA_ENV])
+    if manifest.read_contract_sha256 != environ[STAGED_READ_SHA_ENV]:
+        raise RuntimeError("the read contract digest differs from the staged manifest")
+    life = manifest.lifetime
+    if life["mode"] != "retained_shared_phase":
         raise RuntimeError(
-            f"the PrismaBuild residency map {named} is not inside any declared "
-            "container mount, so the resolver inside the container could not open "
-            "it and every staged input would be read from the pool; declare a mount "
-            "covering it")
-    payload = _read_residency_map(named)
-    stage_root = payload.get(STAGE_ROOT_KEY)
-    if not isinstance(stage_root, str) or not PurePosixPath(stage_root).is_absolute():
-        raise RuntimeError(
-            f"the PrismaBuild residency map {named} names no absolute "
-            f"{STAGE_ROOT_KEY!r}, so the staged copies it points at cannot be "
-            "mounted into the container")
-    if not _stage_root_mounted(stage_root):
-        raise RuntimeError(
-            f"the stage root {stage_root} named by the PrismaBuild residency map "
-            "is not a mounted directory on this host; binding it would hand the "
-            "container an empty directory and every staged read would fall back "
-            "to the pool")
-    root = PurePosixPath(stage_root)
-    extra: list[dict] = []
-    if not any(PurePosixPath(m["target"]) == root or PurePosixPath(m["target"]) in root.parents
-               for m in mounts):
-        extra.append({"source": stage_root, "target": stage_root, "readonly": True})
-    return {RESIDENCY_MAP_ENV: str(inside)}, extra
+            "a host_local_cache staged manifest cannot cross the container boundary: its "
+            "pins are descriptors of the owning process, and unit 4D has not built a descriptor "
+            "transfer; use a retained_shared_phase manifest")
+    mounts = spec["container"].get("mounts", [])
+    env = {STAGED_MANIFEST_ENV: str(_declared_target(mounts, PurePosixPath(environ[STAGED_MANIFEST_ENV]), "manifest")),
+           STAGED_SHA_ENV: environ[STAGED_SHA_ENV], STAGED_READ_SHA_ENV: environ[STAGED_READ_SHA_ENV],
+           STAGED_READ_PATH_ENV: str(_declared_target(mounts, PurePosixPath(environ[STAGED_READ_PATH_ENV]), "read contract")),
+           STAGED_TIERS_ENV: "ssd"}
+    namespace = PurePosixPath(life["namespace"])
+    covering = [m for m in mounts if PurePosixPath(m["target"]) == namespace or PurePosixPath(m["target"]) in namespace.parents]
+    if not covering:
+        return env, [{"source": str(namespace), "target": str(namespace), "readonly": True}]
+    nearest = max(covering, key=lambda m: len(PurePosixPath(m["target"]).parts))
+    translated = PurePosixPath(nearest["source"]) / namespace.relative_to(nearest["target"])
+    if translated != namespace or not nearest.get("readonly", False):
+        raise RuntimeError("the staged phase namespace must be covered by a readonly identity mount or none")
+    return env, []
 
 
 def _canonical_absolute(value: object) -> "str | None":
@@ -733,7 +674,7 @@ EXIT_CLEANUP_FAILED = 91
 EXIT_CREATE_FAILED = 92
 #: The only ambient names this adapter reads. Nothing else crosses from the
 #: launching process into the container; a spec's own ``env`` is application data.
-AMBIENT_SETTINGS = ("FLUX_JOB_ID", "OUT", "TMPDIR", RESIDENCY_MAP_ENV,
+AMBIENT_SETTINGS = ("FLUX_JOB_ID", "OUT", "TMPDIR", *STAGED_ENV,
                     *COTANGENT_SCRATCH_ENV, *STAGE_B_SPILL_ENV,
                     *CONTAINER_CACHE_SCRATCH_ENV, *PRODUCED_SPOOL_ENV)
 _CID = re.compile(r"[0-9a-f]{64}")
@@ -815,8 +756,8 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
     else:
         argv += ["--user=0:0"]
     argv += ["--mount", f"type=bind,src={cwd},dst=/workspace,readonly"]
-    residency_env, residency_mounts = residency_environment(spec, environ)
-    for mount in [*spec["container"].get("mounts", []), *residency_mounts]:
+    staged_env, staged_mounts = staged_input_environment(spec, environ)
+    for mount in [*spec["container"].get("mounts", []), *staged_mounts]:
         value = f"type=bind,src={mount['source']},dst={mount['target']}"
         if mount.get("readonly", False):
             value += ",readonly"
@@ -825,7 +766,7 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
     scratch = _forwarded_local_scratch_environment(spec, environ)
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
-                 **bounded_defaults, **residency_env, **scratch,
+                 **bounded_defaults, **staged_env, **scratch,
                  **produced_spool_environment(spec, environ)}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]

@@ -243,7 +243,7 @@ def test_power_windows_are_unchanged(monkeypatch):
 
 @pytest.mark.parametrize("name", [
     "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head",
-    "render_window_bench", "stage_fed_demonstration", "staged_exact_read_bench",
+    "render_window_bench", "staged_exact_read_bench",
     "staged_read_stream_ab", "unit_journal_bench"])
 def test_migrated_tool_imports(name):
     import importlib

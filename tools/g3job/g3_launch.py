@@ -3,9 +3,9 @@
 
 Numerical runner arguments and pinned /pq files remain teacher-04's (PQ7882eda3).
 The harness calls the current central D32 policy owner at its own seams; only
-the source-read seam replaces a pinned hook. PB ranges use the admitted helper
-mounts and a writable queue for attempt-bound reader pins. Host keys are
-translated from /source, exports and teachers; /workspace is this pbjob checkout.
+the source-read seam replaces a pinned hook. Staged ranges come from the bound immutable
+staged manifest, read-only. Host keys are
+translated from /source, exports and teachers; /workspace is this job's checkout.
 
 usage: g3_launch.py (--pilot | --arm ARM) [--run-tag TAG]
 """
@@ -53,6 +53,8 @@ p.add_argument("--preflight", action="store_true")
 p.add_argument("--qualify-then-score", action="store_true")
 p.add_argument("--source-preparation")
 p.add_argument("--source-preparation-sha256")
+p.add_argument("--read-plan", help="the application read plan (data manifest v2) bound to the staged manifest")
+p.add_argument("--read-plan-sha256")
 args = p.parse_args()
 if not args.reader_smoke and not args.real_arm_smoke and not args.manifest_sha256:
     p.error('a scorer requires --manifest-sha256')
@@ -104,15 +106,17 @@ spec = {"container": {"image": IMAGE, "content_sha256": IMAGE_CONTENT,
                 "PRISMAQUANT_IDENTITY_GIT_COMMIT": PQ_COMMIT, "PRISMAQUANT_IDENTITY_GIT_DIRTY": "false",
                 "TESSERA_SRC": "/tessera/src", "G3_PQ_ROOT": "/pq"}}
 from g3_residency import container_contract
-pb_mounts, pb_env = container_contract()
-spec["container"]["mounts"].extend(pb_mounts)
-spec["env"].update(pb_env)
+staged_mounts, staged_env = container_contract()
+spec["container"]["mounts"].extend(staged_mounts)
+spec["env"].update(staged_env)
 spec["env"]["G3_HOST_MOUNTS"] = json.dumps({target: source for source, target in mounts})
-if pb_env:
+if staged_mounts:
     from g3_residency import launch_read_plan
+    if not args.read_plan or not args.read_plan_sha256:
+        p.error("a staged run requires --read-plan and --read-plan-sha256")
     read_plan_path = runs / f"{name}.read-plan.json"
     with read_plan_path.open("x") as stream:
-        json.dump(launch_read_plan(), stream, separators=(",", ":"))
+        json.dump(launch_read_plan(args.read_plan, args.read_plan_sha256), stream, separators=(",", ":"))
     spec["env"]["G3_READ_PLAN"] = f"/out/{read_plan_path.name}"
 if "PRISMAQUANT_DEV_MODE" in os.environ:
     spec["env"]["PRISMAQUANT_DEV_MODE"] = os.environ["PRISMAQUANT_DEV_MODE"]

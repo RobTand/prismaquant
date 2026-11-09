@@ -527,7 +527,7 @@ def load_file(path: Path, limit: int, *, binding, decode, declared_signature=Non
     SHA-256 fence decides whether it is admitted, so a wrong or stale staged
     copy is refused exactly as a wrong pool copy would be. The declared path is
     the fallback and the accounting says so. Without
-    ``PRISMABUILD_RESIDENCY_MAP`` no resolver exists and the bytes are the
+    ``PRISMAQUANT_STAGED_MANIFEST`` no resolver exists and the bytes are the
     pool's.
 
     Under the active allowed-tier policy the read requires ``binding``, the

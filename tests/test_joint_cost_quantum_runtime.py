@@ -661,7 +661,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     # context is what makes this run offline; it does not relax the
     # production check, which still refuses a half-present launch context.
     for name in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
-                 "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_RESIDENCY_MAP"):
+                 "PRISMABUILD_ACTION_SCOPE", "PRISMAQUANT_STAGED_MANIFEST"):
         monkeypatch.delenv(name, raising=False)
 
     captured = {}

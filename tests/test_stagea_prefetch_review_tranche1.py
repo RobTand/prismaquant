@@ -200,53 +200,6 @@ def test_shutdown_does_not_mask_primary_capture_failure(monkeypatch):
     landed.set()
 
 
-def test_cancelled_staged_wait_raises_cancelled_error():
-    """The wait seam aborts with CancelledError, never UNCOVERED."""
-    from prismaquant.residency_shard_reader import await_staged_spans
-
-    class _Uncovered:
-        def __init__(self):
-            self.polls = 0
-            self.first_poll = threading.Event()
-
-        def staged_range_outcome(self, declared, start, end, declared_size=None):
-            from prismaquant.residency_map import RANGE_UNCOVERED
-            self.polls += 1
-            if self.polls == 1:
-                self.first_poll.set()
-            return None, RANGE_UNCOVERED
-
-        def record_range_wait(self, *args, **kwargs):
-            return None
-
-    resolver = _Uncovered()
-    cancel = threading.Event()
-    started, done = threading.Event(), threading.Event()
-    outcome = {}
-
-    def waiter():
-        started.set()
-        try:
-            outcome["verdict"] = await_staged_spans(
-                resolver, [("declared", 0, 8, 16)],
-                deadline=time.monotonic() + BOUND_S, cancel=cancel)
-        except CancelledError as exc:
-            outcome["cancelled"] = exc
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=waiter, daemon=True)
-    thread.start()
-    assert started.wait(timeout=10.0), "waiter never started"
-    assert resolver.first_poll.wait(timeout=10.0), "wait never polled"
-    cancel.set()
-    assert done.wait(timeout=10.0), "cancelled wait did not finish promptly"
-    thread.join(timeout=10.0)
-    assert "cancelled" in outcome, (
-        f"cancel resolved as {outcome.get('verdict')!r}, not CancelledError")
-    assert isinstance(outcome["cancelled"], CancelledError)
-
-
 def test_declared_unlanded_span_raises_typed_expiry():
     """UNCOVERED at the read seam is a typed transient cause."""
     from prismaquant import staged_tier_policy as policy

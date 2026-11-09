@@ -16,5 +16,4 @@ tools/build_t4_logical_request.py	literal	prismabuild-fleet/cas
 tools/build_t4_recovery_request.py	literal	prismabuild-fleet/cas
 tools/build_t4_recovery_request.py	literal	prismabuild-fleet/pb-queue
 tools/derive_tessera_progress_grace.py	literal	prismabuild-fleet/pb-queue
-tools/stage_fed_demonstration.py	literal	prismabuild-fleet/pb-queue
 tools/stagea_produced_live_cycle.py	import	prismabuild.*
