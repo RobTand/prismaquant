@@ -278,7 +278,7 @@ NONHERMETIC = {
     ),
     "//tests:test_stage_b_streamed_incoming_1143": struct(
         tags = ["hosted-arm64"],
-        reason = "With the reviewed PrismaBuild SDK installed, its staging tests construct ExactCotangentScratch on tmp_path; that real disk guard refuses arm64 tmpfs. Static audit; fresh runtime validation pending.",
+        reason = "Its staging tests construct ExactCotangentScratch on tmp_path; that real disk guard refuses arm64 tmpfs. Static audit; fresh runtime validation pending.",
     ),
     "//tests:test_stage_b_workspace_profile": struct(
         tags = ["gpu"],
@@ -330,7 +330,7 @@ NONHERMETIC = {
     ),
     "//tests:test_strict_reader_tier_enforcement": struct(
         tags = ["hosted-arm64"],
-        reason = "With the reviewed PrismaBuild SDK installed, the local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
+        reason = "The local_scratch=True checkpoint test constructs ExactCotangentScratch on tmp_path; its disk guard refuses arm64 tmpfs. Static audit; runtime validation pending.",
     ),
     "//tests:test_tensor_digest_owner_recipes_2638": struct(
         tags = ["gpu"],

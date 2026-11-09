@@ -47,13 +47,11 @@ exactly once. Initial placements start on ARM in both modes; full workflow rerun
 swap the architecture assigned to every shard.
 
 The runners are GitHub-hosted `ubuntu-24.04` and `ubuntu-24.04-arm`. CI uses no
-PrismaBuild admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
-commit, and `pip install -c .github/ci-constraints.txt -e '.[test]' --group pbsdk`
-preserve the existing CPU installation. The `pbsdk` dependency group installs the
-reviewed PrismaBuild client SDK (`prismabuild`, a Git install at
-`staged_lease.PB_READER_LEASE_PIN_COMMIT`), so tests that drive the SDK run on hosted
-runners instead of skipping (#3216). Tests that need the fleet's sealed lease-helper
-generation or PrismaBuild's `tools/` scripts still skip with their own reasons.
+fleet admission or fleet runner. Python 3.12, CPU torch, the resolved Tessera
+commit, and `pip install -c .github/ci-constraints.txt -e '.[test]'`
+preserve the existing CPU installation. The retired execution system's client is
+no longer a dependency: no dependency group installs it and tests that drove it were
+ported to the native stack or deleted.
 Pip caches include dependency declarations, constraints, and the Tessera pin.
 Native libraries get one thread each. Pytest workers are bounded by inherited
 CPU affinity and two GiB per worker after reserving one GiB for the runner. Work
@@ -155,7 +153,7 @@ both `ubuntu-24.04` and `ubuntu-24.04-arm`. Its limit must equal
 only for a listed node, only up to that limit, and only while the PR base carries
 that exact policy blob, so a merged migration grants nothing to a later PR. The
 default, file budgets and every unlisted node stay shrink-only. A malformed record
-fails closed. The first migration (#3223) covers installing the PrismaBuild SDK.
+fails closed. The first migration (#3223) recorded the dependency change of a retired client install.
 
 `tools/ci/gate_quarantine.json` replaces `.github/hosted-known-failures.txt`.
 The legacy file at main `8d72e303e2f070925077ce9e072b254df3856909` had 54 active
@@ -188,7 +186,7 @@ base64 and URL-encoded values, including gzip members, and never prints values.
 It uses standard-library `compression.zstd` when available; otherwise zstd is
 reported as "not scanned". Unset/empty secrets do not fail fork PRs. Exit 1
 means a detected value; exit 75 means unreadable or incomplete input.
-Vendor the core and SHA-256 pin in step across PrismaQuant, TL3, PrismaBuild
+Vendor the core and SHA-256 pin in step across PrismaQuant, TL3
 and Tessera. Static tests reject secret command-line flags and expressions
 outside step-level `env`. Authentication belongs in the external
 `~/.config/buildbuddy/bazelrc` or a Python API client's environment-fed HTTP header.

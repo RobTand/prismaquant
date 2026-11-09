@@ -43,21 +43,8 @@ pip.parse(
     # pip on the amd64 runner would install an x86 torch for arm64 executors.
     experimental_index_url_overrides = {"torch": "https://download.pytorch.org/whl/cpu"},
     target_platforms = ["linux_x86_64", "linux_aarch64"],
-    whl_modifications = {"@pq_wheel_modifications//:prismabuild.json": "prismabuild"},
 )
-# rules_python builds the SDK wheel from the SHA-256 checked source archive.
-# Preserve that distinct Bazel origin without claiming pip installed a Git VCS URL.
-pip.whl_mods(
-    hub_name = "pq_wheel_modifications",
-    whl_name = "prismabuild",
-    # rules_python excludes sdist RECORDs from runfiles by default. The SDK
-    # verifier needs the original package hashes, so include this one explicitly.
-    data = ["site-packages/prismabuild-0.1.0.dist-info/RECORD"],
-    copy_files = {
-        "@@//tools/bazel:prismabuild_source.json": "site-packages/prismabuild-0.1.0.dist-info/prismaquant_bazel_source.json",
-    },
-)
-use_repo(pip, "pq_pip", "pq_wheel_modifications")
+use_repo(pip, "pq_pip")
 
 # The hosted gate has no tests/__init__.py; an implicit one would change imports.
 rules_python_config = use_extension("@rules_python//python/extensions:config.bzl", "config")

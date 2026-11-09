@@ -1,10 +1,11 @@
 # PrismaQuant Architecture
 
-As of: 2026-11-09, PB-zero closure in live PrismaQuant source (the dependency removal is the slice's final commit), slice5.
+As of: 2026-11-09, PB-zero closure in live PrismaQuant source, slice5.
 Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
 nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
 the v1 config is archived under `experiments/measurements/`. Recorded CAS receipts are checked offline by `recorded_cas_receipt`. The `staged_lease` doorways are deleted; `tools/build_stagea_seed_package.py` refuses without a native data-manifest validator. `gate_evidence` has no pbtest `inventory` kind.
 A ban over live source (text mechanisms plus an AST import/dynamic-load scan, explicit history/definition exclusions, and a shrink-only 4C-14 file list) replaces the PB boundary allowlist and the import-leak guard.
+The `pbsdk` dependency group and every pin and manifest of the retired client (`pyproject.toml`, `uv.lock`, `tools/bazel/requirements*`, `pip_modules.json`, `MODULE.bazel`, the source-identity document and their test guards) are deleted in the slice's final commit; the hosted install in `.github/workflows/bazel-hosted.yml` must drop `--group pbsdk` in the same merge.
 No numerical, GPU, serving or production qualification follows.
 
 As of: 2026-11-09, test-runtime closure, slice4f.

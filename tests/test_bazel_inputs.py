@@ -172,7 +172,7 @@ def test_no_credential_reaches_a_test_on_any_lane(tmp_path):
     assert environment['PATH'] == '/usr/bin'
 
 
-def test_the_export_tracks_the_project_lock_and_sdk_pin(tmp_path):
+def test_the_export_tracks_the_project_lock(tmp_path):
     for name in requirements.SOURCES:
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -180,14 +180,10 @@ def test_the_export_tracks_the_project_lock_and_sdk_pin(tmp_path):
     before = requirements.source_digest(tmp_path)
     (tmp_path / 'uv.lock').write_text((ROOT / 'uv.lock').read_text() + '\n')
     assert requirements.source_digest(tmp_path) != before
-    assert requirements.SDK_PROVENANCE in requirements.SOURCES
+    assert not hasattr(requirements, 'SDK_PROVENANCE')
 
 
-def test_the_registry_export_contains_the_reviewed_hashed_sdk_archive():
-    source = requirements.sdk_source(ROOT)
+def test_the_registry_export_pins_no_retired_client():
     for platform in requirements.PLATFORMS:
         export = (ROOT / requirements.EXPORT.format(platform)).read_text()
-        assert requirements.pins(export)['prismabuild'] == (
-            source['url'])
-        sdk = next(block for block in export.split('\n\n') if block.startswith('prismabuild @'))
-        assert '--hash=sha256:e2f64a500db635dcc619338e3ced8bfff14f28d23a588a4a01897a944f712970' in sdk
+        assert 'prismabuild' not in {name.replace('_', '-') for name in requirements.pins(export)}

@@ -11,8 +11,7 @@ Excluded, each by an explicit list below (never by pattern guessing):
 - ``HISTORY_PREFIXES``: append-only records of retired runs and decisions;
 - ``BAN_DEFINITIONS``: the files that define the ban or prove that a retired name is refused, and so
   must spell the name;
-- ``PENDING_FINAL_COMMIT``: dependency manifests and generated build inputs, removed with the
-  ``pbsdk`` group in the slice's last commit (the same commit deletes this list);
+- ``CI_DATA``: measured gate timings keyed by retired test node ids;
 - ``tests/boundary_allowlists/prismabuild_4c14.txt``: the 4C-14 files, shrink-only. A listed file
   that no longer matches, or no longer exists, fails until its line is deleted.
 """
@@ -41,13 +40,7 @@ BAN_DEFINITIONS = (
     "tests/test_native_staged_readers.py", "tests/test_tessera_campaign_container.py",
     "tests/test_tessera_native_rows.py", "tests/g3job/test_g3_submit.py",
 )
-PENDING_FINAL_COMMIT = (
-    "pyproject.toml", "uv.lock", "MODULE.bazel", ".github/workflows/bazel-hosted.yml",
-    "tools/bazel/", "tests/pb_runtime_generation_pin.json", "tests/test_pb_sdk_test_env_3216.py",
-    "tests/test_prismabuild_import_leak_1281.py", "tests/boundary_allowlists/prismabuild.txt",
-    "tools/ci/gate_", "docs/ci_gate.md", "docs/dependency_lock.md", "docs/merge_queue.md",
-    "tests/fixtures/graph_impact_allowlist.json",
-)
+CI_DATA = ("tools/ci/gate_durations.json",)  # measured timings keyed by node ids of tests that no longer exist
 
 _WIRE = re.compile(r"prismaquant\.prismabuild\.[a-z_0-9.]+")
 MECHANISM = re.compile(
@@ -65,7 +58,7 @@ def mechanisms(text: str) -> list[str]:
 def excluded(path: str) -> bool:
     if path in HISTORY_EXCEPT:
         return False
-    return (path.startswith(HISTORY_PREFIXES + PENDING_FINAL_COMMIT) or path in BAN_DEFINITIONS
+    return (path.startswith(HISTORY_PREFIXES) or path in BAN_DEFINITIONS or path in CI_DATA
             or path.endswith("BUILD.bazel"))
 
 

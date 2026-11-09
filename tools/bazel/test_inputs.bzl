@@ -49,13 +49,13 @@ TEST_INPUTS = {
         data = ["//:files/prismaquant"],
         reason = "it scans every prismaquant module for imports of tools.",
     ),
-    "//tests:test_prismabuild_boundary": struct(
-        data = ["//:files/prismaquant", "//:files/tools"],
-        reason = "it scans prismaquant and tools for prismabuild references.",
+    "//tests:test_prismabuild_ban": struct(
+        data = ["//:files/prismaquant", "//:files/tools", "//tests:files"],
+        reason = "it scans the live source tree for retired execution-system mechanisms.",
     ),
-    "//tests:test_prismabuild_import_leak_1281": struct(
-        data = ["//tests:files"],
-        reason = "its collection scanner parses every test source without importing it.",
+    "//tests:test_prismabuild_boundary": struct(
+        data = ["//:files/prismaquant", "//:files/tools", "//tests:files"],
+        reason = "it scans the live Python modules for loads of the retired package.",
     ),
     "//tests:test_serving_runtime_patch_set": struct(
         data = ["//:files/prismaquant/serving_runtime_patches"],
