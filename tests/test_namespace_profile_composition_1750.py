@@ -1,4 +1,5 @@
 """Metadata/admission composition; no Docker, GPU, Netdata or native profiler."""
+from container_admission import ADMISSION
 import copy
 import json
 import subprocess
@@ -142,6 +143,7 @@ def test_real_git_composed_admission_reaches_docker_boundary_only_after_checks(t
     def inspect(container):
         reached.append(container)
         raise DockerBoundary()
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)
     monkeypatch.setattr(adapter, "inspect_or_load", inspect)
     with pytest.raises(DockerBoundary):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
@@ -185,7 +187,7 @@ def test_published_instrumentation_tamper_refuses_before_docker(tmp_path, monkey
     row["argv"][4] = json.dumps(spec)
     monkeypatch.chdir(checkout)
     for key, value in row["env"].items(): monkeypatch.setenv(key, value)
-    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("Docker reached"))
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("container engine reached"))
     with pytest.raises(RuntimeError):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
 
@@ -287,6 +289,7 @@ def test_declared_profile_without_namespace_binding_refuses_before_docker(tmp_pa
         pass
     def inspect(*args):
         raise DockerReached("unbound instrumentation reached Docker")
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)
     monkeypatch.setattr(adapter, "inspect_or_load", inspect)
     with pytest.raises(RuntimeError, match="namespace"):
         adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])

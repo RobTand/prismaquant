@@ -1,4 +1,4 @@
-"""The fanout must execute the sealed source in its declared Docker runtime."""
+"""The fanout must execute the sealed source in its declared rootless Podman runtime."""
 import importlib
 import json
 import re
@@ -14,6 +14,7 @@ from prismaquant import tessera_campaign_rows as campaign_rows
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch
 
+from container_admission import ADMISSION, CIDFILE, stub_launch, with_admission
 from container_inspection_fixture import inspection
 
 
@@ -42,46 +43,48 @@ def test_container_row_keeps_row_arguments_and_declared_runtime():
     assert row["retry_safe"] is True
 
 
-def test_container_uses_worker_snapshot_and_host_user_without_shell():
+def test_container_uses_worker_snapshot_and_native_cpuset_without_shell():
     runner = importlib.import_module("tools.tessera_campaign_container")
-    argv = runner.docker_command(spec(), ["python3", "a path;$(touch bad)"],
-                                 cwd="/worker/snapshot", uid=1000, gid=1001,
+    argv = runner.podman_command(spec(), ["python3", "a path;$(touch bad)"],
+                                 cwd="/worker/snapshot", admission=ADMISSION, cidfile=CIDFILE,
                                  image_id="sha256:resolved")
-    assert argv[:3] == ["docker", "run", "--rm"]
-    assert argv[argv.index("--user") + 1] == "1000:1001"
+    assert argv[:2] == [runner.PODMAN, "create"]
+    assert argv[argv.index("--cidfile") + 1] == CIDFILE
+    for flag in ("--pull=never", "--cgroups=disabled", "--network=none", "--env-host=false"):
+        assert flag in argv
+    assert argv[argv.index("--cpuset-cpus") + 1] == "21,22,23,30"
+    assert ("--user=0:0" in argv) or ("--userns=keep-id" in argv and "--user=1000:1000" in argv)
     assert "type=bind,src=/worker/snapshot,dst=/workspace,readonly" in argv
     assert not any("/original/checkout" in arg for arg in argv)
     assert "PYTHONPATH=.:/producer/src" in argv
     assert "type=bind,src=/producer,dst=/producer,readonly" in argv
     assert argv[-3:] == ["sha256:resolved", "python3", "a path;$(touch bad)"]
-    assert not any(arg.startswith("--cpuset") or arg == "--cgroup-parent" for arg in argv)
+    assert "docker" not in " ".join(argv) and "--gpus" not in argv and "--device" not in argv
 
 
-def _argv_with_budget(budget):
+def _argv_with_budget(budget, admission=ADMISSION):
     runner = importlib.import_module("tools.tessera_campaign_container")
     declared = spec()
     if budget is not _ABSENT:
         declared["box_memory_gb"] = budget
-    return runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                                 uid=1000, gid=1000, image_id="sha256:resolved")
+    return runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 admission=admission, cidfile=CIDFILE, image_id="sha256:resolved")
 
 
 _ABSENT = object()
 
 
-def test_a_declared_box_budget_becomes_the_cgroup_cap_the_guard_refuses_from():
-    """The bound has to be enforced by the kernel, not asserted in a plan.
+def test_a_declared_budget_within_the_admission_is_recorded_not_kernel_enforced():
+    """D1 (probe job fV3wqkMnFq): with ``--cgroups=disabled`` podman accepts ``--memory``
+    but does not enforce it, so none is emitted and ``HostConfig.Memory`` is never evidence.
+    The bound is the job unit's; the declared cap only has to fit the admitted memory."""
+    argv = _argv_with_budget(10)
+    assert "--memory" not in argv and "--memory-swap" not in argv
 
-    ``CaptureMemoryGuard`` holds its margin back from a cgroup cap and refuses
-    without one; on GB10 the device and the host share one physical pool, so
-    this single number is the aggregate bound rather than 92 GiB plus a
-    resident set. The value is the spec's own ``box_memory_gb`` -- the same one
-    the demand derivation already refuses to exceed.
-    """
-    argv = _argv_with_budget(104)
-    assert argv[argv.index("--memory") + 1] == "104g"
-    # no swap headroom: the row fails rather than spilling past its budget
-    assert argv[argv.index("--memory-swap") + 1] == "104g"
+
+def test_a_declared_budget_above_the_admission_is_refused():
+    with pytest.raises(RuntimeError, match="104 GiB exceeds the admitted 16 GiB"):
+        _argv_with_budget(104)
 
 
 def test_a_spec_declaring_no_budget_keeps_the_previous_invocation():
@@ -104,32 +107,30 @@ def _argv_with_fields(cpu_gb=_ABSENT, box_gb=_ABSENT):
         declared["cpu_memory_gb"] = cpu_gb
     if box_gb is not _ABSENT:
         declared["box_memory_gb"] = box_gb
-    return runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                                 uid=1000, gid=1000, image_id="sha256:resolved")
+    return runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved")
 
 
 def test_the_container_cap_is_the_cpu_field_not_the_box_capacity():
-    """Two fields, two meanings, and conflating them breaks one of them.
-
-    ``box_memory_gb`` is the box's total unified capacity, which the demand
-    derivation refuses to derive a row above -- for A2 that is the combined
-    physical demand a PrismaBuild row reserves. ``cpu_memory_gb`` is what the
-    container's cgroup may charge. Reading the cap out of the capacity field
-    gives a 114 GiB container cap for a row whose CPU side must fit 34 GiB.
-    """
-    argv = _argv_with_fields(cpu_gb=34, box_gb=114)
-    assert argv[argv.index("--memory") + 1] == "34g"
-    assert argv[argv.index("--memory-swap") + 1] == "34g"
+    """``cpu_memory_gb`` is what the container may charge; ``box_memory_gb`` is capacity."""
+    big = with_admission(memory_gib=64)
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    declared = spec()
+    declared["cpu_memory_gb"], declared["box_memory_gb"] = 34, 114
+    runner.podman_command(declared, ["python3"], cwd="/worker/snapshot", admission=big,
+                          cidfile=CIDFILE, image_id="sha256:resolved")
+    with pytest.raises(RuntimeError, match="34 GiB exceeds the admitted 16 GiB"):
+        _argv_with_fields(cpu_gb=34, box_gb=114)
 
 
 def test_a_spec_sealed_before_the_cpu_field_keeps_its_old_cap():
     """Backwards: v3 and every earlier spec declared only box_memory_gb."""
-    argv = _argv_with_fields(cpu_gb=_ABSENT, box_gb=104)
-    assert argv[argv.index("--memory") + 1] == "104g"
+    with pytest.raises(RuntimeError, match="104 GiB exceeds the admitted 16 GiB"):
+        _argv_with_fields(cpu_gb=_ABSENT, box_gb=104)
 
 
 def test_host_adapter_needs_no_prismaquant_dependencies_and_forwards_no_progress(tmp_path):
-    """The host launcher must reach Docker before importing the pinned image.
+    """The host launcher must build its container argv before importing the pinned image.
 
     Sparklina's minimal action interpreter deliberately has no
     ``compressed_tensors``.  Before #601 importing this module initialized
@@ -150,9 +151,10 @@ environ = {{
     "PRISMABUILD_ACTION_PROGRESS_PATH": "/mnt/shared/queue/k.progress",
     "PRISMABUILD_ACTION_PROGRESS_TOKEN": "minted-token",
 }}
-argv = runner.docker_command(json.loads(spec), ["python3"], cwd="/snapshot",
-                            uid=1, gid=1, image_id="sha256:resolved",
-                            environ=environ)
+admission = {json.dumps(ADMISSION)!r}
+argv = runner.podman_command(json.loads(spec), ["python3"], cwd="/snapshot",
+                            admission=json.loads(admission), cidfile={CIDFILE!r},
+                            image_id="sha256:resolved", environ=environ)
 assert not any("PRISMABUILD_ACTION_PROGRESS" in part for part in argv)
 assert not hasattr(runner, "progress_environment")
 """
@@ -224,7 +226,7 @@ def test_materialization_row_preserves_its_subcommand_and_resource_demand(contai
 def test_actual_image_content_cannot_be_overridden_and_cpu_mode_requests_no_gpu():
     runner = importlib.import_module('tools.tessera_campaign_container')
     data = spec()
-    argv = runner.docker_command(data, ['python3'], cwd='/snapshot', uid=1, gid=1,
+    argv = runner.podman_command(data, ['python3'], cwd='/snapshot', admission=ADMISSION, cidfile=CIDFILE,
         image_id='sha256:resolved', content_sha256='a'*64, with_gpu=False)
     assert '--gpus' not in argv
     assert 'PRISMAQUANT_CONTAINER_CONTENT_SHA256='+'a'*64 in argv
@@ -266,11 +268,11 @@ def test_checkout_commit_is_read_on_the_host_and_refuses_changed_package_bytes(t
     root = tmp_path / 'checkout'
     head = _git_checkout(root)
     assert runner.checkout_commit(str(root)) == head
-    argv = runner.docker_command(spec(), ['python3'], cwd=str(root), uid=1, gid=1,
+    argv = runner.podman_command(spec(), ['python3'], cwd=str(root), admission=ADMISSION, cidfile=CIDFILE,
                                  image_id='sha256:resolved', checkout_commit=head)
     assert f'{runner.CHECKOUT_COMMIT_ENV}={head}' in argv
     assert not any(item.startswith(runner.CHECKOUT_COMMIT_ENV) for item in
-                   runner.docker_command(spec(), ['python3'], cwd=str(root), uid=1, gid=1,
+                   runner.podman_command(spec(), ['python3'], cwd=str(root), admission=ADMISSION, cidfile=CIDFILE,
                                          image_id='sha256:resolved'))
     # An untracked file is not part of a commit; the package digest covers it.
     (root / 'prismaquant' / 'untracked.py').write_text('U = 1\n')
@@ -285,18 +287,17 @@ def test_checkout_commit_is_read_on_the_host_and_refuses_changed_package_bytes(t
 
 def test_main_hands_the_checkout_commit_to_the_container(monkeypatch, tmp_path, capsys):
     runner = _runner()
-    launched = {}
+    launched = []
     monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [inspection()])
     monkeypatch.setattr(runner, 'verify_pinned_import', lambda *args, **kwargs: {})
-    monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
-    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
+    stub_launch(monkeypatch, runner, launched)
     data = spec()
     data['container'].pop('archive', None)
     root = tmp_path / 'checkout'
     head = _git_checkout(root)
     monkeypatch.chdir(root)
-    runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass'])
-    assert f'{runner.CHECKOUT_COMMIT_ENV}={head}' in launched['argv']
+    assert runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass']) == 0
+    assert f'{runner.CHECKOUT_COMMIT_ENV}={head}' in launched[0]
     assert json.loads(capsys.readouterr().out.splitlines()[0])['checkout_commit'] == head
 
 
@@ -313,7 +314,7 @@ def test_image_archive_requires_content_digest_and_refuses_changed_bytes(tmp_pat
     calls = []
     def run(argv, **kwargs):
         calls.append(argv)
-        assert argv[:3] == ['docker', 'image', 'inspect']
+        assert argv[:3] == [runner.PODMAN, 'image', 'inspect']
         return SimpleNamespace(returncode=1, stdout='', stderr='absent')
     monkeypatch.setattr(runner.subprocess, 'run', run)
     with pytest.raises(RuntimeError, match='archive bytes changed'):
@@ -325,69 +326,36 @@ def _runner():
     return importlib.import_module('tools.tessera_campaign_container')
 
 
-def test_a_row_that_reserved_no_gpu_does_not_get_the_device():
-    """The defect in one assertion (#430).
-
-    ``pbrun`` empties ``CUDA_VISIBLE_DEVICES`` in the action's environment
-    exactly when it granted no GPU slots.  Attaching the device anyway spends
-    no PrismaBuild token for it, so its admission arithmetic can seat a
-    GPU-reserving row beside this one, and a power reading taken next door has
-    an owner it cannot see.
-    """
-
-    attached, reason = _runner().gpu_attachment(
-        spec(), cpu_only=False, environ={'CUDA_VISIBLE_DEVICES': ''})
-    assert attached is False, (
-        'the container took the whole GPU for a row that reserved none: '
-        'PrismaBuild granted no slots and emptied CUDA_VISIBLE_DEVICES, and '
-        'nothing but a remembered --cpu-only withheld --gpus all (#430)')
-    assert 'no visible device' in reason
+def test_a_cpu_admission_withholds_the_device_whatever_the_spec_says():
+    """Only the native admission decides. An empty or granting CUDA_VISIBLE_DEVICES is not consulted."""
+    for visible in (None, '', '0'):
+        data = spec()
+        if visible is not None:
+            data['env']['CUDA_VISIBLE_DEVICES'] = visible
+        attached, reason = _runner().gpu_attachment(ADMISSION)
+        assert attached is False and 'no GPU' in reason
 
 
-def test_a_spec_that_hides_the_device_from_its_payload_does_not_attach_it():
-    """Masking CUDA is not the same as not having the device, and the spec
-    saying its payload sees none is a declaration this must honour."""
-
-    data = spec()
-    data['env']['CUDA_VISIBLE_DEVICES'] = ''
-    attached, reason = _runner().gpu_attachment(data, cpu_only=False, environ={})
-    assert attached is False
-    assert reason.startswith('container spec env')
+def test_a_gpu_admission_is_refused_until_unit_4e():
+    with pytest.raises(RuntimeError, match='held for unit 4E'):
+        _runner().gpu_attachment(with_admission(gpus=1))
 
 
-def test_a_granted_row_still_gets_the_device():
-    """The control.  Without it the assertions above would pass on a function
-    that never attaches anything, which would break every campaign row."""
+def test_a_malformed_admission_is_refused():
+    runner = _runner()
+    for bad in ({}, {**ADMISSION, 'schema': 'other'}, {**ADMISSION, 'affinity': []},
+                {**ADMISSION, 'affinity': [3, 1]}, {k: v for k, v in ADMISSION.items() if k != 'gpus'}):
+        with pytest.raises(RuntimeError, match='admission is missing or malformed'):
+            runner.gpu_attachment(bad)
 
-    attached, _ = _runner().gpu_attachment(
-        spec(), cpu_only=False, environ={'CUDA_VISIBLE_DEVICES': '0'})
-    assert attached is True
 
-
-def test_an_interactive_run_outside_pbrun_keeps_its_behaviour():
-    """Unset is not a declaration: there is no grant to read, so the flag is
-    still the way to say no and the default is unchanged."""
+def test_main_withholds_the_device_and_launches_with_the_native_cpuset(monkeypatch, tmp_path):
+    """The same property through the real entry point, on the argv it would run."""
 
     runner = _runner()
-    assert runner.gpu_attachment(spec(), cpu_only=False, environ={})[0] is True
-    assert runner.gpu_attachment(spec(), cpu_only=True, environ={})[0] is False
-    assert runner.gpu_attachment(
-        spec(), cpu_only=True, environ={'CUDA_VISIBLE_DEVICES': '0'})[0] is False
-
-
-def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch, tmp_path):
-    """The same property through the real entry point, on the argv it execs.
-
-    The unit assertions above call the decision directly; this one asserts on
-    what Docker is actually handed, so a decision that is right in isolation
-    and unwired in ``main`` still fails.
-    """
-
-    runner = _runner()
-    launched = {}
+    launched = []
     monkeypatch.setattr(runner, 'inspect_or_load', lambda container: [inspection()])
-    monkeypatch.setattr(runner.os, 'execvp', lambda file, argv: launched.setdefault('argv', argv))
-    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '')
+    stub_launch(monkeypatch, runner, launched)
     data = spec()
     data['container'].pop('archive', None)
     # main() also refuses a launch that would import PrismaQuant from the
@@ -401,10 +369,64 @@ def test_main_withholds_the_device_from_a_row_that_reserved_none(monkeypatch, tm
         {'source': str(pinned), 'target': str(pinned), 'readonly': True}]
     data['env']['PYTHONPATH'] = str(pinned)
     monkeypatch.chdir(checkout)
-    runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass'])
-    assert '--gpus' not in launched['argv'], (
-        'the exec line still maps the whole GPU into a container whose row '
-        'reserved none (#430): ' + ' '.join(launched['argv'][:8]))
+    assert runner.main(['--spec', json.dumps(data), '--', 'python3', '-c', 'pass']) == 0
+    argv = launched[0]
+    assert '--gpus' not in argv and '--device' not in argv
+    assert argv[argv.index('--cpuset-cpus') + 1] == '21,22,23,30'
+
+
+def test_no_launch_without_a_native_job(monkeypatch):
+    runner = _runner()
+    monkeypatch.delenv('FLUX_JOB_ID', raising=False)
+    monkeypatch.delenv('OUT', raising=False)
+    with pytest.raises(RuntimeError, match='admitted native job'):
+        runner.native_admission({})
+
+
+def test_pb_context_is_never_forwarded_and_a_spec_naming_it_refuses():
+    runner = _runner()
+    retired = ('PRISMABUILD_ACTION_KEY', 'PRISMABUILD_ACTION_NONCE', 'PRISMABUILD_ACTION_SCOPE',
+               'PRISMABUILD_READER_HELPER_ROOT', 'PRISMABUILD_QUEUE_ROOT',
+               'PRISMABUILD_ACTION_PROGRESS_PATH', 'PRISMABUILD_ACTION_PROGRESS_TOKEN')
+    for name in retired:
+        data = spec()
+        data['env'][name] = 'x'
+        with pytest.raises(RuntimeError, match='retired PB action/reader context'):
+            runner.validate_container(data)
+    argv = runner.podman_command(spec(), ['python3'], cwd='/snapshot', admission=ADMISSION,
+                                 cidfile=CIDFILE, image_id='sha256:x',
+                                 environ={name: 'x' for name in retired})
+    assert not any(name in part for part in argv for name in retired)
+    assert not hasattr(runner, 'reader_context_environment')
+    kept = dict(PRISMABUILD_PRODUCED_SPOOL_ROOT='/spool', PRISMABUILD_LOCAL_SCRATCH_IO='{}')
+    data = spec()
+    data['env'].update(kept)
+    runner.validate_container(data)
+
+
+def test_only_the_listed_ambient_names_are_read(tmp_path):
+    runner = _runner()
+
+    class Recording(dict):
+        seen = None
+
+        def get(self, key, default=None):
+            self.seen.add(key)
+            return super().get(key, default)
+
+        def __contains__(self, key):
+            self.seen.add(key)
+            return super().__contains__(key)
+
+        def __getitem__(self, key):
+            self.seen.add(key)
+            return super().__getitem__(key)
+
+    environ = Recording({'SECRET_TOKEN': 'x', 'HOME': '/home/x', 'PATH': '/bin'})
+    environ.seen = set()
+    runner.podman_command(spec(), ['python3'], cwd='/snapshot', admission=ADMISSION,
+                          cidfile=CIDFILE, image_id='sha256:x', environ=environ)
+    assert environ.seen <= set(runner.AMBIENT_SETTINGS), sorted(environ.seen - set(runner.AMBIENT_SETTINGS))
 
 
 # --- the bounded capture environment the pass requires before it touches CUDA
@@ -439,9 +461,9 @@ def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
     """
     data = _bounded_spec()
     assert "MIMALLOC_PURGE_DELAY" not in data["env"]
-    argv = _runner().docker_command(
-        data, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
-        image_id="sha256:" + "a" * 64, with_gpu=False, environ={}, bounded=True)
+    argv = _runner().podman_command(
+        data, ["python3", "-c", "pass"], cwd=str(tmp_path), admission=ADMISSION, cidfile=CIDFILE,
+        image_id="sha256:" + "a" * 64, environ={}, bounded=True)
     forwarded = [argv[index + 1] for index, value in enumerate(argv)
                  if value == "--env"]
     for name, expected in _runner().BOUNDED_CAPTURE_ENV.items():
@@ -469,9 +491,9 @@ def test_only_a_bounded_row_is_handed_the_bounded_environment(tmp_path):
     runner = _runner()
     legacy = spec()
     legacy["env"] = {**legacy["env"], "MIMALLOC_PURGE_DELAY": "10"}
-    argv = runner.docker_command(
-        legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
-        image_id="sha256:" + "a" * 64, with_gpu=False, environ={})
+    argv = runner.podman_command(
+        legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), admission=ADMISSION, cidfile=CIDFILE,
+        image_id="sha256:" + "a" * 64, environ={})
     forwarded = [argv[index + 1] for index, value in enumerate(argv)
                  if value == "--env"]
     assert "MIMALLOC_PURGE_DELAY=10" in forwarded, forwarded
@@ -481,9 +503,9 @@ def test_only_a_bounded_row_is_handed_the_bounded_environment(tmp_path):
 
     with pytest.raises(RuntimeError,
                        match="contradicts the bounded capture contract"):
-        runner.docker_command(
-            legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), uid=1, gid=1,
-            image_id="sha256:" + "a" * 64, with_gpu=False, environ={},
+        runner.podman_command(
+            legacy, ["python3", "-c", "pass"], cwd=str(tmp_path), admission=ADMISSION, cidfile=CIDFILE,
+            image_id="sha256:" + "a" * 64, environ={},
             bounded=True)
 
 
@@ -507,7 +529,7 @@ def test_a_spec_that_contradicts_the_bounded_capture_contract_refuses():
     _runner().validate_container(data)
 
 
-# -- the residency map crosses the docker boundary (PQ #732) ------------------
+# -- the residency map crosses the container boundary (PQ #732; deleted by unit 4d) ------------------
 
 
 def _residency_spec(tmp_path):
@@ -530,8 +552,8 @@ def _residency_map(tmp_path, stage_root=None):
 
 def _argv(tmp_path, environ, declared=None):
     runner = importlib.import_module("tools.tessera_campaign_container")
-    return runner.docker_command(declared or _residency_spec(tmp_path), ["python3"],
-                                 cwd="/snapshot", uid=1, gid=1,
+    return runner.podman_command(declared or _residency_spec(tmp_path), ["python3"],
+                                 cwd="/snapshot", admission=ADMISSION, cidfile=CIDFILE,
                                  image_id="sha256:resolved", environ=environ)
 
 
@@ -558,7 +580,7 @@ def test_the_residency_map_crosses_with_its_stage_mounted_read_only(tmp_path, mo
 
 
 def test_without_a_map_the_argv_is_byte_identical(tmp_path):
-    """``docker_command`` serves more than PrismaBuild launches."""
+    """``podman_command`` serves more than PrismaBuild launches."""
 
     assert _argv(tmp_path, {}) == _argv(tmp_path, None)
     assert not any("RESIDENCY" in flag or "/stage" in flag for flag in _argv(tmp_path, {}))
@@ -646,14 +668,14 @@ def test_cotangent_scratch_preserves_sealed_local_path_identity(mode):
     if mode == "conflict":
         declared["env"][runner.COTANGENT_SCRATCH_ENV[0]] = "/different"
     if mode == "good":
-        argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-            uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+        argv = runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+            admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=env)
         assert f"{runner.COTANGENT_SCRATCH_ENV[0]}={root}" in argv
         assert f"{runner.COTANGENT_SCRATCH_ENV[1]}={36 << 30}" in argv
     else:
         with pytest.raises(RuntimeError, match="cotangent scratch"):
-            runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+            runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=env)
 
 
 @pytest.mark.parametrize("mode", ["good", "missing", "readonly", "remapped", "nested", "conflict"])
@@ -673,11 +695,11 @@ def test_local_spool_preserves_source_host_path_identity(mode):
     if mode == "conflict":
         declared["env"][runner.PRODUCED_SPOOL_ENV[0]] = "/different"
     if mode == "good":
-        argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-            uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+        argv = runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+            admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=env)
         assert f"{runner.PRODUCED_SPOOL_ENV[0]}={root}" in argv
         assert f"{runner.PRODUCED_SPOOL_ENV[1]}={32 << 30}" in argv
     else:
         with pytest.raises(RuntimeError, match="local output spool"):
-            runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                uid=1000, gid=1000, image_id="sha256:resolved", environ=env)
+            runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=env)

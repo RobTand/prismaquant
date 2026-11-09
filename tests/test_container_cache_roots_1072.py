@@ -10,6 +10,7 @@ writable mount covers; it now refuses unless the spec names a reason
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE
 import importlib
 import sys
 from pathlib import Path
@@ -39,8 +40,8 @@ def _spec(env=None, roots=()):
 
 
 def _docker_env(declared, environ):
-    argv = _runner().docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                                    uid=1000, gid=1000, image_id="sha256:resolved",
+    argv = _runner().podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                                    admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved",
                                     environ=environ)
     return dict(argv[i + 1].split("=", 1) for i, value in enumerate(argv[:-1])
                 if value == "--env")
@@ -97,10 +98,10 @@ def test_overlay_pins_are_named(value, overlay):
 def test_no_scratch_launches_exactly_as_before(monkeypatch):
     runner = _runner()
     declared = _spec()
-    argv = runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                                 uid=1000, gid=1000, image_id="sha256:resolved", environ={})
+    argv = runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ={})
     monkeypatch.setattr(runner, "CONTAINER_CACHE_ENV", ())
-    assert runner.docker_command(declared, ["python3"], cwd="/worker/snapshot",
-                                 uid=1000, gid=1000, image_id="sha256:resolved",
+    assert runner.podman_command(declared, ["python3"], cwd="/worker/snapshot",
+                                 admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved",
                                  environ={}) == argv
     assert not any(part.split("=", 1)[0] in CACHES for part in argv)

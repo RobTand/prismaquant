@@ -45,17 +45,15 @@ def run(image,command,*,serving):
          'TESSERA_REPO':str(TS_CONTAINER),'OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1',
          'MAX_JOBS':'2','TORCHINDUCTOR_COMPILE_THREADS':'1','PRISMAQUANT_PROD_ACT_SCALES':'0',
          'TMPDIR':'/tmp','HF_HOME':'/tmp/huggingface','XDG_CACHE_HOME':'/tmp/cache','PRISMAQUANT_TMPDIR':'/tmp/prismaquant','TRITON_CACHE_DIR':'/tmp/triton',**(serving_env if serving else {})}
-    from tools.tessera_campaign_container import residency_environment,reader_context_environment
+    from tools.tessera_campaign_container import residency_environment
     mounts=[{'source':str(Path.cwd()),'target':'/pq','readonly':True},
         {'source':str(TS.parent),'target':'/native-sources','readonly':True},
         {'source':str(local_path),'target':'/native-spool','readonly':False},
         {'source':'/mnt/shared','target':'/mnt/shared','readonly':False}]
     declaration={'container':{'mounts':mounts},'env':env}
     residency_env,residency_mounts=residency_environment(declaration,reader_environment)
-    read_env,read_mounts=reader_context_environment(declaration,reader_environment)
-    env.update(residency_env);env.update(read_env)
-    env['PRISMABUILD_ACTION_KEY']=reader_environment['PRISMABUILD_ACTION_KEY']
-    mounts+=residency_mounts+read_mounts
+    env.update(residency_env)
+    mounts+=residency_mounts
     argv=['docker','run','--rm','--gpus','all','--ipc=host','--user',f'{os.getuid()}:{os.getgid()}',
           '--memory','40g','--memory-swap','40g','--cpuset-cpus',','.join(map(str,sorted(os.sched_getaffinity(0)))),
           '--workdir','/pq','--entrypoint','']

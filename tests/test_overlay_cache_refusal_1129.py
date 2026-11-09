@@ -17,6 +17,7 @@ carries the waiver.
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE
 import importlib
 import json
 import sys
@@ -106,8 +107,8 @@ def test_an_unpinned_spec_binds_under_the_scratch_root(tmp_path, campaign):
     # under the spill root.
     runner = importlib.import_module("tools.tessera_campaign_container")
     environ = dict(item.split("=", 1) for item in _outer_env(argv))
-    docker = runner.docker_command(
-        sealed, ["python3"], cwd="/worker/snapshot", uid=1000, gid=1000,
+    docker = runner.podman_command(
+        sealed, ["python3"], cwd="/worker/snapshot", admission=ADMISSION, cidfile=CIDFILE,
         image_id="sha256:resolved", environ=environ)
     forwarded = dict(docker[i + 1].split("=", 1)
                      for i, word in enumerate(docker[:-1]) if word == "--env")

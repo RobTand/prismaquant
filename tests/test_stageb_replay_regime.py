@@ -6,6 +6,7 @@ quantum whose regime differs from the rest.
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE
 import copy
 import pickle
 
@@ -259,7 +260,7 @@ def test_launcher_reads_the_regime_from_the_environment_only(monkeypatch):
 
 def test_the_container_forwards_the_sealed_regime_verbatim():
     """The regime rides the spec's ``env``, which the container forwards as is."""
-    from tools.tessera_campaign_container import docker_command
+    from tools.tessera_campaign_container import podman_command
 
     regime = "capture_batch=2,accumulation=operator_gemm,chunk_rows=4096"
     spec = {"model": "/mnt/shared/model", "cwd": "/original/checkout",
@@ -267,7 +268,7 @@ def test_the_container_forwards_the_sealed_regime_verbatim():
             "env": {"PYTHONPATH": ".", REPLAY_REGIME_ENV: regime},
             "container": {"image": "qualified:fixed", "mounts": [
                 {"source": "/mnt/shared", "target": "/mnt/shared"}]}}
-    argv = docker_command(spec, ["python3"], cwd="/snapshot", uid=1, gid=1,
+    argv = podman_command(spec, ["python3"], cwd="/snapshot", admission=ADMISSION, cidfile=CIDFILE,
                           image_id="sha256:x", environ={})
     assert f"{REPLAY_REGIME_ENV}={regime}" in argv
 

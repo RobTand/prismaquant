@@ -1212,7 +1212,8 @@ def test_joint_submit_environment_reaches_launcher_argv(
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))
     executed = []
-    monkeypatch.setattr(launcher.os, "execvp", lambda binary, argv: executed.append(argv))
+    from container_admission import stub_launch
+    stub_launch(monkeypatch, launcher, executed)
     launcher.main(launcher_args)
     docker_env = dict(item.split("=", 1) for index, item in enumerate(executed[0])
                       if index and executed[0][index - 1] == "--env")

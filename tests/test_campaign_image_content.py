@@ -1,4 +1,5 @@
 """A portable tag may resolve differently, but its executable content is fixed."""
+from container_admission import ADMISSION, stub_launch
 from copy import deepcopy
 import hashlib
 from pathlib import Path
@@ -51,20 +52,15 @@ def test_resolved_image_is_executed_after_content_check(monkeypatch, capsys):
         if argv[0] == "git":
             return CompletedProcess(argv, 0, stdout=head if "rev-parse" in argv else "",
                                     stderr="")
-        if argv[0] == "docker":
+        if argv[0] == runner.PODMAN:
             inspected.append(argv)
             return CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr="")
         pytest.fail(f"unexpected subprocess call: {argv}")
-    def execute(binary, argv):
-        executed.append(argv)
-        raise SystemExit(0)
     monkeypatch.setattr(runner.subprocess, "run", run)
-    monkeypatch.setattr(runner.os, "execvp", execute)
+    stub_launch(monkeypatch, runner, executed)
     spec = {"container": {"image": "qualified:portable", "content_sha256": digest}}
-    with pytest.raises(SystemExit) as stopped:
-        runner.main(["--spec", json.dumps(spec), "--", "python3", "task.py"])
-    assert stopped.value.code == 0
-    assert inspected == [["docker", "image", "inspect", "qualified:portable"]]
+    assert runner.main(["--spec", json.dumps(spec), "--", "python3", "task.py"]) == 0
+    assert inspected == [[runner.PODMAN, "image", "inspect", "qualified:portable"]]
     assert executed[0][-3:] == [observed["Id"], "python3", "task.py"]
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["image_id"] == observed["Id"]
@@ -80,9 +76,10 @@ def test_changed_portable_tag_refuses_before_container_launch(monkeypatch):
     observed["Config"]["Env"] = ["PATH=/changed"]
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs:
                         CompletedProcess(argv, 0, stdout=json.dumps([observed]), stderr=""))
-    def forbidden(*args):
+    def forbidden(*args, **kwargs):
         pytest.fail("changed runtime reached container launch")
-    monkeypatch.setattr(runner.os, "execvp", forbidden)
+    monkeypatch.setattr(runner, "native_admission", lambda environ: ADMISSION)
+    monkeypatch.setattr(runner, "run_owned_container", forbidden)
     spec = {"container": {"image": "qualified:portable", "content_sha256": expected}}
     with pytest.raises(RuntimeError, match="content.*differs"):
         runner.main(["--spec", json.dumps(spec), "--", "python3", "task.py"])

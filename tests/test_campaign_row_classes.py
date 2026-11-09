@@ -17,6 +17,7 @@ Three properties, in the order they matter.
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE, with_admission
 import json
 from pathlib import Path
 import sys
@@ -328,39 +329,26 @@ def test_the_campaign_s_own_rows_are_unaffected_by_the_weights_only_gate():
 
 
 # --------------------------------------------------------------------------
-# The container launcher emits the ROCm flags only for a ROCm class
+# The launcher attaches no GPU device: native admission is CPU-only until unit 4E
 # --------------------------------------------------------------------------
 
-def docker_argv(container: dict) -> list[str]:
-    return container_tool.docker_command(
+def podman_argv(container: dict, *, admission=ADMISSION) -> list[str]:
+    return container_tool.podman_command(
         {"container": container, "env": {}}, ["python3", "-c", "pass"],
-        cwd="/home/rob/example", uid=1000, gid=1000,
+        cwd="/home/rob/example", admission=admission, cidfile=CIDFILE,
         image_id="sha256:" + "0" * 64, environ={})
 
 
-def test_an_undeclared_gpu_runtime_still_emits_gpus_all():
-    argv = docker_argv({"image": "prismaquant-example:pinned"})
-    assert argv[:5] == ["docker", "run", "--rm", "--gpus", "all"]
-    assert "/dev/dxg" not in argv
-
-
-def test_the_rocm_runtime_emits_the_wsl_device_and_library_mount():
-    argv = docker_argv({"image": "prismaquant-rocm:pinned",
-                        "gpu_runtime": "rocm-wsl"})
-    assert argv[:5] == ["docker", "run", "--rm", "--device", "/dev/dxg"]
-    assert ("type=bind,src=/usr/lib/wsl/lib,dst=/usr/lib/wsl/lib,readonly"
-            in argv)
-    assert "--gpus" not in argv
-
-
-def test_a_cpu_only_launch_attaches_nothing_under_either_runtime():
+def test_a_cpu_admission_attaches_nothing_under_either_declared_runtime():
     for runtime in ("nvidia", "rocm-wsl"):
-        argv = container_tool.docker_command(
-            {"container": {"image": "example:pinned", "gpu_runtime": runtime},
-             "env": {}}, ["python3", "-c", "pass"], cwd="/home/rob/example",
-            uid=1000, gid=1000, image_id="sha256:" + "0" * 64,
-            with_gpu=False, environ={})
+        argv = podman_argv({"image": "example:pinned", "gpu_runtime": runtime})
         assert "--gpus" not in argv and "/dev/dxg" not in argv
+        assert "--device" not in argv and "nvidia.com/gpu=all" not in argv
+
+
+def test_a_gpu_admission_is_refused_not_attached():
+    with pytest.raises(RuntimeError, match="held for unit 4E"):
+        podman_argv({"image": "example:pinned"}, admission=with_admission(gpus=1))
 
 
 def test_an_unknown_gpu_runtime_is_refused():

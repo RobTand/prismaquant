@@ -9,6 +9,7 @@ another setting cannot join the rest.
 """
 from __future__ import annotations
 
+from container_admission import ADMISSION, CIDFILE
 from types import SimpleNamespace
 
 import pytest
@@ -168,14 +169,14 @@ def test_both_launchers_refuse_a_malformed_setting_before_any_work(monkeypatch, 
 
 
 def test_the_container_forwards_the_sealed_setting_verbatim():
-    from tools.tessera_campaign_container import docker_command
+    from tools.tessera_campaign_container import podman_command
 
     spec = {"model": "/mnt/shared/model", "cwd": "/original/checkout",
             "python": "python3", "campaign_argv": [],
             "env": {"PYTHONPATH": ".", BF16_REDUCTION_ENV: "off"},
             "container": {"image": "qualified:fixed", "mounts": [
                 {"source": "/mnt/shared", "target": "/mnt/shared"}]}}
-    argv = docker_command(spec, ["python3"], cwd="/snapshot", uid=1, gid=1,
+    argv = podman_command(spec, ["python3"], cwd="/snapshot", admission=ADMISSION, cidfile=CIDFILE,
                           image_id="sha256:x", environ={})
     assert f"{BF16_REDUCTION_ENV}=off" in argv
 
