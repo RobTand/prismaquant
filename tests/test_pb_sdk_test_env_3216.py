@@ -2,8 +2,8 @@
 
 Rob, 2026-11-02: "The library should be installed for tests if it's
 needed." Before this, no hosted job installed ``prismabuild``, so 779 tests
-skipped on every hosted run with ``fleet_sdk.SKIP_REASON`` and only the
-fleet's pbtest shards ran them.
+skipped on every hosted run and only the fleet's shards ran them. The skip
+helper has since been deleted (slice4f); the group and its pins remain for slice 5.
 
 The reviewed commit lives in one place,
 ``tools/bazel/prismabuild_source.json`` until its remaining test consumers
