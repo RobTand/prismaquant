@@ -10,8 +10,8 @@ The schema strings are frozen wire identifiers of the recorded documents.
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
-import json
+
+from .digests import canonical_json_sha256
 
 CAS_RECEIPT_SCHEMA = "prismaquant.prismabuild.cas_receipt.v3"
 WORKER_ATTESTATION_SCHEMA = "prismaquant.prismabuild.worker_attestation.v2"
@@ -22,11 +22,10 @@ _RECEIPT_KEYS = frozenset({"schema", "action_key", "action_manifest_sha256", "pr
 
 
 def _canonical_sha256(value: object) -> str | None:
-    """SHA-256 of canonical JSON (sorted keys, compact separators, no ASCII escaping), or None if not finite JSON."""
+    """SHA-256 of canonical JSON (the tree's one encoding), or None if the value is not finite JSON."""
     try:
-        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    except (TypeError, ValueError):
+        return canonical_json_sha256(value, where="receipt")
+    except ValueError:
         return None
 
 
