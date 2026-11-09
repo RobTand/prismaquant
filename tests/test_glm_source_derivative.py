@@ -230,7 +230,7 @@ def test_recorded_receipt_refusals_are_decided_in_order():
     assert receipt.cas_receipt_self_check(body) == 'cas-receipt-digest'
     producer = copy.deepcopy(audit)
     producer['producer']['action_key'] = '0'*64
-    producer['receipt_sha256'] = receipt._canonical_sha256({k: v for k, v in producer.items() if k != 'receipt_sha256'})
+    producer['receipt_sha256'] = receipt._receipt_digest({k: v for k, v in producer.items() if k != 'receipt_sha256'})
     assert receipt.cas_receipt_self_check(producer) == 'worker-attestation-digest'
 
 
