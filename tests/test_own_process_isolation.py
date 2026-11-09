@@ -123,6 +123,15 @@ def test_a_shared_session_runs_the_marked_module_in_one_child(tmp_path):
     assert not (out / "deselected.pid").exists()
 
 
+def test_a_marked_module_that_passes_passes_in_its_own_child(tmp_path):
+    proc, output, outcomes, out = _session(tmp_path, "sample_passes.py", "sample_shared.py")
+    assert proc.returncode == 0, output
+    assert outcomes == {"test_first": ("passed", ""), "test_second": ("passed", ""), "test_shared": ("passed", "")}, output
+    child = {_pid(out, "pass-first"), _pid(out, "pass-second")}
+    assert len(child) == 1 and proc.pid not in child
+    assert _pid(out, "shared") == proc.pid
+
+
 def test_a_session_of_the_module_alone_runs_in_process(tmp_path):
     proc, output, outcomes, out = _session(tmp_path, "sample_isolated.py")
     assert proc.returncode == 1, output
