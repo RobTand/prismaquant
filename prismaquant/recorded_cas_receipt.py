@@ -21,7 +21,7 @@ RECEIPT_REFUSALS = ("cas-receipt-shape", "cas-receipt-digest", "worker-attestati
 _RECEIPT_KEYS = frozenset({"schema", "action_key", "action_manifest_sha256", "producer", "result", "receipt_sha256"})
 
 
-def _canonical_sha256(value: object) -> str | None:
+def _receipt_digest(value: object) -> str | None:
     """SHA-256 of canonical JSON (the tree's one encoding), or None if the value is not finite JSON."""
     try:
         return canonical_json_sha256(value, where="receipt")
@@ -35,13 +35,13 @@ def cas_receipt_self_check(receipt: object) -> str | None:
             or receipt["schema"] != CAS_RECEIPT_SCHEMA):
         return RECEIPT_REFUSALS[0]
     body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
-    if _canonical_sha256(body) != receipt["receipt_sha256"]:
+    if _receipt_digest(body) != receipt["receipt_sha256"]:
         return RECEIPT_REFUSALS[1]
     producer = receipt["producer"]
     if not isinstance(producer, Mapping) or not (
             producer.get("schema") == WORKER_ATTESTATION_SCHEMA
             and producer.get("action_key") == receipt["action_key"]
-            and _canonical_sha256({key: value for key, value in producer.items() if key != "attestation_sha256"})
+            and _receipt_digest({key: value for key, value in producer.items() if key != "attestation_sha256"})
             == producer.get("attestation_sha256")):
         return RECEIPT_REFUSALS[2]
     return None
