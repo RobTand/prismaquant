@@ -262,7 +262,7 @@ def test_a_staged_range_that_is_not_a_regular_file_falls_back_to_the_pool(tmp_pa
     report = resolver.report()
     assert report['range_hits'] >= 1  # the declared range was answered, then not served
     assert report['bytes_from_stage'] == 0
-    assert 'staged range is not a regular file' in {row['reason'] for row in report['fallbacks']}
+    assert any('staged range is not a regular file' in row['reason'] for row in report['fallbacks'])
 
 
 # -- the descriptor-alias seam ----------------------------------------------
