@@ -104,6 +104,7 @@ from .joint_quantum_handoff import (
 )
 from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
+from .joint_run_progress import log_progress
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -557,10 +558,9 @@ class QuantumProgress:
     only once the journal shard is on disk.
     """
 
-    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None):
-        from .joint_run_progress import declared_phases
-
-        self._phases = declared_phases()
+    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None,
+                 phases=None):
+        self._phases = None if phases is None else tuple(phases)
         self._log = log or (lambda message: print(message, flush=True))
         self._base_units = int(base_units)
         self._units = 0
@@ -573,6 +573,7 @@ class QuantumProgress:
 
     def _enter(self, name: str) -> None:
         if self._phases is None:
+            self._phase = str(name)
             return
         try:
             index = self._phases.index(str(name))
@@ -621,9 +622,7 @@ class QuantumProgress:
             self._enter(self._frontier.phase_name)
 
     def commit(self) -> bool:
-        """Report the cumulative count under the current phase (inert no-op)."""
-        from .prismabuild_progress import report
-
+        """Log local cumulative advancement after the durable journal boundary."""
         if self._phase is None:
             return False
         advanced = (self._committed == (None, None)
@@ -631,8 +630,8 @@ class QuantumProgress:
                     or self._phase != self._committed[1])
         if not advanced:
             return False
-        if report(self._phase, self.units(), unit="quantum_units"):
-            self.commits += 1
+        log_progress(self.units(), self._phase, unit="quantum_units", log=self._log)
+        self.commits += 1
         self._committed = (self.units(), self._phase)
         return True
 

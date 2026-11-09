@@ -31,8 +31,8 @@ def read(root,tessera):
     from prismaquant.staged_lease import sdk_submodule
     os.environ.update(sdk_submodule('core')._reader_identity_environment(os.environ['PRISMABUILD_ACTION_KEY']))
     bind_strict_inputs()
-    from prismaquant.prismabuild_progress import report
-    assert report('head',0,unit='handoff')
+    from prismaquant.joint_run_progress import log_progress
+    log_progress(0,'head',unit='handoff')
     files=json.loads(strict_read({'path':str(root/'files.json'),'sha256':digest(root/'files.json')}))
     from prismaquant.layer_streaming import _source_safe_open,_await_layer_readset
     from prismaquant.production_weight_cache import ProductionWeightCache
@@ -61,7 +61,7 @@ def read(root,tessera):
         'pwc_serving_tier':receipt['serving_tier'],'pwc_sha256':receipt['sha256'],
         'wire_sha256':hashlib.sha256(wire).hexdigest(),'strict_allowed_tiers':['ram','ssd'],
         'action_key':os.environ['PRISMABUILD_ACTION_KEY'],'independent_tessera_reader_sha256':digest(Path(tessera)/'experiments/native_local_inputs.py')}
-    dump(root/'proof.json',result);assert report('head',1,unit='handoff');print(json.dumps(result))
+    dump(root/'proof.json',result);log_progress(1,'head',unit='handoff');print(json.dumps(result))
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('mode',choices=('build','read'));p.add_argument('--root',type=Path,required=True);p.add_argument('--tessera');a=p.parse_args()

@@ -128,7 +128,7 @@ def test_a_spec_sealed_before_the_cpu_field_keeps_its_old_cap():
     assert argv[argv.index("--memory") + 1] == "104g"
 
 
-def test_host_adapter_needs_no_prismaquant_dependencies_and_forwards_progress(tmp_path):
+def test_host_adapter_needs_no_prismaquant_dependencies_and_forwards_no_progress(tmp_path):
     """The host launcher must reach Docker before importing the pinned image.
 
     Sparklina's minimal action interpreter deliberately has no
@@ -153,8 +153,8 @@ environ = {{
 argv = runner.docker_command(json.loads(spec), ["python3"], cwd="/snapshot",
                             uid=1, gid=1, image_id="sha256:resolved",
                             environ=environ)
-assert "PRISMABUILD_ACTION_PROGRESS_PATH=/mnt/shared/queue/k.progress" in argv
-assert "PRISMABUILD_ACTION_PROGRESS_TOKEN=minted-token" in argv
+assert not any("PRISMABUILD_ACTION_PROGRESS" in part for part in argv)
+assert not hasattr(runner, "progress_environment")
 """
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
@@ -174,20 +174,6 @@ def test_host_launcher_validates_with_the_package_spec_contract():
     for name in ("READER_CONTEXT_ENV", "SAFE_PATH_ENV", "CHECKOUT_COMMIT_ENV",
                  "BOUNDED_CAPTURE_ENV", "GPU_RUNTIME_FLAGS", "DEFAULT_GPU_RUNTIME"):
         assert getattr(runner, name) == getattr(contract, name), name
-
-
-def test_host_progress_names_match_the_container_reporter():
-    """Forwarded names and the in-container writer remain one PB contract."""
-
-    from runpy import run_path
-
-    runner = importlib.import_module("tools.tessera_campaign_container")
-    # Read the stdlib-only reporter by file path: importing its package here
-    # would hide precisely the minimal-host import boundary this test guards.
-    reporter = run_path(str(Path(__file__).resolve().parents[1] /
-                            'prismaquant' / 'prismabuild_progress.py'))
-    assert runner.PATH_ENV == reporter['PATH_ENV']
-    assert runner.TOKEN_ENV == reporter['TOKEN_ENV']
 
 
 @pytest.mark.parametrize("target", ["/", "/workspace", "/workspace/tools", "/mnt/../workspace"])

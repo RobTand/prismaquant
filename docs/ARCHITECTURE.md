@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, local application progress, slice4b.
+Source: `prismaquant/joint_run_progress.py` (`log_progress`),
+`prismaquant/{joint_cost_quantum,joint_stage_b_head,tessera_campaign,
+tessera_joint_aura}.py`, `tools/{build_tessera_selected_cache,
+capture_glm_routed_layers,tessera_campaign_container}.py`, based on
+`345c9f681`. The PB progress module, its token/phase/staged-wait/export-wait
+protocol, per-progress source memo and dev stamp are retired, along with the
+container progress forwarding. Writers still announce counts only after their
+existing durable or verified boundary, now as one local diagnostic line that
+carries no schema, file, acknowledgement or success authority. Phase rosters
+are explicit application data; no environment names them. Replay and overlay
+cadence takes an explicit finite `progress_interval_s`; the old
+`progress_allowance_s` and `--head-progress-allowance-s` refuse, naming the
+retired no-progress watchdog. Native walltime remains the execution bound. The
+older entries below that describe the PB progress record, `.staged-wait` and
+`.export-wait` files or `PRISMAQUANT_DEV_PROGRESS_STAMP` are history. G3
+helper-script transport stays in slice 4d. No numerical, serving, GPU or
+production qualification follows; proofs are in the migration evidence.
+
 As of: 2026-11-08, native private pin/bootstrap, slice4a.
 Source: `tools/{check_tessera_dev_install,provision_tessera_pin,
 accept_tessera_pin_provisioner,resolve_tessera_dev_pin}.py`, based on

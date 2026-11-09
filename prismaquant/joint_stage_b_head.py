@@ -372,7 +372,7 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
 
     from .calibration_data import load_calibration_input
     from .production_weight_cache import ProductionWeightCache
-    from .prismabuild_progress import commit as _pb_commit
+    from .joint_run_progress import log_progress
     from .tessera_joint_aura import (
         _prepared_digest_recorded, check_prepared_completion,
         normalize_historical_encoder_reuse, require_prepared_digests,
@@ -461,7 +461,7 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
         # The slice attests the units the prepare-time walk verified; the
         # count is reported once, at its final cumulative value, exactly as
         # a resumed walk reports its reverified prefix (#822).
-        _pb_commit(progress_units, progress_phase)
+        log_progress(progress_units, progress_phase)
     return SimpleNamespace(
         producer_implementation_sha256=producer, completion=completion, formats_by_qname=formats_by_qname,
         calibration_ids=ids, calibration=calibration, cache=cache,

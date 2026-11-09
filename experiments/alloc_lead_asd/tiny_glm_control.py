@@ -59,7 +59,7 @@ def dependency_identity():
 
 
 def commit(units, phase):
-    from prismaquant.prismabuild_progress import commit as report_progress
+    from prismaquant.joint_run_progress import log_progress as report_progress
     report_progress(units, phase, 'durable_tiny_glm_control')
 
 

@@ -14,7 +14,7 @@ import pytest
 import torch
 
 from tools import band_serial_handoff_live_pair as pair_driver
-from prismaquant import calibration_data, joint_quantum_handoff, prismabuild_progress
+from prismaquant import calibration_data, joint_quantum_handoff
 from prismaquant import residency_map, staged_whole_file
 from prismaquant.staged_tier_policy import TierPolicyRefused
 from prismaquant.joint_adjoint_slices import load_adjoint_slice
@@ -94,7 +94,6 @@ def observed_consumer(tmp_path, monkeypatch):
                         ))
     monkeypatch.setattr(joint_quantum_handoff, "handoff_read_entries",
                         lambda *_args: [{"path": str(owners)}])
-    monkeypatch.setattr(prismabuild_progress, "report", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(pair_driver, "_serving", lambda paths: {
         "served": {str(path): ["stage"] for path in paths},
         "resolver": {"bytes_from_pool": 0}, "tier_bytes": 123, "read_bytes": 123,

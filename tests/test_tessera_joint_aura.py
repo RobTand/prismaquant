@@ -1120,7 +1120,7 @@ def test_the_synthesis_loop_reports_what_it_has_committed(tmp_path, monkeypatch,
     for name in names:
         _unlink_render(tmp_path, name, fmt)
     reports = []
-    monkeypatch.setattr(bridge, "_pb_commit",
+    monkeypatch.setattr(bridge, "log_progress",
                         lambda units, phase, unit=None: reports.append((units, phase, unit)))
     data = bridge.load_measured_anchor_input(config, verify_payloads=False, log_every=1)
     lines = [line for line in capsys.readouterr().out.splitlines() if "synthesized" in line]
@@ -1131,23 +1131,6 @@ def test_the_synthesis_loop_reports_what_it_has_committed(tmp_path, monkeypatch,
     assert [count for count, _, _ in reports] == [1, 2]
     assert [unit for _, _, unit in reports] == sorted(names)
     assert {phase for _, phase, _ in reports} == {"synthesize"}
-
-
-def test_progress_is_reported_only_into_an_admitted_action(tmp_path, monkeypatch):
-    """The reporting channel is the worker's; outside one it is a no-op, which
-    is why the call sites do not test how they were launched."""
-    from prismaquant.tessera_joint_aura import _pb_commit
-
-    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_PATH", raising=False)
-    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", raising=False)
-    assert _pb_commit(7, "synthesize") is False
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(tmp_path / "progress.json"))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t0ken")
-    assert _pb_commit(7, "synthesize", unit="a@b") is True
-    record = json.loads((tmp_path / "progress.json").read_text())
-    assert record == {"schema": "prismabuild.action_progress.v1", "token": "t0ken",
-                      "phase": "synthesize", "units_completed": 7, "unit": "a@b",
-                      "reported_unix": record["reported_unix"]}
 
 
 def test_a_missing_device_envelope_is_a_pure_input_refusal(tmp_path, monkeypatch):

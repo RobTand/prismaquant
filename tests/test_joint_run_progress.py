@@ -24,7 +24,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import dispatch_tessera_campaign as dispatch
-import tessera_campaign_container as container
 
 from prismaquant import joint_run_progress as jrp
 
@@ -242,31 +241,29 @@ def test_an_undeclared_phase_commits_nothing_and_says_why():
     assert recorder.records == []
 
 
-def test_a_launch_with_no_declared_phases_commits_nothing(monkeypatch):
-    monkeypatch.delenv(jrp.PHASES_ENV, raising=False)
-    assert jrp.declared_phases() is None
+def test_an_empty_explicit_roster_commits_nothing_but_still_logs():
     recorder, clock, progress = reporter(phases=())
     progress.entry(layer=0, partition=0)
     clock.advance(61)
     progress.flush(force=True)
     assert recorder.records == []
-    assert recorder.lines, "the log line is not conditional on the fleet"
+    assert recorder.lines, "the log line is not conditional on a phase roster"
 
 
-def test_the_declared_list_is_read_as_data_from_the_environment(monkeypatch):
-    monkeypatch.setenv(jrp.PHASES_ENV, json.dumps(["head", "layer-0"]))
-    assert jrp.declared_phases() == ("head", "layer-0")
-    for bad in ("", "[]", "{}", "not json", '["", "layer-0"]', '[1]'):
-        monkeypatch.setenv(jrp.PHASES_ENV, bad)
-        assert jrp.declared_phases() is None
+def test_the_default_roster_is_the_head_then_the_layers_and_no_environment_names_it(monkeypatch):
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(["other"]))
+    assert not hasattr(jrp, "PHASES_ENV") and not hasattr(jrp, "declared_phases")
+    progress = jrp.JointRunProgress(layers=2, partitions=2, log=lambda _line: None,
+                                    clock=Clock(), interval_s=60.0)
+    progress.enter("other")
+    assert progress.phase is None
+    for name in run_phases(2):
+        progress.enter(name)
+        assert progress.phase == name
 
 
-def test_no_channel_is_byte_identical_to_this_module_being_absent(monkeypatch, tmp_path):
-    from prismaquant import prismabuild_progress
-    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_PATH", raising=False)
-    monkeypatch.delenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", raising=False)
-    monkeypatch.delenv(jrp.PHASES_ENV, raising=False)
-    assert prismabuild_progress.report("head", 1) is False
+def test_the_default_reporter_writes_a_local_log_and_no_transport_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     clock = Clock()
     lines = []
     progress = jrp.JointRunProgress(layers=2, partitions=2, log=lines.append,
@@ -275,7 +272,28 @@ def test_no_channel_is_byte_identical_to_this_module_being_absent(monkeypatch, t
     clock.advance(61)
     assert progress.flush(force=True) is True
     assert progress.commits == 0
+    assert lines
     assert not list(tmp_path.iterdir())
+
+
+def test_log_progress_emits_one_local_diagnostic_and_returns_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    lines = []
+    assert jrp.log_progress(7, "head", "unit-a", log=lines.append) is None
+    assert len(lines) == 1 and lines[0].startswith("application progress: ")
+    assert json.loads(lines[0].split(": ", 1)[1]) == {
+        "phase": "head", "units_completed": 7, "unit": "unit-a"}
+    assert not list(tmp_path.iterdir())
+
+
+def test_the_interval_must_be_finite_and_positive():
+    for bad in (0, -1, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="finite positive"):
+            jrp.JointRunProgress(layers=1, partitions=1, log=lambda _line: None,
+                                 interval_s=bad)
+    for bad in ("inf", "nan", "0", "-3"):
+        with pytest.raises(ValueError):
+            jrp.interval_seconds({jrp.INTERVAL_ENV: bad})
 
 
 # -- submission and reporter phase agreement -------------------------------
@@ -301,28 +319,6 @@ def test_an_oversized_read_plan_is_refused_rather_than_truncated():
 def test_the_run_command_declares_phases_at_all():
     source = (REPO / "tools" / "dispatch_tessera_campaign.py").read_text()
     assert 'command == "run":' in source and "_declared_phase_names(manifest)" in source
-
-
-# -- the container boundary --------------------------------------------------
-
-def test_the_container_carries_the_declared_phase_list_inside():
-    spec = {"container": {"mounts": [
-        {"source": "/mnt/shared", "target": "/mnt/shared"}]}}
-    environ = {
-        container.PATH_ENV: "/mnt/shared/pb-queue/claimed/k.progress",
-        container.TOKEN_ENV: "tok",
-        container.PHASES_ENV: json.dumps(["head", "layer-0"]),
-    }
-    assert container.progress_environment(spec, environ) == {
-        container.PATH_ENV: "/mnt/shared/pb-queue/claimed/k.progress",
-        container.TOKEN_ENV: "tok",
-        container.PHASES_ENV: json.dumps(["head", "layer-0"]),
-    }
-
-
-def test_a_container_launch_without_a_channel_forwards_nothing():
-    spec = {"container": {"mounts": [{"source": "/mnt/shared", "target": "/mnt/shared"}]}}
-    assert container.progress_environment(spec, {}) == {}
 
 
 # -- the durable boundary ----------------------------------------------------

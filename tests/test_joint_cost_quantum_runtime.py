@@ -1444,21 +1444,17 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
                 "render_file_upper_bound_bytes": 40, "candidate_count": 1},
                {"window_index": 1, "names": ["b"], "statistics_bytes": 1,
                 "render_file_upper_bound_bytes": 60, "candidate_count": 1}]
-    progress_file = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress_file))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "token")
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(
-        ["head", "layer-001-chunk-000", "layer-001-chunk-001"]))
+    lines = []
     frontier = ChunkFrontier(chunks=chunks, windows=windows)
-    progress = QuantumProgress(frontier=frontier, base_units=3)
+    progress = QuantumProgress(frontier=frontier, base_units=3, log=lines.append,
+                               phases=["head", "layer-001-chunk-000", "layer-001-chunk-001"])
     progress.enter_head(0)
-    assert progress_file.is_file()
-    first = json.loads(progress_file.read_text())
+    first = json.loads(lines[-1].split(': ', 1)[1])
     assert first["phase"] == "head" and first["units_completed"] == 3
     progress.priced(4)
     progress.window_done(windows[0])
     progress.commit()
-    second = json.loads(progress_file.read_text())
+    second = json.loads(lines[-1].split(': ', 1)[1])
     assert second["phase"] == "layer-001-chunk-000"
     # Cumulative across phases, continuing from the head-committed base:
     # 3 head units + 4 quantum-local units.
@@ -1466,7 +1462,7 @@ def test_progress_cadence_at_chunk_granularity(tmp_path, monkeypatch):
     progress.priced(5)
     progress.window_done(windows[1])
     progress.commit()
-    third = json.loads(progress_file.read_text())
+    third = json.loads(lines[-1].split(': ', 1)[1])
     assert third["phase"] == "layer-001-chunk-001"
     assert third["units_completed"] == 8
 

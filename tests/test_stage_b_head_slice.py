@@ -302,14 +302,14 @@ def test_producer_refuses_a_layer_without_units(tmp_path):
         _produce(campaign, layers=(0, 7))
 
 
-def test_head_reports_the_walks_cumulative_units_once(tmp_path, monkeypatch):
+def test_head_reports_the_walks_cumulative_units_once(tmp_path, capsys):
     campaign = _campaign(tmp_path)
     _, bindings = _produce(campaign)
-    progress = tmp_path / "progress.json"
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress))
-    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t")
     _consume(campaign, _record(0, bindings[0]), progress_phase="head")
-    record = json.loads(progress.read_text())
+    lines = [line for line in capsys.readouterr().out.splitlines()
+             if line.startswith('application progress: ')]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split(': ', 1)[1])
     assert record["phase"] == "head"
     assert record["units_completed"] == len(campaign["data"].formats_by_qname)
 

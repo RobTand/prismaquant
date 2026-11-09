@@ -12,7 +12,7 @@ import torch
 from experiments.alloc_lead_asd import a_side_diag as diag
 from experiments.alloc_lead_asd.run_pair import load_source_model, load_staged_inputs, runtime_identity
 from prismaquant.residency_map import residency_report
-from prismaquant.prismabuild_progress import commit
+from prismaquant.joint_run_progress import log_progress
 
 
 def relative_max(a, b):
@@ -130,12 +130,12 @@ def main():
                 "deterministic_backward_requested": args.deterministic_backward,
                 "source_commit": os.environ.get("PRISMAQUANT_IDENTITY_GIT_COMMIT"),
                 "input_residency": residency_report()}
-    diag.atomic_json_dump(identity, str(output / "inputs.ready.json")); commit(1, "startup")
+    diag.atomic_json_dump(identity, str(output / "inputs.ready.json")); log_progress(1, "startup")
     model = load_source_model(config, state, dtype=torch.bfloat16, device="cuda")
     for parameter in model.parameters(): parameter.requires_grad_(False)
     model.get_input_embeddings().register_forward_hook(lambda m, i, y: y.requires_grad_(True))
     identity["runtime"] = runtime_identity(model)
-    commit(1, "control")
+    log_progress(1, "control")
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
                                             torch.profiler.ProfilerActivity.CUDA]) as profiler:
         names, results, scalars = control(model, ids,
@@ -147,13 +147,13 @@ def main():
     stable = all(u["backward_vs_repeat"]["bitwise_equal"] for r in results for u in r["units"])
     diag.atomic_json_dump({"identity": identity, "results": results, "complete": True,
                           "repeat_cotangents_bitwise_stable": stable},
-                          str(output / "control.json")); commit(2, "control")
+                          str(output / "control.json")); log_progress(2, "control")
     print(json.dumps({"complete": True, "results": [{"seed": r["seed"],
         "fixed_g_contractions": r["fixed_g_contractions"],
         "backward_api_projection_effect": r["backward_api_projection_effect"],
         "units_with_api_difference": sum(not u["grad_vs_backward"]["bitwise_equal"] for u in r["units"]),
         "units_with_repeat_difference": sum(not u["backward_vs_repeat"]["bitwise_equal"] for u in r["units"])}
-        for r in results]}, sort_keys=True), flush=True); commit(3, "publish")
+        for r in results]}, sort_keys=True), flush=True); log_progress(3, "publish")
     if args.deterministic_backward and not stable:
         raise SystemExit("deterministic backward failed repeated-cotangent equality")
 

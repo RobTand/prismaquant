@@ -34,10 +34,9 @@ def prepare(spec,out,local_root,device_bytes):
     from prismaquant.memory_management import enforce_device_envelope
     envelope=enforce_device_envelope("cuda",device_bytes,where="native GLM reference preparation")
     from experiments.native_local_handoff import LocalHandoff,LocalSourceMapping,strict_read,bind_strict_inputs
-    from prismaquant.prismabuild_progress import report
+    from prismaquant.joint_run_progress import log_progress
     bind_strict_inputs()
-    if not report("head",0,unit="native_operators"):
-        raise RuntimeError("native input read-phase channel is unavailable")
+    log_progress(0,"head",unit="native_operators")
     local=LocalHandoff(local_root,max_bytes=40<<30)
     from safetensors.torch import save_file
     from transformers import AutoConfig
@@ -92,8 +91,7 @@ def prepare(spec,out,local_root,device_bytes):
     from prismaquant.tessera_joint_aura import _read_verified_wire_blob
     for index,member in enumerate(members):
         if index%32==0:
-            if not report(f'members-{index//32:03d}',0,unit='native_operators'):
-                raise RuntimeError('native input read-phase report refused')
+            log_progress(0,f'members-{index//32:03d}',unit='native_operators')
             by_shard={}
             for upcoming in members[index:index+32]:
                 row=rows[upcoming['unit']]['formats'][fmt]

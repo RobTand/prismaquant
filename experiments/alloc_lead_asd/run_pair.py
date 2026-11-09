@@ -24,7 +24,7 @@ from prismaquant.joint_aura import source_execution_identity
 from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import activate_staged_tier_policy
 from prismaquant.staged_whole_file import read_staged_whole_file
-from prismaquant.prismabuild_progress import commit as report_progress
+from prismaquant.joint_run_progress import log_progress as report_progress
 
 
 MODEL_SHA = "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"

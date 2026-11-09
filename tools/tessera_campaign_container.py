@@ -45,24 +45,6 @@ from tools.tessera_campaign_namespace import (
 )
 
 
-# These are PrismaBuild's action environment contract, deliberately kept in
-# this host-side adapter rather than imported from ``prismaquant``.  Importing
-# the package runs its production initialisation before this launcher reaches
-# the qualified container, so a worker that only has the small host Python
-# runtime could fail before Docker starts (#601).  The container-side campaign
-# continues to use ``prismaquant.prismabuild_progress`` to write the record;
-# this adapter only carries the two sealed channel values across the boundary.
-PATH_ENV = "PRISMABUILD_ACTION_PROGRESS_PATH"
-TOKEN_ENV = "PRISMABUILD_ACTION_PROGRESS_TOKEN"
-#: The phase names the submission sealed.  Carried across the boundary too,
-#: because a phase the submission did not declare is refused by the worker and
-#: an action reporting only refused names is indistinguishable from one
-#: reporting nothing.  Inside the container this is the only way to know the
-#: list: ``PRISMABUILD_ACTION_PROGRESS_HELPER`` names a file on the fleet mount
-#: that the qualified image does not bind, which is also why the record is
-#: written by ``prismaquant.prismabuild_progress`` rather than by that helper.
-PHASES_ENV = "PRISMABUILD_ACTION_PROGRESS_PHASES"
-
 #: PrismaBuild's residency map (RobTand/prismabuild#583): where this action's
 #: declared inputs were staged.  The consumer half is
 #: ``prismaquant.residency_map`` (``ENV_VAR`` there); the literal is repeated
@@ -124,42 +106,6 @@ def gpu_attachment(spec: dict, *, cpu_only: bool, environ) -> tuple:
         if value == "":
             return False, f"{source} declares no visible device"
     return True, "no declaration withheld the device"
-
-
-def progress_environment(spec: dict, environ) -> dict:
-    """The PrismaBuild progress channel this container needs, if any.
-
-    The container is launched with the declared ``env`` and nothing else, so
-    without this the row inside it cannot report advancement, PB sees a silent
-    action and ends it within the startup allowance -- a stall watchdog killing
-    exactly the working rows it was added to save (PB #480).
-
-    Refused rather than dropped when the file's directory is not inside a
-    writable declared mount.  A report written into the container's own
-    ephemeral filesystem is invisible to the worker and indistinguishable from
-    not reporting at all, and failing at launch is far cheaper than failing an
-    hour into a pricing round.
-    """
-
-    path, token = environ.get(PATH_ENV), environ.get(TOKEN_ENV)
-    if not path or not token:
-        return {}
-    directory = PurePosixPath(path).parent
-    for mount in spec["container"].get("mounts", []):
-        target = PurePosixPath(mount["target"])
-        if (directory == target or target in directory.parents) and not mount.get("readonly", False):
-            channel = {PATH_ENV: str(path), TOKEN_ENV: str(token)}
-            phases = environ.get(PHASES_ENV)
-            # A string, not a file: it needs no mount and it is what lets the
-            # row inside check a phase name where the typo is instead of being
-            # refused quietly until the allowance runs out.
-            if phases:
-                channel[PHASES_ENV] = str(phases)
-            return channel
-    raise RuntimeError(
-        f"the PrismaBuild progress file {path} is not inside any writable "
-        "container mount, so this row could not report the anchors it commits "
-        "and would be ended as a stall; declare a mount covering it")
 
 
 def _read_residency_map(path: str) -> dict:
@@ -965,7 +911,6 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
                  **bounded_defaults,
-                 **progress_environment(spec, environ if environ is not None else {}),
                  **residency_env, **reader_env, **scratch,
                  **produced_spool_environment(spec, environ if environ is not None else {})}
     for key, value in sorted(forwarded.items()):

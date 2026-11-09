@@ -761,7 +761,6 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
     import test_joint_cost_quantum_runtime as rt
     import prismaquant.joint_cost_quantum as qc
     import prismaquant.perturbed_x_cache as pxc
-    from prismaquant import prismabuild_progress as pbprog
     from prismaquant.joint_adjoint_slices import stage_a_slice
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress,
@@ -774,11 +773,13 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
     receipt = setup["receipt"]
     events = []
 
-    def _report(phase, units, **kwargs):
-        events.append(("report", phase, units))
-        return True
+    local_log = setup.setdefault('_local_progress_log', qc.log_progress)
 
-    monkeypatch.setattr(pbprog, "report", _report)
+    def _report(units, phase, unit=None, *, log=print):
+        events.append(("report", phase, units))
+        local_log(units, phase, unit, log=log)
+
+    monkeypatch.setattr(qc, "log_progress", _report)
     # Stacking-safe seams: first drive stores the true originals on setup;
     # later drives delegate to those, never to a previous wrapper.
     seams = setup.setdefault("_orig_seams", {})
@@ -978,10 +979,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         prepared_inputs=prepared_inputs,
         replay_mode=replay_mode, spill_bound=spill_bound,
         checkpoint_incoming_mode=checkpoint_incoming_mode)
-    monkeypatch.setenv(
-        "PRISMABUILD_ACTION_PROGRESS_PHASES",
-        json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))
-    progress = QuantumProgress(frontier=frontier, base_units=0)
+    progress = QuantumProgress(frontier=frontier, base_units=0,
+                               phases=[p["name"] for p in manifest["read_plan"]["phases"]])
     calib_ids = torch.load(setup["calib_path"])
     events.append(("setup-open", str(setup["calib_path"])))
     payload = run_layer_quantum_core(
