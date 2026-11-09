@@ -1,5 +1,28 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, native container admission and namespace provenance v2, slice4c.
+Source: `tools/{tessera_campaign_container,tessera_campaign_namespace}.py`,
+`prismaquant/campaign_container_spec.py`, based on `989d3ef46`. The campaign
+container adapter no longer runs Docker or forwards PB action, nonce, scope,
+queue, helper-root or progress context. It requires an admitted native Flux job
+(saved launch, original jobspec, event log, cgroup scope, R allocation and
+affinity, through the existing `flux_jobs.verify_current_job`), then creates one
+rootless Podman container by captured CID with the accepted G01 controls: pull
+never, cgroups disabled, no network, the native cpuset, no device, readonly
+sealed checkout, finite forwarded environment. Only the captured CID is stopped
+and removed, on success, failed start, interruption and late failure, and the
+adapter records `container.json` beside the native launch. A clean payload with
+failed cleanup exits 91. Container memory is declared, not kernel-enforced at
+container level: with cgroups disabled `--memory` is accepted but ignored (probe
+job fV3wqkMnFq), so a spec cap above the admitted memory refuses and the job unit
+bounds the process. The GPU arm stays held for unit 4E. Namespace bindings are
+schema v2; provenance is the Tessera pin, image content digest, native profile
+and native runtime digest, and v1 refuses. A spec naming a retired PB
+setting refuses. The residency map, produced spool and local scratch PB wire stay
+until 4d, 4e and slice 5. Container content digests are engine specific, so
+specs sealed under Docker need re-sealing. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
 As of: 2026-11-09, local application progress, slice4b.
 Source: `prismaquant/joint_run_progress.py` (`log_progress`),
 `prismaquant/{joint_cost_quantum,joint_stage_b_head,tessera_campaign,
