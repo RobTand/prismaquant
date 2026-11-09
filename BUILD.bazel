@@ -5720,16 +5720,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "experiments/build_dryrun_queue",
-    srcs = [
-        "experiments/build_dryrun_queue.py",
-    ],
-    deps = [
-        "@pq_pip//prismabuild",
-    ],
-)
-
-pq_py_library(
     name = "experiments/build_glm_tr3_teacher",
     srcs = [
         "experiments/build_glm_tr3_teacher.py",
@@ -7542,16 +7532,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/receipt_demo",
-    srcs = [
-        "experiments/receipt_demo.py",
-    ],
-    deps = [
-        "@pq_pip//prismabuild",
     ],
 )
 
@@ -12512,7 +12492,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
-        "@pq_pip//prismabuild",
         "@pq_pip//torch",
     ],
 )
