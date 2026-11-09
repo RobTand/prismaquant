@@ -10,7 +10,8 @@ affinity, through the existing `flux_jobs.verify_current_job`), then creates one
 rootless Podman container by captured CID with the accepted G01 controls: pull
 never, cgroups disabled, no network, the native cpuset, no device, readonly
 sealed checkout, finite forwarded environment. Only the captured CID is stopped
-and removed, on success, failed start, interruption and late failure, and the
+and removed, on success, failed start, interruption and late failure (an interrupted
+cleanup finishes in about a second, inside the native five second kill grace), and the
 adapter records `container.json` beside the native launch. A clean payload with
 failed cleanup exits 91. Container memory is declared, not kernel-enforced at
 container level: with cgroups disabled `--memory` is accepted but ignored (probe
