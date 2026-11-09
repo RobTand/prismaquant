@@ -40,7 +40,6 @@ def _run_main(tmp_path, monkeypatch, *, physical_bytes, output):
     monkeypatch.setattr(pool, "read_diskstats", lambda: {})
     monkeypatch.setattr(pool, "read_arcstats", lambda: {})
     monkeypatch.setattr(pool, "loadavg", lambda: [0.0, 0.0, 0.0])
-    monkeypatch.setattr(pool, "concurrent_claims", lambda: 0)
     monkeypatch.setattr(pool, "zfs_params", lambda: {})
     monkeypatch.setattr(pool, "Sampler", MetadataSampler)
     monkeypatch.setattr(sys, "argv", ["glm_pool_read_ceiling.py", "--arms", str(spec),

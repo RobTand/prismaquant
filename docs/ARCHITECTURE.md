@@ -8987,11 +8987,11 @@ PQ #1098, part of #997).
   no bound keeps 104; a malformed bound refuses. Gate:
   `tests/test_dispatch_joint_quanta.py`.
 - **Stage B preparation progress phases (PQ #1098).**
-  `tools/prepare_stageb_after_capture.sh` passes one `--progress-phase` per
+  `tools/prepare_stageb_after_capture.py` passes one `--progress-phase` per
   read phase of the manifest it submits, in order, because pbrun refuses a
   v2 read plan otherwise (`require_linear_read_plan_progress`). The
   preparation commits no progress units, so each allowance is the run's
-  `--timeout-s`. Gate: `tests/test_prepare_stageb_after_capture_1098.py`.
+  `--timeout-s`. Gate: `tests/test_prepare_stageb_after_capture_native.py`.
 
 No format, pipeline default, stage or ship gate changes.
 
@@ -9131,7 +9131,7 @@ they are.
 `stage_b_preparation_submission` now declares a SHA-256 for every entry it
 adds. Bound digests are taken from their bindings, and the rest are hashed.
 PrismaBuild's copies are therefore pinned to declared bytes. The submission
-also emits `strict_read_flags`, which `prepare_stageb_after_capture.sh`
+also emits `strict_read_flags`, which `prepare_stageb_after_capture.py`
 appends to the command. Without the flags, the reads are plain file reads,
 as before.
 
@@ -9280,7 +9280,7 @@ A proofs, the production pickle, and the config, index and header ranges
 `layer_streaming.streaming_source_plan` reads, PQ #1095) and a write-only
 produced-output template over the metadata root (PB #912: zero window, one
 `stage_b_metadata` payload slot, a ceiling of 64 MiB per file it can write).
-`tools/prepare_stageb_after_capture.sh` submits the preparation with both,
+`tools/prepare_stageb_after_capture.py` submits the preparation with both,
 with `--residency stage`, and with the tools' new `--produced-output` flag.
 Under that flag `prismaquant.stage_b_prep_io.publish_files` files one
 prewrite per group of files it creates (extension, inputs, manifests,
@@ -9972,7 +9972,7 @@ spec whose `PRISMAQUANT_STAGED_RANGE_WAIT_S` is not below 900 s refuses before
 any metadata is published. It also refuses a plan whose retained budget is not
 its resource policy's (PQ #1022), and the generator settles every layer's
 retained admission before the head intake, naming `derive_policy` when an
-operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.sh` is the
+operator-declared budget does not fit the roster. `tools/prepare_stageb_after_capture.py` is the
 repository launcher for that step; it resolves the interpreter from the Tessera
 dev pin. Gates: `tests/test_joint_catalog_extension.py`,
 `tests/test_prepare_extended_joint_quanta.py`,

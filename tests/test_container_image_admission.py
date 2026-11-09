@@ -325,7 +325,7 @@ def test_a_malformed_archive_row_is_refused_not_undeclared():
 def _direct_args(tmp_path: Path, container: dict) -> types.SimpleNamespace:
     spec = _write_spec(tmp_path / "spec.json", container)
     return types.SimpleNamespace(
-        spec=spec, pbrun="submitter",
+        spec=spec,
         demand="gpu=1,mem_gb=104", cpus=6, tag="sparky", priority=-10,
         timeout_s=None, container_arg=None, residency=None, head_grace_s=1800)
 

@@ -10,11 +10,6 @@
         "readonly": true
       },
       {
-        "source": "/mnt/shared/prismabuild-fleet/pb-queue",
-        "target": "/mnt/shared/prismabuild-fleet/pb-queue",
-        "readonly": false
-      },
-      {
         "source": "/ram/prewarm",
         "target": "/ram/prewarm",
         "readonly": true

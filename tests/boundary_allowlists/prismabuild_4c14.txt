@@ -35,6 +35,4 @@ tests/test_container_image_admission.py
 tests/test_lfm_mixed_serving.py
 tests/test_physical_host_foreign_container_audit.py
 tests/test_pq87_paired_validation.py
-tests/test_prepare_stageb_after_capture_1098.py
-tools/prepare_stageb_after_capture.sh
 tools/submit_quantum_cache_row.py
