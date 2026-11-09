@@ -4144,6 +4144,356 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/glm_native_moe_acquire",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/glm_native_moe_acquire.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/native_local_handoff",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/model_runtime",
+        "@pq_pip//safetensors",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/glm_native_moe_launch",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/glm_native_moe_launch.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/glm_native_moe_launch.py",
+        "prismaquant/container_runtime_identity.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/container_runtime_identity",
+        "@pq_pip//tessera_quant",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_preparation",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_preparation.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_preparation.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/model_runtime",
+        "@pq_pip//safetensors",
+        "@pq_pip//tessera_quant",
+        "@pq_pip//torch",
+        "@pq_pip//transformers",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_seal_encoder",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_seal_encoder.py",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+        "@pq_pip//tessera_quant",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_source_run",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_source_run.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving.py",
+        "archive/pq_experiments_2026-11-09/experiments/lfm_mixed_source_run.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/native_local_handoff",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/native_local_handoff.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/pact_checker_receipt_acceptance",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/pact_checker_receipt_acceptance.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pact_checker_receipt_acceptance.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/pq183_direct_export",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/pq183_direct_export.py",
+    ],
+    deps = [
+        "@pq_pip//tessera_quant",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_direct_export",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        "@pq_pip//numpy",
+        "@pq_pip//requests",
+        "@pq_pip//safetensors",
+        "@pq_pip//tessera_quant",
+        "@pq_pip//tokenizers",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/boundary_control",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/boundary_control",
+        ":tools/measure_boundary_control",
+        ":tools/prismaquant_source_bootstrap",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/experiments/qualify_native_local_handoff",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/experiments/qualify_native_local_handoff.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/qualify_native_local_handoff.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/native_local_handoff",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        "@pq_pip//safetensors",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_assembly_stdout",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_assembly_stdout.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_preparation",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_preparation.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_preparation",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_serving",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_serving.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_source_run",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_lfm_mixed_source_run.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_serving",
+        ":archive/pq_experiments_2026-11-09/experiments/lfm_mixed_source_run",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_native_local_handoff",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_native_local_handoff.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/native_local_handoff",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        "@pq_pip//pytest",
+        "@pq_pip//torch",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_physical_host_foreign_container_audit",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_physical_host_foreign_container_audit.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab.py",
+        "archive/pq_experiments_2026-11-09/tests/test_physical_host_foreign_container_audit.py",
+    ],
+    deps = [
+        "@pq_pip//pytest",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_pq183_continuation",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_pq183_continuation.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound.py",
+        "archive/pq_experiments_2026-11-09/tests/test_pq183_continuation.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_pq183_direct_export",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_pq183_direct_export.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq183_direct_export.py",
+        "archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound.py",
+        "archive/pq_experiments_2026-11-09/tests/test_pq183_direct_export.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_direct_export",
+        ":archive/pq_experiments_2026-11-09/experiments/pq183_lfm_bound",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_pq87_paired_validation",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_pq87_paired_validation.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/experiments/pq87_boundary_contract.json",
+        "archive/pq_experiments_2026-11-09/experiments/pq87_validation_manifest.json",
+        "archive/pq_experiments_2026-11-09/tests/test_pq87_paired_validation.py",
+    ],
+    deps = [
+        "//tests:test_boundary_policy_lib",
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/boundary_control",
+        ":prismaquant/validate_quantized_model",
+        ":tools/__init__",
+        "@pq_pip//pytest",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tests/test_pq87_physical_ab",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tests/test_pq87_physical_ab.py",
+    ],
+    deps = [
+        ":archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab",
+        "@pq_pip//pytest",
+    ],
+)
+
+pq_py_library(
+    name = "archive/pq_experiments_2026-11-09/tools/submit_quantum_cache_row",
+    srcs = [
+        "archive/pq_experiments_2026-11-09/tools/submit_quantum_cache_row.py",
+    ],
+    data = [
+        "archive/pq_experiments_2026-11-09/tools/submit_quantum_cache_row.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/campaign_container_spec",
+        ":prismaquant/digests",
+        ":tools/__init__",
+        ":tools/tessera_campaign_container",
+    ],
+)
+
+pq_py_library(
     name = "archive/production_render_staged_2026-07-30/prismaquant/production_render_staged",
     srcs = [
         "archive/production_render_staged_2026-07-30/prismaquant/production_render_staged.py",
@@ -5988,20 +6338,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "experiments/glm_arc_prewarm",
-    srcs = [
-        "experiments/glm_arc_prewarm.py",
-    ],
-    data = [
-        "experiments/glm_arc_prewarm.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/campaign_data_manifests",
-    ],
-)
-
-pq_py_library(
     name = "experiments/glm_data_manifests",
     srcs = [
         "experiments/glm_data_manifests.py",
@@ -6161,40 +6497,6 @@ pq_py_library(
         ":prismaquant/container_runtime_identity",
         ":tools/__init__",
         ":tools/tessera_campaign_container",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/glm_native_moe_acquire",
-    srcs = [
-        "experiments/glm_native_moe_acquire.py",
-    ],
-    deps = [
-        ":experiments/native_local_handoff",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/model_runtime",
-        "@pq_pip//safetensors",
-        "@pq_pip//torch",
-        "@pq_pip//transformers",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/glm_native_moe_launch",
-    srcs = [
-        "experiments/glm_native_moe_launch.py",
-    ],
-    data = [
-        "experiments/glm_native_moe_acquire.py",
-        "experiments/glm_native_moe_launch.py",
-        "prismaquant/container_runtime_identity.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/container_runtime_identity",
-        "@pq_pip//tessera_quant",
     ],
 )
 
@@ -6772,65 +7074,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "experiments/lfm_mixed_preparation",
-    srcs = [
-        "experiments/lfm_mixed_preparation.py",
-    ],
-    data = [
-        "experiments/lfm_mixed_preparation.py",
-    ],
-    deps = [
-        ":experiments/pq183_lfm_bound",
-        ":experiments/pq87_paired_validation",
-        ":experiments/pq87_physical_ab",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/model_runtime",
-        "@pq_pip//safetensors",
-        "@pq_pip//tessera_quant",
-        "@pq_pip//torch",
-        "@pq_pip//transformers",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/lfm_mixed_seal_encoder",
-    srcs = [
-        "experiments/lfm_mixed_seal_encoder.py",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/lfm_mixed_serving",
-    srcs = [
-        "experiments/lfm_mixed_serving.py",
-    ],
-    data = [
-        "experiments/lfm_mixed_serving.py",
-    ],
-    deps = [
-        ":experiments/pq183_lfm_bound",
-        ":experiments/pq87_paired_validation",
-        ":experiments/pq87_physical_ab",
-        "@pq_pip//tessera_quant",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/lfm_mixed_source_run",
-    srcs = [
-        "experiments/lfm_mixed_source_run.py",
-    ],
-    data = [
-        "experiments/lfm_mixed_serving.py",
-        "experiments/lfm_mixed_source_run.py",
-    ],
-    deps = [
-        ":experiments/lfm_mixed_serving",
-    ],
-)
-
-pq_py_library(
     name = "experiments/lfm_packed_joint_screen",
     srcs = [
         "experiments/lfm_packed_joint_screen.py",
@@ -6886,18 +7129,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "experiments/native_local_handoff",
-    srcs = [
-        "experiments/native_local_handoff.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
     name = "experiments/original_cuda_control",
     srcs = [
         "experiments/original_cuda_control.py",
@@ -6941,21 +7172,6 @@ pq_py_library(
     deps = [
         ":tools/__init__",
         ":tools/resolve_tessera_dev_pin",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/pact_checker_receipt_acceptance",
-    srcs = [
-        "experiments/pact_checker_receipt_acceptance.py",
-    ],
-    data = [
-        "experiments/pact_checker_receipt_acceptance.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/digests",
     ],
 )
 
@@ -7027,38 +7243,6 @@ pq_py_library(
         "@pq_pip//numpy",
         "@pq_pip//pytest",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/pq183_direct_export",
-    srcs = [
-        "experiments/pq183_direct_export.py",
-    ],
-    deps = [
-        "@pq_pip//tessera_quant",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/pq183_lfm_bound",
-    srcs = [
-        "experiments/pq183_lfm_bound.py",
-    ],
-    data = [
-        "experiments/pq183_lfm_bound.py",
-    ],
-    deps = [
-        ":experiments/pq183_direct_export",
-        ":experiments/pq87_paired_validation",
-        ":experiments/pq87_physical_ab",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        "@pq_pip//numpy",
-        "@pq_pip//requests",
-        "@pq_pip//safetensors",
-        "@pq_pip//tessera_quant",
-        "@pq_pip//tokenizers",
     ],
 )
 
@@ -7259,39 +7443,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         "@pq_pip//pytest",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/pq87_paired_validation",
-    srcs = [
-        "experiments/pq87_paired_validation.py",
-    ],
-    data = [
-        "experiments/pq87_paired_validation.py",
-    ],
-    deps = [
-        ":experiments/pq87_physical_ab",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/boundary_control",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/pq87_physical_ab",
-    srcs = [
-        "experiments/pq87_physical_ab.py",
-    ],
-    data = [
-        "experiments/pq87_physical_ab.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/boundary_control",
-        ":tools/measure_boundary_control",
-        ":tools/prismaquant_source_bootstrap",
     ],
 )
 
@@ -7508,23 +7659,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/kl_fisher",
-        "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "experiments/qualify_native_local_handoff",
-    srcs = [
-        "experiments/qualify_native_local_handoff.py",
-    ],
-    data = [
-        "experiments/qualify_native_local_handoff.py",
-    ],
-    deps = [
-        ":experiments/native_local_handoff",
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        "@pq_pip//safetensors",
         "@pq_pip//torch",
     ],
 )
@@ -11088,13 +11222,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/build_t4_recovery_request",
-    srcs = [
-        "tools/build_t4_recovery_request.py",
-    ],
-)
-
-pq_py_library(
     name = "tools/build_tessera_census_cache",
     srcs = [
         "tools/build_tessera_census_cache.py",
@@ -11642,20 +11769,6 @@ pq_py_library(
         ":tools/__init__",
         ":tools/ci/bazel_artifacts",
         ":tools/ci/bazel_gate",
-    ],
-)
-
-pq_py_library(
-    name = "tools/collect_class_evidence",
-    srcs = [
-        "tools/collect_class_evidence.py",
-    ],
-    data = [
-        "tools/collect_class_evidence.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/digests",
     ],
 )
 
@@ -12783,6 +12896,22 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "tools/prepare_stageb_after_capture",
+    srcs = [
+        "tools/prepare_stageb_after_capture.py",
+    ],
+    data = [
+        "tools/prepare_stageb_after_capture.py",
+        "tools/resolve_tessera_dev_pin.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":prismaquant/digests",
+    ],
+)
+
+pq_py_library(
     name = "tools/prismaquant_runtime_snapshot",
     srcs = [
         "tools/prismaquant_runtime_snapshot.py",
@@ -13226,23 +13355,6 @@ pq_py_library(
         ":prismaquant/mount_facts",
         "@pq_pip//safetensors",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/submit_quantum_cache_row",
-    srcs = [
-        "tools/submit_quantum_cache_row.py",
-    ],
-    data = [
-        "tools/submit_quantum_cache_row.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/campaign_container_spec",
-        ":prismaquant/digests",
-        ":tools/__init__",
-        ":tools/tessera_campaign_container",
     ],
 )
 
