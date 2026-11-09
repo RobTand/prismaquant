@@ -1046,8 +1046,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     reused state is read-only for the walk.
     """
     _require(progress_allowance_s is None,
-             "PB no-progress watchdog is retired; use native walltime and an "
-             "explicit local progress_interval_s")
+             "the retired PB no-progress watchdog is gone; use native walltime and "
+             "an explicit local progress_interval_s")
     from .render_cache_paths import (
         cache_weight_filename,
         require_injective_cache_filenames,

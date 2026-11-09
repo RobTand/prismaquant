@@ -25,8 +25,7 @@ def log_progress(units: int, phase: str, unit: str | None = None,
                  *, log=print) -> None:
     """Log an observed cumulative count without publishing execution evidence."""
     log("application progress: " + json.dumps({
-        "phase": str(phase), "units_completed": int(units), "unit": unit,
-    }, sort_keys=True))
+        "phase": str(phase), "unit": unit, "units_completed": int(units)}))
 
 
 def interval_seconds(environ=None) -> float:

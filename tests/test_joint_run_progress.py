@@ -242,6 +242,7 @@ def test_an_undeclared_phase_commits_nothing_and_says_why():
 
 
 def test_an_empty_explicit_roster_commits_nothing_but_still_logs():
+    assert callable(jrp.log_progress)
     recorder, clock, progress = reporter(phases=())
     progress.entry(layer=0, partition=0)
     clock.advance(61)
@@ -264,6 +265,10 @@ def test_the_default_roster_is_the_head_then_the_layers_and_no_environment_names
 
 def test_the_default_reporter_writes_a_local_log_and_no_transport_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    transport = tmp_path / "action.progress"
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(transport))
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t" * 32)
+    monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PHASES", json.dumps(run_phases(2)))
     clock = Clock()
     lines = []
     progress = jrp.JointRunProgress(layers=2, partitions=2, log=lines.append,
@@ -273,7 +278,7 @@ def test_the_default_reporter_writes_a_local_log_and_no_transport_file(tmp_path,
     assert progress.flush(force=True) is True
     assert progress.commits == 0
     assert lines
-    assert not list(tmp_path.iterdir())
+    assert not transport.exists() and not list(tmp_path.iterdir())
 
 
 def test_log_progress_emits_one_local_diagnostic_and_returns_nothing(tmp_path, monkeypatch):

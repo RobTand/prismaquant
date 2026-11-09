@@ -184,8 +184,8 @@ def main(argv=None) -> int:
     if args.head_resume and not args.head_checkpoint:
         raise ValueError("head resume requires --head-checkpoint")
     if args.head_progress_allowance_s is not None:
-        raise ValueError("PB no-progress watchdog is retired; use native walltime "
-                         "and --head-progress-interval-s for local logs")
+        raise ValueError("the retired PB no-progress watchdog is gone; use native "
+                         "walltime and --head-progress-interval-s for local logs")
     if (args.head_progress_phase is None) != (args.head_progress_interval_s is None):
         raise ValueError("head progress phase and interval must be supplied together")
     if args.head_progress_phase is not None:
