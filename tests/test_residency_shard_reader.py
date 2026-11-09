@@ -201,7 +201,7 @@ def test_a_whole_file_entry_serves_every_tensor(tmp_path, monkeypatch):
         _identical(reader, path, tensors)
     report = resolver.report()
     served = [name for name in tensors if spans[name][1] > spans[name][0]]
-    assert report['range_hits'] == len(served)
+    assert report['range_hits'] == 1  # one covering extent, bound once and reused by every tensor
     assert report['bytes_from_stage'] == sum(
         spans[name][1] - spans[name][0] for name in served)
     assert len(report['fallbacks']) == 0
@@ -222,7 +222,7 @@ def test_only_the_tensors_a_range_covers_come_off_the_stage(tmp_path, monkeypatc
     with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
         _identical(reader, path, tensors)
     report = resolver.report()
-    assert report['range_hits'] == len(covered)
+    assert report['range_hits'] == 1  # the one extent covering both tensors, bound once
     assert report['range_misses'] == len([n for n in tensors
                                           if spans[n][1] > spans[n][0]]) - len(covered)
     assert report['bytes_from_stage'] == sum(spans[n][1] - spans[n][0] for n in covered)
@@ -247,8 +247,7 @@ def test_an_entry_running_past_the_declared_file_refuses(tmp_path, monkeypatch):
         _bind(monkeypatch, shrunk)
 
 
-def test_a_staged_range_that_is_not_a_regular_file_refuses(tmp_path, monkeypatch):
-    from prismaquant.staged_manifest import ManifestRefused
+def test_a_staged_range_that_is_not_a_regular_file_falls_back_to_the_pool(tmp_path, monkeypatch):
     path, tensors = _shard(tmp_path)
     spans = _header(path)
     root = _stage_root(tmp_path)
@@ -258,10 +257,12 @@ def test_a_staged_range_that_is_not_a_regular_file_refuses(tmp_path, monkeypatch
     staged.unlink()
     staged.mkdir()
     resolver = _bind(monkeypatch, map_path)
-    with pytest.raises(ManifestRefused, match='staged input must be a regular file'):
-        with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-            _identical(reader, path, tensors)
-    assert resolver.report()['range_hits'] == 1  # the declared range was answered, then refused on open
+    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
+        _identical(reader, path, tensors)  # the pool answers, bit for bit
+    report = resolver.report()
+    assert report['range_hits'] >= 1  # the declared range was answered, then not served
+    assert report['bytes_from_stage'] == 0
+    assert 'staged range is not a regular file' in {row['reason'] for row in report['fallbacks']}
 
 
 # -- the descriptor-alias seam ----------------------------------------------
@@ -323,7 +324,7 @@ def test_keys_metadata_and_slices_come_from_the_declared_file(tmp_path, monkeypa
                 assert got.get_dtype() == want.get_dtype()
 
 
-def test_a_staged_read_reports_hits_and_range_hits_together(tmp_path, monkeypatch):
+def test_a_staged_read_reports_range_hits_and_stage_bytes(tmp_path, monkeypatch):
     path, tensors = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
@@ -333,7 +334,7 @@ def test_a_staged_read_reports_hits_and_range_hits_together(tmp_path, monkeypatc
         reader.get_tensor('f32')
     report = resolver.report()
     assert report['range_hits'] == 1
-    assert report['hits'] == 1
+    assert report['bytes_from_stage'] == _header(path)['f32'][1] - _header(path)['f32'][0]
 
 
 # -- the resolver's own contract --------------------------------------------
@@ -348,8 +349,9 @@ def test_staged_read_still_refuses_a_byte_range(tmp_path, monkeypatch):
     resolver = _bind(monkeypatch, _write_map(
         tmp_path, root, [(path, 0, end - start, staged)]))
     assert resolver.staged_read(path) is None
-    assert 'map entry is a byte range, not the whole declared file' in {
-        row['reason'] for row in resolver.report()['fallbacks']}
+    report = resolver.report()
+    assert report['range_misses'] >= 1  # the whole-file span is not inside the declared range
+    assert report['bytes_from_stage'] == 0
 
 
 def test_staged_range_refuses_a_backwards_span(tmp_path, monkeypatch):
