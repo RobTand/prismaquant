@@ -2,13 +2,11 @@
 # Shrink-only: tests/test_prismabuild_ban.py fails on an entry whose file is gone or no longer matches.
 # Never add a line. D5: glm_native_moe_launch, qualify_native_local_handoff and pact_checker_receipt_acceptance
 # fail closed at import/call; they are not runnable until their 4C-14 disposition lands.
-experiments/README-glm-arc-prewarm.md
 experiments/alloc_lead_asd/README.md
 experiments/alloc_lead_asd/recipes/container.json
 experiments/alloc_lead_asd/recipes/glm-container.json
 experiments/bench_source_hash_threads.py
 experiments/build_kda_kernel_qualification.py
-experiments/glm_arc_prewarm.py
 experiments/glm_native_moe_acquire.py
 experiments/glm_native_moe_launch.py
 experiments/glm_pool_read_ceiling.py
@@ -38,7 +36,5 @@ tests/test_lfm_mixed_serving.py
 tests/test_physical_host_foreign_container_audit.py
 tests/test_pq87_paired_validation.py
 tests/test_prepare_stageb_after_capture_1098.py
-tools/build_t4_recovery_request.py
-tools/collect_class_evidence.py
 tools/prepare_stageb_after_capture.sh
 tools/submit_quantum_cache_row.py
