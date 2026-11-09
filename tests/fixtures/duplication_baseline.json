@@ -73,7 +73,6 @@
   "hashlib:tools/check_readset_coverage.py::_load_json",
   "hashlib:tools/check_t4_overlay_prepare.py::sha",
   "hashlib:tools/compose_tessera_cached_units.py::main",
-  "hashlib:tools/derive_tessera_progress_grace.py::sha256",
   "hashlib:tools/dsv4_wikitext_inputs.py::_strict_json_load",
   "hashlib:tools/dsv4_wikitext_inputs.py::_tensor_sha256",
   "hashlib:tools/duplication_inventory.py::_shingles",
@@ -205,7 +204,6 @@
   "sorted-json:tools/compare_stage_a_checkpoints.py::main",
   "sorted-json:tools/compose_tessera_cached_units.py::main",
   "sorted-json:tools/derive_retained_window_budget.py::main",
-  "sorted-json:tools/derive_tessera_progress_grace.py::main",
   "sorted-json:tools/device_envelope_probe.py::main",
   "sorted-json:tools/dispatch_joint_quanta.py::_dispatch",
   "sorted-json:tools/dispatch_joint_quanta.py::check_source_coverage",
@@ -744,10 +742,6 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py"
   ],
-  "derive": [
-   "tools/band_serial_handoff_live_pair.py",
-   "tools/derive_tessera_progress_grace.py"
-  ],
   "derive_policy": [
    "prismaquant/joint_served_activation.py",
    "prismaquant/joint_stageb_resources.py"
@@ -824,8 +818,7 @@
   ],
   "sha256": [
    "prismaquant/glm_source_derivative.py",
-   "prismaquant/tessera_calibration_cache.py",
-   "tools/derive_tessera_progress_grace.py"
+   "prismaquant/tessera_calibration_cache.py"
   ],
   "source_proof": [
    "prismaquant/joint_aura_retained_budget_transition.py",

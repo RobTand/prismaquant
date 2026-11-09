@@ -6872,6 +6872,13 @@ pq_py_library(
 )
 
 pq_py_library(
+    name = "experiments/measurements/derive_tessera_progress_grace_retired_execution_system_2026-11-09",
+    srcs = [
+        "experiments/measurements/derive_tessera_progress_grace_retired_execution_system_2026-11-09.py",
+    ],
+)
+
+pq_py_library(
     name = "experiments/measurements/verified-capture-load-20260908/analyze_native",
     srcs = [
         "experiments/measurements/verified-capture-load-20260908/analyze_native.py",
@@ -8738,6 +8745,7 @@ pq_py_library(
         ":prismaquant/qnames",
         ":prismaquant/quality_prefill_population",
         ":prismaquant/record_fields",
+        ":prismaquant/recorded_cas_receipt",
         ":prismaquant/render_cache_paths",
         ":prismaquant/render_score",
         ":prismaquant/research_cost_acceptance",
@@ -9923,13 +9931,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "prismaquant/pbwait_table",
-    srcs = [
-        "prismaquant/pbwait_table.py",
-    ],
-)
-
-pq_py_library(
     name = "prismaquant/pipeline",
     srcs = [
         "prismaquant/pipeline.py",
@@ -10090,6 +10091,17 @@ pq_py_library(
     name = "prismaquant/record_fields",
     srcs = [
         "prismaquant/record_fields.py",
+    ],
+)
+
+pq_py_library(
+    name = "prismaquant/recorded_cas_receipt",
+    srcs = [
+        "prismaquant/recorded_cas_receipt.py",
+    ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/digests",
     ],
 )
 
@@ -10298,6 +10310,9 @@ pq_py_library(
     name = "prismaquant/ship_gates",
     srcs = [
         "prismaquant/ship_gates.py",
+    ],
+    data = [
+        "prismaquant/flux_jobs.py",
     ],
     deps = [
         ":prismaquant/__init__",
@@ -11733,21 +11748,6 @@ pq_py_library(
 )
 
 pq_py_library(
-    name = "tools/demonstrate_admission_checks",
-    srcs = [
-        "tools/demonstrate_admission_checks.py",
-    ],
-    data = [
-        "//tests:test_runtime_fixed_resource_admission.py",
-        "prismaquant/runtime_provenance.py",
-        "tools/demonstrate_admission_checks.py",
-    ],
-    deps = [
-        "@pq_pip//pytest",
-    ],
-)
-
-pq_py_library(
     name = "tools/derive_retained_window_budget",
     srcs = [
         "tools/derive_retained_window_budget.py",
@@ -11762,13 +11762,6 @@ pq_py_library(
         ":prismaquant/joint_retained_window_plan",
         ":prismaquant/qnames",
         "@pq_pip//torch",
-    ],
-)
-
-pq_py_library(
-    name = "tools/derive_tessera_progress_grace",
-    srcs = [
-        "tools/derive_tessera_progress_grace.py",
     ],
 )
 
