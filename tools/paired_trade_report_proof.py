@@ -1,6 +1,5 @@
 """Measure synthetic paired-trade reports through the actual allocator command."""
 from __future__ import annotations
-from prismaquant import joint_aura_rows
 
 import argparse
 import gc
@@ -17,7 +16,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from prismaquant import format_registry as fr, joint_aura as joint
+from prismaquant import format_registry as fr, joint_aura as joint, joint_aura_rows
 from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex
 from prismaquant import native_results
