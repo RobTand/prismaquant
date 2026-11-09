@@ -32,7 +32,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from prismaquant import flux_jobs  # noqa: E402
-from prismaquant.digests import bytes_sha256hex  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex  # noqa: E402
 
 CAMPAIGN = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913')
 PANEL = CAMPAIGN / 'allocation/joint-panel'
@@ -60,7 +60,7 @@ def preparation_arguments(args, spec: str, spec_sha: str) -> list[str]:
             '--spec', spec, '--spec-sha256', spec_sha]
 
 
-def build(args, environ=os.environ, run=subprocess.run) -> dict:
+def plan_job(args, environ=os.environ, run=subprocess.run) -> dict:
     """Everything up to the submission: the submission directory, the staged binding check and the job argv."""
     checkout = Path(environ.get('PQ_CHECKOUT') or ROOT).resolve()
     python = environ.get('PQ_PYTHON') or f'/home/rob/venvs/pq-tessera-{resolve_pin(checkout)[:8]}/bin/python'
@@ -90,17 +90,17 @@ def main(argv=None) -> int:
     parser.add_argument('--record-dir', type=Path, help='shared directory for the native submission record')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
-    plan = build(args)
+    plan = plan_job(args)
     flux_jobs.validate_job(checkout=plan['checkout'], resources=RESOURCES, environment=THREADS, staged_input=plan['binding'])
     if args.dry_run:
-        print(json.dumps({'status': 'validated', 'argv_sha256': bytes_sha256hex(json.dumps(plan['argv']).encode()),
-                          'resources': RESOURCES.__dict__}, sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text({'status': 'validated', 'argv_sha256': bytes_sha256hex(json.dumps(plan['argv']).encode()),
+                                            'resources': RESOURCES.__dict__}))
         return 0
     if args.record_dir is None:
         parser.error('--record-dir is required to submit')
     submission = flux_jobs.submit_job(plan['argv'], checkout=plan['checkout'], resources=RESOURCES,
                                       record_dir=args.record_dir, environment=THREADS, staged_input=plan['binding'])
-    print(json.dumps({'status': 'submitted', 'job_id': submission.job_id, 'record_dir': str(submission.record_dir)}, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text({'status': 'submitted', 'job_id': submission.job_id, 'record_dir': str(submission.record_dir)}))
     return 0
 
 

@@ -41,7 +41,7 @@ def test_the_job_argv_carries_the_preparation_strict_flags_and_declaration(tmp_p
     binding = tmp_path / "binding.json"
     binding.write_text(json.dumps({"read_contract_path": str(tmp_path / "metadata.submission" / "read-manifest.json.gz")}))
     calls = []
-    plan = wrapper.build(_args(tmp_path, binding), _environ(tmp_path), run=_fake_run(tmp_path, calls))
+    plan = wrapper.plan_job(_args(tmp_path, binding), _environ(tmp_path), run=_fake_run(tmp_path, calls))
     prepare_call = calls[0][0]
     assert prepare_call[:4] == ["/venv/bin/python", "-m", "tools.stage_b_preparation_submission", "prepare"]
     assert "--tier" not in prepare_call
@@ -56,7 +56,7 @@ def test_a_staged_binding_for_another_read_manifest_refuses(tmp_path):
     binding = tmp_path / "binding.json"
     binding.write_text(json.dumps({"read_contract_path": "/mnt/shared/other/read-manifest.json.gz"}))
     with pytest.raises(ValueError, match="read manifest"):
-        wrapper.build(_args(tmp_path, binding), _environ(tmp_path), run=_fake_run(tmp_path, []))
+        wrapper.plan_job(_args(tmp_path, binding), _environ(tmp_path), run=_fake_run(tmp_path, []))
 
 
 def test_the_resources_are_a_native_cpu_profile():
