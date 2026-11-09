@@ -162,15 +162,9 @@ def stage_b_spill_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
-#: PrismaBuild's sealed list of an action's bounded-local pairs (PB #911):
-#: ``ROOT_ENV:MAX_ENV`` items separated by commas. pbrun charges each pair's
-#: ceiling, rounded up to whole GiB, to the executing box's ``spool_gb``.
-LOCAL_SCRATCH_PAIRS_ENV = "PRISMABUILD_LOCAL_SCRATCH_PAIRS"
-LOCAL_SCRATCH_IO_ENV = "PRISMABUILD_LOCAL_SCRATCH_IO"
-
 #: Every bounded-local scratch kind a campaign container may write on the
-#: executing box's disk, in the order its pair is listed. A kind added here
-#: is forwarded and priced by the same call (``local_scratch_environment``).
+#: executing box's disk. A kind added here is validated and forwarded by the
+#: same call (``local_scratch_environment``).
 #: The produced spool is not listed: its root and bound live in the launch-bound declaration.
 CONTAINER_CACHE_SCRATCH_ENV = (
     "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
@@ -208,123 +202,47 @@ LOCAL_SCRATCH_KINDS = (
 
 
 def local_scratch_environment(spec: dict, environ) -> dict:
-    """Every declared bounded-local scratch pair, plus PrismaBuild's pair list.
+    """Every declared bounded-local scratch kind's root and byte ceiling.
 
     Each kind in :data:`LOCAL_SCRATCH_KINDS` is validated by its own
     function, so a root without a sealed positive byte ceiling is refused
-    here, as it is at launch. The pairs that are declared are listed in
-    :data:`LOCAL_SCRATCH_PAIRS_ENV`, so PrismaBuild charges every byte
-    bound it forwards. With no scratch declared this is ``{}`` and the
-    sealed request carries nothing new.
+    here, as it is at launch. With no scratch declared this is ``{}``.
+    Nothing prices scratch bytes at placement: the roots are operator
+    provisioned and each ceiling is enforced where the scratch is opened.
     """
 
-    if LOCAL_SCRATCH_PAIRS_ENV in spec.get("env", {}):
-        raise RuntimeError(
-            f"spec env {LOCAL_SCRATCH_PAIRS_ENV} is derived from the declared "
-            "scratch kinds, not declared by a spec")
     forwarded: dict = {}
-    pairs = []
+    roots = []
     for names, environment in LOCAL_SCRATCH_KINDS:
         declared = environment(spec, environ)
         if declared:
             forwarded.update(declared)
-            pairs.append(names)
-    if not pairs:
-        return {}
-    roots = [forwarded[root] for root, _ in pairs]
+            roots.append(declared[names[0]])
     if len(set(roots)) != len(roots):
         raise RuntimeError(
             "two bounded-local scratch kinds name the same root; each needs "
-            "its own root so PrismaBuild can charge each ceiling")
-    forwarded[LOCAL_SCRATCH_PAIRS_ENV] = ",".join(
-        f"{root}:{maximum}" for root, maximum in pairs)
+            "its own root so each ceiling bounds its own bytes")
     return forwarded
 
 
 def local_scratch_request_environment(spec: dict) -> dict:
-    """Project sealed spec declarations into the outer PB admission envelope.
+    """Project sealed spec declarations into the row's explicit environment.
 
-    Unlike payload forwarding, admission never consults the coordinator's
-    environment. Keep preflight and envelope construction on this same path.
+    Unlike payload forwarding, the row never consults the coordinator's
+    environment. Keep preflight and row construction on this same path.
     """
-    forwarded = local_scratch_environment(spec, spec.get("env", {}))
-    forwarded.update(local_scratch_io_environment(spec, forwarded))
-    return forwarded
-
-
-def local_scratch_io_environment(spec: dict, scratch: dict) -> dict:
-    """Validate PB v1 traffic independently of occupancy; preserve wire bytes.
-
-    ``scratch`` is the complete validated capacity projection, not a selected
-    root. PB owns profile comparison, freshness at placement and scheduling.
-    """
-    env = spec.get("env", {})
-    if LOCAL_SCRATCH_IO_ENV not in env:
-        return {}
-
-    def refuse(reason):
-        raise ValueError(f"{LOCAL_SCRATCH_IO_ENV}: {reason}")
-
-    def unique_object(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                refuse(f"duplicate JSON key {key!r}")
-            result[key] = value
-        return result
-
-    def nonfinite(value):
-        refuse(f"nonfinite JSON value {value}")
-
-    wire = env[LOCAL_SCRATCH_IO_ENV]
-    if not isinstance(wire, str) or not wire:
-        refuse("scratch I/O declaration must be a nonempty JSON string")
-    try:
-        intent = json.loads(wire, object_pairs_hook=unique_object,
-                            parse_constant=nonfinite)
-    except ValueError as exc:
-        refuse(f"invalid scratch I/O JSON: {exc}")
-    fields = {"schema", "write_bytes", "read_bytes", "profile_contract",
-              "max_profile_age_s"}
-    if not isinstance(intent, dict) or set(intent) != fields:
-        refuse("scratch I/O declaration requires exactly the PB v1 fields")
-    if intent["schema"] != "prismabuild.local_scratch_io.v1":
-        refuse("unsupported scratch I/O schema")
-    for direction in ("write_bytes", "read_bytes"):
-        if type(intent[direction]) is not int or intent[direction] < 0:
-            refuse(f"{direction} must be a nonnegative JSON integer")
-    if not (intent["write_bytes"] or intent["read_bytes"]):
-        refuse("at least one traffic direction must be positive")
-    contract = intent["profile_contract"]
-    if not isinstance(contract, str) or re.fullmatch(r"[A-Za-z0-9_.-]+", contract) is None:
-        refuse("profile_contract must be a nonempty token [A-Za-z0-9_.-]+")
-    age = intent["max_profile_age_s"]
-    # PB checks finiteness as a float, including for JSON integer ages.
-    # Unrepresentable integers must refuse, not escape preflight as overflow.
-    try:
-        valid_age = (type(age) in (int, float) and age > 0
-                     and math.isfinite(float(age)))
-    except OverflowError:
-        valid_age = False
-    if not valid_age:
-        refuse("max_profile_age_s must be a positive finite JSON number")
-    pairs = scratch.get(LOCAL_SCRATCH_PAIRS_ENV, "").split(",")
-    if len(pairs) != 1 or not pairs[0]:
-        refuse("scratch I/O requires exactly one scratch pair")
-    return {LOCAL_SCRATCH_IO_ENV: wire}
+    return local_scratch_environment(spec, spec.get("env", {}))
 
 
 def _forwarded_local_scratch_environment(spec: dict, environ) -> dict:
-    """Forward every registered pair, never the outer admission control."""
-    forwarded = local_scratch_environment(spec, environ)
-    forwarded.pop(LOCAL_SCRATCH_PAIRS_ENV, None)
-    return forwarded
+    """Forward every registered scratch kind's root and ceiling."""
+    return local_scratch_environment(spec, environ)
 
 
 #: The container's write caches and PrismaQuant's temp parent, each with the
 #: subdirectory it gets under a declared scratch root (PQ #1072, #1014 item f).
 #: Left unset, each one lands in the container's writable overlay, which is
-#: bounded by nothing and invisible to PrismaBuild.
+#: bounded by nothing and invisible to the declared scratch ceilings.
 CONTAINER_CACHE_ENV = (
     ("HF_HOME", "hf"),
     ("TRITON_CACHE_DIR", "triton"),

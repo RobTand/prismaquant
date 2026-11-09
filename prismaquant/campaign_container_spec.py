@@ -13,11 +13,10 @@ from pathlib import PurePosixPath
 import re
 
 
-#: The one PB name a spec may still carry until its owner migrates: the local
-#: scratch I/O wire (slice 5). Any other ``PRISMABUILD_`` spec setting refuses: the
-#: PB action, reader, queue and produced-spool context no longer exists, and a spec
-#: naming it promises a service that is gone.
-KEPT_PB_SPEC_ENV = ("PRISMABUILD_LOCAL_SCRATCH_IO",)
+#: No PB name is a valid spec setting: the PB action, reader, queue, produced-spool and
+#: local-scratch charge contexts no longer exist, and a spec naming one promises a
+#: service that is gone.
+KEPT_PB_SPEC_ENV = ()
 #: The native staged-input names the launcher alone supplies (``staged_launch.launch`` exports
 #: the same five); a spec naming one is forged or conflicting, never a default.
 LAUNCHER_STAGED_ENV = ("PRISMAQUANT_STAGED_MANIFEST", "PRISMAQUANT_STAGED_MANIFEST_SHA256",

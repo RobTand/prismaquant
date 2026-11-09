@@ -93,11 +93,6 @@ def pbrun_argv(row: str, spec: dict) -> list[str]:
             f"/home/rob/pb-scratch-pq2463q/{row}/spill",
         "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES":
             str(WORKSPACE_GIB * (1 << 30)),
-        "PRISMABUILD_LOCAL_SCRATCH_PAIRS": (
-            "PRISMAQUANT_CONTAINER_CACHE_ROOT:"
-            "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES,"
-            "PRISMAQUANT_STAGE_B_COTANGENT_ROOT:"
-            "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES"),
     }
     argv = [
         sys.executable, "/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
@@ -132,8 +127,7 @@ def main(argv=None) -> int:
         "cache-row-display", ensure_ascii=True, allow_nan=True,
         separators=(",", ": "), indent=1)
     print(display.text(
-        {"spec": spec, "scratch": scratch,
-         "pairs": scratch.get("PRISMABUILD_LOCAL_SCRATCH_PAIRS")}))
+        {"spec": spec, "scratch": scratch}))
     print("CACHE_GIB:", CACHE_GIB[args.row], "WORKSPACE_GIB:", WORKSPACE_GIB)
     if not args.submit:
         return 0

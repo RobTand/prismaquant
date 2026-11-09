@@ -387,7 +387,8 @@ def test_pb_context_is_never_forwarded_and_a_spec_naming_it_refuses():
     runner = _runner()
     retired = ('PRISMABUILD_ACTION_KEY', 'PRISMABUILD_ACTION_NONCE', 'PRISMABUILD_ACTION_SCOPE',
                'PRISMABUILD_READER_HELPER_ROOT', 'PRISMABUILD_QUEUE_ROOT',
-               'PRISMABUILD_ACTION_PROGRESS_PATH', 'PRISMABUILD_ACTION_PROGRESS_TOKEN')
+               'PRISMABUILD_ACTION_PROGRESS_PATH', 'PRISMABUILD_ACTION_PROGRESS_TOKEN',
+               'PRISMABUILD_LOCAL_SCRATCH_IO', 'PRISMABUILD_LOCAL_SCRATCH_PAIRS')
     for name in retired:
         data = spec()
         data['env'][name] = 'x'
@@ -398,10 +399,6 @@ def test_pb_context_is_never_forwarded_and_a_spec_naming_it_refuses():
                                  environ={name: 'x' for name in retired})
     assert not any(name in part for part in argv for name in retired)
     assert not hasattr(runner, 'reader_context_environment')
-    kept = dict(PRISMABUILD_LOCAL_SCRATCH_IO='{}')
-    data = spec()
-    data['env'].update(kept)
-    runner.validate_container(data)
 
 
 def test_only_the_listed_ambient_names_are_read(tmp_path):

@@ -1069,7 +1069,6 @@ def test_resource_policy_controls_container_and_native_row_intent(tmp_path, camp
         quantum_argv(record, **args)
 
 
-
 def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, monkeypatch, capsys):
     """PQ #1147: a plan re-declared after the quantum was sealed stamps by default."""
     import dispatch_joint_quanta as dispatch
@@ -1216,8 +1215,6 @@ def test_cotangent_scratch_is_validated_and_sealed_in_outer_request(
     argv = quantum_argv(record, **args)
     sealed = argv["env"]
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
-        'PRISMAQUANT_STAGE_B_COTANGENT_ROOT:PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
     actual = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert cotangent_scratch_environment(actual, sealed) == env
 
@@ -1245,8 +1242,6 @@ def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
     argv = quantum_argv(record, **args)
     sealed = argv["env"]
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == (
-        'PRISMAQUANT_STAGE_B_SPILL_ROOT:PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
     actual = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert stage_b_spill_environment(actual, sealed) == env
 
@@ -1254,274 +1249,6 @@ def test_stage_b_spill_is_validated_and_sealed_in_outer_request(
 _COTANGENT = ('PRISMAQUANT_STAGE_B_COTANGENT_ROOT', 'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES')
 _SPILL = ('PRISMAQUANT_STAGE_B_SPILL_ROOT', 'PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES')
 _CACHE_2798 = ('PRISMAQUANT_CONTAINER_CACHE_ROOT', 'PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES')
-_IO_2798 = 'PRISMABUILD_LOCAL_SCRATCH_IO'
-
-
-def _scratch_io_2798(**changes):
-    """Explicit fixture traffic, not an estimate of Stage B work or occupancy."""
-    return json.dumps({
-        'write_bytes': 9_000_000_007,
-        'read_bytes': 3_000_000_011,
-        'profile_contract': 'prismabuild.local_scratch_io.buffered_seq_sync.v1',
-        'max_profile_age_s': 3600,
-        'schema': 'prismabuild.local_scratch_io.v1',
-        **changes,
-    }, separators=(',', ':'))
-
-
-@pytest.mark.parametrize('pair', [_COTANGENT, _SPILL],
-                         ids=['cotangent', 'spill'])
-@pytest.mark.parametrize('traffic', [
-    {}, {'write_bytes': 0}, {'read_bytes': 0, 'max_profile_age_s': 0.5},
-], ids=['both-directions', 'read-only', 'write-only'])
-def test_scratch_io_2798_outer_seal_and_byte_unchanged_opt_out(
-        tmp_path, campaign, monkeypatch, pair, traffic):
-    """Only sealed spec opt-in changes the envelope; ambient traffic never does."""
-    import dispatch_joint_quanta as dispatch
-    root = str(tmp_path / 'scratch')
-    env = {pair[0]: root, pair[1]: '1073741825'}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    baseline = build()
-    assert _outer_env(baseline) == [
-        f'{pair[0]}={root}', f'{pair[1]}=1073741825',
-        'PRISMABUILD_LOCAL_SCRATCH_PAIRS=' + ':'.join(pair), dispatch.DEV_MODE_ENV]
-    monkeypatch.setenv(_IO_2798, _scratch_io_2798(write_bytes=777))
-    assert build() == baseline
-    wire = _scratch_io_2798(**traffic)  # Preserve the explicit JSON, including whitespace.
-    before = dispatch.SPEC_PATH.read_text()
-    spec = json.loads(before)
-    assert baseline["argv"][baseline["argv"].index("--spec") + 1] == json.dumps(spec, sort_keys=True)
-    spec['env'][_IO_2798] = wire
-    opted_spec = json.dumps(spec)
-    dispatch.SPEC_PATH.write_text(opted_spec)
-    opted = build()
-    outer = dict(item.split('=', 1) for item in _outer_env(opted))
-    assert outer.get(_IO_2798) == wire, 'explicit traffic must reach the outer PB request'
-    assert _outer_env(opted).count(f'{_IO_2798}={wire}') == 1
-    assert outer[pair[1]] == '1073741825'
-    assert outer['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ':'.join(pair)
-    assert '--transport' not in opted or opted[opted.index('--transport') + 1] == 'pool'
-    sealed = json.loads(opted["argv"][opted["argv"].index("--spec") + 1])
-    assert sealed['env'][_IO_2798] == wire
-    assert dispatch.SPEC_PATH.read_text() == opted_spec
-    # Remove precisely the new declaration from the two sealed surfaces:
-    # every other byte/argument must match the capacity-only request.
-    from copy import deepcopy
-    restored = deepcopy(opted)
-    del restored["env"][_IO_2798]
-    del sealed['env'][_IO_2798]
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
-    restored["argv"][restored["argv"].index("--spec") + 1] = DIRECT_ASCII_SPACED_LAX.text(sealed)
-    assert restored == baseline
-    dispatch.SPEC_PATH.write_text(before)
-    assert build() == baseline
-
-
-def test_scratch_io_2798_traffic_is_independent_of_capacity_and_uses_one_spec(
-        tmp_path, campaign, monkeypatch):
-    """Changing row reservation must not rewrite traffic or the output-spool charge."""
-    import dispatch_joint_quanta as dispatch
-    root = str(tmp_path / 'spill')
-    wire = _scratch_io_2798()
-    env = {_SPILL[0]: root, _SPILL[1]: '1', _IO_2798: wire,
-           'PRISMAQUANT_STAGE_B_REPLAY_REGIME': 'capture_batch=2'}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    # The dispatcher replaces the literal capacity using a row's sealed bound.
-    # Fixture only: this tests plumbing, not the spill-bound producer's arithmetic.
-    bound = {'capture_batch': 2, 'reservation_bytes': 1073741825}
-    monkeypatch.setattr(dispatch, '_sealed_spill_bound', lambda record: bound)
-    read_text = Path.read_text
-    spec_reads = []
-
-    def once_per_row(path, *args, **kwargs):
-        if path == dispatch.SPEC_PATH:
-            spec_reads.append(path)
-            assert len(spec_reads) == 1, 'traffic and capacity must use the same spec parse'
-        return read_text(path, *args, **kwargs)
-
-    monkeypatch.setattr(Path, 'read_text', once_per_row)
-    for reservation in (1073741825, 8_589_934_593):
-        bound['reservation_bytes'] = reservation
-        spec_reads.clear()
-        argv = build()
-        assert len(spec_reads) == 1
-        outer = dict(item.split('=', 1) for item in _outer_env(argv))
-        assert outer.get(_IO_2798) == wire
-        assert outer[_SPILL[1]] == str(reservation)
-        assert outer['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ':'.join(_SPILL)
-        sealed = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
-        assert sealed['env'][_IO_2798] == wire
-        assert sealed['env'][_SPILL[1]] == str(reservation)
-    # Conversely, another row's explicit traffic does not change any capacity.
-    spec = json.loads(read_text(dispatch.SPEC_PATH))
-    spec['env'][_IO_2798] = _scratch_io_2798(write_bytes=19, read_bytes=23)
-    dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    spec_reads.clear()
-    changed = dict(item.split('=', 1) for item in _outer_env(build()))
-    assert changed == {**outer, _IO_2798: spec['env'][_IO_2798]}
-
-
-_BAD_IO_2798 = [
-    ('empty', ''), ('not-json', '{'), ('array', '[]'), ('null', 'null'),
-    ('non-string', {'write_bytes': 1}),
-    ('wrong-schema', _scratch_io_2798(schema='prismabuild.local_scratch_io.v2')),
-    ('extra-field', _scratch_io_2798(reservation_bytes=10)),
-    ('boolean-write', _scratch_io_2798(write_bytes=True)),
-    ('negative-write', _scratch_io_2798(write_bytes=-1)),
-    ('fractional-write', _scratch_io_2798(write_bytes=1.5)),
-    ('string-write', _scratch_io_2798(write_bytes='1')),
-    ('boolean-read', _scratch_io_2798(read_bytes=False)),
-    ('negative-read', _scratch_io_2798(read_bytes=-1)),
-    ('fractional-read', _scratch_io_2798(read_bytes=1.5)),
-    ('string-read', _scratch_io_2798(read_bytes='1')),
-    ('no-traffic', _scratch_io_2798(write_bytes=0, read_bytes=0)),
-    ('empty-contract', _scratch_io_2798(profile_contract='')),
-    ('bad-contract', _scratch_io_2798(profile_contract='not a contract')),
-    ('non-string-contract', _scratch_io_2798(profile_contract=3)),
-    ('zero-age', _scratch_io_2798(max_profile_age_s=0)),
-    ('negative-age', _scratch_io_2798(max_profile_age_s=-1)),
-    ('boolean-age', _scratch_io_2798(max_profile_age_s=True)),
-    ('string-age', _scratch_io_2798(max_profile_age_s='60')),
-    ('infinite-age', _scratch_io_2798(max_profile_age_s=float('inf'))),
-    ('nan-age', _scratch_io_2798(max_profile_age_s=float('nan'))),
-    ('float-overflow-age', _scratch_io_2798().replace(
-        '"max_profile_age_s":3600', '"max_profile_age_s":1e999')),
-    ('duplicate-key', _scratch_io_2798()[:-1] + ', "write_bytes": 42}'),
-]
-for _field_2798 in json.loads(_scratch_io_2798()):
-    _incomplete_2798 = json.loads(_scratch_io_2798())
-    del _incomplete_2798[_field_2798]
-    _BAD_IO_2798.append(('missing-' + _field_2798, json.dumps(_incomplete_2798)))
-
-
-@pytest.mark.parametrize('wire', [value for _, value in _BAD_IO_2798],
-                         ids=[name for name, _ in _BAD_IO_2798])
-def test_scratch_io_2798_refuses_malformed_or_incomplete_declarations(
-        tmp_path, campaign, wire):
-    root = str(tmp_path / 'spill')
-    build = _scratch_quantum_argv(tmp_path, campaign,
-        {_SPILL[0]: root, _SPILL[1]: '1073741824', _IO_2798: wire}, (root,))
-    with pytest.raises(DispatchRefused, match=r'PRISMABUILD_LOCAL_SCRATCH_IO:'):
-        build()
-
-
-@pytest.mark.parametrize('pairs', [
-    (), (_COTANGENT, _SPILL), (_COTANGENT, _CACHE_2798),
-    (_SPILL, _CACHE_2798), (_COTANGENT, _SPILL, _CACHE_2798),
-], ids=['no-pair', 'cotangent-spill', 'cotangent-cache', 'spill-cache', 'three-pairs'])
-def test_scratch_io_2798_refuses_unsupported_pair_count_without_dropping_capacity(
-        tmp_path, campaign, pairs):
-    """Multi-root Stage B remains capacity-only, not accepted I/O placement."""
-    import dispatch_joint_quanta as dispatch
-    roots = [f'/scratch/fixture-2798/root-{index}' for index in range(len(pairs))]
-    env = {name: value for i, (root, maximum) in enumerate(pairs)
-           for name, value in ((root, roots[i]), (maximum, str((i + 1) * (1 << 30) + 1)))}
-    if _CACHE_2798 in pairs:
-        # Existing cache contract requires TMPDIR on a distinct charged workspace.
-        env['PRISMAQUANT_TMPDIR'] = roots[0] + '/tmp'
-    build = _scratch_quantum_argv(tmp_path, campaign, env, roots)
-    before = build()
-    outer = dict(item.split('=', 1) for item in _outer_env(before))
-    assert all(outer[name] == env[name] for pair in pairs for name in pair)
-    if pairs:
-        assert outer['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ','.join(':'.join(pair) for pair in pairs)
-    else:
-        assert 'PRISMABUILD_LOCAL_SCRATCH_PAIRS' not in outer
-    spec = json.loads(dispatch.SPEC_PATH.read_text())
-    spec['env'][_IO_2798] = _scratch_io_2798()
-    dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    with pytest.raises(DispatchRefused, match=r'(?i)(exactly one|single).*scratch.*pair|scratch.*(exactly one|single).*pair'):
-        build()
-    # Refusal must not "repair" the target by deleting pairs or merging roots.
-    assert json.loads(dispatch.SPEC_PATH.read_text()) == spec
-    del spec['env'][_IO_2798]
-    dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    assert build() == before
-
-
-@pytest.mark.parametrize('bad_pair', [_COTANGENT, _SPILL, _CACHE_2798],
-                         ids=['cotangent', 'spill', 'cache'])
-def test_scratch_io_2798_validates_all_capacities_before_pair_eligibility(
-        tmp_path, campaign, bad_pair):
-    pairs = (_COTANGENT, _SPILL, _CACHE_2798)
-    roots = ['/scratch/fixture-2798/' + name for name in ('cot', 'spill', 'cache')]
-    env = {name: value for pair, root in zip(pairs, roots)
-           for name, value in ((pair[0], root), (pair[1], '1073741825'))}
-    env.update({_IO_2798: _scratch_io_2798(), bad_pair[1]: '0',
-                'PRISMAQUANT_TMPDIR': roots[1] + '/tmp'})
-    build = _scratch_quantum_argv(tmp_path, campaign, env, roots)
-    with pytest.raises(DispatchRefused, match='positive byte ceiling'):
-        build()
-
-
-def test_scratch_io_2798_stage_a_keeps_spool_only_outer_envelope(tmp_path, campaign):
-    import dispatch_joint_quanta as dispatch
-    spec = json.loads(dispatch.SPEC_PATH.read_text())
-    root = '/scratch/fixture-2798/stage-a-spill'
-    spec['container'].setdefault('mounts', []).append({'source': root, 'target': root})
-    spec['env'].update({_SPILL[0]: root, _SPILL[1]: '1073741825'})
-    dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    manifest = _adjoint_manifest(tmp_path, campaign)
-    baseline = stage_a_argv(manifest, campaign)
-    wire = _scratch_io_2798()
-    spec['env'][_IO_2798] = wire
-    before = json.dumps(spec)
-    dispatch.SPEC_PATH.write_text(before)
-    argv = stage_a_argv(manifest, campaign)
-    assert _outer_env(argv) == _outer_env(baseline)
-    outer = dict(item.split('=', 1) for item in _outer_env(argv))
-    assert _IO_2798 not in outer and 'PRISMABUILD_LOCAL_SCRATCH_PAIRS' not in outer
-    sealed = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
-    assert sealed['env'][_IO_2798] == wire
-    assert sealed['env'][_SPILL[1]] == '1073741825'
-    assert dispatch.SPEC_PATH.read_text() == before
-    spec['env'][_IO_2798] = _scratch_io_2798(write_bytes=-1)
-    dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    with pytest.raises(DispatchRefused, match='write_bytes.*nonnegative'):
-        stage_a_argv(manifest, campaign)
-
-
-@pytest.mark.parametrize("age,accepted", [
-    pytest.param(3600, True, id="integer"),
-    pytest.param(0.5, True, id="fractional"),
-    pytest.param(10**308, True, id="large-finite-integer"),
-    pytest.param(10**309, False, id="overflowing-integer"),
-    pytest.param(10**400, False, id="reported-overflow"),
-])
-def test_scratch_io_freshness_requires_float_representability(tmp_path, age, accepted):
-    import dispatch_joint_quanta as joint_dispatch
-    from tools import tessera_campaign_container as runner
-
-    declared = json.loads(joint_dispatch.SPEC_PATH.read_text())
-    root, maximum = runner.COTANGENT_SCRATCH_ENV
-    declared["container"]["mounts"].append({
-        "source": str(tmp_path), "target": str(tmp_path), "readonly": False})
-    declared["env"].update({root: str(tmp_path), maximum: "1024"})
-    wire = json.dumps({
-        "schema": "prismabuild.local_scratch_io.v1",
-        "write_bytes": 1, "read_bytes": 0,
-        "profile_contract": "prismabuild.local_scratch_io.buffered_seq_sync.v1",
-        "max_profile_age_s": age,
-    })
-    declared["env"]["PRISMABUILD_LOCAL_SCRATCH_IO"] = wire
-    path = tmp_path / "spec.json"
-    path.write_text(json.dumps(declared))
-    if accepted:
-        projected = runner.local_scratch_request_environment(declared)
-        assert projected[runner.LOCAL_SCRATCH_IO_ENV] == wire
-        joint_dispatch._container_wrap(
-            path, ["true"], progress=[("head", joint_dispatch.HEAD_PROGRESS_GRACE_S)])
-    else:
-        message = r"PRISMABUILD_LOCAL_SCRATCH_IO: max_profile_age_s.*positive finite"
-        with pytest.raises(ValueError, match=message):
-            runner.local_scratch_request_environment(declared)
-        with pytest.raises(joint_dispatch.DispatchRefused, match=message):
-            joint_dispatch._container_wrap(
-                path, ["true"], progress=[("head", joint_dispatch.HEAD_PROGRESS_GRACE_S)])
-    assert json.loads(path.read_text()) == declared
-
-
-# The remaining scratch tests predate the optional traffic declaration.
 
 
 def _scratch_quantum_argv(tmp_path, campaign, env, roots):
@@ -1542,26 +1269,18 @@ def _outer_env(argv):
     return [f"{k}={v}" for k, v in argv["env"].items()]
 
 
-def test_every_declared_scratch_pair_is_listed_for_pb(tmp_path, campaign):
-    """PQ #1019: the sealed request lists each pair, cotangent first, so PB
-    #911 charges both ceilings to the executing box's ``spool_gb``."""
+def test_every_declared_scratch_kind_is_sealed_with_its_ceiling(tmp_path, campaign):
+    """PQ #1019: the sealed request carries each declared kind's root and a positive decimal ceiling."""
     cotangent, spill = '/home/rob/pb-scratch/cot', '/home/rob/pb-scratch/spill'
     env = {_COTANGENT[0]: cotangent, _COTANGENT[1]: str(36 << 30),
            _SPILL[0]: spill, _SPILL[1]: str(178_000_000_000)}
     argv = _scratch_quantum_argv(tmp_path, campaign, env, (cotangent, spill))()
     sealed = dict(item.split('=', 1) for item in _outer_env(argv))
     assert all(sealed.get(name) == value for name, value in env.items())
-    assert sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'] == ','.join(
-        ':'.join(pair) for pair in (_COTANGENT, _SPILL))
-    # PB's grammar: ROOT_ENV:MAX_ENV items, each variable sealed beside it,
-    # each ceiling a positive decimal byte count.
-    for item in sealed['PRISMABUILD_LOCAL_SCRATCH_PAIRS'].split(','):
-        root_env, max_env = item.split(':')
+    for root_env, max_env in (_COTANGENT, _SPILL):
         assert sealed[root_env].startswith('/')
         assert sealed[max_env].isdecimal() and int(sealed[max_env]) > 0
-    # The list is a request option, never forwarded into the container.
-    wrapped = argv["argv"]
-    assert not any('PRISMABUILD_LOCAL_SCRATCH_PAIRS' in part for part in wrapped)
+    assert not [name for name in sealed if name.startswith('PRISMABUILD_')]
 
 
 def test_a_stage_b_row_retains_spill_and_cotangent_ceilings(tmp_path, campaign):
@@ -1604,16 +1323,6 @@ def test_a_scratch_root_without_a_positive_bound_is_refused(
         env[names[1]] = bound
     build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
     with pytest.raises(dispatch.DispatchRefused, match='positive byte ceiling'):
-        build()
-
-
-def test_a_spec_cannot_declare_the_pair_list(tmp_path, campaign):
-    import dispatch_joint_quanta as dispatch
-    root = '/home/rob/pb-scratch/spill'
-    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30),
-           'PRISMABUILD_LOCAL_SCRATCH_PAIRS': ''}
-    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
-    with pytest.raises(dispatch.DispatchRefused, match='derived from the declared'):
         build()
 
 
@@ -1751,3 +1460,54 @@ def test_a_band_serial_producer_captures_at_the_chains_batch_size_at_dispatch(
             path, producer, progress=head_only,
             handoff_chain_batch_size=chain_batch_size)
         assert argv[-len(producer):] == producer
+
+
+@pytest.mark.parametrize('name', ['PRISMABUILD_LOCAL_SCRATCH_PAIRS', 'PRISMABUILD_LOCAL_SCRATCH_IO'])
+def test_a_spec_naming_a_retired_scratch_setting_refuses(tmp_path, campaign, name):
+    import dispatch_joint_quanta as dispatch
+    root = '/home/rob/pb-scratch/spill'
+    env = {_SPILL[0]: root, _SPILL[1]: str(1 << 30), name: ''}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    with pytest.raises(dispatch.DispatchRefused, match='retired service environment'):
+        build()
+
+
+@pytest.mark.parametrize('bad_pair', [_COTANGENT, _SPILL, _CACHE_2798], ids=['cotangent', 'spill', 'cache'])
+def test_every_scratch_kind_needs_a_positive_ceiling(tmp_path, campaign, bad_pair):
+    pairs = (_COTANGENT, _SPILL, _CACHE_2798)
+    roots = ['/scratch/fixture-2798/' + name for name in ('cot', 'spill', 'cache')]
+    env = {name: value for pair, root in zip(pairs, roots)
+           for name, value in ((pair[0], root), (pair[1], '1073741825'))}
+    env.update({bad_pair[1]: '0', 'PRISMAQUANT_TMPDIR': roots[1] + '/tmp'})
+    build = _scratch_quantum_argv(tmp_path, campaign, env, roots)
+    with pytest.raises(DispatchRefused, match='positive byte ceiling'):
+        build()
+
+
+def test_the_spill_ceiling_follows_the_rows_sealed_bound_from_one_spec_read(tmp_path, campaign, monkeypatch):
+    """Changing the row reservation rewrites only the spill ceiling, and the row reads its spec once."""
+    import dispatch_joint_quanta as dispatch
+    root = str(tmp_path / 'spill')
+    env = {_SPILL[0]: root, _SPILL[1]: '1', 'PRISMAQUANT_STAGE_B_REPLAY_REGIME': 'capture_batch=2'}
+    build = _scratch_quantum_argv(tmp_path, campaign, env, (root,))
+    bound = {'capture_batch': 2, 'reservation_bytes': 1073741825}
+    monkeypatch.setattr(dispatch, '_sealed_spill_bound', lambda record: bound)
+    read_text = Path.read_text
+    spec_reads = []
+
+    def once_per_row(path, *args, **kwargs):
+        if path == dispatch.SPEC_PATH:
+            spec_reads.append(path)
+            assert len(spec_reads) == 1, 'ceiling and root must use the same spec parse'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', once_per_row)
+    for reservation in (1073741825, 8_589_934_593):
+        bound['reservation_bytes'] = reservation
+        spec_reads.clear()
+        argv = build()
+        assert len(spec_reads) == 1
+        outer = dict(item.split('=', 1) for item in _outer_env(argv))
+        assert outer[_SPILL[0]] == root and outer[_SPILL[1]] == str(reservation)
+        sealed = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
+        assert sealed['env'][_SPILL[1]] == str(reservation)
