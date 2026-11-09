@@ -754,8 +754,9 @@ def native_admission(environ) -> dict:
         raise RuntimeError("the launch environment differs from the running native job")
     from prismaquant import native_results
     context = native_results.execution_context()
+    from prismaquant.digests import bytes_sha256hex
     raw = (Path(context["record_dir"]) / "launch.json").read_bytes()
-    if hashlib.sha256(raw).hexdigest() != context["launch_sha256"]:
+    if bytes_sha256hex(raw) != context["launch_sha256"]:
         raise RuntimeError("the saved native launch changed during admission")
     saved_profile = json.loads(raw)["profile"]
     resources = context["resources"]
@@ -838,7 +839,7 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
 def _save_record(path: Path, record: dict) -> None:
     temporary = path.with_name(path.name + ".tmp")
     with temporary.open("w") as stream:
-        stream.write(json.dumps(record, sort_keys=True, indent=1) + "\n")
+        stream.write(json.dumps(record, indent=1) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
@@ -956,7 +957,8 @@ def run_owned_container(spec: dict, command: list[str], *, cwd: str, image_id: s
             record["cleanup_errors"].append(str(exc))
         finally:
             _save_record(path, record)
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            from prismaquant.digests import bytes_sha256hex
+            digest = bytes_sha256hex(path.read_bytes())
             print(f"campaign container evidence {path} sha256={digest}", flush=True)
             for sig, handler in handlers.items():
                 signal.signal(sig, handler)

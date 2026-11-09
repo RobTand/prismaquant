@@ -173,7 +173,7 @@ def test_host_launcher_validates_with_the_package_spec_contract():
     runner = importlib.import_module("tools.tessera_campaign_container")
     assert (Path(runner.validate_container.__code__.co_filename).resolve()
             == Path(contract.__file__).resolve())
-    for name in ("READER_CONTEXT_ENV", "SAFE_PATH_ENV", "CHECKOUT_COMMIT_ENV",
+    for name in ("SAFE_PATH_ENV", "CHECKOUT_COMMIT_ENV",
                  "BOUNDED_CAPTURE_ENV", "GPU_RUNTIME_FLAGS", "DEFAULT_GPU_RUNTIME"):
         assert getattr(runner, name) == getattr(contract, name), name
 
@@ -227,7 +227,7 @@ def test_actual_image_content_cannot_be_overridden_and_cpu_mode_requests_no_gpu(
     runner = importlib.import_module('tools.tessera_campaign_container')
     data = spec()
     argv = runner.podman_command(data, ['python3'], cwd='/snapshot', admission=ADMISSION, cidfile=CIDFILE,
-        image_id='sha256:resolved', content_sha256='a'*64, with_gpu=False)
+        image_id='sha256:resolved', content_sha256='a'*64)
     assert '--gpus' not in argv
     assert 'PRISMAQUANT_CONTAINER_CONTENT_SHA256='+'a'*64 in argv
     data['env']['PRISMAQUANT_CONTAINER_CONTENT_SHA256'] = 'b'*64
@@ -462,7 +462,7 @@ def test_the_launcher_supplies_the_bounded_capture_environment(tmp_path):
     data = _bounded_spec()
     assert "MIMALLOC_PURGE_DELAY" not in data["env"]
     argv = _runner().podman_command(
-        data, ["python3", "-c", "pass"], cwd=str(tmp_path), admission=ADMISSION, cidfile=CIDFILE,
+        data, ["python3", "-c", "pass"], cwd=str(tmp_path), admission=with_admission(memory_gib=32), cidfile=CIDFILE,
         image_id="sha256:" + "a" * 64, environ={}, bounded=True)
     forwarded = [argv[index + 1] for index, value in enumerate(argv)
                  if value == "--env"]

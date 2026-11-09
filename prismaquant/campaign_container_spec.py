@@ -14,12 +14,11 @@ import re
 
 
 #: PB names a spec may still carry until their owners migrate: the produced
-#: spool pair (unit 4e) and the local scratch I/O wire (slice 5). Any other
+#: spool family (unit 4e) and the local scratch I/O wire (slice 5). Any other
 #: ``PRISMABUILD_`` spec setting refuses: the PB action, reader and queue
 #: context no longer exists, and a spec naming it promises a service that is gone.
-KEPT_PB_SPEC_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
-                    "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES",
-                    "PRISMABUILD_LOCAL_SCRATCH_IO")
+KEPT_PB_SPEC_ENV = ("PRISMABUILD_LOCAL_SCRATCH_IO",)
+KEPT_PB_SPEC_ENV_PREFIXES = ("PRISMABUILD_PRODUCED_SPOOL_",)
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -202,7 +201,8 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
     if CHECKOUT_COMMIT_ENV in env:
         raise RuntimeError('the checkout commit is supplied by the inspected launcher, not by a spec')
     for name in env:
-        if name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV:
+        if (name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV
+                and not name.startswith(KEPT_PB_SPEC_ENV_PREFIXES)):
             raise RuntimeError(
                 f"the {name} setting belongs to the retired PB action/reader context; "
                 "the native launch supplies no such service, so a spec cannot name it")
