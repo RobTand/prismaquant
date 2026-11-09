@@ -709,7 +709,7 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
     # ``_production_cache_source_sha256`` input, so an in-place append here
     # rewrites ``producer_source_sha256`` for every concurrent consumer and
     # corrupts the checkout under test (PQ #2218).  The per-test config the
-    # autouse ``checker_sdk_fixture`` binds has this exact name; seeding it
+    # autouse ``checker_native_fixture`` binds has this exact name; seeding it
     # keeps callers without that fixture working too.
     config_path = tmp_path / "checker-config.json"
     try:
