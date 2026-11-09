@@ -129,8 +129,18 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
+def refuse_retired_produced_env(env) -> None:
+    """Refuse the retired produced-output service names (the spool's bound is the launch-bound declaration's)."""
+    for name in env:
+        if name.startswith("PRISMABUILD_PRODUCED_"):
+            raise RuntimeError(
+                f"the {name} setting belongs to the retired produced-output service context; "
+                "the spool root and bound are the launch-bound declaration's, never environment")
+
+
 def refuse_retired_pb_env(env) -> None:
     """Refuse every PB service setting a spec names, except the kept scratch wire."""
+    refuse_retired_produced_env(env)
     for name in env:
         if name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV:
             raise RuntimeError(

@@ -52,7 +52,7 @@ else:
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 
-from prismaquant.campaign_container_spec import admission_image_reference, refuse_retired_pb_env
+from prismaquant.campaign_container_spec import admission_image_reference, refuse_retired_produced_env
 from prismaquant import joint_quantum_row as quantum_row
 
 
@@ -1592,7 +1592,7 @@ def _slice_chain_batch_size(record: Mapping) -> int:
 def refuse_retired_service_environment(spec: Mapping) -> None:
     """Reject retired PB service settings; spool bounds live in the launch-bound declaration."""
     try:
-        refuse_retired_pb_env(spec.get("env", {}))
+        refuse_retired_produced_env(spec.get("env", {}))
     except RuntimeError as exc:
         raise DispatchRefused(f"retired service environment; use a launch-bound declaration: {exc}") from exc
 

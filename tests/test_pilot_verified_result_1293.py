@@ -18,6 +18,11 @@ from test_dispatch_joint_quanta import campaign, records_dir
 from test_joint_dispatch_pilot import _argv, _published_pilots, _ready
 from tools import dispatch_joint_quanta as dispatch
 
+class _ProductionPilotGateway(dispatch.FakeGateway):
+    """Fixture submit/terminal behaviour with the production pilot reader."""
+    read_verified_result = dispatch.Gateway.read_verified_result
+
+
 FAULTS = [None, "commit", "tree", "entry", "plan", "environment", "wrapper", "legacy",
           "failed", "cancelled", "replaced"]
 
@@ -92,7 +97,7 @@ def test_production_gateway_admits_only_the_reviewed_source_and_invocation(
     capsys.readouterr()
     output = tmp_path / "consumer-dry-run"
     result = dispatch.main(_argv(records_dir, output, receipt, extra=[*args, "--dry-run"]),
-                           _gateway=dispatch.Gateway())
+                           _gateway=_ProductionPilotGateway())
     captured = capsys.readouterr()
     assert not output.exists()
     assert result == (0 if fault is None else 3)
@@ -120,7 +125,7 @@ def test_a_changed_counter_byte_is_not_the_published_counters(
     _install_native_reader(monkeypatch, canned, None)
     capsys.readouterr()
     assert dispatch.main(_argv(records_dir, tmp_path / "out", receipt, extra=[*args, "--dry-run"]),
-                         _gateway=dispatch.Gateway()) == 3
+                         _gateway=_ProductionPilotGateway()) == 3
     assert "differ from the counters the native result published" in capsys.readouterr().err
 
 
@@ -138,6 +143,6 @@ def test_production_gateway_reads_a_consumer_copy_not_the_producer_path(
     capsys.readouterr()
     output = tmp_path / "consumer-dry-run"
     assert dispatch.main(_argv(records_dir, output, receipt, extra=[*args, "--dry-run"]),
-                         _gateway=dispatch.Gateway()) == 0
+                         _gateway=_ProductionPilotGateway()) == 0
     assert not output.exists()
     assert len(json.loads(capsys.readouterr().out)["rows"]) == 3

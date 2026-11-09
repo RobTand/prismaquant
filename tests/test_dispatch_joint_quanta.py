@@ -650,7 +650,8 @@ def test_stage_a_seals_the_ram_tier_and_binds_the_produced_declaration(tmp_path,
     assert argv["residency"]["tier"] == "stage"
     assert argv["residency"]["ram"] == "auto"
     assert _envelope_envs(argv) == ["PRISMAQUANT_DEV_MODE=1"]
-    assert argv["produced_declaration"].endswith("stage-a-declaration.json")
+    flag = argv["argv"].index("--produced-declaration")
+    assert argv["argv"][flag + 1].endswith("stage-a-declaration.json")
     tail = argv["argv"]
     sealed = json.loads(tail[tail.index("--spec") + 1])
     assert not [name for name in sealed["env"] if name.startswith("PRISMABUILD_")]
