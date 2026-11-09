@@ -8559,7 +8559,6 @@ pq_py_library(
         "prismaquant/per_row_pricing.py",
         "prismaquant/perturbed_x_cache.py",
         "prismaquant/priced_cell.py",
-        "prismaquant/prismabuild_progress.py",
         "prismaquant/prismasnap.py",
         "prismaquant/prismasnap_checkpoint.py",
         "prismaquant/prismasnap_contract.py",
