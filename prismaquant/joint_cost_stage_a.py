@@ -2381,8 +2381,6 @@ def bind_stage_a_produced_output(*, artifact_max_bytes):
     """Bind current native declaration and require its effective artifact ceiling."""
     from .stage_a_produced_output import BoundaryProducedPublication
     if not os.environ.get("FLUX_JOB_ID"):
-        if os.environ.get("PRISMABUILD_ACTION_KEY"):
-            raise AdjointIdentityRefused("legacy PB context cannot authorize a native produced owner")
         return None
     publication = BoundaryProducedPublication.bind_from_admitted_owner()
     declared = publication.durable_maxima()["payload_max_bytes"]

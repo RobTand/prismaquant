@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, pilot/result callers on native authority and the PB-only demonstrations retired, slice4e.
+Source: `tools/{dispatch_joint_quanta,paired_trade_report_proof,tessera_campaign_container}.py`,
+`prismaquant/{joint_dispatch_pilot,joint_cost_quantum,campaign_container_spec}.py`, based on
+`adaf3d9f6`. The joint dispatch pilot gate now takes its result from the existing native owner:
+`--pilot-selector SELECTION_PATH SELECTION_SHA256` names a `native_results` selection (saved job,
+launch, expected launch intent and exact publication), and the production Gateway reads it with
+`read_selected_result`, which authenticates the succeeded terminal execution, the launch source and
+runtime, the retained announcement and the artifact bytes. The pilot counters name their producer by
+native `job_id` (`PILOT_SCHEMA` v2; a v1 document refuses), the reviewed `--pilot-source-contract` v2
+binds the launch's commit and tree and the container spec, the supplied counters must equal the
+published counters, and `bind_capture_command` is gone. A pilot quantum run by a native job publishes
+its completion and counters as one native result (`publish_pilot_result`); a container job has no
+native identity inside the container, so a real GPU pilot stays held for unit 4E and is not claimed.
+`tools/paired_trade_report_proof.py` publishes its archive with `publish_result`. The produced-spool
+environment (`PRISMABUILD_PRODUCED_SPOOL_*`) is gone: the spool's root and bound are the launch-bound
+declaration's, the dispatcher and the container spec refuse the retired names, and the adapter's early
+writable-identity-mount check for the spool root is replaced by the refusal at spool construction.
+`experiments/{build_dryrun_queue,receipt_demo}.py` and the fabricated PB carrier fixture are deleted.
+`staged_lease.client_sdk()` and its callers (checker receipts, historical original-capture receipts)
+keep failing closed; their disposition belongs to the PB-zero gate. No numerical, GPU, serving or
+production qualification follows; proofs are in the migration evidence.
+
 As of: 2026-11-09, G3 and staged-reader callers on the native staged manifest, slice4d.
 Source: `tools/g3job/{g3_residency,g3_launch,g3_progress_launch,g3_submit}.py`,
 `tools/tessera_campaign_container.py`, `prismaquant/campaign_container_spec.py`, based on

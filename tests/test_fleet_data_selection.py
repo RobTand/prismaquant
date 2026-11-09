@@ -77,13 +77,10 @@ MARKED_FILES = {
         "test_glm53_probe_expands_onto_the_census_roster"},
     "test_glm_joint_data_manifest_at_submit_fleet_data.py": {
         "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases"},
-    "test_dispatch_shared_tag_placement_fleet_data.py": {
-        "test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet"},
 }
 
 #: The hermetic halves the reads were split out of: they mark nothing.
-SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",
-              "test_dispatch_shared_tag_placement.py")
+SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",)
 
 
 def _marked_tests(name):
@@ -105,7 +102,7 @@ def _test_names(name):
 
 
 def test_the_marked_real_data_tests_carry_the_mark():
-    """The three reads #1014 names are marked, each alone in its file."""
+    """The two reads #1014 still names are marked, each alone in its file."""
     for name, expected in MARKED_FILES.items():
         assert _marked_tests(name) == expected, name
         tree_tests = _test_names(name)

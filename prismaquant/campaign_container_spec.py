@@ -13,17 +13,16 @@ from pathlib import PurePosixPath
 import re
 
 
-#: PB names a spec may still carry until their owners migrate: the produced
-#: spool family (unit 4e) and the local scratch I/O wire (slice 5). Any other
-#: ``PRISMABUILD_`` spec setting refuses: the PB action, reader and queue
-#: context no longer exists, and a spec naming it promises a service that is gone.
+#: The one PB name a spec may still carry until its owner migrates: the local
+#: scratch I/O wire (slice 5). Any other ``PRISMABUILD_`` spec setting refuses: the
+#: PB action, reader, queue and produced-spool context no longer exists, and a spec
+#: naming it promises a service that is gone.
 KEPT_PB_SPEC_ENV = ("PRISMABUILD_LOCAL_SCRATCH_IO",)
 #: The native staged-input names the launcher alone supplies (``staged_launch.launch`` exports
 #: the same five); a spec naming one is forged or conflicting, never a default.
 LAUNCHER_STAGED_ENV = ("PRISMAQUANT_STAGED_MANIFEST", "PRISMAQUANT_STAGED_MANIFEST_SHA256",
                        "PRISMAQUANT_READ_CONTRACT_SHA256", "PRISMAQUANT_READ_CONTRACT_PATH",
                        "PRISMAQUANT_STAGED_ALLOWED_TIERS")
-KEPT_PB_SPEC_ENV_PREFIXES = ("PRISMABUILD_PRODUCED_SPOOL_",)
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -130,6 +129,15 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
+def refuse_retired_pb_env(env) -> None:
+    """Refuse every PB service setting a spec names, except the kept scratch wire."""
+    for name in env:
+        if name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV:
+            raise RuntimeError(
+                f"the {name} setting belongs to the retired PB action/reader/spool context; "
+                "the native launch supplies no such service, so a spec cannot name it")
+
+
 def validate_container(spec: dict, *, bounded: bool = False) -> None:
     """Check a container spec, with the bounded-capture env gate opt-in.
 
@@ -208,12 +216,7 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
     for name in LAUNCHER_STAGED_ENV:
         if name in env:
             raise RuntimeError(f"the {name} setting is supplied by the launcher, not by a spec")
-    for name in env:
-        if (name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV
-                and not name.startswith(KEPT_PB_SPEC_ENV_PREFIXES)):
-            raise RuntimeError(
-                f"the {name} setting belongs to the retired PB action/reader context; "
-                "the native launch supplies no such service, so a spec cannot name it")
+    refuse_retired_pb_env(env)
     for name, expected in BOUNDED_CAPTURE_ENV.items():
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec

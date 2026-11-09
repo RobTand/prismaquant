@@ -125,27 +125,22 @@ def test_cost_v2_read_plan_repeats_source_without_repeating_entries(
     assert manifest == _build(fixture, prepared, budget)
 
 
-def test_cost_v2_manifest_passes_published_prismabuild_validator(cost_fixture, monkeypatch):
-    """The reviewed installed PB V2 validator is the final schema authority."""
-    from fleet_sdk import require_prismabuild_sdk
-
-    require_prismabuild_sdk()
+def test_cost_v2_manifest_totals_and_keys_are_recomputed_independently(cost_fixture):
+    """Application schema authority, without a PB validator: exact keys, and totals recomputed from the entries."""
     fixture, prepared, budget = cost_fixture
     manifest = _build(fixture, prepared, budget)
-    # Isolated mode uses the installed SDK, not PYTHONPATH or a fleet source
-    # checkout. A child also keeps other tests' PB imports out of this gate
-    # and leaves the parent's public plugin import graph untouched.
-    result = subprocess.run(
-        [sys.executable, "-I", "-c", '''
-import json, sys
-import prismabuild.core as core
-manifest = json.load(sys.stdin)
-assert core.validate_data_manifest(manifest)["read_plan"] == manifest["read_plan"]
-'''],
-        input=json.dumps(manifest), text=True, capture_output=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert producer.check_manifest_v2(manifest) is manifest
+    assert set(manifest) == {"schema", "produced_by", "mount_prefix", "entries", "entry_count",
+                             "total_bytes", "annotations", "read_plan"}
+    assert all(set(entry) == {"path", "offset", "bytes", "sha256"} for entry in manifest["entries"])
+    assert manifest["entry_count"] == len(manifest["entries"])
+    assert manifest["total_bytes"] == sum(entry["bytes"] for entry in manifest["entries"])
+    phases = manifest["read_plan"]["phases"]
+    cumulative = 0
+    for phase in phases:
+        cumulative += sum(manifest["entries"][i]["bytes"] for i in phase["entry_indices"])
+        assert phase["cumulative_bytes"] == cumulative
+    assert manifest["read_plan"]["read_bytes"] == cumulative
 
 
 def test_cost_v2_resume_filters_reads_without_repartitioning(cost_fixture):

@@ -193,10 +193,7 @@ def cmd_spec(args) -> int:
     finally:
         sys.path.pop(0)
     spec = json.loads(Path(args.base_spec).read_text())
-    spool = spec["env"].get("PRISMABUILD_PRODUCED_SPOOL_ROOT")
-    spec["env"] = {key: value for key, value in spec["env"].items()
-                   if not key.startswith("PRISMABUILD_PRODUCED_SPOOL_")}
-    mounts = [m for m in spec["container"]["mounts"] if m["source"] != spool]
+    mounts = list(spec["container"]["mounts"])
     mounts.append({"source": args.scratch, "target": args.scratch, "readonly": False})
     if args.py_spy:
         mounts.append({"source": args.py_spy, "target": "/opt/bench/py-spy",

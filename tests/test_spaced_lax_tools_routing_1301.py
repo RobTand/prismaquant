@@ -65,14 +65,12 @@ def test_fence_finish_reports_calculated_median_and_removes_scratch(tmp_path, ca
 
 
 @pytest.mark.parametrize("spy", [None, "/tools/spy-é"], ids=["no-spy", "spy"])
-def test_chain_spec_removes_spool_environment_and_mounts(tmp_path, capsys, spy):
+def test_chain_spec_emits_the_base_spec_with_scratch_and_spy(tmp_path, capsys, spy):
     from tools.chain_roll_bench import cmd_spec
 
     spec = {"container": {"mounts": [
-        {"source": "/spool", "target": "/spool", "readonly": False},
         {"source": "/model-é", "target": "/model", "readonly": True}]},
-        "env": {"PRISMABUILD_PRODUCED_SPOOL_ROOT": "/spool",
-                "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "100", "KEEP": "é"}}
+        "env": {"KEEP": "é"}}
     path = tmp_path / "base.json"
     path.write_text(json.dumps(spec))
     before = path.read_bytes()

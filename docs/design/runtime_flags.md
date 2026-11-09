@@ -1,12 +1,14 @@
 # prismaquant runtime flags
 
-Stage A local-output opt-in (PQ #928 / PB #857, 2026-09-22):
-`PRISMABUILD_PRODUCED_SPOOL_ROOT` and `PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES`
-must both be sealed in the parent PB request. The root names local disk and the
-positive byte ceiling bounds one owner's pending export groups (32 GiB is the
-proposed campaign setting, not additional RAM demand). The container must expose
-the same root at the same writable host/container path. PB verifies the sealed
-values and owns export admission, movement, retries and durable acknowledgements.
+Stage A local-output opt-in (PQ #928; native declaration since slice 4e, 2026-11-09):
+the produced output spool is declared by the launch-bound produced declaration
+(`declaration['spool'] = {root, max_bytes}`), never by environment. The retired
+`PRISMABUILD_PRODUCED_SPOOL_*` names are refused in a container spec. The root names
+local disk and the positive byte ceiling bounds one owner's pending export groups
+(32 GiB is the proposed campaign setting, not additional RAM demand). The container
+must expose the same root at the same writable host/container path;
+`ProducedOutputSpool` refuses construction ("explicit provisioned host-local spool
+root required") when the root is not an existing canonical host-local directory.
 Unset means the original direct canonical writer. This option changes output
 placement before commit, not scientific partitioning or read-tier authorization.
 

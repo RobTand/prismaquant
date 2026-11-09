@@ -37,7 +37,7 @@ from prismaquant import campaign_container_spec as container_spec
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant.joint_campaign_ledger import seal_quantum_record
 
-from stage_a_spool_spec import stage_a_plan, with_spool
+from stage_a_spool_spec import declared_stage_a_argv, stage_a_plan, with_spool
 
 ROOT = Path(__file__).resolve().parents[1]
 for _entry in (ROOT, ROOT / "tools"):
@@ -142,7 +142,7 @@ def _quantum_record(tmp_path: Path) -> Path:
 
 
 def test_stage_a_declares_the_image_it_seals_into_the_spec(tmp_path, joint_spec):
-    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
+    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
     assert _declared_image(argv, IMAGE_FLAG) == embedded["container"]["image"]
 
@@ -177,7 +177,7 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
         return real_read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", two_faced)
-    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
+    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     embedded = _embedded_spec(argv)
     assert reads["spec"] == 1
     assert embedded["container"]["image"] == IMAGE
@@ -187,7 +187,7 @@ def test_the_declaration_comes_from_the_same_parse_as_the_sealed_spec(
 def test_a_repository_manifest_digest_is_declared_exactly(tmp_path, monkeypatch):
     spec = _write_spec(tmp_path / "spec.json", {"image": REPO_IMAGE})
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
+    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     assert _declared_image(argv, IMAGE_FLAG) == REPO_IMAGE
 
 
@@ -199,7 +199,7 @@ def test_an_archive_backed_spec_declares_no_image(tmp_path, monkeypatch):
                              "sha256": ARCHIVE_SHA}}
     spec = _write_spec(tmp_path / "spec.json", container)
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
-    argv = joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
+    argv = declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
     assert "container_images" not in argv
     embedded = _embedded_spec(argv)
     assert embedded["container"]["archive"] == container["archive"]
@@ -214,7 +214,7 @@ def test_a_malformed_archive_is_refused_not_silently_undeclared(tmp_path, monkey
     spec = _write_spec(tmp_path / "spec.json", container)
     monkeypatch.setattr(joint, "SPEC_PATH", spec)
     with pytest.raises(RuntimeError, match="archive"):
-        joint.stage_a_argv(_joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
+        declared_stage_a_argv(joint.stage_a_argv, _joint_manifest(tmp_path, _joint_campaign(tmp_path)), _joint_campaign(tmp_path))
 
 
 def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsys):

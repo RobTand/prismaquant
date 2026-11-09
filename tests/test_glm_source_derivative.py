@@ -15,7 +15,6 @@ from prismaquant import glm_capture_compatibility as compatibility
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.model_profiles.default import DefaultProfile
-from fleet_sdk import installed_client_sdk
 
 EVIDENCE = Path(__file__).resolve().parents[1] / 'experiments/measurements/glm-derivative-contract-20260908'
 DRIVER = Path(__file__).resolve().parents[1] / 'tools/build_glm_derivative_image.py'
@@ -204,19 +203,18 @@ def test_real_image_build_preserves_config_layers_and_source():
     assert len(build['changed_payload_files']) == 1
 
 
-def test_real_pb_receipt_binds_canonical_body_payload_and_source(installed_client_sdk):
-    # The receipt's shape and digests are checked by PB's client SDK (PB #1254).
+def test_historical_pb_receipt_verification_is_held_until_the_pb_zero_disposition():
+    """The original capture's PB-era CAS receipt cannot be authenticated natively.
+
+    ``_verify_cas_receipt`` reaches the PB client doorway, which refuses: native authority does not
+    qualify a PB receipt. This pins the fail-closed hold; the disposition (archive with the historical
+    evidence, or an offline receipt check that imports no PB) belongs to the PB-zero gate, not to 4e.
+    """
+    from prismaquant.staged_lease import LeaseRefused
     audit = json.loads((EVIDENCE/'image-build-audit.json').read_text())
     output = (EVIDENCE/'image-build-output.log').read_bytes()
-    compatibility._verify_cas_receipt(audit['receipt'], audit['source_snapshot'], output)
-    forged = copy.deepcopy(audit['receipt'])
-    forged['result']['bytes'] += 1
-    with pytest.raises(ValueError, match='body digest'):
-        compatibility._verify_cas_receipt(forged, audit['source_snapshot'], output)
-    other = copy.deepcopy(audit['source_snapshot'])
-    other['input']['sha256'] = '0'*64
-    with pytest.raises(ValueError, match='source snapshot input'):
-        compatibility._verify_cas_receipt(audit['receipt'], other, output)
+    with pytest.raises(LeaseRefused, match='unqualified'):
+        compatibility._verify_cas_receipt(audit['receipt'], audit['source_snapshot'], output)
 
 
 def test_reviewed_producer_completion_is_python_repr_not_json():

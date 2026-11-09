@@ -134,9 +134,6 @@ def _canonical_absolute(value: object) -> "str | None":
 COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
                          "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
 
-PRODUCED_SPOOL_ENV = ("PRISMABUILD_PRODUCED_SPOOL_ROOT",
-                      "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES")
-
 #: The Stage B one-pass replay spill (PQ #994); the names
 #: ``prismaquant.joint_replay_spill.SPILL_ENV`` reads.
 STAGE_B_SPILL_ENV = ("PRISMAQUANT_STAGE_B_SPILL_ROOT",
@@ -165,17 +162,6 @@ def stage_b_spill_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
-def produced_spool_environment(spec: dict, environ) -> dict:
-    """Forward the sealed local-spool declaration through an identity bind.
-
-    The source-host exporter runs outside the container. A remapped pathname
-    would name different bytes there, so the most specific covering mount must
-    expose the same host path read-write. No host directory is mounted here.
-    """
-    return _bounded_local_environment(spec, environ, PRODUCED_SPOOL_ENV,
-                                      "local output spool")
-
-
 #: PrismaBuild's sealed list of an action's bounded-local pairs (PB #911):
 #: ``ROOT_ENV:MAX_ENV`` items separated by commas. pbrun charges each pair's
 #: ceiling, rounded up to whole GiB, to the executing box's ``spool_gb``.
@@ -185,8 +171,7 @@ LOCAL_SCRATCH_IO_ENV = "PRISMABUILD_LOCAL_SCRATCH_IO"
 #: Every bounded-local scratch kind a campaign container may write on the
 #: executing box's disk, in the order its pair is listed. A kind added here
 #: is forwarded and priced by the same call (``local_scratch_environment``).
-#: The produced spool is not listed: PrismaBuild charges its window through
-#: ``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`` and refuses its pair in the list.
+#: The produced spool is not listed: its root and bound live in the launch-bound declaration.
 CONTAINER_CACHE_SCRATCH_ENV = (
     "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
 
@@ -688,7 +673,7 @@ EXIT_CREATE_FAILED = 92
 #: launching process into the container; a spec's own ``env`` is application data.
 AMBIENT_SETTINGS = ("FLUX_JOB_ID", "OUT", "TMPDIR", *STAGED_ENV,
                     *COTANGENT_SCRATCH_ENV, *STAGE_B_SPILL_ENV,
-                    *CONTAINER_CACHE_SCRATCH_ENV, *PRODUCED_SPOOL_ENV)
+                    *CONTAINER_CACHE_SCRATCH_ENV)
 _CID = re.compile(r"[0-9a-f]{64}")
 
 
@@ -778,8 +763,7 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
     scratch = _forwarded_local_scratch_environment(spec, environ)
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
-                 **bounded_defaults, **staged_env, **scratch,
-                 **produced_spool_environment(spec, environ)}
+                 **bounded_defaults, **staged_env, **scratch}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:

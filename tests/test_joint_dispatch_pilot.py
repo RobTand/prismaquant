@@ -15,7 +15,6 @@ from test_dispatch_joint_quanta import (
     _receipt, _stamp_receipt, _write_receipt, campaign, records_dir,
 )
 from tools.dispatch_joint_quanta import FakeGateway, main
-from fleet_sdk import installed_client_sdk
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +26,25 @@ def _pilot_spec(tmp_path, monkeypatch):
     spec.write_text(json.dumps(with_spool(
         {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
+
+
+def _selection(directory, job_id):
+    """A well-formed native result selection document for ``job_id`` (written under ``directory``).
+
+    Returns (path, sha256, document). The gateway double only reads the job identity; the real
+    authority checks of the same document are proved on real native records.
+    """
+    from prismaquant import native_results
+    publication = {"path": str(directory / f"{job_id}.publication.json"), "sha256": "c" * 64, "bytes": 1}
+    document = {"schema": native_results.SELECTION_SCHEMA, "job_id": job_id,
+                "record_dir": str(directory / f"record-{job_id}"), "launch_sha256": "a" * 64,
+                "publication": publication, "expected_launch": {}, "producer_id": "pilot",
+                "inputs": {}, "runtime": {}, "max_publication_bytes": 1 << 20,
+                "max_evidence_bytes": 1 << 20, "max_artifact_bytes": 1 << 20}
+    wire = json.dumps(document, sort_keys=True).encode()
+    path = directory / f"{job_id}.selection.json"
+    path.write_bytes(wire)
+    return path, hashlib.sha256(wire).hexdigest(), document
 
 
 def _argv(records_dir, output_root, receipt, extra=()):
@@ -86,8 +104,8 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
     """Use the row's counters and publisher, then mutate their output bytes.
 
     Returns ``extra`` argv (``--pilot-counters``/``--pilot-selector``). With a
-    ``gateway`` the helper also publishes one canned verified result per pilot
-    on that gateway, so the current SDK-bound admission path runs.
+    ``gateway`` the helper also publishes one canned native result per pilot
+    on that gateway, so the production admission path runs over a controlled double.
     """
     from tools import dispatch_joint_quanta as dispatch
     from prismaquant import joint_dispatch_pilot as pilot
@@ -100,14 +118,13 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
     args = []
     contract_refs = set()
     # The fixture's layers have distinct shapes (different layer/geometry), so
-    # each row needs its own pilot action — exactly as a real fanout does when
-    # shapes differ. Each pilot gets its own action key so selectors stay
+    # each row needs its own pilot job — exactly as a real fanout does when
+    # shapes differ. Each pilot gets its own native job id so selectors stay
     # unique (PQ #1293).
     record_paths = sorted(records_dir.glob("layer-*.json"))
     for ordinal, record_path in enumerate(record_paths):
-        action_key = f"{ordinal:064x}"
-        monkeypatch.setenv("PRISMABUILD_ACTION_KEY", action_key)
-        published = round(time.time(), 6)
+        job_id = f"\u0192{ordinal + 2}"
+        monkeypatch.setenv("FLUX_JOB_ID", job_id)
         record = json.loads(record_path.read_text())
         now = time.time()
         windows = [{**w, "render_file_upper_bound_bytes": 300}
@@ -146,8 +163,9 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
             mutate(document)
             path.write_text(json.dumps(document))
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        selection_path, selection_sha, selection = _selection(tmp_path, job_id)
         args += ["--pilot-counters", str(path), digest,
-                 "--pilot-selector", action_key, repr(published), "1"]
+                 "--pilot-selector", str(selection_path), selection_sha]
         from tools.dispatch_joint_quanta import PilotSelector
 
         wire = record_path.read_bytes()
@@ -163,22 +181,18 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
             completion = quantum_override(completion) or completion
         if mutate_completion is not None:
             completion = mutate_completion(completion) or completion
-        selector = PilotSelector(action_key, published, 1)
+        selector = PilotSelector(selection)
         row_argv = dispatch.quantum_argv(
             record, record_path=record_path, output_root=tmp_path / "out")
         command = row_argv["argv"]
         # This review input is supplied independently of the result and
-        # counter bytes. Its source/entry/environment are the planned ones.
-        descriptor = {"id": "pbrun.checkout-snapshot", "sha256": "9" * 64, "bytes": 1234}
-        contract = {"schema": pilot.PILOT_SOURCE_SCHEMA, "snapshot": descriptor,
-                    "snapshot_selection": {"schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
-                        "input": descriptor, "subdirectory": ".", "commit": "7" * 40,
-                        "parent": None, "refs": {}},
+        # counter bytes. Its source/entry/spec are the planned ones.
+        contract = {"schema": pilot.PILOT_SOURCE_SCHEMA,
+                    "source": {"commit": "7" * 40, "tree": "6" * 40},
                     "implementation_sha256": "f" * 64,
                     "launcher_argv": pilot.PILOT_LAUNCHER,
                     "quantum_argv": pilot.PILOT_ENTRY,
-                    "container_spec": json.loads(command[command.index("--spec") + 1]),
-                    "outer_environment": {"PATH": "/usr/bin:/bin"}}
+                    "container_spec": json.loads(command[command.index("--spec") + 1])}
         source_wire = json.dumps(contract, sort_keys=True).encode()
         source_sha = hashlib.sha256(source_wire).hexdigest()
         source_path = tmp_path / (source_sha + ".pilot-source.json")
@@ -187,17 +201,14 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
             args += ["--pilot-source-contract", str(source_path), source_sha]
             contract_refs.add(source_sha)
         result = {
-            "schema": "prismabuild.verified_action_result.v1",
-            "action_key": action_key, "published_unix": published, "attempt": 1,
-            "generation": "g" * 64, "worker_id": "fixture", "host": "fixture",
-            "request": {"params": {"command": command, "cwd": ".",
-                "checkout_snapshot": {"schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
-                                      "input": descriptor, "subdirectory": ".", "commit": "7" * 40, "parent": None, "refs": {}}},
-                        "inputs": [descriptor], "task": {"working_directory": "."},
-                        "environment": {"variables": {"PATH": "/usr/bin:/bin"}}},
-            "receipt": {"receipt_sha256": "c" * 64},
+            "schema": dispatch.NATIVE_PILOT_RESULT_SCHEMA,
+            "job_id": job_id, "launch_sha256": "a" * 64, "publication_sha256": "c" * 64,
+            "argv": command,
+            "source": {"checkout": "/fixture/source", "commit": "7" * 40, "tree": "6" * 40},
+            "resources": {"cores": 2, "memory_gib": 8, "gpus": 0, "walltime_s": 300, "placement": "portable"},
+            "execution": {"status": "succeeded", "payload_exit": 0},
             "payload": json.dumps(completion).encode() + b"\n",
-            "inputs": [], "input_payloads": {}}
+            "counters_bytes": path.read_bytes()}
         if gateway is not None:
             gateway.publish_result(selector, result)
     return args
@@ -218,10 +229,11 @@ def test_matching_producer_pilots_admit_and_stamp_the_fanout(
         admission = (event["metadata"] if event["event"] == "native-intent" else event)["pilot_admission"]
         assert admission["mode"] == "verified"
         assert admission["gpu_envelope_fraction"] == 0.5
-        assert len(admission["action_key"]) == 64
+        assert admission["job_id"].startswith("\u0192")
         assert len(admission["document"]["sha256"]) == 64
-        assert admission["result"]["action_key"] == admission["action_key"]
-        assert admission["result"]["attempt"] == 1
+        assert admission["result"]["job_id"] == admission["job_id"]
+        assert len(admission["result"]["publication_sha256"]) == 64
+        assert admission["result"]["source"] == {"commit": "7" * 40, "tree": "6" * 40}
 
 
 def test_optional_kernel_profile_does_not_invalidate_measured_wait(
@@ -303,7 +315,7 @@ def test_incomplete_measurement_never_certifies_a_pilot(
 
 
 def test_a_pilot_without_a_verified_result_refuses(tmp_path, campaign, records_dir, monkeypatch):
-    """The counters naming an action with no readable verified result refuse."""
+    """The counters naming a job with no readable verified result refuse."""
     receipt = _ready(tmp_path, campaign, records_dir)
     args = _published_pilots(tmp_path, records_dir, monkeypatch)
     gateway = FakeGateway()
@@ -314,7 +326,7 @@ def test_a_pilot_without_a_verified_result_refuses(tmp_path, campaign, records_d
 
 def test_a_missing_selector_refuses_unbound_counters(tmp_path, campaign, records_dir,
                                                     monkeypatch, capsys):
-    """Counters whose action has no --pilot-selector cannot certify the row."""
+    """Counters whose job has no --pilot-selector cannot certify the row."""
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
@@ -325,7 +337,7 @@ def test_a_missing_selector_refuses_unbound_counters(tmp_path, campaign, records
             skip -= 1
             continue
         if word == "--pilot-selector":
-            skip = 3
+            skip = 2
             continue
         stripped.append(word)
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=stripped),
@@ -335,13 +347,13 @@ def test_a_missing_selector_refuses_unbound_counters(tmp_path, campaign, records
 
 
 def test_a_duplicate_selector_refuses(tmp_path, campaign, records_dir, monkeypatch):
-    """Two selectors naming one action key are ambiguous, never a merge."""
+    """Two selectors naming one native job are ambiguous, never a merge."""
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
-    # The first row's selector repeated: same action key, a second triple.
-    first_key = args[args.index("--pilot-selector") + 1]
-    extra = args + ["--pilot-selector", first_key, "1.0", "1"]
+    # The first row's selector repeated: same native job, a second pair.
+    at = args.index("--pilot-selector")
+    extra = args + ["--pilot-selector", args[at + 1], args[at + 2]]
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=extra),
                 _gateway=gateway) == 3
     assert not gateway.submitted
@@ -385,28 +397,6 @@ def test_a_completion_naming_another_quantum_refuses(tmp_path, campaign, records
     assert "another quantum" in capsys.readouterr().err
 
 
-def test_a_wrong_attempt_selector_refuses(tmp_path, campaign, records_dir,
-                                          monkeypatch, capsys):
-    """A selector for an attempt the reader does not hold refuses."""
-    receipt = _ready(tmp_path, campaign, records_dir)
-    gateway = FakeGateway()
-    args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
-    # Rewrite every attempt to 2; no result is published for attempt 2.
-    patched = []
-    index = 0
-    while index < len(args):
-        if args[index] == "--pilot-selector":
-            patched += ["--pilot-selector", args[index + 1], args[index + 2], "2"]
-            index += 4
-            continue
-        patched.append(args[index])
-        index += 1
-    assert main(_argv(records_dir, tmp_path / "out", receipt, extra=patched),
-                _gateway=gateway) == 3
-    assert not gateway.submitted
-    assert "no verified result published" in capsys.readouterr().err
-
-
 def _tampered_copy(path: Path, tmp_path: Path, quantum_id: str) -> Path:
     """A same-length sibling file carrying different bytes."""
     raw = bytearray(path.read_bytes())
@@ -437,7 +427,7 @@ def test_sealed_invocation_mismatch_refuses(tmp_path, campaign, records_dir,
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
     for result in gateway.results.values():
-        command = result["request"]["params"]["command"]
+        command = result["argv"]
         if fault == "entry":
             command[command.index("prismaquant.joint_cost_quantum")] = "foreign.module"
         elif fault == "regime":
@@ -475,7 +465,7 @@ def test_replaced_record_shape_refuses(tmp_path, campaign, records_dir, monkeypa
         completion["quantum_record"] = {"path": str(altered),
                                         "sha256": hashlib.sha256(wire).hexdigest(),
                                         "bytes": len(wire)}
-        command = result["request"]["params"]["command"]
+        command = result["argv"]
         command[command.index("--quantum-sha256") + 1] = completion["quantum_record"]["sha256"]
         position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
         args[position - 1:position + 1] = [str(altered), completion["quantum_record"]["sha256"]]
@@ -485,11 +475,11 @@ def test_replaced_record_shape_refuses(tmp_path, campaign, records_dir, monkeypa
     assert not gateway.submitted
 
 
-def test_native_capture_authority_refuses_legacy_sdk_requests():
+def test_a_foreign_launch_argv_is_not_the_supported_quantum_entry():
     from prismaquant.joint_dispatch_pilot import PilotRefused
     from tools import dispatch_joint_quanta as dispatch
-    with pytest.raises(PilotRefused, match="native capture result authority is unavailable"):
-        dispatch._sealed_quantum_command({"request": {"params": {"command": ["foreign"]}}})
+    with pytest.raises(PilotRefused, match="not the supported containerized quantum entry"):
+        dispatch._parse_pilot_invocation(["foreign"])
 
 
 def test_legacy_unbound_result_refuses(tmp_path, campaign, records_dir, monkeypatch):
@@ -503,26 +493,21 @@ def test_legacy_unbound_result_refuses(tmp_path, campaign, records_dir, monkeypa
     assert not gateway.submitted
 
 
-@pytest.mark.parametrize("fault", ["snapshot", "outer_environment", "image", "self_asserted_code"])
+@pytest.mark.parametrize("fault", ["commit", "tree", "image"])
 def test_resealed_unreviewed_source_refuses(tmp_path, campaign, records_dir, monkeypatch, fault):
+    """The authenticated launch's commit/tree and container spec must match one reviewed contract;
+    the counters' self-asserted code digest cannot replace review."""
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
     for result in gateway.results.values():
-        request = result["request"]
-        if fault == "snapshot":
-            request["params"]["checkout_snapshot"]["input"]["sha256"] = "8" * 64
-        elif fault == "outer_environment":
-            request["environment"]["variables"]["PYTHONPATH"] = "/foreign/imports"
-        elif fault == "image":
-            command = request["params"]["command"]
+        if fault in ("commit", "tree"):
+            result["source"][fault] = "8" * 40
+        else:
+            command = result["argv"]
             spec = json.loads(command[4])
             spec["container"]["image"] = "sha256:" + "8" * 64
             command[4] = json.dumps(spec)
-        else:
-            # The exact counter digest/reference still matches the immutable
-            # result; its self-asserted code digest cannot replace review.
-            request["params"]["checkout_snapshot"]["input"]["sha256"] = "8" * 64
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 3
     assert not gateway.submitted
 
@@ -561,7 +546,7 @@ def test_another_output_namespace_uses_only_the_authenticated_record(
         completion["quantum_record"] = {"path": str(moved),
                                         "sha256": hashlib.sha256(wire).hexdigest(),
                                         "bytes": len(wire)}
-        command = result["request"]["params"]["command"]
+        command = result["argv"]
         command[command.index("--quantum") + 1] = "/absent-pilot-wire/" + record["quantum_id"]
         command[command.index("--quantum-sha256") + 1] = completion["quantum_record"]["sha256"]
         command[command.index("--output-root") + 1] = "/other-pilot-output"
@@ -574,6 +559,7 @@ def test_another_output_namespace_uses_only_the_authenticated_record(
         completion["counters"].update(sha256=digest, bytes=len(raw))
         start = args.index(str(path))
         args[start + 1] = digest
+        result["counters_bytes"] = raw
         position = args.index(entry["sha256"], args.index("--pilot-quantum-record"))
         args[position - 1:position + 1] = [str(moved), completion["quantum_record"]["sha256"]]
         result["payload"] = json.dumps(completion).encode()
@@ -585,7 +571,8 @@ def test_foreign_selector_refuses(tmp_path, campaign, records_dir, monkeypatch):
     receipt = _ready(tmp_path, campaign, records_dir)
     gateway = FakeGateway()
     args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=gateway)
-    args += ["--pilot-selector", "8" * 64, "1.0", "1"]
+    foreign_path, foreign_sha, _ = _selection(tmp_path, "\u0192Z")
+    args += ["--pilot-selector", str(foreign_path), foreign_sha]
     assert main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway) == 3
     assert not gateway.submitted
 

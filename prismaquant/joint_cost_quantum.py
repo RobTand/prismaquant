@@ -895,7 +895,7 @@ class QuantumCounters:
             power = gpu.get("gpu_power_w_p50")
             counters["pilot"] = {
                 "binding": self.pilot_binding,
-                "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                "job_id": os.environ.get("FLUX_JOB_ID"),
                 "gpu_envelope_fraction": None if power is None else power / 140.0,
             }
         if self._kernel_error:
@@ -4260,7 +4260,7 @@ def run_layer_quantum(
 
 
 def quantum_completion_record(result: Mapping, *, record_path, record_bytes: bytes) -> dict:
-    """The producer's single completion record carried by PB stdout.
+    """The producer's single completion record, printed on stdout and published natively when the job is native.
 
     ``record_bytes`` is the exact owned quantum wire read the identity gate
     authenticated (PQ #1293); ``record_path`` is the sealed ``--quantum``
@@ -4452,7 +4452,15 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps(quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)))
+    completion = quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)
+    print(json.dumps(completion))
+    counters_path = Path(completion["counters"]["path"])
+    # Only a pilot (counters carrying a pilot binding) is published, and only by a native job.
+    if (os.environ.get("FLUX_JOB_ID") and os.environ.get("OUT")
+            and "pilot" in json.loads(counters_path.read_bytes())):
+        from .joint_dispatch_pilot import publish_pilot_result
+        publish_pilot_result(counters_path.with_name("pilot-publication.json"), completion=completion,
+                             counters_path=counters_path, quantum_record=completion["quantum_record"])
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK

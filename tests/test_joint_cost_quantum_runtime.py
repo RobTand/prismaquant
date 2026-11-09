@@ -653,15 +653,11 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     import prismaquant.glm_capture_compatibility as compatibility
 
     # This is an OFFLINE stage-A environment, and the launch context is the
-    # one seam a stub cannot fake: a capture that carries
-    # PRISMABUILD_ACTION_KEY is an admitted produced-output owner and now
-    # binds one unconditionally, refusing if it cannot. Inside pbtest this
-    # process IS admitted, and inherits a key with no residency map, so the
-    # stub would be asked to bind a queue that does not exist. Clearing the
-    # context is what makes this run offline; it does not relax the
-    # production check, which still refuses a half-present launch context.
-    for name in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
-                 "PRISMABUILD_ACTION_SCOPE", "PRISMAQUANT_STAGED_MANIFEST"):
+    # one seam a stub cannot fake: a capture inside an admitted native job
+    # (FLUX_JOB_ID) binds a produced-output owner unconditionally, refusing if
+    # it cannot. Clearing the context is what makes this run offline; it does
+    # not relax the production check.
+    for name in ("FLUX_JOB_ID", "PRISMAQUANT_STAGED_MANIFEST"):
         monkeypatch.delenv(name, raising=False)
 
     captured = {}

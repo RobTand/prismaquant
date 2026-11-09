@@ -443,6 +443,11 @@ def test_stage_a_cli_threads_artifact_flag(tmp_path, monkeypatch):
     assert captured["artifact_budget_bytes"] is None
 
 
+def _declared(builder, manifest, campaign, **kwargs):
+    from stage_a_spool_spec import declared_stage_a_argv
+    return declared_stage_a_argv(builder, manifest, campaign, **kwargs)
+
+
 def _dispatcher_argv_fixture(tmp_path, monkeypatch):
     """Minimal valid manifest + campaign for stage_a_argv budget tests."""
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1] / "tools"))
@@ -495,17 +500,17 @@ def test_dispatcher_threads_artifact_flag(tmp_path, monkeypatch):
 
     manifest, campaign = _dispatcher_argv_fixture(tmp_path, monkeypatch)
 
-    plain = stage_a_argv(manifest, campaign)
+    plain = _declared(stage_a_argv, manifest, campaign)
     assert "--artifact-budget-bytes" not in plain["argv"]
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=RUN_640_GIB)
     assert "--artifact-budget-bytes" in threaded["argv"]
     assert str(RUN_640_GIB) in threaded["argv"]
 
     for bad in (True, 0, -5, "8 GiB"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
 
 def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
@@ -521,9 +526,9 @@ def test_dispatcher_refuses_non_integer_numerics(tmp_path, monkeypatch):
 
     for bad in (687194767360.9, 640.0, Decimal("640"), "640.9", "0x10"):
         with pytest.raises(DispatchRefused):
-            stage_a_argv(manifest, campaign, artifact_budget_bytes=bad)
+            _declared(stage_a_argv, manifest, campaign, artifact_budget_bytes=bad)
 
-    threaded = stage_a_argv(manifest, campaign,
+    threaded = _declared(stage_a_argv, manifest, campaign,
                             artifact_budget_bytes=f" {RUN_640_GIB} ")
     assert threaded["argv"][threaded["argv"].index("--artifact-budget-bytes") + 1] == str(
         RUN_640_GIB)

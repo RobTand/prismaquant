@@ -93,3 +93,31 @@ def test_selection_cannot_adopt_legacy_fields():
     for selection in ({}, {'schema': nr.SELECTION_SCHEMA, 'action_key': 'a' * 64}):
         with pytest.raises(nr.ResultUnavailable):
             nr.read_selected_result(selection)
+
+
+def test_publish_result_refuses_an_existing_publication_without_replacing_it(tmp_path, monkeypatch, capsys):
+    """A publication path that exists is never replaced: its bytes and the announced result are unchanged.
+
+    Terminal authority (the running job and its runtime) is a controlled double; the publisher's file
+    writing, role roster, byte bounds and exclusive-link publication are real.
+    """
+    monkeypatch.setattr(nr, 'execution_context', lambda: {'schema': nr.PRODUCER_SCHEMA, 'job_id': 'f2'})
+    monkeypatch.setattr(nr, 'measure_runtime', lambda *, dependencies=(): {})
+    source = tmp_path / 'input.bin'
+    source.write_bytes(b'input')
+    artifact = tmp_path / 'artifact.bin'
+    artifact.write_bytes(b'artifact')
+    inputs = {'source': {'path': str(source), 'sha256': hashlib.sha256(b'input').hexdigest(), 'bytes': 5}}
+    path = tmp_path / 'publication.json'
+    first = nr.publish_result(path, producer_id='p', inputs=inputs, artifacts={'result': artifact},
+                              max_artifact_bytes=1 << 20)
+    announced = capsys.readouterr().out
+    assert nr.ANNOUNCEMENT_PREFIX.decode() in announced
+    before = path.read_bytes()
+    artifact.write_bytes(b'artifact-changed')
+    with pytest.raises(FileExistsError):
+        nr.publish_result(path, producer_id='p', inputs=inputs, artifacts={'result': artifact},
+                          max_artifact_bytes=1 << 20)
+    assert path.read_bytes() == before
+    assert hashlib.sha256(before).hexdigest() == first['sha256']
+    assert capsys.readouterr().out == ''

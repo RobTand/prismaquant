@@ -96,6 +96,9 @@ def test_an_empty_space_passes_the_check(tmp_path, monkeypatch):
 
 # ------------------------------------------- 2. staged-range wait vs grace
 
+from stage_a_spool_spec import declared_stage_a_argv  # noqa: E402
+
+
 def _spec(monkeypatch, tmp_path, env):
     spec = tmp_path / "spec.json"
     from stage_a_spool_spec import with_spool
@@ -122,7 +125,7 @@ def test_a_wait_at_or_above_the_chunk_grace_refuses(tmp_path, monkeypatch, campa
     _spec(monkeypatch, tmp_path, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": wait})
     manifest = _adjoint_manifest(tmp_path, campaign)
     with pytest.raises(dispatch.DispatchRefused, match="PRISMAQUANT_STAGED_RANGE_WAIT_S"):
-        dispatch.stage_a_argv(manifest, campaign)
+        declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
 
 
 @pytest.mark.parametrize("env", [{}, {"PRISMAQUANT_STAGED_RANGE_WAIT_S": "600"},
@@ -130,7 +133,7 @@ def test_a_wait_at_or_above_the_chunk_grace_refuses(tmp_path, monkeypatch, campa
 def test_a_wait_below_every_grace_submits(tmp_path, monkeypatch, campaign, env):
     _spec(monkeypatch, tmp_path, env)
     manifest = _adjoint_manifest(tmp_path, campaign)
-    argv = dispatch.stage_a_argv(manifest, campaign)
+    argv = declared_stage_a_argv(dispatch.stage_a_argv, manifest, campaign)
     assert argv["progress_phases"] == ["head=1800", "chain-000=900", "chain-001=900"]
 
 

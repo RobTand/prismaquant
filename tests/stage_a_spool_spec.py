@@ -1,9 +1,10 @@
-"""A campaign container spec fixture that declares the produced output spool.
+"""Fixtures for a Stage A row's produced output spool.
 
-The Stage A dispatch refuses a spec without the spool (PQ #1012), so every
-fixture spec a Stage A row seals declares one: a root on the executing box's
-own disk, its byte bound, the paced-export opt-in, and the writable identity
-bind the container requires. The paths are text; no test writes under them.
+The spool's root and byte bound live in the launch-bound produced declaration
+(``declaration['spool']``), never in environment. A fixture spec carries only the
+writable identity bind the container needs; ``write_declaration`` writes the
+declaration the shipped Stage A row requires. The paths are text; no test writes
+under them.
 """
 from __future__ import annotations
 
@@ -12,12 +13,6 @@ import json
 from pathlib import Path
 
 SPOOL_ROOT = "/home/rob/pb-spool/fixture"
-SPOOL_MAX_BYTES = str(32 << 30)
-SPOOL_ENV = {
-    "PRISMABUILD_PRODUCED_SPOOL_ROOT": SPOOL_ROOT,
-    "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": SPOOL_MAX_BYTES,
-    "PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT": "1",
-}
 SPOOL_MOUNT = {"source": SPOOL_ROOT, "target": SPOOL_ROOT, "readonly": False}
 
 #: The fixture plan's plane geometry. The Stage A row seals its spool bound
@@ -29,15 +24,6 @@ FIXTURE_EXECUTION = {"n_probes": 2, "n_calib_samples": 8, "calib_seqlen": 16,
                      "probe_microbatch": 1,
                      "boundary_storage": {"prefetch_batches": 4}}
 SPOOL_WINDOW_BYTES = 2 * 2 * 8 * (16 * FIXTURE_HIDDEN * 2 + 65536)
-#: The spool environment the Stage A row seals: the spec's, with the byte
-#: bound replaced by the plan's two-plane window, and the host window opt-in
-#: that has placement charge it (PQ #1120).
-STAGE_A_SPOOL_ENV = {**SPOOL_ENV,
-                     "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": str(SPOOL_WINDOW_BYTES),
-                     "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW": "1"}
-#: The spool environment a quantum row seals: the spec's, with the host
-#: window opt-in, so placement charges its bound too (PQ #1364).
-QUANTUM_SPOOL_ENV = {**SPOOL_ENV, "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW": "1"}
 
 
 def stage_a_plan(root, **fields) -> dict:
@@ -56,11 +42,27 @@ def stage_a_plan(root, **fields) -> dict:
             **fields}
 
 
+def write_declaration(directory) -> Path:
+    """A valid launch-bound Stage A produced declaration bounding the spool at the fixture window."""
+    from prismaquant.stage_a_produced_output import build_boundary_template
+    path = Path(directory) / "stage-a-declaration.json"
+    path.write_text(json.dumps(build_boundary_template(
+        output_prefix="/out/root", artifact_max_bytes=1 << 20, group_size=1,
+        max_entry_tensor_bytes=1 << 16,
+        spool={"root": SPOOL_ROOT, "max_bytes": SPOOL_WINDOW_BYTES})))
+    return path
+
+
+def declared_stage_a_argv(builder, manifest, campaign, **kwargs):
+    """Call a shipped ``stage_a_argv`` with the launch-bound declaration the Stage A row requires."""
+    kwargs.setdefault("produced_declaration", write_declaration(Path(campaign["plan_path"]).parent))
+    return builder(manifest, campaign, **kwargs)
+
+
 def with_spool(spec: dict) -> dict:
-    """``spec`` plus the spool's environment and identity bind."""
+    """``spec`` plus the spool's writable identity bind."""
 
     spec = copy.deepcopy(spec)
-    spec.setdefault("env", {}).update(SPOOL_ENV)
     mounts = spec.setdefault("container", {}).setdefault("mounts", [])
     mounts.append(dict(SPOOL_MOUNT))
     return spec

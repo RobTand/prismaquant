@@ -32,7 +32,6 @@ if __package__:
         container_cache_environment,
         local_scratch_environment,
         local_scratch_request_environment,
-        produced_spool_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -46,7 +45,6 @@ else:
         container_cache_environment,
         local_scratch_environment,
         local_scratch_request_environment,
-        produced_spool_environment,
         stage_b_spill_environment,
     )
     from prismaquant.joint_layer_quanta import (
@@ -54,7 +52,7 @@ else:
     )
     from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE)
 
-from prismaquant.campaign_container_spec import admission_image_reference
+from prismaquant.campaign_container_spec import admission_image_reference, refuse_retired_pb_env
 from prismaquant import joint_quantum_row as quantum_row
 
 
@@ -312,17 +310,8 @@ DEFAULT_SPEC_PATH = Path(
     "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913"
     "/allocation/joint-panel/spec-hostcap32-ram-dev-spool.json")
 SPEC_PATH = DEFAULT_SPEC_PATH
-#: The produced output spool's root and byte bound (``produced_output_spool``).
-PRODUCED_SPOOL_ROOT_ENV = "PRISMABUILD_PRODUCED_SPOOL_ROOT"
-PRODUCED_SPOOL_MAX_ENV = "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES"
 #: Bytes per element of the execution dtypes a model config may name.
 _CONFIG_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
-#: The host spool window opt-in (PB #910), which the Stage A row seals.
-PRODUCED_SPOOL_HOST_WINDOW_ENV = "PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW"
-#: Opt-ins PrismaBuild reads from the producer's sealed environment, each "0"
-#: or "1": the paced export (PB #891) and the host spool window (PB #910).
-PRODUCED_SPOOL_OPT_IN_ENV = ("PRISMABUILD_PRODUCED_SPOOL_PACED_EXPORT",
-                             PRODUCED_SPOOL_HOST_WINDOW_ENV)
 STATE_FILENAME = "campaign-state.json"
 
 #: Refusal exits: 3 = the stage-A precondition (or the campaign binding)
@@ -1600,11 +1589,12 @@ def _slice_chain_batch_size(record: Mapping) -> int:
             f"{exc}") from exc
 
 
-def produced_spool_row_environment(spec: Mapping) -> dict:
-    """Reject retired service settings; spool bounds live in the declaration."""
-    if any(name.startswith("PRISMABUILD_PRODUCED_") for name in spec.get("env", {})):
-        raise DispatchRefused("retired produced service environment; use a launch-bound declaration")
-    return {}
+def refuse_retired_service_environment(spec: Mapping) -> None:
+    """Reject retired PB service settings; spool bounds live in the launch-bound declaration."""
+    try:
+        refuse_retired_pb_env(spec.get("env", {}))
+    except RuntimeError as exc:
+        raise DispatchRefused(f"retired service environment; use a launch-bound declaration: {exc}") from exc
 
 
 #: The spec field that admits a container cache pinned to the overlay, with
@@ -1729,7 +1719,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 f"spill bound counts parts for {spill_bound['capture_batch']}; "
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
-    produced_spool_row_environment(spec)
+    refuse_retired_service_environment(spec)
     require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its explicit row environment below; no ambient
@@ -2158,7 +2148,6 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         source_prefetch=plan["source_prefetch"] if resource_policy is not None else None,
         operator_prefetch=plan["execution"]["operator_windows"] if resource_policy is not None else None)
     environment = [*local_scratch_request_environment(sealed_spec).items(),
-                   *produced_spool_row_environment(sealed_spec).items(),
                    ("PRISMAQUANT_DEV_MODE", "1")]
     return quantum_row.QuantumRow(
         str(manifest), progress, demand, consumer_tags, priority, wrapped, environment,
@@ -2236,7 +2225,7 @@ def stage_a_argv(adjoint_manifest: Path, campaign: Mapping,
         SPEC_PATH, payload, progress=progress,
         spool_max_bytes=stage_a_spool_window_bytes(campaign, batch_range))
     sealed_spec = json.loads(wrapped[wrapped.index("--spec") + 1])
-    produced_spool_row_environment(sealed_spec)
+    refuse_retired_service_environment(sealed_spec)
     if produced_declaration is None:
         raise DispatchRefused("Stage A requires an explicit launch-bound produced declaration")
     spool = {}
@@ -2750,13 +2739,25 @@ class Gateway:
         result = self.status(saved)
         return result["status"] == "succeeded" and result["payload_exit"] == 0 and not result["query_error"]
 
-    def read_verified_result(self, selector):
+    def read_verified_result(self, selector) -> dict:
+        """Authenticate the selected native producer and its publication; caller counters never authorize."""
+        from prismaquant import native_results
         from prismaquant.joint_dispatch_pilot import PilotRefused
-        raise PilotRefused("native pilot result authority is unavailable (unit 4); PB results and caller counters cannot authorize a Flux launch")
-
-    def bind_capture_command(self, request):
-        from prismaquant.joint_dispatch_pilot import PilotRefused
-        raise PilotRefused("native capture result authority is unavailable (unit 4)")
+        limit = selector.max_result_bytes
+        try:
+            selected = native_results.read_selected_result(
+                selector.selection, artifact_limits={"completion": limit, "counters": limit})
+        except (native_results.ProducerFailed, native_results.ResultUnavailable, ValueError, OSError) as exc:
+            raise PilotRefused(f"native pilot result refused: {exc}") from exc
+        return {"schema": NATIVE_PILOT_RESULT_SCHEMA, "job_id": selected.execution.job_id,
+                "launch_sha256": selector.selection["launch_sha256"],
+                "publication_sha256": selector.selection["publication"]["sha256"],
+                "argv": list(selected.launch["argv"]), "source": dict(selected.launch["source"]),
+                "resources": dict(selected.launch["resources"]),
+                "execution": {"status": selected.execution.status,
+                              "payload_exit": selected.execution.payload_exit},
+                "payload": selected.artifact_payloads["completion"],
+                "counters_bytes": selected.artifact_payloads["counters"]}
 
 
 class FakeGateway(Gateway):
@@ -2773,21 +2774,16 @@ class FakeGateway(Gateway):
 
     def publish_result(self, selector, result: dict) -> None:
         """Make ``selector`` answerable with a canned verified result."""
-        self.results[(selector.action_key, selector.published_unix,
-                      selector.attempt)] = result
+        self.results[selector.job_number] = result
 
     def read_verified_result(self, selector) -> dict:
         from prismaquant.joint_dispatch_pilot import PilotRefused
 
         self.result_reads.append(selector)
-        key = (selector.action_key, selector.published_unix, selector.attempt)
-        if key not in self.results:
+        if selector.job_number not in self.results:
             raise PilotRefused(
                 f"no verified result published for {selector!r}")
-        return self.results[key]
-
-    def bind_capture_command(self, request):
-        """The SDK proof boundary is a test double in this fake gateway."""
+        return self.results[selector.job_number]
 
     def mark_terminal(self, job_id: str) -> None:
         self._terminal.add(job_id)
@@ -2896,8 +2892,8 @@ def plan_consumer_tags(block: Mapping) -> tuple[str, ...]:
     """The effective §5.1 placement tags for the quantum rows.
 
     The plan's ``distributed_campaign.consumer_tags`` when it declares them,
-    else the shared GB10 class tag.  PB requires *every* listed tag
-    (``wanted.issubset(offer.tags)``), so the list is a conjunction, never a
+    else the shared GB10 class tag.  Placement requires *every* listed tag
+    to be offered by the box, so the list is a conjunction, never a
     menu of acceptable boxes: an empty list would publish an unconstrained
     row, and two host names would publish a row no single box can claim (the
     defect this default fixes).  A plan that pins one box names that host
@@ -2972,63 +2968,55 @@ PILOT_RESULT_MAX_BYTES = 8 * 1024 * 1024
 PILOT_EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
 
 
-class PilotSelector:
-    """One exact PB action generation a pilot's counter bytes must answer for.
+NATIVE_PILOT_RESULT_SCHEMA = "prismaquant.native_pilot_result.v1"
 
-    ``--pilot-selector ACTION_KEY PUBLISHED_UNIX ATTEMPT`` names the action,
-    its publication time and its attempt. It is repeatable and bound to the
-    counters by the pilot's ``action_key``; no current/canonical ending is
-    inferred. The selector is what makes the counters answerable to an
-    immutable result rather than to a live path (PQ #1293).
+
+class PilotSelector:
+    """One exact native producer execution a pilot's counters must answer for.
+
+    ``--pilot-selector SELECTION_PATH SELECTION_SHA256`` names a document of the
+    existing ``native_results`` selection schema: the saved job, its launch, the
+    expected launch intent and the exact publication. It is repeatable and bound
+    to the counters by the pilot's own native ``job_id``; no job is discovered
+    by name or time. The selection is what makes the counters answerable to one
+    immutable, authenticated execution (PQ #1293).
     """
 
-    __slots__ = ("action_key", "published_unix", "attempt",
-                 "max_result_bytes", "max_evidence_bytes")
+    __slots__ = ("selection", "job_number", "max_result_bytes", "max_evidence_bytes")
 
-    def __init__(self, action_key, published_unix, attempt, *, result_cap=None,
-                 evidence_cap=None):
-        self.action_key = str(action_key)
-        self.published_unix = float(published_unix)
-        self.attempt = int(attempt)
-        self.max_result_bytes = int(
-            PILOT_RESULT_MAX_BYTES if result_cap is None else result_cap)
-        self.max_evidence_bytes = int(
-            PILOT_EVIDENCE_MAX_BYTES if evidence_cap is None else evidence_cap)
+    def __init__(self, selection, *, result_cap=None, evidence_cap=None):
+        from prismaquant.flux_jobs import job_id_number
+        self.selection = dict(selection)
+        self.job_number = job_id_number(self.selection["job_id"])
+        self.max_result_bytes = int(PILOT_RESULT_MAX_BYTES if result_cap is None else result_cap)
+        self.max_evidence_bytes = int(PILOT_EVIDENCE_MAX_BYTES if evidence_cap is None else evidence_cap)
 
     def __repr__(self):
-        return (f"PilotSelector({self.action_key[:12]!r}, "
-                f"{self.published_unix!r}, {self.attempt!r})")
+        return f"PilotSelector(job {self.job_number})"
 
 
 def parse_pilot_selector(raw: Sequence[str]) -> PilotSelector:
-    """One ``--pilot-selector`` triple, validated as an exact selection."""
-    from prismaquant.digests import is_sha256hex
+    """One ``--pilot-selector`` pair, validated as an exact native selection."""
+    from prismaquant import native_results
+    from prismaquant.digests import bytes_sha256hex, is_sha256hex
     from prismaquant.joint_dispatch_pilot import PilotRefused
 
-    action_key, published, attempt = raw
-    if not is_sha256hex(action_key):
-        raise PilotRefused(
-            f"pilot selector action key is not a full lowercase SHA-256: "
-            f"{action_key!r}")
+    path, digest = raw
+    if not is_sha256hex(digest):
+        raise PilotRefused(f"pilot selection digest is not a full lowercase SHA-256: {digest!r}")
     try:
-        published_unix = float(published)
-    except (TypeError, ValueError) as exc:
-        raise PilotRefused(
-            f"pilot selector publication time is not a finite number: "
-            f"{published!r}") from exc
-    if not math.isfinite(published_unix) or published_unix <= 0:
-        raise PilotRefused(
-            f"pilot selector publication time is not positive and finite: "
-            f"{published!r}")
-    try:
-        number = int(attempt)
-    except (TypeError, ValueError) as exc:
-        raise PilotRefused(
-            f"pilot selector attempt is not a positive integer: {attempt!r}") from exc
-    if number <= 0 or str(number) != str(attempt).strip():
-        raise PilotRefused(
-            f"pilot selector attempt is not a positive integer: {attempt!r}")
-    return PilotSelector(action_key, published_unix, number)
+        wire = _bounded_pilot_bytes(Path(path), PILOT_EVIDENCE_MAX_BYTES)
+        if bytes_sha256hex(wire) != digest:
+            raise PilotRefused("pilot selection document SHA-256 does not match")
+        selection = _pilot_json(wire)
+        if (not isinstance(selection, dict) or selection.get("schema") != native_results.SELECTION_SCHEMA
+                or set(selection) != native_results.SELECTION_KEYS):
+            raise PilotRefused("pilot selection is not an exact native result selection")
+        return PilotSelector(selection)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if isinstance(exc, PilotRefused):
+            raise
+        raise PilotRefused(f"pilot selection {path}: {exc}") from exc
 
 
 def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
@@ -3063,8 +3051,8 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
             document = _pilot_json(raw)
             if not isinstance(document, dict) or not isinstance(document.get("pilot"), dict):
                 raise ValueError("counters and their pilot must be JSON objects")
-            if not is_sha256hex(document["pilot"].get("action_key")):
-                raise ValueError("pilot counter action key is not a full SHA-256")
+            from prismaquant.flux_jobs import job_id_number
+            job_id_number(document["pilot"].get("job_id"))
         except (OSError, ValueError) as exc:
             raise DispatchRefused(f"pilot counters {path}: {exc}") from exc
         documents.append((document, {"path": str(path), "sha256": digest,
@@ -3075,12 +3063,13 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
             selector = parse_pilot_selector(raw_selector)
         except PilotRefused as exc:
             raise DispatchRefused(f"pilot selector: {exc}") from exc
-        if selector.action_key in selectors:
+        if selector.job_number in selectors:
             raise DispatchRefused(
-                f"pilot selector names {selector.action_key[:12]} twice; an "
+                f"pilot selector names native job {selector.job_number} twice; an "
                 "explicit selector must be unique")
-        selectors[selector.action_key] = selector
-    named_keys = {document.get("pilot", {}).get("action_key") for document, _ in documents}
+        selectors[selector.job_number] = selector
+    from prismaquant.flux_jobs import job_id_number
+    named_keys = {job_id_number(document["pilot"]["job_id"]) for document, _ in documents}
     if set(selectors) != named_keys:
         raise DispatchRefused("pilot selectors must name exactly the supplied counter actions; an unbound counter document cannot certify a row")
     implementation = _pilot_code_sha256()
@@ -3117,13 +3106,13 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
                 "code/plan/replay-regime/row-shape receipt, "
                 f"found {len(matching)}")
         counters, reference = matching[0]
-        key = counters.get("pilot", {}).get("action_key")
+        key = job_id_number(counters["pilot"]["job_id"])
         selector = selectors.get(key)
         if selector is None:
             raise DispatchRefused(
-                f"pilot for {row['quantum_id']}: counters name PB action "
-                f"{str(key)[:12]}, for which --pilot-selector ACTION_KEY "
-                "PUBLISHED_UNIX ATTEMPT was not supplied; an unbound counter "
+                f"pilot for {row['quantum_id']}: counters name native job "
+                f"{key}, for which --pilot-selector SELECTION_PATH "
+                "SELECTION_SHA256 was not supplied; an unbound counter "
                 "document cannot certify the row")
         if key not in verified:
             try:
@@ -3175,25 +3164,31 @@ def _bounded_pilot_bytes(path: Path, cap: int) -> bytes:
 
 def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
                          quantum_records):
-    """Authenticate a selected result, then bind independent source approval."""
+    """Authenticate a selected native result, then bind independent source approval."""
+    from prismaquant.digests import bytes_sha256hex
+    from prismaquant.flux_jobs import job_id_number
     from prismaquant.joint_dispatch_pilot import PilotRefused, validate_pilot_completion
 
     result = gateway.read_verified_result(selector)
-    if (not isinstance(result, Mapping)
-            or result.get("schema") != "prismabuild.verified_action_result.v1"
-            or result.get("action_key") != selector.action_key
-            or type(result.get("attempt")) is not int or result["attempt"] != selector.attempt
-            or type(result.get("published_unix")) not in (int, float)
-            or result["published_unix"] != selector.published_unix):
-        raise PilotRefused("pilot PB result differs from the explicit execution selector")
-    request = result.get("request")
-    if not isinstance(request, Mapping):
-        raise PilotRefused("pilot PB result carries no validated sealed request")
-    invocation = _sealed_quantum_command(result, gateway=gateway)
-    source, source_ref = _accepted_pilot_source(request, invocation, contracts)
+    try:
+        selected_job = job_id_number(result.get("job_id")) if isinstance(result, Mapping) else None
+    except ValueError:
+        selected_job = None
+    if (not isinstance(result, Mapping) or result.get("schema") != NATIVE_PILOT_RESULT_SCHEMA
+            or selected_job != selector.job_number):
+        raise PilotRefused("pilot native result differs from the explicit execution selection")
+    if result.get("execution") != {"status": "succeeded", "payload_exit": 0}:
+        raise PilotRefused("pilot native result is not a succeeded execution")
+    invocation = _parse_pilot_invocation(result.get("argv"))
+    source, source_ref = _accepted_pilot_source(result.get("source"), invocation, contracts)
     payload = result.get("payload")
     if not isinstance(payload, bytes) or len(payload) > PILOT_RESULT_MAX_BYTES:
-        raise PilotRefused("pilot PB result carries no bounded owned result payload")
+        raise PilotRefused("pilot native result carries no bounded owned completion")
+    published_counters = result.get("counters_bytes")
+    if (not isinstance(published_counters, bytes)
+            or bytes_sha256hex(published_counters) != reference["sha256"]
+            or len(published_counters) != reference["bytes"]):
+        raise PilotRefused("pilot counters differ from the counters the native result published")
     completion = _single_completion(payload)
     original_paths = [path for path, digest in quantum_records
                       if digest == invocation["--quantum-sha256"]]
@@ -3215,13 +3210,9 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
     except (KeyError, ValueError, TypeError) as exc:
         raise PilotRefused(f"pilot authenticated quantum record refuses: {exc}") from exc
     return ({
-        "action_key": selector.action_key,
-        "published_unix": selector.published_unix,
-        "attempt": selector.attempt,
-        "generation": result.get("generation"),
-        "worker_id": result.get("worker_id"),
-        "host": result.get("host"),
-        "receipt_sha256": (result.get("receipt") or {}).get("receipt_sha256"),
+        "job_id": result["job_id"],
+        "launch_sha256": result["launch_sha256"],
+        "publication_sha256": result["publication_sha256"],
         "quantum_sha256": invocation["--quantum-sha256"],
         "quantum_bytes": len(evidence["quantum_record"]),
         "quantum_record_producer": dict(completion["quantum_record"]),
@@ -3230,15 +3221,8 @@ def _verify_pilot_result(gateway, selector, counters, reference, *, contracts,
                                     "bytes": len(evidence["quantum_record"])},
         "record_identity_sha256": record["identity_sha256"],
         "source_contract": source_ref,
-        "source_snapshot": source["snapshot"],
+        "source": dict(source),
     }, record, invocation)
-
-
-def _sealed_quantum_command(result, *, gateway=None) -> dict:
-    """Prove the wrapper with the SDK, then read its authenticated command."""
-    request = result["request"]
-    (Gateway() if gateway is None else gateway).bind_capture_command(request)
-    return _parse_pilot_invocation(request.get("params", {}).get("command"))
 
 
 def _parse_pilot_invocation(command) -> dict:
@@ -3279,35 +3263,21 @@ def _pilot_semantic_arguments(invocation) -> dict:
             **{key: value for key, value in vars(invocation["args"]).items() if key not in paths}}
 
 
-def _accepted_pilot_source(request, invocation, contracts):
+def _accepted_pilot_source(launch_source, invocation, contracts):
+    """The unique reviewed contract naming the authenticated launch's commit/tree and container spec."""
     from prismaquant.joint_dispatch_pilot import PilotRefused
 
-    params = request.get("params", {})
-    snapshot = params.get("checkout_snapshot", {})
-    descriptor = snapshot.get("input") if isinstance(snapshot, Mapping) else None
-    if (not isinstance(snapshot, Mapping)
-            or snapshot.get("schema") != "prismaquant.prismabuild.pbrun_checkout_snapshot.v2"
-            or snapshot.get("subdirectory") != "." or params.get("cwd") != "."
-            or request.get("task", {}).get("working_directory") != "."):
-        raise PilotRefused("pilot sealed request has no supported checkout snapshot invocation")
-    inputs = request.get("inputs", [])
-    if not isinstance(inputs, list) or inputs.count(descriptor) != 1:
-        raise PilotRefused("pilot source snapshot is not exactly one declared PB input")
-    variables = request.get("environment", {}).get("variables", {})
-    if not isinstance(variables, Mapping):
-        raise PilotRefused("pilot sealed request carries no explicit environment")
-    # These two PB-created containment fields are execution-specific. They do
-    # not select a Python interpreter, import root or workload environment.
-    outer = {k: v for k, v in variables.items()
-             if k not in {"PRISMABUILD_CONTAINER_OWNER", "PRISMABUILD_CONTAINER_MARKER"}}
+    if (not isinstance(launch_source, Mapping)
+            or not isinstance(launch_source.get("commit"), str)
+            or not isinstance(launch_source.get("tree"), str)):
+        raise PilotRefused("pilot native result carries no authenticated source commit and tree")
+    source = {"commit": launch_source["commit"], "tree": launch_source["tree"]}
     matching = [(contract, reference) for contract, reference in contracts
-                if contract["snapshot"] == descriptor
-                and contract["snapshot_selection"] == dict(snapshot)
-                and contract["outer_environment"] == outer
+                if contract["source"] == source
                 and contract["container_spec"] == invocation["spec"]]
     if len(matching) != 1:
-        raise PilotRefused("pilot source snapshot, interpreter or environment has no unique independently reviewed contract")
-    return matching[0]
+        raise PilotRefused("pilot source commit/tree or container spec has no unique independently reviewed contract")
+    return source, matching[0][1]
 
 
 def _single_completion(payload: bytes) -> dict:
@@ -3332,7 +3302,7 @@ def _single_completion(payload: bytes) -> dict:
             found.append(parsed)
     if len(found) != 1:
         raise PilotRefused(
-            f"pilot PB result payload carries {len(found)} quantum completion "
+            f"pilot native result payload carries {len(found)} quantum completion "
             "announcements; exactly one is required")
     return found[0]
 
@@ -3444,17 +3414,18 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         help="producer counters certifying this code, replay "
                              "regime and row shape (repeatable); mandatory "
                              "before publishing more than one quantum")
-    parser.add_argument("--pilot-selector", action="append", nargs=3, default=[],
-                        metavar=("ACTION_KEY", "PUBLISHED_UNIX", "ATTEMPT"),
-                        help="the exact PB action generation each "
+    parser.add_argument("--pilot-selector", action="append", nargs=2, default=[],
+                        metavar=("SELECTION_PATH", "SELECTION_SHA256"),
+                        help="the exact native result selection (the "
+                             "native_results selection document) each "
                              "--pilot-counters document must answer for "
-                             "(repeatable); the counters' own action_key binds "
+                             "(repeatable); the counters' own job_id binds "
                              "them to one selector, and a missing, ambiguous or "
                              "duplicate selector refuses (PQ #1293)")
     parser.add_argument("--pilot-source-contract", action="append", nargs=2, default=[],
                         metavar=("PATH", "SHA256"),
                         help="independently reviewed versioned source and invocation contract; "
-                             "must bind the exact PB snapshot input and expected environments")
+                             "must bind the exact native source commit and tree and the container spec")
     parser.add_argument("--pilot-quantum-record", action="append", nargs=2, default=[],
                         metavar=("PATH", "SHA256"),
                         help="consumer-visible copy of the original pilot quantum wire; "

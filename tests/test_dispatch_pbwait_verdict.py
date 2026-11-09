@@ -28,9 +28,16 @@ def test_another_id_cannot_authorize_reuse(monkeypatch):
     result = dispatch.Gateway().status(SAVED)
     assert result["status"] == "unknown" and "identity differs" in result["query_error"]
 
-def test_native_pilot_authority_fails_closed_without_loading_pb():
+def test_native_pilot_authority_reads_only_a_saved_native_execution(tmp_path):
+    """A selection naming no saved native record refuses; the capture-command hold is gone."""
+    from prismaquant import native_results
     from prismaquant.joint_dispatch_pilot import PilotRefused
     gateway = dispatch.Gateway()
-    for method in (gateway.read_verified_result, gateway.bind_capture_command):
-        with pytest.raises(PilotRefused, match="native .* authority is unavailable"):
-            method(object())
+    assert not hasattr(gateway, "bind_capture_command")
+    publication = {"path": str(tmp_path / "publication.json"), "sha256": "b" * 64, "bytes": 1}
+    selection = {"schema": native_results.SELECTION_SCHEMA, "job_id": "f123", "record_dir": str(tmp_path / "missing"),
+                 "launch_sha256": "a" * 64, "publication": publication, "expected_launch": {},
+                 "producer_id": "x", "inputs": {}, "runtime": {}, "max_publication_bytes": 1,
+                 "max_evidence_bytes": 1, "max_artifact_bytes": 1}
+    with pytest.raises(PilotRefused, match="native pilot result refused"):
+        gateway.read_verified_result(dispatch.PilotSelector(selection))
