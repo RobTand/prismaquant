@@ -845,8 +845,13 @@ def _save_record(path: Path, record: dict) -> None:
     os.replace(temporary, path)
 
 
-def _cleanup_container(record: dict) -> None:
-    """Reap only the captured CID, keeping every error even when removal fails."""
+def _cleanup_container(record: dict, stop_seconds: int = 2) -> None:
+    """Reap only the captured CID, keeping every error even when removal fails.
+
+    ``stop_seconds`` is G01's 2 on a normal exit. An interruption passes 1: the native
+    job gives its payload about five seconds after SIGTERM before SIGKILL, and a
+    killed launcher cannot remove its scratch, so cleanup has to finish inside that grace.
+    """
     path = Path(record["cidfile"])
     record["removed"] = False
     try:
@@ -860,7 +865,7 @@ def _cleanup_container(record: dict) -> None:
         if record.get("cid") not in (None, cid):
             raise ValueError("owned cidfile replaced")
         record["cid"] = cid
-        for args in (["stop", "--time", "2", cid], ["rm", "--force", cid]):
+        for args in (["stop", "--time", str(stop_seconds), cid], ["rm", "--force", cid]):
             done = subprocess.run([PODMAN, *args], capture_output=True, text=True, timeout=15)
             if done.returncode:
                 record["cleanup_errors"].append(args[0] + ": " + done.stderr.strip())
@@ -943,14 +948,12 @@ def run_owned_container(spec: dict, command: list[str], *, cwd: str, image_id: s
             signal.signal(sig, signal.SIG_IGN)
         try:
             if attached is not None and attached.poll() is None:
-                attached.terminate()
-                try:
-                    attached.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    attached.kill()
-                    attached.wait(timeout=3)
+                # The container is reaped by CID below; waiting for the attach
+                # client to wind down would spend the native kill grace.
+                attached.kill()
+                attached.wait(timeout=2)
             if record["cid"] is not None or cidfile.exists():
-                _cleanup_container(record)
+                _cleanup_container(record, 1 if record["interrupted_signal"] else 2)
             else:
                 record["removed"] = True  # nothing was ever created
         except (OSError, subprocess.SubprocessError) as exc:

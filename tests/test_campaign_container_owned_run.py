@@ -118,6 +118,15 @@ def test_interruption_stops_and_removes_only_the_captured_cid(monkeypatch, tmp_p
     assert record["removed"] is True and not record["cleanup_errors"]
     touched = {c[-1] for c in calls(tmp_path) if c[0] in ("stop", "rm", "container")}
     assert touched == {CID}
+    stop = next(c for c in calls(tmp_path) if c[0] == "stop")
+    assert stop[:3] == ("stop", "--time", "1")  # inside the native kill grace
+
+
+def test_a_normal_exit_keeps_the_g01_stop_time(monkeypatch, tmp_path):
+    install(monkeypatch, runner, tmp_path)
+    launch(tmp_path)
+    stop = next(c for c in calls(tmp_path) if c[0] == "stop")
+    assert stop[:3] == ("stop", "--time", "2")
 
 
 def test_an_existing_record_or_cidfile_refuses_before_any_podman_call(monkeypatch, tmp_path):
