@@ -698,7 +698,7 @@ def test_a_spec_naming_a_retired_spool_setting_refuses(name):
     runner = importlib.import_module("tools.tessera_campaign_container")
     declared = spec()
     declared["env"][name] = "x"
-    with pytest.raises(RuntimeError, match="retired PB action/reader/spool context"):
+    with pytest.raises(RuntimeError, match="retired produced-output service context"):
         runner.validate_container(declared)
     assert not hasattr(runner, "produced_spool_environment")
     assert not hasattr(runner, "PRODUCED_SPOOL_ENV")
