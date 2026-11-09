@@ -42,6 +42,18 @@ from tools.tessera_campaign_namespace import (
 )
 
 
+#: The owner's rapid-iteration switch (Rob, 2026-09-19): when the submitting
+#: environment holds ``PRISMAQUANT_DEV_MODE=1``, the provenance gates inside
+#: the container -- the joint pass's source-proof, prepared-digest and
+#: checkpoint-lineage gates -- stamp and record instead of refusing. The
+#: submitter seals it into the spec env it hands this launcher, which is exactly
+#: how ``PRISMAQUANT_LAYER_READ_THREADS`` travels. The launcher itself neither
+#: requires nor interprets the value; the gates in ``prismaquant.dev_mode`` do.
+#: The name is held together with ``prismaquant.dev_mode.DEV_MODE_ENV`` by
+#: ``tests/test_dev_mode_provenance_gates.py``.
+DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE"
+
+
 #: The native staged-input names (``staged_launch.launch`` exports the same five). The
 #: manifest is immutable and published offline; the adapter forwards only what a
 #: ``retained_shared_phase`` manifest can honestly cross into a container.

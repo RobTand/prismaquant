@@ -211,14 +211,17 @@ def test_container_contract_mounts_only_readonly_manifest_dirs_and_translates_or
 
 def test_a_host_local_manifest_cannot_be_launched_into_the_container(tmp_path, monkeypatch):
     from g3_residency import container_contract
-    from staged_native_fixtures import bind, fixture
+    from staged_native_fixtures import fixture
     from prismaquant.staged_manifest import publish_staged_json
     _source, data, binding, _contract = fixture(tmp_path)
     local = {**data, "lifetime": {"mode": "host_local_cache", "root": str(tmp_path / "cache"),
                                   "owner_host": "dl380g10"}}
     path = tmp_path / "host-local.json"
     binding = {**binding, "path": str(path), "sha256": publish_staged_json(path, local)}
-    bind(monkeypatch, binding)
+    # Only the environment is set: the host-local lifetime cannot even build a resolver here.
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST", binding["path"])
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST_SHA256", binding["sha256"])
+    monkeypatch.setenv("PRISMAQUANT_READ_CONTRACT_PATH", binding["read_contract_path"])
     with pytest.raises(RuntimeError, match="host_local_cache.*cannot cross the container boundary"):
         container_contract()
 

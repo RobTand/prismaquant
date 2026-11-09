@@ -8,6 +8,14 @@ import g3_residency as R
 from staged_native_fixtures import bind, publish_inputs
 
 NAMES = {"source": b"source", "wire": b"wire", "teacher": b"teacher"}
+OPEN = []
+
+
+def new_reader():
+    """A reader the fixture releases: every window must be released before the resolver closes."""
+    reader = R.StagedReader()
+    OPEN.append(reader)
+    return reader
 
 
 @pytest.fixture
@@ -35,7 +43,10 @@ def staged(tmp_path, monkeypatch):
     yield files, binding
     try:
         R.close_reader()
+        for reader in OPEN:
+            reader.close()
     finally:
+        OPEN.clear()
         R._READER = None
         G3_MAPS.reset_residency_resolver_for_tests()
 
@@ -55,7 +66,7 @@ def test_the_reader_requires_a_bound_manifest(monkeypatch):
 
 def test_phase_holds_source_and_wire_until_phase_completion(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     assert reader.read(str(files["source"]), 0, 6) == b"source"
     assert len(reader.windows["layer-00"]) == 1 and reader.resolver._windows == 1
     assert reader.read(str(files["wire"]), 0, 4) == b"wire"
@@ -67,7 +78,7 @@ def test_phase_holds_source_and_wire_until_phase_completion(staged):
 
 def test_parallel_source_and_wire_share_one_phase_window(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     seen = []
     threads = [threading.Thread(target=lambda p=p, n=n: seen.append(reader.read(str(p), 0, n)))
                for p, n in ((files["source"], 6), (files["wire"], 4))]
@@ -82,7 +93,7 @@ def test_parallel_source_and_wire_share_one_phase_window(staged):
 
 def test_changed_object_bytes_raise_close_the_descriptor_and_never_read_origin(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     target = object_of(reader, files["source"])
     import os
     os.chmod(target, 0o644)
@@ -98,14 +109,14 @@ def test_changed_object_bytes_raise_close_the_descriptor_and_never_read_origin(s
 
 def test_a_range_that_is_not_a_declared_extent_raises(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     with pytest.raises(RuntimeError, match="differs from requested"):
         reader.read(str(files["source"]), 1, 2)
 
 
 def test_mapped_key_in_closed_phase_still_raises(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     reader.finish_phase("layer-00")
     with pytest.raises(RuntimeError, match="completed phase layer-00"):
         reader.read(str(files["source"]), 0, 6)
@@ -113,7 +124,7 @@ def test_mapped_key_in_closed_phase_still_raises(staged):
 
 
 def test_an_undeclared_path_reads_its_declared_origin(staged, tmp_path):
-    reader = R.StagedReader()
+    reader = new_reader()
     other = tmp_path / "other"
     other.write_bytes(b"other-bytes")
     assert reader.read(str(other), 0, 11) is None
@@ -123,7 +134,7 @@ def test_an_undeclared_path_reads_its_declared_origin(staged, tmp_path):
 
 def test_repeated_phase_use_acquires_each_phase_once_and_releases_it(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     assert reader.read(str(files["source"]), 0, 6) == b"source"
     reader.finish_phase("layer-00")
     assert reader.read(str(files["teacher"]), 0, 7) == b"teacher"
@@ -133,7 +144,7 @@ def test_repeated_phase_use_acquires_each_phase_once_and_releases_it(staged):
 
 def test_finish_phase_refuses_open_descriptors(staged):
     files, _ = staged
-    reader = R.StagedReader()
+    reader = new_reader()
     reader.read(str(files["source"]), 0, 6)
     window, = reader.windows["layer-00"]
     window["active"] = 1
