@@ -8,4 +8,4 @@ from test_dispatch_joint_quanta import _portable_spec, campaign  # noqa: F401
 
 
 def test_stage_b_accounting_gate_retains_requirements_and_refuses_native_launch(tmp_path, campaign):
-    gate.test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box(tmp_path, campaign)
+    gate.test_a_stage_b_row_retains_spill_and_cotangent_ceilings(tmp_path, campaign)
