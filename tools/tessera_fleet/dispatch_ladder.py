@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 from tools.tessera_fleet import common
-CHECKOUT = Path("/mnt/shared/prismabuild-fleet/checkout")
 SOURCE = "/mnt/shared/models/GLM-5.3-Flash-BF16"
 PYTHON = "/home/rob/dq-runs/venvs/prismaquant-cu130/bin/python"
 ENVIRONMENT = {
@@ -58,7 +57,7 @@ def main(argv=None) -> int:
     ap.add_argument("--workspace", type=Path,
                     help="new directory the sealed tree and the submission records "
                          "are written to; required unless --dry-run")
-    ap.add_argument("--checkout", type=Path, default=CHECKOUT,
+    ap.add_argument("--checkout", type=Path, required=True,
                     help="tree holding the tessera/ encoder sources")
     ap.add_argument("--source", default=SOURCE, help="source checkpoint every shard reads")
     ap.add_argument("--python", default=PYTHON, help="interpreter on the GPU boxes")

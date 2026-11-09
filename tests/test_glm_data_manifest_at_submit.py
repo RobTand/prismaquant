@@ -14,7 +14,7 @@ alone:
   declare ``seeds: 0`` while the row read 9.4-19 GB of wire at 41 MB/s
   (row-0065, 2026-09-12);
 * the campaign argv is byte-identical with and without the manifest.  The
-  manifest is a ``pbrun`` input; the campaign's own checkpoint identity is the
+  manifest is a submitter input; the campaign's own checkpoint identity is the
   argv, and a manifest that perturbed it would re-key work already committed.
 
 Nothing here touches the shared mount: the campaign, its captures, its shard
@@ -96,7 +96,7 @@ def _workspace(tmp_path):
 
 
 def _row(units, seed_dir, *, extra=()):
-    """The pbcampaign row ``plan`` writes, in the shape ``submit`` reads."""
+    """The campaign row ``plan`` writes, in the shape ``submit`` reads."""
 
     return {
         "argv": ["python3", "-u", "-m", "prismaquant.tessera_campaign",
@@ -219,7 +219,7 @@ def test_two_submissions_of_one_campaign_write_identical_manifest_bytes(
 ):
     """The manifest is sealed into the action key, so it must not drift.
 
-    ``pbrun`` ingests the manifest as a content-addressed input.  A hostname
+    The submitter ingests the manifest as a content-addressed input.  A hostname
     or a clock reading in ``produced_by`` would give the same row a new action
     key on every submit, and a finished row would stop being a cache hit --
     the opposite of what re-running ``submit`` is for.

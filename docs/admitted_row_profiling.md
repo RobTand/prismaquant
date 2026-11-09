@@ -1,7 +1,7 @@
 # Admission-bound row profiling
 
 The #1899 instrumentation owns one observer and one unchanged row inside an
-ordinary admitted PrismaBuild action. It does not submit work or schedule it.
+ordinary admitted Flux job. It does not submit work or schedule it.
 
 The entrypoint is `python -m tools.pq_admitted_profile --launch ROW.json
 --observations NEW_DIR --profile-local NEW_HOST_LOCAL_DIR`. `ROW.json` stores
@@ -31,16 +31,16 @@ publication contract in [Admitted row profiling](campaign_row_profiling.md).
 No wire, price, journal or encoder identity is changed by telemetry output.
 
 Historical #1750 preparation described a one-A/one-B replacement using
-`--tag gb10`, priority -20, `pbrun --detach` from dl380g10 and no host pin,
+`--tag gb10`, priority -20, a detached submission from dl380g10 and no host pin,
 isolation or measurement mode. Those directions and permissions are superseded,
 not current instructions or evidence that a matching A/B measurement occurred.
 #1750 remains held pending accepted #1942 merge and renewed Astra assignment
-with explicit window/inputs and valid PB admission. Retain PB-assigned affinity
+with explicit window/inputs and valid Flux admission. Retain the admitted job's CPU affinity
 and the newly authorized aggregate resource/thread/deadline contract; this
 runbook authorizes no run. Any future authorized comparison must inspect canonical
 terminal/log/CAS, sampled profile, complete both-box Netdata series and artifacts
 before B. An observer failure stops the experiment: no retry or extra repeat
-without renewed authorization. GPU work remains inside PrismaBuild; this
+without renewed authorization. GPU work remains inside admitted Flux jobs; this
 entrypoint is not a local GPU bypass.
 
 CPU mocked lifecycle tests qualify readiness/ownership/refusal, not actual GPU

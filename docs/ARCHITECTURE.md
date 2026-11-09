@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, PB-zero closure in live PrismaQuant source (the dependency removal is the slice's final commit), slice5.
+Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
+nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and
+the v1 config is archived under `experiments/measurements/`. Recorded CAS receipts are checked offline by `recorded_cas_receipt`. The `staged_lease` doorways are deleted; `tools/build_stagea_seed_package.py` refuses without a native data-manifest validator. `gate_evidence` has no pbtest `inventory` kind.
+A ban over live source (text mechanisms plus an AST import/dynamic-load scan, explicit history/definition exclusions, and a shrink-only 4C-14 file list) replaces the PB boundary allowlist and the import-leak guard.
+No numerical, GPU, serving or production qualification follows.
+
 As of: 2026-11-09, test-runtime closure, slice4f.
 Source: `tests/conftest.py`, `tests/test_own_process_isolation.py`, `tools/bazel/runtime.py`, based on `5373e63da`. The test runtime no longer
 carries PrismaBuild: `tests/fleet_sdk.py` and `tests/prismabuild_imports.py` are deleted, and `tests/conftest.py` has no PB import, name or control

@@ -8,14 +8,14 @@ PB action ``6f4f058751e6`` (layer 44 of GLM-5.3-Flash, regime (d), sparklina,
     alignment) but its ceiling is 196494753792
 
 The ceiling was the spec's hand-set ``PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES``
-(183 GiB), and pbrun charged the same literal to the box's ``spool_gb``. The
+(183 GiB), and the submitter charged the same literal to the box's ``spool_gb``. The
 payload alone reached it; the direct-I/O slot padding that #1060 added to the
 file's reservation was never in it. The need is known before dispatch: it is
 ``spill_geometry``'s payload plus ``max_parts`` slots of padding on the
 spill's direct-I/O grid, the arithmetic ``StageBSpillScratch`` reserves.
 
 The record builder seals that need beside the read plan, and the dispatcher
-sets the row's ceiling from it. PrismaBuild's ``spool_gb`` charge is that
+sets the row's ceiling from it. The submitter's ``spool_gb`` charge is that
 ceiling rounded up to whole GiB, so the demand and the ceiling are one
 number, and both cover the need.
 """

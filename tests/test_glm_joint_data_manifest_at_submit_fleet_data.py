@@ -2,7 +2,7 @@
 
 This test walks about 36k checkpoint shards and a campaign tree that no
 PrismaBuild action declares, so it carries the ``fleet_data`` mark. It lives
-in its own file because ``pbtest`` decides fleet data per file: a file that
+in its own file because the sharded runner decides fleet data per file: a file that
 marks any test needs a ``--data-manifest``, and the merge queue leaves such
 files out. Keeping the mark here lets the hermetic submit tests in
 ``test_glm_joint_data_manifest_at_submit.py`` run in the queue (PQ #1954).

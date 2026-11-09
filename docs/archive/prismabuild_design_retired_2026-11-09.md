@@ -1,3 +1,5 @@
+> **Archived 2026-11-09.** Historical design record of the retired execution system; it does not describe current behaviour.
+
 # PrismaBuild — distributed campaign execution (spec, deferred)
 
 > **⚠ SUPERSEDED as of 2026-08-31 — PrismaBuild moved out of this repository.**

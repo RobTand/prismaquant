@@ -3,7 +3,7 @@
 Every change reaches `main` through Mergify's merge queue. The configuration
 is [`.mergify.yml`](../.mergify.yml). The gate workflow supplies `pr-gate` on
 ordinary PRs and `gate` on temporary batch drafts. Development tests run
-through PrismaBuild; cite their action keys and results in the PR body.
+as admitted Flux jobs; cite their job IDs and results in the PR body.
 
 ## Before you queue
 
@@ -35,7 +35,7 @@ issue rule, so keep required status checks out of classic protection.
 
 TL3 uses branches named `prismaquant-<issue>-tl3-<node>` and starts each
 pull request body with `Refs #<issue>.`, so `linked issue` passes as it
-does for every pull request. TL3 tests each change through PrismaBuild and
+does for every pull request. TL3 tests each change in admitted jobs and
 reviews it, then posts its `TL3 approval` check on the reviewed head and adds
 the `tl3-queue` label. That pair queues the pull request in the default queue
 in place of `queue` and `pr-gate`; the issue-link check stays required. TL3

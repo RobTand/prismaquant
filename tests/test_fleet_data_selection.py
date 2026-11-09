@@ -3,7 +3,7 @@
 A test that reads fleet-local campaign data or live PrismaBuild state that
 no PB action declares is marked ``fleet_data``. ``tests/conftest.py`` skips
 it by default with a reason that names the opt-in, and runs it when ``-m``
-names the mark (the switch ``pbtest --pytest-args`` accepts) or when
+names the mark (the switch the runner's pytest arguments accept) or when
 ``PQ_FLEET_DATA_TESTS=1``. A session of nothing but such tests exits 0, under
 xdist too. These tests drive real pytest sessions over
 ``tests/fleet_data_samples``.
@@ -64,7 +64,7 @@ def test_fleet_data_runs_when_asked_for(tmp_path, extra, environ):
 
 
 #: The decorator this test looks for, spelled as its dotted parts.
-#: ``pbtest`` decides fleet data per file by a textual search for the mark,
+#: the sharded runner decides fleet data per file by a textual search for the mark,
 #: so writing the dotted name out here would make it leave this hermetic
 #: file out of every unmarked run (PQ #1954).
 FLEET_DATA_DECORATOR = ["pytest", "mark", "fleet_data"]
@@ -108,7 +108,7 @@ def test_the_marked_real_data_tests_carry_the_mark():
         tree_tests = _test_names(name)
         assert tree_tests == expected, (
             f"{name} holds unmarked tests {sorted(tree_tests - expected)}: "
-            "pbtest leaves the whole file out of an unmarked run")
+            "the runner leaves the whole file out of an unmarked run")
     for name in SPLIT_FROM:
         assert _marked_tests(name) == set(), name
 

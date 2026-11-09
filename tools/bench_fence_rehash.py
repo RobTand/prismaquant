@@ -21,7 +21,7 @@ read. It reports the stream's ``peak_workers`` and its consumer busy and wait
 seconds, which show how many reads the engine ran beside a working consumer
 (PQ #1533).
 
-Run it through PrismaBuild (``pbrun --profile sample``) on each code version;
+Run it through an admitted native job on each code version;
 it builds no threads of its own.
 """
 from __future__ import annotations

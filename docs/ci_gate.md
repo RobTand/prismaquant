@@ -116,7 +116,7 @@ All other tests retain per-test limits.
 The default, node/file exception lists, and each exception can only decrease against the PR
 base. An absent base policy permits initial setup; an unavailable base commit
 produces no verdict. Exceptions are `ceil(2 * largest hosted time)` and retain
-hosted run IDs. PrismaBuild inventory times do not set hosted limits.
+hosted run IDs. Development-run times do not set hosted limits.
 
 The initial policy uses fourteen calibration attempts: 41275735452/1,
 41277228478/1, 41278311643/1, 41278869921/1 and /2, 41280260494/2,
@@ -208,39 +208,29 @@ python tools/ci/gate_partition.py shard --files-from files.txt \
   --output-files assigned.txt --output-assignment assignment.json
 ```
 
-Agents submit development tests through PrismaBuild from a committed, detached
-worktree, at priority -10. The interpreter must match `tools/resolve_tessera_dev_pin.py`.
-For example, submit the gate contracts with the published client:
+Agents submit development tests through admitted Flux jobs from a committed, detached
+worktree. The interpreter must match `tools/resolve_tessera_dev_pin.py`.
+Submit the gate contracts as admitted Flux jobs (see the flux skill); the file list is:
 
-```sh
-python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
-  --checkout "$CLEAN_WORKTREE" --python "$PINNED_PYTHON" \
-  --shards 6 --workers-per-shard 1 --threads-per-shard 1 \
-  --cpus-per-shard 1 --mem-gb 1 --priority -10 \
-  --json "$REPORT" tests/test_gate_actions.py tests/test_gate_budget.py \
-  tests/test_gate_partition.py tests/test_gate_run.py tests/test_gate_select.py \
-  tests/test_gate_workflow.py tests/test_gate_node_partition.py tests/test_gate_evidence.py
+```text
+tests/test_gate_actions.py tests/test_gate_budget.py tests/test_gate_partition.py
+tests/test_gate_run.py tests/test_gate_select.py tests/test_gate_workflow.py
+tests/test_gate_node_partition.py tests/test_gate_evidence.py
 ```
 
-Inside an admitted action or the hosted job, run the assignment directly:
+Inside an admitted job or the hosted job, run the assignment directly:
 
 ```sh
 python tools/ci/gate_run.py --plan plan.json --assignment assignment.json \
   --workers 4 --result result.json --junitxml junit.xml
 ```
 
-Check the terminal record, logs, and CAS receipt. Failed actions normally have
-terminal evidence without a success receipt. A submission acknowledgement is not
+Check the terminal record, logs, and CAS receipt. Failed jobs normally have
+terminal evidence without a result publication. A submission acknowledgement is not
 a pass. Six fleet-data files require a declared manifest and are recorded as
 excluded from the undeclared-data development inventory; CUDA bodies remain skipped.
 
 ## Reduce qualification evidence
-
-`gate_evidence.py inventory` reads the three `pbtest --json` reports. Export
-public `pb_action` MCP responses as a JSON object keyed by action key, then pass
-that file with `--action-evidence`. The reducer records aggregate cgroup memory
-peaks only from complete responses. It does not read PrismaBuild's internal
-queue or receipt schemas. Missing telemetry remains unknown.
 
 `gate_evidence.py hosted` reads downloaded REST run metadata, job metadata and
 gate artifacts. The final aggregate's effective shard artifacts take precedence
@@ -348,7 +338,7 @@ retains the parent process's native-override refusal guard.
 The shell-gate fixture in `tests/test_run_pipeline_gates_execute.py` owns a unique
 scratch directory per worker. Finishing one worker cannot delete another worker's
 active model. Its controlled subprocess environment also bounds native threads.
-Both regressions failed through PrismaBuild before the fixture repair.
+Both regressions failed in admitted jobs before the fixture repair.
 Existing PR heads that
 predate the gate tooling fail with a message to merge `main` and push again.
 

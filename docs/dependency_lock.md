@@ -27,7 +27,7 @@ uv sync --locked --extra test --dry-run --no-install-project \
   --python "$PY" --no-python-downloads --no-progress
 ```
 
-Run these checks through PrismaBuild, obeying its admission rules and any active
+Run these checks as admitted Flux jobs, obeying their admission rules and any active
 campaign window. Verification must leave the lock byte-identical. A dry-run
 checks the declared test-extra install plan; it is **not** an actual dependency
 installation, GPU validation or a serving-compatibility measurement.
@@ -76,13 +76,13 @@ evidence and the empty forbidden-import list. Canonical refusal messages remain
 `ValueError` messages in the parent. Failed invocations clear previous evidence.
 The publication fixture restores the consumer's producer binding on teardown.
 This test dependency does not alter production admission, the serving pin,
-format menus, PrismaBuild or the installed serving package.
+format menus or the installed serving package.
 
 `tests/test_rung_allowability_producer.py` uses controlled bytes and transport
 failures to check provisioning and isolation. Those controls establish no
 canonical admission qualification. The operations follow-up must run the actual
 declared source through the composed consumer tests on the production-pinned
-interpreter, then repeat through the normal PrismaBuild runner without injected
+interpreter, then repeat through an ordinary admitted job without injected
 producer environment. For the direct composed run, with `PY` naming that
 interpreter:
 

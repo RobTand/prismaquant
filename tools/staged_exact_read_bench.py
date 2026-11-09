@@ -7,7 +7,7 @@ bytes, in one admitted action, on one box, alternating the arms so a drift in
 the tier cannot land on one of them.
 
 Run it as a PrismaBuild action whose data manifest names the entries it reads
-(``pbrun --data-manifest ... --residency stage``); the action's injected
+(a staged-residency launch); the action's injected
 reader context is what the strict tier policy leases through. The driver:
 
 1. waits until every declared entry has landed on the tier, and lists the
@@ -53,7 +53,7 @@ import time
 from pathlib import Path
 
 MARKER = "STAGED-EXACT-READ-BENCH "
-MOUNTS = ("/mnt/shared", "/stage/prewarm", "/ram/prewarm")
+MOUNTS = ("/mnt/shared", "/stage/staged", "/ram/staged")
 OPS = ("READ", "LOOKUP", "GETATTR", "ACCESS", "OPEN", "CLOSE", "WRITE",
        "COMMIT", "READDIR", "READDIRPLUS", "LOCK", "LOCKU", "SETATTR", "RENAME",
        "REMOVE", "CREATE", "OPEN_NOATTR", "DELEGRETURN", "TEST_STATEID",
@@ -907,8 +907,6 @@ def run_child(args, mode: str, *, tree: str, sdk_root: str | None, out: Path,
     env.update(arm_env or {})
     env["PYTHONPATH"] = tree + (os.pathsep + env["PYTHONPATH"]
                                 if env.get("PYTHONPATH") else "")
-    if sdk_root:
-        env["PRISMABUILD_READER_HELPER_ROOT"] = sdk_root
     command = [sys.executable, str(Path(__file__).resolve()), "--child", mode,
                *args.child_argv, *extra]
     if profile:
@@ -972,8 +970,7 @@ def driver_main(args) -> int:
         matched[0]["env"][key] = value
     own_tree = str(Path(__file__).resolve().parents[1])
     report = {"schema": "prismaquant.staged_exact_read_bench.v1",
-              "host": os.uname().nodename, "action_key": os.environ.get(
-                  "PRISMABUILD_ACTION_KEY"), "arms": arms, "argv": sys.argv,
+              "host": os.uname().nodename, "arms": arms, "argv": sys.argv,
               "runs": []}
     # Local workloads read nothing staged, so they wait for no landing.
     staged = [w for arm in arms for w in arm["workloads"] if w not in LOCAL_WORKLOADS]

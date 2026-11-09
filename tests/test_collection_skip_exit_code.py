@@ -1,6 +1,6 @@
 """A shard whose only file skips at collection exits 0, not 5 (PQ #915).
 
-``pbtest`` gives every shard its own pytest over its own files, so pytest's
+the sharded runner gives every shard its own pytest over its own files, so pytest's
 ``EXIT_NO_TESTS_COLLECTED`` is the verdict the fleet reads. A module that
 skips at collection time -- ``pytest.importorskip`` at module scope, directly
 or through an imported sibling test module -- collects nothing, so the shard

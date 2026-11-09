@@ -93,7 +93,7 @@ class _StubProducer(types.SimpleNamespace):
 
 def _submit(tmp_path: Path, monkeypatch, contract: dict, *, gate: bool = True,
             inner=INNER) -> tuple[list, list]:
-    """Run ``submit-export --dry-run``; return (pbrun argv, manifest argv)."""
+    """Run ``submit-export --dry-run``; return (submitter argv, manifest argv)."""
     run = tmp_path / ("gated" if gate else "ungated")
     checkout = _checkout(run / "tessera", contract)
     workspace = run / "workspace"

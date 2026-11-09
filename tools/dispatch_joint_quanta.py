@@ -468,7 +468,7 @@ def _stage_manifest_binding(adjoint_manifest: Path, campaign: Mapping) -> dict:
     * ``phases``: the read-phase names in manifest order -- v1 from
       ``annotations.phases``, v2 from ``read_plan.phases`` (v2 forbids
       ``annotations.phases``; ``prismabuild.core`` holds that rule, this
-      reader mirrors it). pbrun's linear rule requires every read name
+      reader mirrors it). the submitter's linear rule requires every read name
       declared, in order; the caller declares exactly this list.
 
     Anything else -- an unreadable file, a non-manifest, a phase table that
@@ -639,7 +639,7 @@ def _executable_manifest_digest(record: dict, *, output_root: Path) -> str:
 
     Mirrors :func:`_slice_manifest_digest` for the post-capture executable
     readset: the row's ``executable_readset.manifest_sha256`` names the one
-    manifest pbrun stages for this row, and its wire bytes must hash to the
+    manifest the submitter stages for this row, and its wire bytes must hash to the
     sealed digest; a drifted or absent manifest refuses before anything
     publishes. Records without the block keep the legacy slice path.
     """
@@ -918,7 +918,7 @@ def _executable_prepared_input(record: dict, *,
 def _slice_manifest_digest(record: dict, *, output_root: Path) -> str:
     """The sealed slice digest a quantum row actually binds.
 
-    The row's ``read_set.manifest_sha256`` names the slice manifest pbrun
+    The row's ``read_set.manifest_sha256`` names the slice manifest the submitter
     stages for this row -- not the campaign parent the record also carries.
     The file is read where the row reads it (relative manifests resolve
     against the output root, as the row builder does) and its wire bytes

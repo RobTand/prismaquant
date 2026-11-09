@@ -1,0 +1,44 @@
+# 4C-14 files that still carry a PrismaBuild mechanism (migration row 4C-14: PORT/ARCHIVE/DELETE).
+# Shrink-only: tests/test_prismabuild_ban.py fails on an entry whose file is gone or no longer matches.
+# Never add a line. D5: glm_native_moe_launch, qualify_native_local_handoff and pact_checker_receipt_acceptance
+# fail closed at import/call; they are not runnable until their 4C-14 disposition lands.
+experiments/README-glm-arc-prewarm.md
+experiments/alloc_lead_asd/README.md
+experiments/alloc_lead_asd/recipes/container.json
+experiments/alloc_lead_asd/recipes/glm-container.json
+experiments/bench_source_hash_threads.py
+experiments/build_kda_kernel_qualification.py
+experiments/glm_arc_prewarm.py
+experiments/glm_native_moe_acquire.py
+experiments/glm_native_moe_launch.py
+experiments/glm_pool_read_ceiling.py
+experiments/joint_projection_reduce_run.sh
+experiments/lfm_joint_microbatch_diagnose.sh
+experiments/lfm_joint_microbatch_source.sh
+experiments/lfm_mixed_preparation.py
+experiments/lfm_mixed_serving.py
+experiments/lfm_packed_joint_screen.sh
+experiments/lfm_stream_cpu_pytest.sh
+experiments/pact_checker_receipt_acceptance.py
+experiments/pq183_lfm_bound.py
+experiments/pq237_joint_aura_streamed.md
+experiments/pq322_anchor_file_io_ab.sh
+experiments/pq322_anchor_verify_ab.sh
+experiments/pq322_anchor_wire_qualification.sh
+experiments/pq322_joint_anchor_run.sh
+experiments/pq329_native_receipt_consume.sh
+experiments/pq87_paired_validation.py
+experiments/pq87_physical_ab.py
+experiments/pq_profile_cpu_checks.sh
+experiments/qdq_constant_residency_run.sh
+experiments/qualify_native_local_handoff.py
+experiments/reseal_identity_proof.py
+tests/test_container_image_admission.py
+tests/test_lfm_mixed_serving.py
+tests/test_physical_host_foreign_container_audit.py
+tests/test_pq87_paired_validation.py
+tests/test_prepare_stageb_after_capture_1098.py
+tools/build_t4_recovery_request.py
+tools/collect_class_evidence.py
+tools/prepare_stageb_after_capture.sh
+tools/submit_quantum_cache_row.py

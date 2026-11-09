@@ -31,7 +31,7 @@ def main():
                         help='verified per-cell qualification JSON, reused in place (repeatable)')
     parser.add_argument('--prior-child', nargs=2, action='append', default=[], metavar=('SHA256', 'PARENT_KEY'),
                         help='CAS child result manifest with pair task/output IDs (repeatable)')
-    parser.add_argument('--cas-root', default='/mnt/shared/prismabuild-fleet/cas',
+    parser.add_argument('--cas-root', required=True,
                         help='CAS containing prior child manifests in blobs/<prefix>/<digest>')
     args = parser.parse_args()
     root = Path(args.root).resolve()

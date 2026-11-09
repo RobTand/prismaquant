@@ -4,13 +4,13 @@ PrismaBuild #714: a GB10-class action was claimed by the Spark that did *not*
 hold its pinned Docker image, and died inside ``tools.tessera_campaign_container``
 after the attempt was spent.  The image was sealed inside the
 ``--spec`` JSON and nowhere PB could read it before claiming.  The paired PB
-change adds ``pbrun --container-image`` and the campaign row field
+change adds the submitter's ``--container-image`` and the campaign row field
 ``container_images``; this file gates the PrismaQuant callers that must fill
 them:
 
 * the joint dispatcher's stage-A and quantum argvs declare exactly the image
   of the same parsed spec they serialize into ``--spec`` (one parse, no
-  second-read race), as a pbrun option before the payload separator;
+  second-read race), as a submitter option before the payload separator;
 * generated campaign rows carry ``container_images`` from the *resolved*
   row-class container, so a class override declares its own image;
 * a spec whose image is supplied by a validated ``container.archive``
@@ -325,7 +325,7 @@ def test_a_malformed_archive_row_is_refused_not_undeclared():
 def _direct_args(tmp_path: Path, container: dict) -> types.SimpleNamespace:
     spec = _write_spec(tmp_path / "spec.json", container)
     return types.SimpleNamespace(
-        spec=spec, pbrun="/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py",
+        spec=spec, pbrun="submitter",
         demand="gpu=1,mem_gb=104", cpus=6, tag="sparky", priority=-10,
         timeout_s=None, container_arg=None, residency=None, head_grace_s=1800)
 

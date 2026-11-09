@@ -119,7 +119,7 @@ identities. These outputs are diagnostic research, refused by shipping allocatio
 they do not turn an old capture into a new context or establish held-out quality.
 Probe-count forecasts from a small retained pilot are conditional planning numbers,
 not population-variance or served-KL precision guarantees. CPU/GPU execution and
-staged NVMe/RAM consumption use PrismaBuild admission and byte-integrity checks.
+staged NVMe/RAM consumption use Flux admission and byte-integrity checks.
 In default dev mode, recorded-versus-running identity or provenance differences
 are stamped and continue under `dev_mode.seal_check`; no re-seal or cache adoption
 is required. Certified mode remains explicit.

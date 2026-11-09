@@ -103,7 +103,7 @@ def test_an_unpinned_spec_binds_under_the_scratch_root(tmp_path, campaign):
     sealed = _sealed(argv)
     assert "overlay_cache_admission" not in sealed
     assert sealed["env"] == env
-    # The launcher, given the scratch pair pbrun seals, binds all five
+    # The launcher, given the scratch pair the submitter seals, binds all five
     # under the spill root.
     runner = importlib.import_module("tools.tessera_campaign_container")
     environ = dict(item.split("=", 1) for item in _outer_env(argv))

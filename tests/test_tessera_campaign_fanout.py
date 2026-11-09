@@ -491,29 +491,6 @@ def test_merge_refuses_a_journal_that_names_a_shard_it_does_not_have(tmp_path):
                                   tmp_path / "cost.anchors.json")
 
 
-def test_row_table_keeps_a_row_whose_exit_status_holds_a_space():
-    """``rc`` renders ``1 (action 137)`` when launcher and action disagree.
-
-    That is the failing row, and a whitespace split drops it -- leaving a
-    receipts file that reports only the rows that worked.
-    """
-    import dispatch_tessera_campaign as dispatch
-
-    table = (
-        "key           status    transport  job    host    elapsed  rc               receipt  note\n"
-        "641c9bfbedd8  executed  pull       j-1    sparky  120.0s   0                cas/a    -\n"
-        "9bf8f58d174f  executed  pull       j-2    lina    12.0s    1 (action 137)   cas/b    killed\n"
-        "6fea9fb2131e  cache_hit pull       -      -       -        -                cas/c    -\n"
-    )
-    from prismaquant.pbwait_table import parse_pbwait_table
-    rows = parse_pbwait_table(table)
-    assert [row["key"] for row in rows] == [
-        "641c9bfbedd8", "9bf8f58d174f", "6fea9fb2131e"]
-    assert rows[1]["rc"] == "1 (action 137)"
-    assert rows[1]["host"] == "lina"
-    assert rows[2]["rc"] == "-"
-
-
 def test_receipts_accept_a_memoized_row_and_refuse_a_failed_campaign(tmp_path):
     """A re-submitted row reports no launcher status of its own.
 

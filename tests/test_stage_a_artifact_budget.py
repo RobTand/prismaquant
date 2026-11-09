@@ -34,7 +34,7 @@ def _release_process_state_this_file_installs():
     A test that calls ``main`` in-process does not, so the policy it turned
     on stayed on for every file pytest ran afterwards in the same process,
     and every bulk read there refused with no residency map to serve from.
-    Two files were seen failing behind it, in the order pbtest happened to
+    Two files were seen failing behind it, in the order the runner happened to
     group them.
 
     The ``tools/`` path is restored by monkeypatch. A dispatcher already
@@ -560,7 +560,7 @@ def test_this_file_leaves_no_process_global_state_behind(
     this runs, the two ``joint_cost_stage_a.main`` calls above have already
     activated the staged-tier policy process-wide. Before the teardown
     fixture at the top of this file, this assertion failed here instead of
-    failing -- as it did on main -- in whichever unrelated file pbtest
+    failing -- as it did on main -- in whichever unrelated file the runner
     happened to group next in the same process.
 
     ``sys.path`` is covered by ``monkeypatch.syspath_prepend`` at the three

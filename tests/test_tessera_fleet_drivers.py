@@ -1,13 +1,9 @@
-"""The Tessera fleet drivers moved from PrismaBuild (RobTand/prismabuild#1076).
+"""The Tessera fleet drivers: whole-model dispatcher, per-shard dispatchers and status screen.
 
-PrismaBuild names no client, so its whole-model Tessera dispatcher, the two
-per-shard dispatchers and the status screen live in ``tools/tessera_fleet``.
-They reach PrismaBuild only through the published ``pbcampaign.py`` and
-``pbwait.py`` commands, which ``tests/test_prismabuild_boundary.py`` holds
-them to. These tests cover what the move kept from the PrismaBuild suite
-(partitioning, input verification, the assembly barrier, the shard domain)
-and what the rewire changed (named preparation hosts, results read from the
-worker's own records, one sealed workspace per dispatch).
+They live in ``tools/tessera_fleet`` and reach the execution system only through its published
+submit and wait commands. These tests cover partitioning, input verification, the assembly barrier,
+the shard domain, named preparation hosts, results read from the worker's own records and one
+sealed workspace per dispatch.
 """
 from __future__ import annotations
 
@@ -142,7 +138,7 @@ def test_prepare_records_its_identity_under_the_host_it_was_pinned_to(tmp_path, 
         'source_identity': {'tensors': {'model.layers.0.w': 'weights'}}, 'count': 1}
 
 
-# --- the whole-model dispatcher, rewired onto pbcampaign ----------------------
+# --- the whole-model dispatcher, rewired onto the campaign submitter ----------------------
 
 def _campaign(monkeypatch, *, statuses, returncode=0):
     calls = []

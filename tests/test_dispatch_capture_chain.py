@@ -1,7 +1,7 @@
 """The capture chain dispatcher (PQ #1885).
 
 The rows a sealed chain submits are real ``tessera_campaign`` rows, which
-need a model and a GPU; here a fake ``pbcampaign`` prints the detach line,
+need a model and a GPU; here a fake submitter prints the detach line,
 the test writes each row's PrismaBuild ending, and the chain fixture of
 ``test_capture_layer_chain`` does what the row would have done. So every
 output the dispatcher checks before submitting a successor is one the

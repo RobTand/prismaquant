@@ -37,7 +37,7 @@ because it inventories the whole graph. New tests do not inherit exceptions.
 ## Shared core
 
 `tools/ci/graph_impact.py` is the stdlib-only core shared byte-identically by
-PrismaQuant, PrismaBuild, Tessera and TrustLadder. Its inputs are opaque test
+PrismaQuant, Tessera and TrustLadder. Its inputs are opaque test
 IDs mapped to sets of source files, directed edges, optional source line
 counts, and the exact adapter metadata `test_packages`,
 `base_package_max_reach`, and `edge_diff`. The typed diff contains `added` and

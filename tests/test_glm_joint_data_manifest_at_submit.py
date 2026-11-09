@@ -23,7 +23,7 @@ and the exclusions that make the order true:
 * a joint pass submitted before the campaign merge published the checkpoint's
   unit shards is refused with the directory named, not submitted blind;
 * the submit command puts ``--data-manifest`` before ``--detach`` and mirrors
-  the chain's demand, because a ``pbrun`` option after the separator is an
+  the chain's demand, because a submitter option after the separator is an
   argument of the action instead.
 
 The tests exercise metadata-only paths without Torch. The producer imports
@@ -277,7 +277,7 @@ def scratch(request):
     """A per-test directory that is never under ``/tmp``.
 
     ``pytest``'s own ``tmp_path`` lands wherever ``TMPDIR`` points, and
-    ``pbtest`` refuses a ``--basetemp`` override, so the one place a fleet
+    the sharded runner refuses a ``--basetemp`` override, so the one place a fleet
     shard can be told to write is a path this module chooses. /tmp was cleared
     by an OOM in 2026-04 and took a set of artifacts with it; nothing here
     writes there.
@@ -1088,7 +1088,7 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     command = next(line for line in printed.splitlines()
                    if line.startswith("[dry-run] "))[len("[dry-run] "):]
     argv = command.split()
-    # ``--data-manifest`` is an option of pbrun. After the separator it would
+    # ``--data-manifest`` is an option of the submitter. After the separator it would
     # be an argument of the action, and the fleet would warm nothing.
     assert argv.index("--data-manifest") < argv.index("--detach")
     assert argv.index("--detach") < argv.index("--")
@@ -1540,7 +1540,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
 def test_the_manifest_of_a_pass_is_byte_identical_across_two_builds(
     scratch, shared_mount,
 ):
-    """``pbrun`` seals the manifest's digest into the action key.
+    """The submitter seals the manifest's digest into the action key.
 
     A field that drifted between two submissions of the same pass would give
     the finished pass a new key and re-run it, which is the opposite of what

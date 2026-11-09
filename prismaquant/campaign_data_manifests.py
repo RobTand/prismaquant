@@ -660,7 +660,7 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
                              size_source: str) -> dict:
     """``produced_by`` that two submissions of one campaign agree on, byte for byte.
 
-    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    The submitter ingests the manifest as a content-addressed input and seals its
     digest into the action key, so a field that changes between runs -- a
     hostname, a clock reading -- gives the same row a new key on every submit.
     That is not a cosmetic loss: a finished row stops being a cache hit and is
@@ -669,7 +669,7 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
 
     The producer is named by the digest of its own source, not by ``git
     rev-parse HEAD``.  ``plan`` publishes these bytes and runs as a
-    PrismaBuild action, where ``HEAD`` is pbrun's snapshot commit rather than
+    sealed action, where ``HEAD`` is the snapshot commit rather than
     the submitter's, and inside a container, where git exits 128 on a checkout
     another uid owns and ``_producer_commit`` reads that as ``"unknown"``.  A
     host-side ``submit`` re-deriving the same row would then write a different
@@ -2416,7 +2416,7 @@ def deterministic_entry_provenance(entry_point: str, *, plan: str,
                                    plan_sha256: str, workspace: str) -> dict:
     """``produced_by`` for a post-campaign pass, with nothing run-specific in it.
 
-    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    The submitter ingests the manifest as a content-addressed input and seals its
     digest into the action key, so a hostname or a clock reading here would
     give the same pass a new key on every submit and turn a finished action
     into a re-run. Every field is a property of the tree, the plan and the
@@ -2436,7 +2436,7 @@ def publish_row_manifests(campaign_manifest, workspace, *, out_dir, out_manifest
     src = campaign_manifest
     rows = json.load(open(src))
     if not isinstance(rows, list):
-        raise ReadsetRefused(f"{src}: expected a list of pbcampaign rows")
+        raise ReadsetRefused(f"{src}: expected a list of campaign rows")
     src_sha = file_sha256hex(src)
 
     sizes = None if stat else load_sizes(sizes_cache)

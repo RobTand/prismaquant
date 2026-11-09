@@ -417,10 +417,10 @@ def test_the_read_shape_is_the_mounts_own_two_numbers(tmp_path, monkeypatch):
     """nconnect streams, rsize chunks -- neither one a constant of ours."""
     _use_table(monkeypatch, _mount_table(tmp_path, [
         ('/dev/root', '/', 'ext4', 'rw'),
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS),
     ]))
     assert residency_shard_reader._read_shape(
-        '/stage/prewarm/model-00001.safetensors.ranges/0-100') == (16, 1048576)
+        '/stage/staged/model-00001.safetensors.ranges/0-100') == (16, 1048576)
 
 
 def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, monkeypatch):
@@ -428,14 +428,14 @@ def test_the_nfs_mount_on_top_of_its_autofs_trigger_is_the_one_read(tmp_path, mo
 
     The first sweep of this change measured nothing because the autofs row
     answered first and publishes no transport count. The table below is the
-    one /stage/prewarm actually has.
+    one /stage/staged actually has.
     """
     _use_table(monkeypatch, _mount_table(tmp_path, [
-        ('systemd-1', '/stage/prewarm', 'autofs',
+        ('systemd-1', '/stage/staged', 'autofs',
          'rw,relatime,fd=97,pgrp=1,timeout=0,minproto=5,maxproto=5,direct'),
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS),
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS),
     ]))
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (16, 1048576)
+    assert residency_shard_reader._read_shape('/stage/staged/x') == (16, 1048576)
 
 
 def test_a_mount_that_publishes_no_transport_count_stays_serial(tmp_path, monkeypatch):
@@ -443,11 +443,11 @@ def test_a_mount_that_publishes_no_transport_count_stays_serial(tmp_path, monkey
     for options in ('rw,rsize=1048576,vers=4.2',          # NFS without nconnect
                     'rw,nconnect=16,vers=4.2'):           # NFS without rsize
         _use_table(monkeypatch, _mount_table(tmp_path, [
-            ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', options)]))
-        assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+            ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', options)]))
+        assert residency_shard_reader._read_shape('/stage/staged/x') is None
     _use_table(monkeypatch, _mount_table(tmp_path, [
-        ('/dev/sda1', '/stage/prewarm', 'ext4', 'rw,rsize=1048576,nconnect=16')]))
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+        ('/dev/sda1', '/stage/staged', 'ext4', 'rw,rsize=1048576,nconnect=16')]))
+    assert residency_shard_reader._read_shape('/stage/staged/x') is None
 
 
 def test_the_longest_mount_point_wins_and_octal_is_decoded(tmp_path, monkeypatch):
@@ -463,13 +463,13 @@ def test_the_longest_mount_point_wins_and_octal_is_decoded(tmp_path, monkeypatch
 def test_the_environment_can_put_the_read_back_on_one_stream(tmp_path, monkeypatch):
     """The before arm of an A/B, and the way out if a mount misreports."""
     table = _mount_table(tmp_path, [
-        ('10.100.99.3:/stage/prewarm', '/stage/prewarm', 'nfs4', NFS_OPTIONS)])
+        ('10.100.99.3:/stage/staged', '/stage/staged', 'nfs4', NFS_OPTIONS)])
     monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '1')
     _use_table(monkeypatch, table)
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') is None
+    assert residency_shard_reader._read_shape('/stage/staged/x') is None
     monkeypatch.setenv(residency_shard_reader.STREAMS_ENV, '4')
     residency_shard_reader.reset_read_shape_cache_for_tests()
-    assert residency_shard_reader._read_shape('/stage/prewarm/x') == (4, 1048576)
+    assert residency_shard_reader._read_shape('/stage/staged/x') == (4, 1048576)
 
 
 def test_the_cuts_cover_the_span_exactly_and_align_to_the_chunk():

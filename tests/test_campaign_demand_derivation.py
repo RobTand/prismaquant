@@ -303,7 +303,7 @@ def test_every_under_declared_row_is_named_at_once(monkeypatch, tmp_path):
 
 def test_submit_refuses_an_under_declared_manifest_before_submitting_it(
         monkeypatch, tmp_path):
-    """Nothing reaches pbcampaign that the row's own guard would decline."""
+    """Nothing reaches the submitter that the row's own guard would decline."""
     dispatch = _fixed_plan(monkeypatch)
     spec, census = _spec(tmp_path), _census(tmp_path)
     submitted = []

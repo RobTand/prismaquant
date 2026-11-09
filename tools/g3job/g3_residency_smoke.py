@@ -1,6 +1,6 @@
 """One declared staged range in the real G3 container, never a model quality arm.
 
-Launch with g3_launch --reader-smoke JSON and pbrun's data manifest.
+Launch with g3_launch --reader-smoke JSON and the submitter's data manifest.
 Use stage/share auto and qualified RAM auto.
 The JSON fields are path, offset, bytes, and sha256.
 The host path must match an existing G3 input mount.
