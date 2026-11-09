@@ -13297,8 +13297,11 @@ pq_py_library(
         "tools/tessera_campaign_container.py",
     ],
     deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/campaign_container_spec",
         ":prismaquant/container_runtime_identity",
+        ":prismaquant/digests",
         ":tools/__init__",
         ":tools/pq_admitted_profile_cycle",
     ],
