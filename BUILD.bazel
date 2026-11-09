@@ -6204,8 +6204,6 @@ pq_py_library(
         ":prismaquant/__init__",
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/container_runtime_identity",
-        ":tools/__init__",
-        ":tools/tessera_campaign_container",
         "@pq_pip//tessera_quant",
     ],
 )
@@ -12108,6 +12106,11 @@ pq_py_library(
         "tools/g3job/g3_launch.py",
         "tools/g3job/g3_progress_launch.py",
     ],
+    deps = [
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
+        ":tools/g3job/g3_pq_policy/__init__",
+    ],
 )
 
 pq_py_library(
@@ -12145,7 +12148,6 @@ pq_py_library(
         ":prismaquant/activation_fair_pricing_cycle",
         ":prismaquant/digests",
         ":tools/g3job/g3_pq_policy/__init__",
-        "@pq_pip//prismabuild",
     ],
 )
 
@@ -12176,7 +12178,8 @@ pq_py_library(
         "tools/g3job/g3_submit.py",
     ],
     deps = [
-        ":tools/g3job/g3_progress_launch",
+        ":prismaquant/__init__",
+        ":prismaquant/activation_fair_pricing_cycle",
     ],
 )
 
@@ -13178,19 +13181,6 @@ pq_py_library(
         ":tools/__init__",
         ":tools/prepare_extended_joint_quanta",
         ":tools/regenerate_joint_quanta",
-    ],
-)
-
-pq_py_library(
-    name = "tools/stage_fed_demonstration",
-    srcs = [
-        "tools/stage_fed_demonstration.py",
-    ],
-    deps = [
-        ":prismaquant/__init__",
-        ":prismaquant/activation_fair_pricing_cycle",
-        ":prismaquant/source_read_plan",
-        "@pq_pip//safetensors",
     ],
 )
 

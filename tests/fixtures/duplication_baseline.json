@@ -744,10 +744,6 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py"
   ],
-  "delta": [
-   "tools/profile_stage_b_head.py",
-   "tools/stage_fed_demonstration.py"
-  ],
   "derive": [
    "tools/band_serial_handoff_live_pair.py",
    "tools/derive_tessera_progress_grace.py"
