@@ -2,7 +2,7 @@
 
 Host-local eviction pins belong to canonical fluxcache run-set. Shared phases
 remain retained until every reader scope is stopped or fenced. Windows close
-only after their caller joins copies and reader threads; no PB SDK is loaded.
+only after their caller joins copies and reader threads.
 """
 from __future__ import annotations
 
@@ -31,27 +31,7 @@ class ReadsetUnbound(RuntimeError):
     pass
 
 
-def _authority_hold(*args, **kwargs):
-    raise LeaseRefused('unit4 native source/result/publication authority is unqualified', kind='integrity')
-
-
-# Explicit owning-boundary holds for inventoried unit4 consumers. No SDK,
-# injected claim, queue discovery or PB-compatible client is available here.
-client_sdk = sdk_submodule = resolve_context = _load_sealed_payload = _authority_hold
-load_claimed_manifest = _authority_hold
-reviewed_installed_distribution = inject_installed_sdk_for_tests = _authority_hold
-set_lease_helper_root = _authority_hold
-
-
 def lease_helper_root():
-    return None
-
-
-def discover_launch_queue_root(*args, **kwargs):
-    return _authority_hold()
-
-
-def clear_injected_sdk_for_tests():
     return None
 
 

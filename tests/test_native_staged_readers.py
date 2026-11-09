@@ -349,13 +349,11 @@ def test_materializer_reuses_only_verified_identical_publication(tmp_path):
     assert (dest / sha(b'known')).read_bytes() == b'known'
 
 
-def test_source_result_and_publication_authority_cannot_use_ambient_pb_context(tmp_path, monkeypatch):
+def test_source_result_and_publication_authority_cannot_use_ambient_context(tmp_path, monkeypatch):
     from prismaquant import staged_lease
-    monkeypatch.setenv('PRISMABUILD_ACTION_KEY', 'a'*64)
-    monkeypatch.setenv('PRISMABUILD_READER_HELPER_ROOT', str(tmp_path))
-    for operation in (staged_lease.client_sdk, staged_lease.resolve_context):
-        with pytest.raises(staged_lease.LeaseRefused, match='unit4 native'):
-            operation()
+    for name in ('client_sdk', 'sdk_submodule', 'resolve_context', 'load_claimed_manifest',
+                 'discover_launch_queue_root', 'set_lease_helper_root'):
+        assert not hasattr(staged_lease, name)
     with pytest.raises(stage_b_prep_io.PreparationPublicationRefused,
                        match='native preparation declaration unavailable'):
         stage_b_prep_io.bind_preparation_publication(tmp_path, required=True)

@@ -16,6 +16,7 @@ decision itself is Tessera's
 import copy
 import hashlib
 import json
+import types
 import random
 import statistics
 from importlib.resources import as_file
@@ -560,34 +561,33 @@ OBS_LANE = ("tessera::fused_window_dense", "native_fused_window_dense")
 _CHECKER_RESULTS = {}
 
 
+class _NativeChecker:
+    """Controlled double of ``native_results.read_selected_result`` for the checker rows.
+
+    Real native authority refusals are proved on real native records in the slice-5 native job;
+    here each selection token maps to the authenticated SelectedResult the reader would return.
+    """
+    results = {}
+
+
 @pytest.fixture(autouse=True)
-def checker_sdk_fixture(tmp_path, monkeypatch):
-    """Domain fixtures model the public SDK; actual PB acceptance is separate."""
-    from prismaquant import staged_lease
+def checker_native_fixture(tmp_path, monkeypatch):
+    from prismaquant import native_results
+    _NativeChecker.results = _CHECKER_RESULTS
     _CHECKER_RESULTS.clear()
     config = tmp_path / "checker-config.json"
     _obs_write(config, {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []})
     monkeypatch.setattr(srp, "CHECKER_CONFIG_PATH", config)
 
-    class FixtureSDK:
-        PoolQueue = staticmethod(lambda: None)
+    def read_selected_result(selection, *, artifact_limits=None):
+        entry = _CHECKER_RESULTS.get(selection.get("job_id"))
+        if entry is None:
+            raise native_results.ResultUnavailable("no such native completion")
+        if entry.get("failed"):
+            raise native_results.ProducerFailed(types.SimpleNamespace(status="failed", job_id=selection["job_id"]))
+        return copy.deepcopy(entry["selected"])
 
-        @staticmethod
-        def read_verified_action_result(queue, action_key, **selector):
-            result = copy.deepcopy(_CHECKER_RESULTS[action_key])
-            if (selector["attempt"] != result["attempt"]
-                    or selector["published_unix"] != result["published_unix"]):
-                raise ValueError("wrong explicit selector")
-            return result
-
-        @staticmethod
-        def bind_standard_capture_command(request):
-            expected = ["fixture-capture", *request["params"]["command"]]
-            if request["task"]["argv"] != expected:
-                raise ValueError("unbound wrapper")
-            return expected
-
-    monkeypatch.setattr(staged_lease, "client_sdk", lambda: FixtureSDK)
+    monkeypatch.setattr(native_results, "read_selected_result", read_selected_result)
 
 
 def _consume_observations(observations, **kwargs):
@@ -697,18 +697,14 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
         mutate(observation)
     obs_b = _obs_write(root / "observation.json", observation)
     key = hashlib.sha256(str(root).encode()).hexdigest()
-    source = {"id": "pbrun.checkout-snapshot", "bytes": 123, "sha256": "9" * 64}
-    snapshot = {"schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
-                "input": source, "commit": "1" * 40, "parent": "2" * 40,
-                "subdirectory": ".", "refs": {}}
+    job_id = "ƒ" + key[:11]
     command = ["fixture-checker", str(root / "panel.json"), "--observation-out", obs_b["path"]]
-    environment = {"variables": {"CUDA_VISIBLE_DEVICES": ""}}
-    _CHECKER_RESULTS[key] = {
-        "action_key": key, "published_unix": 10.0, "attempt": 1,
-        "inputs": [source], "payload": json.dumps(emitted, sort_keys=True).encode() + b"\n",
-        "request": {"params": {"command": command, "checkout_snapshot": snapshot, "cwd": "."},
-                    "environment": environment,
-                    "task": {"argv": ["fixture-capture", *command], "working_directory": "."}}}
+    source = {"commit": "1" * 40, "tree": "2" * 40}
+    from prismaquant import native_results
+    selected = native_results.SelectedResult(
+        publication={}, artifact_payloads={"observation": srp.DIRECT_ASCII_STRICT.encoded(emitted) + b"\n"},
+        input_payloads={}, launch={"source": dict(source), "argv": list(command)}, execution=None)
+    _CHECKER_RESULTS[job_id] = {"selected": selected}
     # Never the packaged ``srp.CHECKER_CONFIG_PATH``: that file is a
     # ``_production_cache_source_sha256`` input, so an in-place append here
     # rewrites ``producer_source_sha256`` for every concurrent consumer and
@@ -720,13 +716,11 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
         config = json.loads(config_path.read_bytes())
     except FileNotFoundError:
         config = {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []}
-    config["checkers"].append({"snapshot": snapshot, "command": command, "cwd": ".",
-                               "working_directory": ".",
-                               "environment": environment, "observation_output": obs_b["path"]})
+    config["checkers"].append({"source": source, "argv": command, "observation_output": obs_b["path"]})
     _obs_write(config_path, config)
     _obs_write(root / "checker-receipt.json", {
         "schema": srp.CHECKER_RECEIPT_SCHEMA, "observation": obs_b,
-        "selector": {"action_key": key, "published_unix": 10.0, "attempt": 1}})
+        "selection": {"job_id": job_id}})
     return obs_b
 
 
@@ -935,42 +929,45 @@ def test_load_refuses_a_forged_panel_with_matching_hashes_and_no_checker(tmp_pat
         srp.load_shape_table(path)
 
 
-@pytest.mark.parametrize("mutation", ["missing", "selector", "source", "commit", "subdirectory", "refs",
-                                      "cwd", "working_directory", "command", "environment", "wrapper"])
+@pytest.mark.parametrize("mutation", ["missing", "failed", "commit", "tree", "argv", "output", "bytes"])
 def test_observation_requires_the_selected_reviewed_checker_at_convert_and_load(tmp_path, mutation):
     observation_fixture(tmp_path)
     observation = tmp_path / "obs" / "observation.json"
     table = _consume_observations([observation], table_id="pilot")
     table_path = tmp_path / "table.json"
     srp.write_shape_table(table, table_path)
-    result = next(iter(_CHECKER_RESULTS.values()))
+    entry = next(iter(_CHECKER_RESULTS.values()))
+    selected = entry["selected"]
     if mutation == "missing":
         _CHECKER_RESULTS.clear()
-    elif mutation == "selector":
-        result["attempt"] = 2
-    elif mutation == "source":
-        result["request"]["params"]["checkout_snapshot"]["input"]["sha256"] = "8" * 64
+    elif mutation == "failed":
+        entry["failed"] = True
     elif mutation == "commit":
-        result["request"]["params"]["checkout_snapshot"]["commit"] = "3" * 40
-    elif mutation == "subdirectory":
-        result["request"]["params"]["checkout_snapshot"]["subdirectory"] = "archive"
-    elif mutation == "refs":
-        result["request"]["params"]["checkout_snapshot"]["refs"] = {"other": "3" * 40}
-    elif mutation == "cwd":
-        result["request"]["params"]["cwd"] = "archive"
-    elif mutation == "working_directory":
-        result["request"]["task"]["working_directory"] = "archive"
-    elif mutation == "command":
-        result["request"]["params"]["command"][0] = "forged-checker"
-        result["request"]["task"]["argv"][1] = "forged-checker"
-    elif mutation == "environment":
-        result["request"]["environment"]["variables"]["CUDA_VISIBLE_DEVICES"] = "0"
+        selected.launch["source"]["commit"] = "3" * 40
+    elif mutation == "tree":
+        selected.launch["source"]["tree"] = "3" * 40
+    elif mutation == "argv":
+        selected.launch["argv"][0] = "forged-checker"
+    elif mutation == "output":
+        config = json.loads(srp.CHECKER_CONFIG_PATH.read_bytes())
+        config["checkers"][0]["observation_output"] = str(tmp_path / "elsewhere.json")
+        _obs_write(srp.CHECKER_CONFIG_PATH, config)
     else:
-        result["request"]["task"]["argv"][0] = "unbound"
+        selected.artifact_payloads["observation"] += b" "
     with pytest.raises(srp.ShapeRuntimeError):
         _consume_observations([observation], table_id="forged")
     with pytest.raises(srp.ShapeRuntimeError):
         srp.load_shape_table(table_path)
+
+
+def test_a_v1_checker_receipt_refuses(tmp_path):
+    observation_fixture(tmp_path)
+    path = tmp_path / "obs" / "checker-receipt.json"
+    receipt = json.loads(path.read_bytes())
+    receipt["schema"] = "prismaquant.shape_time_checker_receipt.v1"
+    _obs_write(path, receipt)
+    with pytest.raises(srp.ShapeRuntimeError, match="native checker receipt"):
+        _consume_observations([tmp_path / "obs" / "observation.json"], table_id="v1")
 
 
 def test_convert_refuses_forged_observation_without_a_real_checker(tmp_path):
@@ -986,9 +983,8 @@ def test_convert_refuses_forged_observation_without_a_real_checker(tmp_path):
 def test_checker_result_requires_exact_output_and_a_bounded_observation(tmp_path, monkeypatch):
     binding = observation_fixture(tmp_path)
     path = tmp_path / "obs" / "observation.json"
-    result = next(iter(_CHECKER_RESULTS.values()))
-    result["payload"] *= 2
-    with pytest.raises(srp.ShapeRuntimeError, match="owned output"):
+    next(iter(_CHECKER_RESULTS.values()))["selected"].artifact_payloads["observation"] *= 2
+    with pytest.raises(srp.ShapeRuntimeError, match="published artifact"):
         _consume_observations([path], table_id="duplicate-output")
     monkeypatch.setattr(srp, "CHECKER_RESULT_MAX_BYTES", binding["bytes"] - 1)
     with pytest.raises(srp.ShapeRuntimeError, match="byte cap"):
@@ -1052,7 +1048,7 @@ def test_expected_panel_digest_matches_authenticated_panel_at_convert_and_load(t
     # Keep the selected source, wrapper and every other artifact binding valid.
     # The domain double now owns the same malformed observation bytes, so the
     # panel comparison, not output authentication, must refuse.
-    next(iter(_CHECKER_RESULTS.values()))["payload"] = observation_path.read_bytes()
+    next(iter(_CHECKER_RESULTS.values()))["selected"].artifact_payloads["observation"] = observation_path.read_bytes()
     receipt_path = tmp_path / "obs" / "checker-receipt.json"
     receipt = json.loads(receipt_path.read_bytes())
     receipt["observation"] = observation_binding
@@ -1090,7 +1086,7 @@ def test_unknown_receipt_cannot_restore_digest_only_reload(tmp_path, receipt, fi
         document["context"]["tensor_parallel"] = 2
     path = tmp_path / "tampered-table.json"
     _obs_write(path, document)
-    with pytest.raises(srp.ShapeRuntimeError, match="authenticated PB checker completion"):
+    with pytest.raises(srp.ShapeRuntimeError, match="authenticated checker completion"):
         srp.load_shape_table(path)
 
 

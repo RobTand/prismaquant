@@ -71,7 +71,7 @@ cannot lend one rate's samples to an unmeasured rate. Every runtime price needs
 its own checker-bound row; a declared proposal pool is not measured coverage.
 
 Tessera's checker emits ``tessera.shape_time_observation.v1``. Conversion
-requires its explicitly selected PB completion and the independently reviewed
+requires its explicitly selected native completion and the independently reviewed
 checker configuration; a panel or observation alone is insufficient.
 """
 from __future__ import annotations
@@ -531,7 +531,7 @@ def _parse_shape_table(payload: Mapping, source_path: str) -> ShapeRuntimeTable:
 def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
     """Parse the file and re-bind every row to the authenticated raw samples.
 
-    A checker receipt is rejoined through the public PB reader and the
+    A checker receipt is rejoined through the native result reader and the
     independent reviewed source config, then its projection is compared to
     the table. Bare panels, observations and unrecognized receipt schemas
     refuse; a matching digest alone cannot authenticate measurement rows.
@@ -539,7 +539,7 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
     table = parse_shape_table(_json(path), source_path=str(path))
     if table.rate_pools:
         raise ShapeRuntimeError(
-            "shape-time rate_pools are not authenticated by PB checker completions")
+            "shape-time rate_pools are not authenticated by native checker completions")
     for receipt, expected in sorted({(row.measurement.receipt_path, row.measurement.receipt_sha256)
                                      for row in table.rows}):
         receipt_path = Path(receipt)
@@ -583,7 +583,7 @@ def _rebind_shape_row_to_receipt(table: ShapeRuntimeTable, receipt_path: Path, r
                     or row.measurement.warmup_iterations != projection["warmup_iterations"]):
                 raise ShapeRuntimeError("shape row measurement differs from its checker observation")
         return
-    raise ShapeRuntimeError("shape-time receipt requires an authenticated PB checker completion")
+    raise ShapeRuntimeError("shape-time receipt requires an authenticated checker completion")
 
 
 # --------------------------------------------------------------------------- #
@@ -969,7 +969,7 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
 # observation and its bound panel bytes: it does not import or vendor
 # ``tessera.serving``, does not deserialize the producer's private validation
 # token, and does not restate a second semantic validator. Everything the
-# producer proved is joined to a selected PB completion and a reviewed
+# producer proved is joined to a selected native completion and a reviewed
 # checker source/command/environment. Hash and length detect subsequent
 # artifact changes. Everything
 # that is a PQ admission decision (pinned contract, lane, context) is made by
@@ -977,8 +977,8 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
 
 SHAPE_TIME_PANEL_SCHEMA = "tessera.shape_time_panel.v1"
 SHAPE_TIME_OBSERVATION_SCHEMA = "tessera.shape_time_observation.v1"
-CHECKER_RECEIPT_SCHEMA = "prismaquant.shape_time_checker_receipt.v1"
-CHECKER_CONFIG_SCHEMA = "prismaquant.shape_time_checker_config.v1"
+CHECKER_RECEIPT_SCHEMA = "prismaquant.shape_time_checker_receipt.v2"
+CHECKER_CONFIG_SCHEMA = "prismaquant.shape_time_checker_config.v2"
 CHECKER_CONFIG_PATH = Path(__file__).parent / "tessera_runtime" / "shape_time_checker_config.json"
 CHECKER_RESULT_MAX_BYTES = 2 * 1024 * 1024
 CHECKER_EVIDENCE_MAX_BYTES = 4 * 1024 * 1024
@@ -1034,73 +1034,54 @@ def _observation_lane(value, where) -> KernelLane:
 
 
 def _verify_checker_receipt(receipt: Mapping) -> dict:
-    """Join an explicit PB completion to independently reviewed checker bytes."""
-    top = _object(receipt, ("schema", "observation", "selector"), "checker receipt")
+    """Join an explicit native completion to independently reviewed checker bytes.
+
+    The receipt names an observation and embeds one ``native_results`` selection. The selection is read
+    only through ``read_selected_result``, which authenticates the succeeded terminal execution, its saved
+    launch, runtime and exact publication; the authenticated launch's source commit/tree and argv must
+    equal exactly one reviewed pin, and the published artifact must be exactly the observation bytes.
+    A v1 receipt (a completion of the retired execution system) is historical evidence and refuses.
+    """
+    top = _object(receipt, ("schema", "observation", "selection"), "checker receipt")
     if top["schema"] != CHECKER_RECEIPT_SCHEMA:
-        raise ShapeRuntimeError("observation requires a versioned PB checker receipt")
-    selector = _object(top["selector"], ("action_key", "published_unix", "attempt"),
-                       "checker selector")
-    _observation_sha(selector["action_key"], "checker action key")
-    published = _observation_number(selector["published_unix"], "checker publication time")
-    attempt = _integer(selector["attempt"], "checker attempt", 1)
+        raise ShapeRuntimeError("observation requires a versioned native checker receipt")
     reader = ArtifactReader(Path())
     try:
         observation_path, raw = reader.bytes(top["observation"], "checker observation",
                                              max_bytes=CHECKER_RESULT_MAX_BYTES)
         observation = _parse_observation_json(raw)
+        selection = top["selection"]
+        if not isinstance(selection, dict):
+            raise ValueError("checker selection: expected an object")
     except (RuntimePriceError, ValueError, UnicodeError) as exc:
         raise ShapeRuntimeError(f"checker observation refused: {exc}") from exc
     try:
-        from .staged_lease import client_sdk
-        sdk = client_sdk()
-        result = sdk.read_verified_action_result(
-            sdk.PoolQueue(), selector["action_key"], published_unix=published,
-            attempt=attempt, max_result_bytes=CHECKER_RESULT_MAX_BYTES,
-            max_evidence_bytes=CHECKER_EVIDENCE_MAX_BYTES)
-        sdk.bind_standard_capture_command(result["request"])
-    except Exception as exc:
-        raise ShapeRuntimeError(f"PB checker completion refused: {exc}") from exc
-    if (result.get("action_key") != selector["action_key"]
-            or result.get("published_unix") != published or result.get("attempt") != attempt):
-        raise ShapeRuntimeError("PB checker result differs from the explicit selector")
-    request = result["request"]
-    params = request.get("params", {})
-    snapshot = params.get("checkout_snapshot", {})
-    source = snapshot.get("input")
-    if not isinstance(source, Mapping) or source not in result.get("inputs", []):
-        raise ShapeRuntimeError("PB checker carries no sealed source snapshot input")
+        from . import native_results
+        selected = native_results.read_selected_result(
+            selection, artifact_limits={"observation": CHECKER_RESULT_MAX_BYTES})
+    except (native_results.ProducerFailed, native_results.ResultUnavailable, ValueError, OSError,
+            TypeError, KeyError) as exc:
+        raise ShapeRuntimeError(f"native checker completion refused: {exc}") from exc
     try:
         config = _object(_json(CHECKER_CONFIG_PATH), ("schema", "checkers"), "checker config")
     except (OSError, ValueError) as exc:
         raise ShapeRuntimeError(f"reviewed checker configuration unavailable: {exc}") from exc
     if config["schema"] != CHECKER_CONFIG_SCHEMA or not isinstance(config["checkers"], list):
         raise ShapeRuntimeError("reviewed checker configuration has an unsupported schema")
+    launch = selected.launch
+    source = launch.get("source") or {}
     matches = []
     for entry in config["checkers"]:
-        pin = _object(entry, ("snapshot", "cwd", "working_directory", "command", "environment",
-                              "observation_output"),
-                      "reviewed checker")
-        if (snapshot == pin["snapshot"] and params.get("command") == pin["command"]
-                and params.get("cwd") == pin["cwd"]
-                and request["task"].get("working_directory") == pin["working_directory"]
-                and request.get("environment") == pin["environment"]
+        pin = _object(entry, ("source", "argv", "observation_output"), "reviewed checker")
+        pinned = _object(pin["source"], ("commit", "tree"), "reviewed checker source")
+        if (source.get("commit") == pinned["commit"] and source.get("tree") == pinned["tree"]
+                and launch.get("argv") == pin["argv"]
                 and str(observation_path) == pin["observation_output"]):
             matches.append(pin)
     if len(matches) != 1:
-        raise ShapeRuntimeError("PB checker source/command/environment is not independently reviewed")
-    payload = result.get("payload")
-    if not isinstance(payload, bytes) or len(payload) > CHECKER_RESULT_MAX_BYTES:
-        raise ShapeRuntimeError("PB checker carries no bounded owned result bytes")
-    emitted = []
-    for line in payload.splitlines():
-        try:
-            value = _parse_observation_json(line)
-        except (ValueError, UnicodeError):
-            continue
-        if isinstance(value, Mapping) and value.get("schema") == SHAPE_TIME_OBSERVATION_SCHEMA:
-            emitted.append(value)
-    if len(emitted) != 1 or DIRECT_ASCII_STRICT.encoded(emitted[0]) + b"\n" != raw:
-        raise ShapeRuntimeError("observation bytes differ from the PB checker's owned output")
+        raise ShapeRuntimeError("native checker source/argv is not independently reviewed")
+    if selected.artifact_payloads.get("observation") != raw:
+        raise ShapeRuntimeError("observation bytes differ from the native checker's published artifact")
     projection = _observation_projection(observation)
     projection["observation_bytes"] = raw
     return projection
@@ -1386,7 +1367,7 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
     if not observations:
         raise ShapeRuntimeError("shape-time conversion requires at least one observation")
     if checker_receipts is None or len(checker_receipts) != len(observations):
-        raise ShapeRuntimeError("conversion requires one explicit PB checker receipt per observation")
+        raise ShapeRuntimeError("conversion requires one explicit native checker receipt per observation")
     projections: list[dict] = []
     for index, path in enumerate(observations):
         _observation, (_path, raw) = read_shape_time_observation(path)
