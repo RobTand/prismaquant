@@ -16,11 +16,8 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from prismaquant import format_registry as fr, joint_aura as joint, joint_aura_rows
-from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
 from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_STRICT, bytes_sha256hex
 from prismaquant import native_results
-from prismaquant.layer_config import load_assignment
 
 LOW, HIGH = "FP8_E4M3", "FP8_E5M2"
 #: Aggregate byte ceiling of the published archive plus its input (the native result owner caps at 1 GiB).
@@ -48,6 +45,8 @@ def samples(layer, expert, role, probes):
 
 def fixture(directory, config, probes, layers):
     import torch
+    from prismaquant import format_registry as fr, joint_aura as joint, joint_aura_rows
+    from prismaquant.streamed_model_identity import STREAMED_MODEL_IDENTITY_SCHEMA
     c = config["text_config"]
     source_content = {"config": config, "weight_map": {"synthetic": "none"},
                       "shards": [{"path": "/synthetic/no-weights", "size": 1, "sha256": "a" * 64}]}
@@ -116,7 +115,25 @@ def profile_allocator_command(directory, fixture_dir, refusal=False):
              for path in directory.rglob("*") if path.is_file()}}
 
 
+def publish_archive(output, model_config, config_bytes):
+    """Publish ``output/proof.tar.gz`` as a native result of the running Flux job.
+
+    The exact model config bytes are the input, the archive is the artifact, and the publication is
+    authenticated by its reader. Returns the measured artifact binding and the publication binding.
+    """
+    archive = (Path(output) / "proof.tar.gz").resolve()
+    config_path = Path(model_config).resolve()
+    publication = native_results.publish_result(
+        Path(output) / "publication.json", producer_id="pq2286-paired-trade-proof",
+        inputs={"model_config": {"path": str(config_path), "sha256": bytes_sha256hex(config_bytes),
+                                 "bytes": len(config_bytes)}},
+        artifacts={"cli_proof": archive}, max_artifact_bytes=PUBLICATION_MAX_BYTES)
+    return native_results.bind_result_artifact(str(archive), max_bytes=PUBLICATION_MAX_BYTES), publication
+
+
 def main():
+    from prismaquant import joint_aura_rows
+    from prismaquant.layer_config import load_assignment
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-config", type=Path, default=ROOT / "tools/pq2286_target_config.json")
@@ -192,16 +209,7 @@ def main():
     with tarfile.open(archive, "w:gz") as target:
         for child in ("allocation", "refusal", "proof.json"):
             target.add(args.output / child, arcname=child)
-    # The archive is published as a native result of this Flux job: the exact model config bytes are the
-    # input, the archive is the artifact, and the publication is authenticated by its reader.
-    config_path = args.model_config.resolve()
-    publication = native_results.publish_result(
-        args.output / "publication.json", producer_id="pq2286-paired-trade-proof",
-        inputs={"model_config": {"path": str(config_path), "sha256": bytes_sha256hex(config_bytes),
-                                 "bytes": len(config_bytes)}},
-        artifacts={"cli_proof": archive.resolve()}, max_artifact_bytes=PUBLICATION_MAX_BYTES)
-    proof["artifact_bundle"] = native_results.bind_result_artifact(str(archive.resolve()), max_bytes=PUBLICATION_MAX_BYTES)
-    proof["artifact_publication"] = publication
+    proof["artifact_bundle"], proof["artifact_publication"] = publish_archive(args.output, args.model_config, config_bytes)
     print(DIRECT_ASCII_SPACED_LAX.text(proof))
 
 
