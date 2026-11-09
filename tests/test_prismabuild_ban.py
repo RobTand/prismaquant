@@ -12,8 +12,6 @@ Excluded, each by an explicit list below (never by pattern guessing):
 - ``BAN_DEFINITIONS``: the files that define the ban or prove that a retired name is refused, and so
   must spell the name;
 - ``CI_DATA``: measured gate timings keyed by retired test node ids;
-- ``tests/boundary_allowlists/prismabuild_4c14.txt``: the 4C-14 files, shrink-only. A listed file
-  that no longer matches, or no longer exists, fails until its line is deleted.
 """
 from __future__ import annotations
 
@@ -22,7 +20,6 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FOURC14 = Path(__file__).with_name("boundary_allowlists") / "prismabuild_4c14.txt"
 
 HISTORY_PREFIXES = (
     "docs/audits/", "docs/results/", "docs/measurements/", "docs/reports/", "docs/reviews/",
@@ -78,15 +75,10 @@ def read_text(path: str) -> str | None:
         return None
 
 
-def fourc14() -> set[str]:
-    return {line.strip() for line in FOURC14.read_text().splitlines()
-            if line.strip() and not line.startswith("#")}
-
-
 def live_findings() -> dict[str, list[str]]:
-    listed, found = fourc14(), {}
+    found = {}
     for path in tracked():
-        if excluded(path) or path in listed:
+        if excluded(path):
             continue
         text = read_text(path)
         if text is None:
@@ -99,17 +91,6 @@ def live_findings() -> dict[str, list[str]]:
 
 def test_no_live_source_carries_a_prismabuild_mechanism():
     assert live_findings() == {}
-
-
-def test_the_4c14_list_only_shrinks():
-    stale = {}
-    for path in sorted(fourc14()):
-        text = read_text(path)
-        if text is None:
-            stale[path] = "file is gone: delete its line"
-        elif not mechanisms(text):
-            stale[path] = "file no longer matches: delete its line"
-    assert stale == {}
 
 
 def test_the_ban_sees_every_mechanism_form_and_spares_wire_ids():

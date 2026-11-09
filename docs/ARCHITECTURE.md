@@ -1,5 +1,10 @@
 # PrismaQuant Architecture
 
+As of: 2026-11-09, PB-zero closure of the remaining experiment, tool and test surfaces, slice6.
+Source: `tools/prepare_stageb_after_capture.py`, `tests/test_prismabuild_ban.py`, `archive/pq_experiments_2026-11-09/README.md`, based on `b78164ab5`. The shrink-only 4C-14 list and its loader are gone: the ban has no allowlist and its only live finding is the CI workflow line owned outside this repository.
+`tools/prepare_stageb_after_capture.py` replaces the shell wrapper: it writes the preparation submission, requires an explicit staged launch binding for that submission's read manifest, passes the submission's own produced-output declaration and strict read flags, and submits one native CPU job (`--dry-run` only validates);
+the progress-phase text elsewhere in this document describes the retired wrapper. The retired-queue diagnostics, recovery-request and class-evidence tools are deleted; the native-MoE launchers, pq87/pq183 A/B family, LFM mixed-serving drivers, docker launchers and their scenario tests moved to `archive/pq_experiments_2026-11-09/` (not executable). No numerical, GPU, serving or production qualification follows.
+
 As of: 2026-11-09, PB-zero closure in live PrismaQuant source, slice5.
 Source: `tests/test_prismabuild_ban.py`, `tests/test_prismabuild_boundary.py`, `prismaquant/shape_runtime_prices.py`, `prismaquant/recorded_cas_receipt.py`, `prismaquant/staged_lease.py`, based on `0bbf045a0`. The local-scratch charge wire is gone (a container spec naming a retired service setting is refused;
 nothing prices scratch at placement, a named limit). The shape-time checker receipt is v2: it embeds one `native_results` selection, whose authenticated launch source and argv must equal exactly one reviewed pin and whose published artifact must equal the observation bytes; v1 receipts refuse and

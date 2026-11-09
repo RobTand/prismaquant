@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.test_prismabuild_ban import excluded, fourc14, read_text, tracked
+from tests.test_prismabuild_ban import excluded, read_text, tracked
 
 
 def dynamic_loads(source: str) -> list[str]:
@@ -29,9 +29,9 @@ def dynamic_loads(source: str) -> list[str]:
 
 
 def scan() -> dict[str, list[str]]:
-    listed, found = fourc14(), {}
+    found = {}
     for path in tracked():
-        if not path.endswith(".py") or excluded(path) or path in listed:
+        if not path.endswith(".py") or excluded(path):
             continue
         source = read_text(path)
         hits = dynamic_loads(source) if source is not None else []

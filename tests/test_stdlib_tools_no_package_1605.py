@@ -202,7 +202,6 @@ def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> N
 
 @pytest.mark.parametrize("script,option", [
     ("stageb_a4_quantizer_launch.py", "--group-policy-sha256"),
-    ("glm_native_moe_launch.py", "--spec-sha256"),
 ])
 def test_host_image_launcher_help_before_package_or_device_access(tmp_path, script, option):
     """Only the deployed launcher/public stdlib owner exist; PQ is denied."""
