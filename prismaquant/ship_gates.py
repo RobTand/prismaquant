@@ -103,7 +103,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
                 raise ValueError(f"{identity}: arguments must be a string array")
             if identity not in GOLD_TOOLS and not argv:
                 raise ValueError(f"{identity}: argv is empty")
-            if any(Path(word).name in {"pbrun.py", "pbtest.py", "pbgang.py", "pbcampaign.py"}
+            if any(Path(word).name in {"flux", "flux_jobs.py"}
                    for word in argv):
                 raise ValueError("stage processes must not submit nested jobs")
             if identity in GOLD_TOOLS:

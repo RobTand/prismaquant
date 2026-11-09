@@ -174,7 +174,7 @@ def test_runner_refuses_incomplete_or_inconsistent_configuration(tmp_path, damag
     elif damage == "tp":
         config["topology"] = {"tensor_parallel_size": 3, "nnodes": 2}
     elif damage == "nested":
-        next(stage for stage in config["stages"] if "argv" in stage)["argv"] = ["pbrun.py"]
+        next(stage for stage in config["stages"] if "argv" in stage)["argv"] = ["flux_jobs.py"]
     else:
         config["stages"][0]["args"] += ["--model=other-model"]
     path.write_text(json.dumps(config))
