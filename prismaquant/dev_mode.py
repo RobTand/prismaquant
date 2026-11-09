@@ -35,8 +35,7 @@ The contract:
   recorded and running implementation, so a human decides, and the author of
   such a change starts the run fresh on purpose.
 * A dev result never passes as a certified one: results carry the
-  ``dev_uncertified`` stamp from :func:`dev_stamp`, and progress records carry
-  it under the ``PRISMAQUANT_DEV_PROGRESS_STAMP=1`` opt-in (PR #828).
+  ``dev_uncertified`` stamp from :func:`dev_stamp`.
 * The merged campaign checkpoint's canonical seal in
   ``load_measured_anchor_input`` (302.653 s on the real 7.2 GB input, action
   ``282c61140ba7``) is not recomputed in dev mode. Dev mode requires a full
@@ -73,8 +72,7 @@ CERTIFIED_VALUE = "0"
 NOT_COMPUTED = "not computed"
 
 #: The stamp's fixed top-level marker. Always present in results.json under
-#: dev mode; progress records carry it only when PRISMAQUANT_DEV_PROGRESS_STAMP
-#: is exactly "1" (PR #828). Absent in certified mode.
+#: dev mode. Absent in certified mode.
 DEV_UNCERTIFIED_KEY = "dev_uncertified"
 DEV_MODE_KEY = "dev_mode"
 
