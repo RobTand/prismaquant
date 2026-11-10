@@ -226,3 +226,37 @@ def test_publication_uses_the_existing_byte_owner(monkeypatch):
     publication.commit("records", [("a.bin", raw)])
     assert len(seen) == 1 and seen[0] is raw
     assert po.events[0][1].sha256 == "e" * 64
+
+
+@pytest.mark.parametrize('raw', [b'', b'\x00\xff\xc3\xa9\r\n'])
+def test_preparation_commit_emits_the_complete_native_descriptor(tmp_path, monkeypatch, raw):
+    from tests.produced_native_fixtures import publication as native_publication
+    from prismaquant.stage_a_produced_output import produced_file_identity
+
+    po = native_publication(tmp_path, write_only=True)
+    publication = prep.PreparationPublication(po)
+    batch = publication.batch_id('records')
+    path = str(Path(po.output_prefix) / 'record.bin')
+    po.require_prewrite(batch_id=batch, payload_ceiling_bytes=len(raw), paths=[path])
+    Path(path).write_bytes(raw)
+    identity = produced_file_identity(path)
+    seen = []
+    publish = po.publish
+
+    def capture(**kwargs):
+        seen.extend(kwargs['descriptors'])
+        return publish(**kwargs)
+
+    monkeypatch.setattr(po, 'publish', capture)
+    out = publication.commit('records', [(path, raw)], writer_identities={path: identity})
+    assert out['ok'] is True
+    # Native authority belongs to the batch producer, not per-descriptor
+    # owner_action_key/owner_attempt fields from the retired PB protocol.
+    assert seen == [{
+        'schema': 'prismaquant.produced_descriptor.v1',
+        'slot': po.declaration['slot'], 'artifact_class': 'payload',
+        'path': path, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(),
+        'producer_generation': batch, 'file_identity': identity,
+    }]
+    assert publication.batches == [{'kind': 'records', 'batch_id': batch, 'files': 1,
+        'bytes': len(raw), 'ref': out['ref']}]
