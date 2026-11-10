@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.own_process
+
 from prismaquant.produced_render_publication import ProducedRenderPublication
 from prismaquant.stage_a_produced_output import BoundaryProducedBindingError, build_boundary_template, publish_document
 
@@ -273,8 +275,9 @@ def test_unstatable_destination_refuses_before_admission(render_owner, monkeypat
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(publication, "contains", lambda path: True)
     monkeypatch.setattr(publication, "require_prewrite", lambda **kwargs: pytest.fail("unexpected admission"))
-    with pytest.raises(ValueError, match="render destination fails origin containment"):
+    with pytest.raises(ValueError, match="cannot stat render destination"):
         publication.require_render_prewrite(plan)
 
 
