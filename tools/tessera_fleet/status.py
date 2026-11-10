@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from prismaquant.tessera_campaign_rows import collect_rows
-from tools.tessera_fleet.stage_status import (  # noqa: F401
+from tools.tessera_fleet.common import (  # noqa: F401
     EXIT_DONE, EXIT_FAILED, EXIT_NOTHING, EXIT_RUNNING, exit_status, show_status)
 
 _EPILOG = """\

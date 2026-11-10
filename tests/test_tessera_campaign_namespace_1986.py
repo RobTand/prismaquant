@@ -11,7 +11,7 @@ import pytest
 import tools.tessera_campaign_namespace as namespace
 from tools import dispatch_tessera_campaign as dispatch
 from tools import tessera_campaign_container as adapter
-from tools.pq_profile_digest import profile_digest_owner
+from tools.pq_profile_source import profile_digest_owner
 
 owner = profile_digest_owner()
 COMMIT = "b" * 40

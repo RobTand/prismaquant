@@ -259,7 +259,7 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
     recomputed by every launch. Object/extent digests are computed while copying.
     Caller owns admission and the explicitly provisioned publication directory.
     """
-    from .io_copy import copy_extent
+    from .io_buffers import copy_extent
     destination = Path(destination)
     rows = []
     for row in entries:

@@ -11,7 +11,7 @@ import sys
 import time
 
 
-from tools.pq_profile_contract import (  # noqa: F401
+from tools.pq_profile_artifact import (  # noqa: F401
     PROFILE_LOCAL_ROOT, profile_row_parts, profiled_row_command,
     profiled_workload_parts, profile_local_destination,
 )

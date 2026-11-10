@@ -53,16 +53,19 @@ allowed; missing broker identity and offline ranks still refuse.
 
 As of: 2026-11-10, P-4 dependency separation, after D-fix `90ceda405`.
 Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
-`prismaquant/io_copy.py`, `prismaquant/joint_quantum_handoff.py`,
-`prismaquant/data_manifest_contract.py`, `tools/tessera_fleet/stage_status.py`.
+`prismaquant/joint_quantum_handoff.py`,
+`prismaquant/data_manifest_contract.py`, `tools/tessera_fleet/common.py`,
+`tools/pq_profile_artifact.py`, `tools/pq_profile_source.py`.
 Shared strict JSON and refusal checks live below numerical artifact schemas.
-The IO engine's sealed buffers and synchronous extent copy are shared leaves;
+The IO engine's sealed buffers and synchronous extent copy share one leaf;
 staged metadata and readers use them without importing the engine's scheduler.
 Handoff publication binds its native owner directly, without importing the
 Stage A driver. Scientific budgets and publication authority remain checked.
 Scientific manifest validation lives below campaign planning, and recovery
 tooling imports that contract directly. Native status presentation shares the
-stage path definition with submission without importing the status CLI.
+stage path definition with submission in the existing fleet common module,
+without importing the status CLI. Profile argv contracts live with profile
+artifact policy, and the stdlib source loader owns its digest bindings directly.
 
 Graph receipt equality linkage uses a native arm's saved `job_id`. The legacy
 producer field remains a read-only fallback for recorded receipts that lack

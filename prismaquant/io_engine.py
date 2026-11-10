@@ -101,7 +101,7 @@ from typing import Any, Callable, Hashable, Iterable, Protocol
 from .io_buffers import (  # noqa: F401 -- existing engine imports share the leaf implementation
     SealedBuffer, kernel_seal_bits, _F_ADD_SEALS, _F_GET_SEALS, _SEALS,
 )
-from .io_copy import copy_extent
+from .io_buffers import copy_extent
 from .digests import bytes_sha256hex
 from .file_identity import file_stat_signature as _stat_signature
 from .residency_map import StagedReadRefused

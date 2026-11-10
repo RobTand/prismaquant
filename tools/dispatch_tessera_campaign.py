@@ -558,7 +558,7 @@ def _flux_campaign(manifest: Path, *, wait_s: int, receipts: Path | None = None)
 
 def cmd_status(args) -> int:
     """Read saved native IDs without replanning, submission or PB state."""
-    from tools.tessera_fleet.stage_status import show_status
+    from tools.tessera_fleet.common import show_status
     return show_status(args.workspace, args.stage, collect_rows=campaign_rows.collect_rows)
 
 

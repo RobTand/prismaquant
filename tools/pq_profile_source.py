@@ -27,3 +27,13 @@ def profile_source_owner(source: str) -> ModuleType:
             sys.modules.pop(owner_name, None)
             raise
     return sys.modules[owner_name]
+
+
+def profile_digest_owner():
+    return profile_source_owner('digests')
+
+
+bytes_sha256hex = profile_digest_owner().bytes_sha256hex
+file_sha256hex = profile_digest_owner().file_sha256hex
+canonical_json_sha256 = profile_digest_owner().canonical_json_sha256
+canonical_json_bytes = profile_digest_owner().canonical_json_bytes
