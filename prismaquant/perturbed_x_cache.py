@@ -88,8 +88,7 @@ def _activation_max_abs_lookup(
 def _maybe_clip_activations(
     x: "torch.Tensor",
     activation_max_abs: dict,
-    param_name: str | None,
-) -> "torch.Tensor":
+    param_name: str | None) -> "torch.Tensor":
     """Clamp activations to ±max_abs when a calibrated value is known.
 
     ``activation_max_abs`` is the dict from
@@ -675,54 +674,23 @@ def _verified_payload_storage(payload, *, max_storage_bytes, device, max_nodes):
     return max(storages.values(), default=0) if device == 'meta' else sum(storages.values())
 
 
-def _await_entry_landing(resolver, entries, *, deadline=None) -> bool:
-    """Wait for whole-file entries the map does not hold yet (PQ #1204).
-
-    ``entries`` is ``[(declared path, file bytes), ...]``: entries a strict
-    reader looked up and did not find. This is the landing-record wait the
-    shard reader and the checkpoint loader use,
-    ``residency_shard_reader.await_staged_spans``, over one whole-file span
-    per entry, with the same proof check (``stage_cover_is_published``, and
-    the batched form for a window). One call covers every entry, so a
-    window waits once, however many of its entries are missing. Returns
-    ``True`` when every entry landed and the caller may look it up again,
-    ``False`` when the caller refuses as before.
-
-    It waits only where waiting can end in a landing. The resolver must
-    carry the sealed readset, and that readset must be bound: an unbound
-    readset cannot tell a declared entry from an undeclared one, so it
-    does not wait, as ``layer_streaming._await_layer_readset`` does not. A
-    span the bound readset does not declare, a covering entry that failed
-    a hard check, and every refusal of PrismaBuild's landing record return
-    at once. ``deadline`` (``time.monotonic()``) bounds the wait only
-    where no landing record covers the entries; ``None`` starts the
-    configured bound here (``PRISMAQUANT_STAGED_RANGE_WAIT_S``).
-
-    Called only after a miss, so an entry the map already holds costs
-    nothing here.
-    """
+def _await_entry_landing(resolver, entries) -> bool:
+    """Check whole-file coverage once after a strict lookup misses."""
     if not entries:
         return True
     readset = getattr(resolver, "declared_readset", None)
     if not callable(readset) or not callable(getattr(resolver, "staged_range_outcome", None)):
         return False
-    if readset().get("state") != "bound":
-        return False
-    import time
     from .residency_map import RANGE_HIT
-    from .residency_shard_reader import await_staged_spans, staged_range_wait_s
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
-    if deadline is None:
-        deadline = time.monotonic() + staged_range_wait_s()
+    from .residency_shard_reader import await_staged_spans
+    from .staged_lease import stage_cover_is_published
     verdict = await_staged_spans(
         resolver, [(str(path), 0, size, size) for path, size in entries],
-        deadline=deadline, published=stage_cover_is_published,
-        published_batch=stage_covers_are_published)
+        published=stage_cover_is_published)
     return verdict == RANGE_HIT
 
 
-def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=None,
-                         deadline=None):
+def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=None):
     """Strict-policy pinned window for a whole-file bulk input.
 
     Returns the unentered ``(window, key, staged, resolver)``. The shared
@@ -759,7 +727,7 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
             except OSError:
                 declared_size = None
         if declared_size is not None and _await_entry_landing(
-                resolver, [(path, declared_size)], deadline=deadline):
+                resolver, [(path, declared_size)]):
             staged = resolver.staged_read(path, expected_sha256=expected_sha256)
     if staged is None:
         raise LeaseRefused("staged-not-serving", kind="availability")
@@ -770,52 +738,18 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
 
 
 def _acquire_open_bulk_window(path, expected_sha256, *, resolver=None,
-                              declared_size=None, deadline=None):
-    """Acquire, enter and open a bulk window, riding out a retired cover (PQ #1248).
-
-    PrismaBuild can retire a cover's fragment after the map answered and
-    before ``acquire_for`` runs; the enter then refuses ``unpublished``
-    (availability). That is a race a recopy resolves within seconds, so one
-    such refusal waits for the entry to land (:func:`_await_entry_landing`),
-    builds a NEW window (a released window is never reused) and enters
-    again, bounded by ``deadline`` (default: the staged-range wait). Every
-    other refusal, and an ``unpublished`` one that outlives the wait, is
-    recorded and raised on the spot: integrity refusals fail clear and the
-    pool is never read.
-
-    Returns ``(window, key, staged, resolver, fd, serving, tier)``.
-    """
-    import time
-    from .residency_shard_reader import staged_range_wait_s
+                              declared_size=None):
+    """Acquire and open one immutable window; availability refusals are final."""
     from .staged_lease import LeaseRefused
-    if deadline is None:
-        deadline = time.monotonic() + staged_range_wait_s()
-    while True:
-        window, key, staged, lease_resolver = _acquire_bulk_window(
-            path, expected_sha256, resolver=resolver,
-            declared_size=declared_size, deadline=deadline)
-        try:
-            fd, serving, tier = _enter_and_open_window(
-                lease_resolver, window, key, path, record_refusal=False)
-        except LeaseRefused as refusal:
-            retry = (refusal.kind == "availability"
-                     and refusal.reason.split(":", 1)[0] == "unpublished"
-                     and time.monotonic() < deadline)
-            if retry:
-                size = declared_size
-                if size is None:
-                    try:
-                        size = os.lstat(path).st_size
-                    except OSError:
-                        size = None
-                retry = size is not None and _await_entry_landing(
-                    lease_resolver, [(path, size)], deadline=deadline)
-            if not retry:
-                lease_resolver.record_fallback(path, str(refusal))
-                raise
-            time.sleep(0.05)
-            continue
-        return window, key, staged, lease_resolver, fd, serving, tier
+    window, key, staged, lease_resolver = _acquire_bulk_window(
+        path, expected_sha256, resolver=resolver, declared_size=declared_size)
+    try:
+        fd, serving, tier = _enter_and_open_window(
+            lease_resolver, window, key, path, record_refusal=False)
+    except LeaseRefused as refusal:
+        lease_resolver.record_fallback(path, str(refusal))
+        raise
+    return window, key, staged, lease_resolver, fd, serving, tier
 
 
 def _enter_and_open_window(resolver, window, key, path, *, record_refusal=True):
@@ -1976,7 +1910,7 @@ def _declared_entry_resolver(resolver, ref):
     return entry_resolver if entry_resolver is not None else residency_resolver()
 
 
-def _strict_lease_groups(references, resolver, *, deadline=None):
+def _strict_lease_groups(references, resolver):
     """``[(entry resolver, [(ref, staged entry), ...]), ...]`` in read order.
 
     One group per resolver object: every entry of a group is vouched in one
@@ -1986,11 +1920,8 @@ def _strict_lease_groups(references, resolver, *, deadline=None):
     looked up here exactly as the single-entry path looks it up, and a miss
     refuses the same way, before anything is pinned.
 
-    A miss first waits for the entry's landing (PQ #1204): the entries of
-    one resolver that the map does not hold yet are awaited together in one
-    :func:`_await_entry_landing` call, under ``deadline``, and looked up
-    again. The window has one deadline, however many resolvers it spans. An
-    entry the map already holds costs one lookup, as before.
+    A miss checks immutable coverage once through `_await_entry_landing`.
+    No mover or landing record can change this bound manifest.
     """
     from .residency_map import residency_resolver
     from .staged_lease import LeaseRefused
@@ -2006,17 +1937,10 @@ def _strict_lease_groups(references, resolver, *, deadline=None):
         if staged is None:
             missed.setdefault(id(entry_resolver), (entry_resolver, []))[1].append(len(looked))
         looked.append((ref, entry_resolver, staged))
-    if missed and deadline is None:
-        # One bound for the whole window, however many resolvers it spans,
-        # as ``await_staged_spans`` has one for the whole call.
-        import time
-        from .residency_shard_reader import staged_range_wait_s
-        deadline = time.monotonic() + staged_range_wait_s()
     for entry_resolver, indices in missed.values():
         if not _await_entry_landing(
                 entry_resolver,
-                [(looked[index][0].path, looked[index][0].file_bytes) for index in indices],
-                deadline=deadline):
+                [(looked[index][0].path, looked[index][0].file_bytes) for index in indices]):
             raise LeaseRefused("staged-not-serving", kind="availability")
         for index in indices:
             ref = looked[index][0]
@@ -2113,7 +2037,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
                                             expected_session, residency_check=None,
                                             release_file_pages=True, scratch=None,
                                             resolver=None, session_for_reference=None,
-                                            local_paths=None, deadline=None):
+                                            local_paths=None):
     """Read/verify the entire bounded window before exposing any tensor.
 
     This is the existing activation artifact owner's exact-input read seam.
@@ -2148,13 +2072,8 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
     against the reference the owner recorded. The window keys the tensor
     by that reference, so the caller cannot tell which copy served it.
 
-    Under the strict policy an entry the map does not hold yet is waited on
-    before the window pins anything, on PrismaBuild's landing record when
-    the sealed readset declares it (PQ #1204, :func:`_await_entry_landing`).
-    ``deadline`` (``time.monotonic()``) is the caller's bound for that wait
-    where no landing record covers the entries; ``None`` starts the
-    configured bound at the first miss. An undeclared entry, or any
-    terminal verdict of the wait, still refuses ``staged-not-serving``.
+    Strict reads check the immutable staged manifest once before pinning.
+    Missing coverage refuses before any canonical payload read.
 
     The entries are read :func:`exact_read_threads` at a time (PQ #1142),
     each on its own buffer from ``scratch``, and each through every fence
@@ -2205,7 +2124,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         if strict:
             lease_window, lease_key, _staged, lease_resolver = (
                 _acquire_bulk_window(path, ref.sha256, resolver=lease_resolver,
-                                     declared_size=ref.file_bytes, deadline=deadline))
+                                     declared_size=ref.file_bytes))
             live_windows.append(lease_window)
             try:
                 lease_fd, _serving, tier = _enter_and_open_window(
@@ -2305,7 +2224,7 @@ def prefetch_exact_activation_cache_entries(references, *, max_tensor_bytes,
         staged = tuple(ref for ref in references if ref not in local_paths)
         if strict:
             for entry_resolver, members in _strict_lease_groups(
-                    staged, resolver, deadline=deadline):
+                    staged, resolver):
                 read_group(entry_resolver, members)
         else:
             _run_in_order(pool, [partial(read_single, ref) for ref in staged])
@@ -2522,8 +2441,7 @@ def build_quantizable_map(
 def _build_module_plans(
     model: nn.Module,
     assignment: Mapping[str, str],
-    profile=None,
-) -> tuple[list[_ModulePlan], list[str], list[dict]]:
+    profile=None) -> tuple[list[_ModulePlan], list[str], list[dict]]:
     quant_map = build_quantizable_map(model, profile=profile)
     by_module: dict[int, _ModulePlan] = {}
     missing: list[str] = []
@@ -2692,8 +2610,7 @@ class PerturbedActivationCache:
             self._handles.append(
                 plan.module.register_forward_hook(
                     self._make_post_hook(plan),
-                    with_kwargs=True,
-                )
+                    with_kwargs=True)
             )
 
     def remove(self) -> None:
@@ -2783,8 +2700,7 @@ class PerturbedActivationCache:
                 original = param.data.detach().clone()
                 q = spec.quantize_dequantize(original).to(
                     device=param.device,
-                    dtype=param.dtype,
-                ).contiguous()
+                    dtype=param.dtype).contiguous()
             # cache_key now includes production-cache identity, so we
             # can safely populate the shared cache regardless of
             # production-active state.  Different production caches
@@ -2795,8 +2711,7 @@ class PerturbedActivationCache:
             enforce_gpu_memory_budget(
                 [self],
                 device=param.device if param.device.type == "cuda" else None,
-                reason="frozen weight cache fill",
-            )
+                reason="frozen weight cache fill")
         else:
             self._frozen_weight_format_cache.move_to_end(cache_key)
         return q
@@ -3037,7 +2952,7 @@ class PerturbedActivationCache:
                     and _env_truthy(
                         "PRISMAQUANT_STRICT_PRODUCTION_CACHE",
                         default=True,
-                    )
+                )
                 ):
                     raise RuntimeError(
                         f"production_weight_cache miss for "
@@ -3249,8 +3164,7 @@ class PerturbedActivationCache:
     def _packed_nvfp4_weight_for(
         self,
         plan: _ModulePlan,
-        param_plan: _ParamPlan,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        param_plan: _ParamPlan) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         param = getattr(plan.module, param_plan.attr)
         if not isinstance(param, torch.nn.Parameter) or param.is_meta:
             raise RuntimeError("cannot pack a missing or meta Linear weight")
@@ -3283,12 +3197,10 @@ class PerturbedActivationCache:
                 )
                 if w_dq is not None:
                     source = w_dq.to(
-                        device=param.device, dtype=param.dtype,
-                    ).contiguous()
+                        device=param.device, dtype=param.dtype).contiguous()
                 elif _env_truthy(
                     "PRISMAQUANT_STRICT_PRODUCTION_CACHE",
-                    default=True,
-                ):
+                    default=True):
                     raise RuntimeError(
                         f"production_weight_cache miss for "
                         f"({param_plan.name!r}, 'NVFP4') on the fused "
@@ -3305,8 +3217,7 @@ class PerturbedActivationCache:
             enforce_gpu_memory_budget(
                 [self],
                 device=param.device if param.device.type == "cuda" else None,
-                reason="NVFP4 packed weight cache fill",
-            )
+                reason="NVFP4 packed weight cache fill")
         else:
             self._fused_nvfp4_weight_cache.move_to_end(cache_key)
         return packed
@@ -3358,8 +3269,7 @@ class PerturbedActivationCache:
         self,
         plan: _ModulePlan,
         param_plan: _ParamPlan,
-        x: torch.Tensor,
-    ) -> torch.Tensor:
+        x: torch.Tensor) -> torch.Tensor:
         self._capture(plan, x)
         x_runtime = x
         act_spec = self._active_activation_spec(plan)

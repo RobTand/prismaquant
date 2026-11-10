@@ -124,14 +124,13 @@ _POLICY = {'limits': {'host_bytes': 28 * 1024 ** 3, 'gpu_bytes': 72 * 1024 ** 3,
                       'physical_bytes': 100 * 1024 ** 3}}
 
 
-def test_stage_b_spec_wait_must_sit_below_the_chunk_grace(tmp_path):
+def test_stage_b_spec_does_not_compare_retired_wait_to_grace(tmp_path):
     """The reviewed spec a52b5359... seals a 900 s wait; every quantum row refuses it (#990)."""
     from tools.prepare_extended_joint_quanta import check_stage_b_spec
     path, spec = _stage_b_spec(tmp_path, 899)
     check_stage_b_spec(path, spec, _POLICY)
     path, spec = _stage_b_spec(tmp_path, 900)
-    with pytest.raises(ValueError, match='progress grace'):
-        check_stage_b_spec(path, spec, _POLICY)
+    check_stage_b_spec(path, spec, _POLICY)
 
 
 def test_stage_b_spec_envelope_must_equal_the_resource_policy(tmp_path):

@@ -367,16 +367,24 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     _publish_flux_json(record_dir / 'submission.json', receipt)
     try:
         result = _flux_run(args, uri=profile['uri'])
-        (record_dir / 'submit.stdout').write_text(result.stdout)
-        (record_dir / 'submit.stderr').write_text(result.stderr)
         if result.returncode:
             raise SubmissionUnknown('native submission returned an error')
         job_id = _job_id(result.stdout.strip())
     except (OSError, subprocess.SubprocessError, ValueError, SubmissionUnknown) as exc:
         raise SubmissionUnknown(f'submission unknown in {record_dir}; do not resubmit') from exc
     receipt.update(state='submitted', job_id=job_id)
-    _publish_flux_json(record_dir / 'submission.json', receipt)
-    (record_dir / 'jobid').write_text(job_id + '\n')
+    try:
+        # The acknowledged ID is recoverable even if the ordinary receipt,
+        # diagnostics or human-readable jobid cannot subsequently be saved.
+        _publish_flux_json(record_dir / 'submitted-job.json', receipt)
+        (record_dir / 'submit.stdout').write_text(result.stdout)
+        (record_dir / 'submit.stderr').write_text(result.stderr)
+        _publish_flux_json(record_dir / 'submission.json', receipt)
+        (record_dir / 'jobid').write_text(job_id + '\n')
+    except OSError as exc:
+        raise SubmissionUnknown(
+            f'submitted as {job_id} in {record_dir}; receipt publication failed; '
+            'load submitted-job.json to reconcile, do not resubmit') from exc
     return FluxSubmission(job_id, record_dir, launch_sha)
 
 
@@ -405,6 +413,22 @@ def _read_submission(record_dir):
             receipt.get('schema') != 'pq.flux.submission.v1' or
             receipt.get('launch_sha256') != launch_sha or intent.get('record_dir') != str(record_dir)):
         raise ValueError('invalid or modified Flux launch/submission receipt')
+    recovery = record_dir / 'submitted-job.json'
+    if recovery.exists():
+        acknowledged = _native_document(read_document(recovery, 1 << 20)[0])
+        if (not isinstance(acknowledged, dict) or
+                acknowledged.get('schema') != 'pq.flux.submission.v1' or
+                acknowledged.get('launch_sha256') != launch_sha or
+                acknowledged.get('profile') != intent.get('profile') or
+                acknowledged.get('state') != 'submitted' or
+                not acknowledged.get('job_id')):
+            raise ValueError('invalid acknowledged Flux job receipt')
+        if receipt.get('state') == 'submitted' and receipt != acknowledged:
+            raise ValueError('conflicting acknowledged Flux job receipt')
+        if receipt.get('state') == 'unknown':
+            if receipt.get('job_id') is not None or receipt.get('launch_sha256') != launch_sha:
+                raise ValueError('invalid unknown Flux receipt')
+            receipt = acknowledged
     if receipt.get('state') != 'submitted' or not receipt.get('job_id'):
         raise SubmissionUnknown(f'submission unknown in {record_dir}; reconcile, do not resubmit')
     return FluxSubmission(_job_id(receipt['job_id']), record_dir, launch_sha), intent

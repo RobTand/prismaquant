@@ -46,6 +46,12 @@ def digest_tensor(tensor, torch):
         memoryview(tensor.reshape(-1).view(torch.uint8).numpy())).hexdigest()
 
 
+def stage_counters(counters, stage_mount):
+    if stage_mount not in counters:
+        raise ValueError(f"REFUSED: stage mount {stage_mount} has no NFS read counters")
+    return counters[stage_mount]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--streams", default="1,2,4,8,16,32",
@@ -85,6 +91,11 @@ def main():
     from prismaquant.mount_facts import find_mount
     mount = find_mount(stage_root, table=residency_shard_reader.MOUNTS_PATH)
     stage_mount = mount.point if mount else stage_root
+    try:
+        stage_counters(nfs_read_bytes(), stage_mount)
+    except ValueError as exc:
+        print(str(exc), flush=True)
+        return 2
     print(f"[mount] {stage_root} {mount.filesystem if mount else '?'} "
           f"{dict(mount.options) if mount else '?'}", flush=True)
     print(f"[mount] read shape from the mount: "
@@ -138,8 +149,9 @@ def main():
         r1 = resource.getrusage(resource.RUSAGE_SELF)
         m1, i1 = nfs_read_bytes(), read_proc_io()
         digest = digest_tensor(tensor, torch)
-        stage_client = m1[stage_mount][0] - m0[stage_mount][0]
-        stage_server = m1[stage_mount][1] - m0[stage_mount][1]
+        before, after = stage_counters(m0, stage_mount), stage_counters(m1, stage_mount)
+        stage_client = after[0] - before[0]
+        stage_server = after[1] - before[1]
         pool_server = (m1.get("/mnt/shared", (0, 0))[1]
                        - m0.get("/mnt/shared", (0, 0))[1])
         row = {

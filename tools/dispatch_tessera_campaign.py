@@ -268,7 +268,7 @@ def verify_row_demand(spec: dict, census: dict, row: dict, *,
             f"own argv derives: {terms}"
             + (f" + {demand['headroom_gb']} GiB declared headroom"
                if demand["headroom_gb"] else "")
-            + ". PrismaBuild would admit the row and its CaptureMemoryGuard "
+            + ". The row's CaptureMemoryGuard "
             "would then refuse it.")
     return record
 
@@ -1600,9 +1600,7 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
     row = {'argv': command, 'cwd': parsed.get('cwd', str(Path.cwd())),
            'demand': demand, 'env': dict(parsed.get('env', {})),
            'tags': [args.tag] if args.tag else [], 'priority': args.priority,
-           'data_manifest': str(manifest), 'timeout_s': args.timeout_s,
-           'progress_phases': [f'{name}={getattr(args, "head_grace_s", None) or 1800 if name == "head" else 900}'
-                               for name in progress_phases]}
+           'data_manifest': str(manifest), 'timeout_s': args.timeout_s}
     image = admission_image_reference(parsed)
     if image is not None:
         row['container_images'] = [image]

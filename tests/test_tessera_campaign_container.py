@@ -62,6 +62,29 @@ def test_container_uses_worker_snapshot_and_native_cpuset_without_shell():
     assert "docker" not in " ".join(argv) and "--gpus" not in argv and "--device" not in argv
 
 
+def test_native_publication_identity_crosses_the_explicit_container_environment():
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    environ = {"FLUX_JOB_ID": "123", "OUT": "/mnt/shared/jobs/owned", "API_TOKEN": "private"}
+    argv = runner.podman_command(spec(), ["python3"], cwd="/worker/snapshot",
+        admission=ADMISSION, cidfile=CIDFILE, image_id="sha256:resolved", environ=environ)
+    forwarded = dict(argv[index + 1].split("=", 1) for index, value in enumerate(argv) if value == "--env")
+    assert forwarded["FLUX_JOB_ID"] == "123"
+    assert forwarded["OUT"] == environ["OUT"]
+    assert "API_TOKEN" not in forwarded
+
+
+def test_native_admission_refuses_before_namespace_directories_are_created(monkeypatch):
+    runner = importlib.import_module("tools.tessera_campaign_container")
+    touched = []
+    monkeypatch.setattr(runner, "validate_namespace_launch", lambda *a, **kw: touched.append("namespace"))
+    def refuse(_environ):
+        raise RuntimeError("unadmitted")
+    monkeypatch.setattr(runner, "native_admission", refuse)
+    with pytest.raises(RuntimeError, match="unadmitted"):
+        runner.main(["--spec", json.dumps(spec()), "--", "python3"])
+    assert touched == []
+
+
 def _argv_with_budget(budget, admission=ADMISSION):
     runner = importlib.import_module("tools.tessera_campaign_container")
     declared = spec()

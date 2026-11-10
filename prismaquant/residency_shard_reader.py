@@ -33,14 +33,8 @@ from .staged_tier_policy import (
 from .staged_lease import LeaseRefused, acquire_entry_window
 
 
-# Retained planner setting; immutable native reads refuse immediately on gaps.
-STAGED_RANGE_WAIT_ENV = "PRISMAQUANT_STAGED_RANGE_WAIT_S"
-STAGED_RANGE_WAIT_S = 300.0
-
-
-def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=None,
-                       published_batch=None):
-    """One immutable coverage check; cold/missing input never polls PB."""
+def await_staged_spans(resolver, wanted, *, published=None, cancel=None):
+    """Check immutable coverage once; missing input never polls or waits."""
     if cancel is not None and cancel.is_set():
         return RANGE_UNDECLARED
     for declared, start, end, size in wanted:
@@ -52,39 +46,6 @@ def await_staged_spans(resolver, wanted, *, deadline, published=None, cancel=Non
         if published is not None and not published(resolver, declared, entry):
             return RANGE_UNDECLARED
     return RANGE_HIT
-
-def staged_range_wait_s() -> float:
-    """The configured wait bound in seconds: finite and not negative.
-
-    ``math.isfinite`` rather than a ``>= 0`` test alone, because the one
-    property this design rests on is that the wait *ends*: ``float("inf")``
-    is neither negative nor NaN, and a deadline of ``started + inf`` never
-    expires. An unbounded wait is not a longer bound, it is no bound.
-    """
-    return staged_range_wait_from_env(os.environ)
-
-
-def staged_range_wait_from_env(env) -> float:
-    """:func:`staged_range_wait_s` read from ``env`` rather than the process.
-
-    The joint dispatcher reads a campaign spec's ``env`` block with the same
-    rules before it submits, so the wait it compares with the row's progress
-    grace is the wait the reader inside the container will use.
-    """
-    raw = env.get(STAGED_RANGE_WAIT_ENV)
-    if raw is None or not str(raw).strip():
-        return STAGED_RANGE_WAIT_S
-    try:
-        value = float(str(raw).strip())
-    except ValueError:
-        raise ValueError(
-            f"{STAGED_RANGE_WAIT_ENV} must be a number of seconds, "
-            f"not {raw!r}") from None
-    if not math.isfinite(value) or value < 0:
-        raise ValueError(
-            f"{STAGED_RANGE_WAIT_ENV} must be a finite number of seconds "
-            f">= 0, not {raw!r}")
-    return value
 
 
 try:

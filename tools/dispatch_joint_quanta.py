@@ -84,31 +84,11 @@ CHUNK_PROGRESS_GRACE_S = 900
 #: blanket grace a load phase takes when no floor applies (below).
 HEAD_PROGRESS_GRACE_S = 1800
 
-#: checkpoint-load and handoff-load commit no progress units: a read into a
-#: disposable scratch is not durable work (PB #480). Their grace is therefore
-#: the phase's whole time budget, derived per row as W + ceil(bytes / floor):
-#:
-#: * W is the spec's ``PRISMAQUANT_STAGED_RANGE_WAIT_S``, read with the
-#:   reader's own rules. The reader sets one deadline, start + W, for every
-#:   staged wait in the phase (joint_adjoint_checkpoints.load_adjoint_checkpoint
-#:   and joint_quantum_handoff.load_handoff_inputs). Without a PrismaBuild landing record the phase
-#:   waits at most W in total; with one (PB #989) its waits are declared and
-#:   exempt from the no-progress clock.
-#: * bytes is the phase's byte count in the row's staged read plan, and at
-#:   the floor rate or faster the transfer takes at most ceil(bytes / floor).
-#:
-#: So W + ceil(bytes / floor) bounds the phase's non-exempt time, and
-#: :func:`require_staged_wait_below_grace` holds for any phase with bytes.
+#: Immutable staged reads check coverage immediately. Load-phase planning
+#: retains only the measured transfer term, ceil(bytes / floor).
 LOAD_PHASE_GRACE_SCHEMA = "prismaquant.load_phase_grace.v1"
 LOAD_PHASE_FLOOR_SCHEMA = "prismaquant.load_phase_floor.v1"
-LOAD_PHASE_BOUND = (
-    "grace = W + ceil(bytes / floor). The reader sets one deadline, start + W, "
-    "for every staged wait in the phase "
-    "(prismaquant.joint_adjoint_checkpoints.load_adjoint_checkpoint; "
-    "prismaquant.joint_quantum_handoff.load_handoff_inputs), so without a PrismaBuild landing record the phase "
-    "waits at most W in total, and with one (PB #989) the waits are declared "
-    "and exempt. At or above the floor rate the transfer takes at most "
-    "ceil(bytes / floor).")
+LOAD_PHASE_BOUND = "grace = ceil(bytes / floor); immutable staged coverage never waits."
 #: Who counts as a reader of the link, for every stamp.
 LINK_READERS_SCOPE = (
     "this dispatch's own rows only: readers from other workloads on the same "
@@ -157,22 +137,9 @@ LOAD_PHASE_FLOOR_ONE_READER = {
 COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
 COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
 COMPUTE_PHASE_BOUND = (
-    "grace = read + the sum of the compute terms. read is W + ceil(bytes / "
-    "floor) with W counted once. The one-deadline property of the load-phase "
-    "bound is shown only for load_adjoint_checkpoint and load_handoff_inputs; "
-    "in a compute phase the staged waits are covered because PrismaBuild "
-    "landing records (PB #989) declare them and exempt them from the "
-    "no-progress clock. More than one undeclared wait is not covered. A "
-    "measured compute term is ceil(units x unit_s), where unit_s is the "
-    "slowest window of at least 30 s of a pass on the same regime and device "
-    "class. An unmeasured term takes the blanket HEAD_PROGRESS_GRACE_S. The "
-    "pass commits no unit (nothing in it is durable), so the grace is its "
-    "whole time budget. The row's last declared phase adds a tail term: the "
-    "quantum's tail after its last window (the payload and teardown spans) "
-    "commits no unit and runs on that phase's clock after its last commit, "
-    "so the term is ceil(1 x unit_s), unit_s the slowest measured tail "
-    "(payload plus teardown wall_s) on the same regime and device class, or "
-    "the blanket.")
+    "grace = measured transfer term + the sum of the compute terms. "
+    "Immutable staged coverage checks do not wait. Native launch does not "
+    "enforce a progress-stall watchdog; these stamps describe the payload plan.")
 #: What each compute kind counts, and where an unmeasured kind's time will
 #: come from once a run records it.
 COMPUTE_KINDS = {
@@ -1176,11 +1143,11 @@ def link_readers(*, rows: int, declared: int | None = None,
     return {"readers": readers, "readers_source": source, "floor": floor}
 
 
-def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
+def load_phase_grace(name: str, *, phase_bytes: int,
                      link: Mapping | None) -> dict:
     """The stall allowance of one load phase, with the stamp that explains it.
 
-    ``mode`` is ``derived`` (W + ceil(bytes / floor), see
+    ``mode`` is ``derived`` (ceil(bytes / floor), see
     :data:`LOAD_PHASE_BOUND`) when a floor measured at this dispatch's
     reader count applies, and ``blanket`` (:data:`HEAD_PROGRESS_GRACE_S`)
     otherwise, with the reason. No concurrency discount is ever applied.
@@ -1188,7 +1155,6 @@ def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
     counted = type(phase_bytes) is int and phase_bytes >= 0
     stamp = {"schema": LOAD_PHASE_GRACE_SCHEMA, "phase": str(name),
              "phase_bytes": phase_bytes if counted else None,
-             "staged_wait_s": staged_wait_s,
              "readers": None if link is None else link["readers"],
              "readers_source": None if link is None else link["readers_source"],
              "readers_scope": LINK_READERS_SCOPE}
@@ -1205,13 +1171,12 @@ def load_phase_grace(name: str, *, phase_bytes: int, staged_wait_s: float,
         return {**blanket,
                 "reason": "the read plan declares no byte count for this phase"}
     if phase_bytes == 0:
-        # W + 0 would equal the reader's own deadline, and the no-progress
-        # clock would race it (require_staged_wait_below_grace).
+        # An empty phase has no transfer measurement to bound.
         return {**blanket, "reason": "the read plan declares 0 bytes for this "
                                      "phase, so there is no transfer to bound"}
     transfer = -(-phase_bytes // int(floor["floor_bytes_per_s"]))
     return {**stamp, "mode": "derived",
-            "grace_s": math.ceil(staged_wait_s) + transfer,
+            "grace_s": transfer,
             "transfer_s": transfer,
             "floor_bytes_per_s": int(floor["floor_bytes_per_s"]),
             "floor_readers": int(floor["readers"]),
@@ -1296,7 +1261,7 @@ def _scope_misses(scope: Mapping, context: Mapping) -> list[str]:
 
 
 def compute_phase_grace(name: str, *, work: Sequence[Mapping], phase_bytes,
-                        staged_wait_s: float, link: Mapping | None,
+                        link: Mapping | None,
                         context: Mapping, ceilings: Mapping) -> dict:
     """The stall allowance of one compute phase, with the stamp that explains it.
 
@@ -1307,9 +1272,9 @@ def compute_phase_grace(name: str, *, work: Sequence[Mapping], phase_bytes,
     ``derived`` only when every term is. See :data:`COMPUTE_PHASE_BOUND`.
     """
     read = load_phase_grace(name, phase_bytes=phase_bytes,
-                            staged_wait_s=staged_wait_s, link=link)
+                            link=link)
     read_term = {key: read[key] for key in (
-        "mode", "grace_s", "phase_bytes", "staged_wait_s", "transfer_s",
+        "mode", "grace_s", "phase_bytes", "transfer_s",
         "floor_bytes_per_s", "readers", "reason") if key in read}
     terms = []
     for item in work:
@@ -1471,44 +1436,6 @@ def progress_grace_of(row: Mapping) -> list | None:
     return json.loads(argv[list(argv).index(quantum_row.PROGRESS_GRACE_FLAG) + 1])
 
 
-def require_staged_wait_below_grace(spec: Mapping,
-                                    progress: Sequence[tuple[str, int]]) -> None:
-    """Refuse a row whose fallback staged-range wait could outlast a phase grace.
-
-    Where PrismaBuild publishes a landing record for the reader's ranges
-    (PB #989), the landing record bounds the wait, not this setting: the
-    reader waits while the range's mover is queued or copying, refuses at
-    once on a mover that ends without a receipt, and declares the wait so
-    PrismaBuild's ``no_progress`` rung does not count it. Only where no
-    landing record covers the range (an older PrismaBuild generation) does
-    the reader wait up to ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` and then
-    refuse with the staging error. PrismaBuild kills a phase that commits no
-    progress for its grace, so that fallback wait at or above the smallest
-    grace turns a staging stall into a no-progress kill, which names no
-    range (R10: 900 s wait against a 900 s chain grace). The wait is read
-    from the spec's ``env`` block with the reader's own rules, so the value
-    compared here is the value the reader will use; the admissible bound is
-    derived from the grace this row declares.
-    """
-    from prismaquant.residency_shard_reader import (
-        STAGED_RANGE_WAIT_ENV, staged_range_wait_from_env)
-
-    env = spec.get("env") or {}
-    try:
-        wait = staged_range_wait_from_env(env)
-    except ValueError as exc:
-        raise DispatchRefused(f"campaign spec: {exc}") from exc
-    name, grace = min(progress, key=lambda phase: phase[1])
-    if not wait < grace:
-        raise DispatchRefused(
-            f"campaign spec {STAGED_RANGE_WAIT_ENV}={wait:g} s is not below "
-            f"the {grace} s progress grace of phase {name!r}. This is the "
-            "reader's fallback wait, used where no PrismaBuild landing record "
-            "covers a range (the landing record bounds every other wait); at "
-            "or above the grace a staging stall would end as a no-progress "
-            f"kill instead of the reader's staging refusal. Set it below {grace} s")
-
-
 def _require_replay_regime(spec: dict, *, emits_handoff: bool = False,
                            chain_batch_size: int | None = None) -> None:
     """Validate the Stage B replay regime the sealed spec declares (#994).
@@ -1644,7 +1571,7 @@ def _admit_overlay_caches(spec: dict, scratch: dict) -> None:
                 "declare a bounded local scratch root to bind them there")
         raise RuntimeError(
             f"the campaign spec pins container caches to the overlay: {named}; "
-            f"these writes are unbounded and invisible to PrismaBuild. {hint}, "
+            f"these writes have no declared filesystem capacity bound. {hint}, "
             f"or name why in the spec's {OVERLAY_CACHE_REASON_FIELD} "
             "(a non-empty string, sealed with the pins it admits)")
     spec[OVERLAY_CACHE_ADMISSION_FIELD] = {
@@ -1674,8 +1601,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     caller retains the reference in the row's ``container_images`` intent.
     The current native profile refuses container admission.
 
-    ``progress`` is the row's ``--progress-phase`` list; the same parse is
-    checked against it (:func:`require_staged_wait_below_grace`).
+    ``progress`` describes the payload phases; it is independent of staging.
 
     ``spool_max_bytes`` is an unused historical parameter. Spool bounds now
     belong to the launch-bound produced declaration. The row's environment
@@ -1695,7 +1621,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
 
     ``spec`` is the caller's one parse of ``spec_path``, when the caller had
     to read it first (the quantum row derives its load grace from the
-    spec's staged wait); the wrapper then seals that parse and reads nothing.
+    spec's resource policy); the wrapper seals that parse and reads nothing.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     spec = (json.loads(Path(spec_path).read_text()) if spec is None
@@ -1720,7 +1646,6 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 "regenerate the executable readsets with the spec's regime")
         spec["env"] = {**env, STAGE_B_SPILL_ENV[1]: str(int(spill_bound["reservation_bytes"]))}
     refuse_retired_service_environment(spec)
-    require_staged_wait_below_grace(spec, progress)
     # Validate a declared workspace before publishing the row. These same
     # inlined spec bytes supply its explicit row environment below; no ambient
     # coordinator environment or second spec read participates.
@@ -1932,7 +1857,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
     prepared_input = None
     executable = record.get("executable_readset")
     # At most one parse of the campaign spec, made when a load phase first
-    # needs its staged wait; _container_wrap then seals that same parse.
+    # needs its resource policy; _container_wrap seals that same parse.
     spec_parse: dict = {}
     grace_stamps: list[dict] = []
     compute_stamps: list[dict] = []
@@ -1943,17 +1868,9 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             spec_parse["spec"] = json.loads(Path(SPEC_PATH).read_text())
         return spec_parse["spec"]
 
-    def staged_wait():
-        from prismaquant.residency_shard_reader import staged_range_wait_from_env
-
-        try:
-            return staged_range_wait_from_env(parsed_spec().get("env") or {})
-        except ValueError as exc:
-            raise DispatchRefused(f"campaign spec: {exc}") from exc
-
     def load_grace(name, phase_bytes):
         stamp = load_phase_grace(name, phase_bytes=phase_bytes,
-                                 staged_wait_s=staged_wait(), link=link)
+                                 link=link)
         grace_stamps.append(stamp)
         return stamp["grace_s"]
 
@@ -1985,7 +1902,7 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
             return None
         stamp = compute_phase_grace(
             name, work=work, phase_bytes=fact.get("bytes"),
-            staged_wait_s=staged_wait(), link=link,
+            link=link,
             context={**context, "entry_bytes": fact.get("entry_bytes")},
             ceilings=ceiling_docs)
         compute_stamps.append(stamp)

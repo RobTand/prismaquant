@@ -271,37 +271,6 @@ def _no_activation_scale_policy_carried_between_tests():
 
 
 @pytest.fixture(autouse=True)
-def _no_staged_range_wait_unless_asked(monkeypatch):
-    """Tests do not wait on a fleet that is not running.
-
-    ``StagedShardReader._range_for`` waits a bounded time for a range the
-    residency map does not cover yet, because on the fleet an uncovered span
-    is usually a mover that has not run rather than a range that will never
-    arrive (PQ #874). Under pytest there are no movers: every uncovered span
-    is permanent, so the default 300 s bound would turn each of the several
-    existing tests that assert an immediate ``readset-not-staged`` refusal
-    into a five-minute sleep that still passes.
-
-    Setting the bound to 0 here restores the pre-#874 refuse-on-first-miss
-    behaviour as the suite-wide default, which is what those tests were
-    written against. The tests that are ABOUT the wait set the variable
-    themselves; a test's own ``monkeypatch.setenv`` runs after this fixture
-    and wins.
-
-    This hides no cost. What waits on the fleet is
-    ``layer_streaming._await_layer_readset``, and only it: the strict policy
-    path, the layer read, and only spans the sealed readset
-    declares and no mover has written yet. A span the readset does not
-    declare, an entry that covers a span and fails a check, and an unbound
-    readset all refuse at once there, exactly as they do here. The one
-    behaviour this default replaces is the 300 s a *declared* range that
-    never arrives would cost before failing -- which needs movers to be
-    meaningful, and there are none under pytest.
-    """
-    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "0")
-
-
-@pytest.fixture(autouse=True)
 def _certified_mode_unless_asked(monkeypatch):
     """Tests run in certified mode unless they ask for dev mode.
 

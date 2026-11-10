@@ -143,8 +143,8 @@ def test_nonzero_source_ranges_and_exact_scientific_contract(tmp_path, monkeypat
             assert os.pread(fd, end - start, entry['object_offset']) == b'EXACT-TENSOR-BYTES-'
         with pytest.raises(OSError):
             os.fstat(fd)
-    assert await_staged_spans(resolver, [(source, start, end, len(raw))], deadline=0) == 'hit'
-    assert await_staged_spans(resolver, [(source, 0, start, len(raw))], deadline=0) == 'undeclared'
+    assert await_staged_spans(resolver, [(source, start, end, len(raw))]) == 'hit'
+    assert await_staged_spans(resolver, [(source, 0, start, len(raw))]) == 'undeclared'
 
 
 def test_scientific_contract_must_match_the_materialized_ranges(tmp_path):

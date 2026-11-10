@@ -21,7 +21,7 @@ class NativeRowsTests(unittest.TestCase):
 
     def test_preflight_all_rows_before_launch(self):
         with patch.object(jobs, 'validate_job', return_value={}), patch.object(jobs, 'submit_job') as submit:
-            with self.assertRaisesRegex(ValueError, 'gpus'):
+            with self.assertRaisesRegex(ValueError, 'GPU lane not qualified'):
                 rows.submit_rows([self.row(), self.row(demand={'cpu': 1, 'mem_gb': 1, 'gpu': 1})],
                                  '/mnt/shared/never-created')
             submit.assert_not_called()

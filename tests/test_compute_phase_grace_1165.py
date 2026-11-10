@@ -95,11 +95,10 @@ def _plan(manifest):
 def _read_term(dispatch, phase_bytes):
     """W + ceil(bytes / floor): the fixture dispatch has one row, so the
     built-in one-reader floor applies."""
-    from prismaquant.residency_shard_reader import staged_range_wait_from_env
 
     env = json.loads(Path(dispatch.SPEC_PATH).read_text()).get("env") or {}
     floor = dispatch.LOAD_PHASE_FLOOR_ONE_READER["floor_bytes_per_s"]
-    return math.ceil(staged_range_wait_from_env(env)) + -(-phase_bytes // floor)
+    return -(-phase_bytes // floor)
 
 
 # -- red: the defect, at the dispatcher ------------------------------------
@@ -317,7 +316,7 @@ def _r13_grace(name, *, phase_bytes, entries, context=V7_CONTEXT):
     work = quantum_row.compute_phase_work(
         name, replay_mode="spill", entries=entries, n_probes=4, capture_batch=4)
     return dispatch.compute_phase_grace(
-        name, work=work, phase_bytes=phase_bytes, staged_wait_s=300.0,
+        name, work=work, phase_bytes=phase_bytes,
         link=dispatch.link_readers(rows=1), context=context,
         ceilings=dispatch.compute_ceilings())
 

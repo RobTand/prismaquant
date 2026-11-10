@@ -255,14 +255,12 @@ def reference_from_record(record: dict):
     )
 
 
-def read_exact_entry_tensors(records, *, expected_session, deadline=None) -> dict:
+def read_exact_entry_tensors(records, *, expected_session) -> dict:
     """Read whole exact entries back, digest-verified, name -> CPU tensor.
 
     Uses the activation owner's verified window reader (hash-then-load in one
     pass), sized to the caller's entry list. Checkpoint restoration passes one
     entry at a time so no read window owns the complete cotangent plane.
-    ``deadline`` is the caller's staged-range wait bound, passed on so an
-    entry the reader waits for again shares it (PQ #1204).
     """
     from .perturbed_x_cache import prefetch_exact_activation_cache_entries
 
@@ -273,9 +271,7 @@ def read_exact_entry_tensors(records, *, expected_session, deadline=None) -> dic
     total = sum(int(record["tensor_bytes"]) for record in records)
     references = [reference_from_record(record) for record in records]
     with prefetch_exact_activation_cache_entries(
-        references, max_tensor_bytes=total, expected_session=expected_session,
-        deadline=deadline,
-    ) as window:
+        references, max_tensor_bytes=total, expected_session=expected_session) as window:
         for reference in references:
             tensors[reference.name] = window.get(reference)
     return tensors
@@ -319,32 +315,25 @@ def exact_entry_windows(records, *, max_resident_bytes):
     return windows, read_ahead
 
 
-def _await_checkpoint_entries(entries, *, deadline):
-    """Wait for one window of entries at once; the exact reader keeps its pin checks.
-
-    :func:`_await_checkpoint_entry` for a list: one poll asks PrismaBuild
-    for every entry's cover in one lookup (PQ #997), and falls back to one
-    lookup per entry only when that answer cannot name the missing one.
-    """
+def _await_checkpoint_entries(entries):
+    """Check this window's immutable coverage once before opening its entries."""
     from .staged_tier_policy import policy_is_active
     if not entries or not policy_is_active():
         return None
     from .residency_map import residency_resolver
     from .residency_shard_reader import await_staged_spans
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    from .staged_lease import stage_cover_is_published
     resolver = residency_resolver()
     if resolver is None:
         return None  # The strict reader supplies its existing missing-context refusal.
     return await_staged_spans(
         resolver, [(entry["path"], 0, entry["file_bytes"], entry["file_bytes"])
                    for entry in entries],
-        deadline=deadline, published=stage_cover_is_published,
-        published_batch=stage_covers_are_published)
+        published=stage_cover_is_published)
 
 
 def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=None,
-                               residency_check=None, deadline=None,
-                               deadline_per_window=False):
+                               residency_check=None):
     """Yield ``(record, tensor)`` for every record, in order, window by window.
 
     The streaming form of :func:`read_exact_entry_tensors` for a whole
@@ -364,28 +353,14 @@ def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=
     Close the generator (``contextlib.closing``) when the consumer may stop
     early: closing waits for a read in flight and releases its charge.
 
-    ``deadline`` is one bound for every staged wait of the stream, started
-    at its first read when ``None``: a load phase's rule. With
-    ``deadline_per_window`` each window's wait starts its own configured
-    bound when its read starts, as a boundary prefetch window's does: the
-    rule for a stream read across a compute pass (PQ #1143), whose later
-    windows are read minutes after its first.
+    Each window checks immutable coverage once before its verified reads.
     """
-    from .residency_shard_reader import staged_range_wait_s
     windows, read_ahead = exact_entry_windows(records, max_resident_bytes=max_resident_bytes)
     if not windows:
         return
-    if deadline_per_window and deadline is not None:
-        raise ValueError("a stream takes one deadline or one per window, not both")
-    if deadline is None and not deadline_per_window:
-        deadline = time.monotonic() + staged_range_wait_s()
-
     def read(window):
-        bound = (time.monotonic() + staged_range_wait_s() if deadline_per_window
-                 else deadline)
-        _await_checkpoint_entries(window, deadline=bound)
-        return read_exact_entry_tensors(window, expected_session=expected_session,
-                                        deadline=bound)
+        _await_checkpoint_entries(window)
+        return read_exact_entry_tensors(window, expected_session=expected_session)
 
     held = []  # (charge, future or tensors), oldest first
 
@@ -1463,8 +1438,7 @@ class AdjointCheckpointAttempt:
             {key: record[key] for key in
              ("schema", "boundary", "session", "activation_entries",
               "shared_state_entries")},
-            where="adjoint checkpoint",
-        )
+            where="adjoint checkpoint")
         with self.owner.hold_transient_metadata(
                 self.manifest_envelope, "checkpoint manifest"):
             manifest_payload = checkpoint_manifest_bytes(record)
@@ -1751,8 +1725,8 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     return read_staged_buffer(resolver, path, staged, label=label, expected_bytes=size)
 
 
-def _await_checkpoint_entry(entry, *, deadline):
-    """Wait within the entered checkpoint phase; the exact reader keeps its pin checks."""
+def _await_checkpoint_entry(entry):
+    """Check immutable coverage; the exact reader keeps its pin checks."""
     from .staged_tier_policy import policy_is_active
     if not policy_is_active():
         return
@@ -1764,12 +1738,11 @@ def _await_checkpoint_entry(entry, *, deadline):
         return  # The strict reader supplies its existing missing-context refusal.
     size = entry["file_bytes"]
     return await_staged_spans(
-        resolver, [(entry["path"], 0, size, size)], deadline=deadline,
+        resolver, [(entry["path"], 0, size, size)],
         published=stage_cover_is_published)
 
 
-def _verified_checkpoint_manifest(space, record: dict, *, deadline,
-                                  shared_state_max_bytes=None) -> dict:
+def _verified_checkpoint_manifest(space, record: dict, *, shared_state_max_bytes=None) -> dict:
     """``record``, once the checkpoint's ``checkpoint.json`` is its exact bytes."""
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
     manifest_path = checkpoint_dir / "checkpoint.json"
@@ -1789,7 +1762,7 @@ def _verified_checkpoint_manifest(space, record: dict, *, deadline,
         raise RuntimeError(
             "adjoint checkpoint entries are not under the checkpoint "
             f"directory the loader reads ({manifest_path})")
-    _await_checkpoint_entry(manifest_entry, deadline=deadline)
+    _await_checkpoint_entry(manifest_entry)
     try:
         payload = _read_shared_state_payload(manifest_path, manifest_entry)
     except OSError as exc:
@@ -1811,15 +1784,14 @@ def _verified_checkpoint_manifest(space, record: dict, *, deadline,
     return stored
 
 
-def _load_checkpoint_shared_states(stored: dict, *, deadline,
-                                   shared_state_max_bytes=None) -> tuple[dict, dict]:
+def _load_checkpoint_shared_states(stored: dict, *, shared_state_max_bytes=None) -> tuple[dict, dict]:
     if checkpoint_is_packed(stored):
         return _load_packed_shared_states(
-            stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+            stored,  shared_state_max_bytes=shared_state_max_bytes)
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
-        _await_checkpoint_entry(entry, deadline=deadline)
+        _await_checkpoint_entry(entry)
         path = Path(entry["path"])
         payload = _read_shared_state_payload(path, entry)
         digest = bytes_sha256hex(payload)
@@ -1841,14 +1813,14 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
     return shared_adjoint, shared_pass
 
 
-def read_shared_state_pack(entry: dict, *, deadline) -> list:
+def read_shared_state_pack(entry: dict) -> list:
     """``[(name, member bytes)]`` of a packed checkpoint's one pack row.
 
     Read through the same staged small-file reader as every shared-state
     file (so tier counts are per whole file), checked against the row's
     digest and size, then unpacked and checked member by member.
     """
-    _await_checkpoint_entry(entry, deadline=deadline)
+    _await_checkpoint_entry(entry)
     payload = _read_shared_state_payload(Path(entry["path"]), entry)
     if (bytes_sha256hex(payload) != entry["sha256"]
             or len(payload) != entry["file_bytes"]):
@@ -1857,12 +1829,11 @@ def read_shared_state_pack(entry: dict, *, deadline) -> list:
     return unpack_shared_states(payload)
 
 
-def _load_packed_shared_states(stored: dict, *, deadline,
-                               shared_state_max_bytes=None) -> tuple[dict, dict]:
+def _load_packed_shared_states(stored: dict, *, shared_state_max_bytes=None) -> tuple[dict, dict]:
     (entry,) = stored["shared_state_entries"]
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
-    for name, member in read_shared_state_pack(entry, deadline=deadline):
+    for name, member in read_shared_state_pack(entry):
         state = pickle.loads(member)
         kind, key = shared_state_slot(name)
         (shared_adjoint if kind == "adjoint" else shared_pass)[key] = state
@@ -1883,12 +1854,10 @@ def load_checkpoint_shared_states(
     Stage A chain (PQ #1001) reads the checkpoint's activation cotangents by
     reference, one bounded window at a time, and needs only these.
     """
-    from .residency_shard_reader import staged_range_wait_s
-    deadline = time.monotonic() + staged_range_wait_s()
     stored = _verified_checkpoint_manifest(
-        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        space, record,  shared_state_max_bytes=shared_state_max_bytes)
     return _load_checkpoint_shared_states(
-        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        stored,  shared_state_max_bytes=shared_state_max_bytes)
 
 
 def _entry_bytes(entry) -> int:
@@ -2029,12 +1998,10 @@ def load_adjoint_checkpoint(
     """
     if type(stream_incoming) is not bool:
         raise ValueError("checkpoint stream_incoming must be a bool")
-    from .residency_shard_reader import staged_range_wait_s
-    deadline = time.monotonic() + staged_range_wait_s()
     if stream_incoming:
         record = _checkpoint_metadata_snapshot(record)
     stored = _verified_checkpoint_manifest(
-        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        space, record,  shared_state_max_bytes=shared_state_max_bytes)
     try:
         plane = (_validated_checkpoint_stream_plane(stored) if stream_incoming
                  else checkpoint_cotangent_plane(stored))
@@ -2053,14 +2020,14 @@ def load_adjoint_checkpoint(
             total_bytes=sum(_entry_bytes(entry) for entry in entries))
         with closing(stream_exact_entry_tensors(
                 entries, expected_session=session, max_resident_bytes=max_resident_bytes,
-                residency_check=residency_check, deadline=deadline)) as stream:
+                residency_check=residency_check)) as stream:
             for entry, tensor in stream:
                 cotangents[by_name[entry["name"]]] = tensor
                 del tensor
                 rate.entry(_entry_bytes(entry))
         rate.done()
     shared_adjoint, shared_pass = _load_checkpoint_shared_states(
-        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        stored,  shared_state_max_bytes=shared_state_max_bytes)
     return cotangents, shared_adjoint, shared_pass
 
 
@@ -2901,8 +2868,7 @@ def _roll_group(runner, group, *, batches, layer, probe_index, cotangents,
 def _render_free_fused_passes(
     runner, *, storage, batches, layer, cotangents, n_probes,
     incoming_entries, incoming_tensor, pipeline, min_free_gib, then=None,
-    batch_size=1, layer_pass=None,
-) -> int:
+    batch_size=1, layer_pass=None) -> int:
     """The fused roll: one forward per batch group, one backward per probe.
 
     Sample-major (``prefetched_fused_boundary_windows``). Every probe's

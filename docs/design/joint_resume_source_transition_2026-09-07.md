@@ -83,7 +83,7 @@ predecessor-chain tampering, backend/packed/microbatch/checkpoint regressions,
 and architecture/staleness gates.
 
 ```text
-bash experiments/pq322_cpu_checks.sh \
+bash archive/pq_experiments_2026-11-09/experiments/pq322_cpu_checks.sh \
   tests/test_joint_aura_source_transition.py tests/test_tessera_joint_aura.py \
   tests/test_joint_aura_streamed.py tests/test_joint_aura_microbatch.py \
   tests/test_joint_aura_packed.py tests/test_joint_aura_projection.py \

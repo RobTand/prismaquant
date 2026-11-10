@@ -10,6 +10,7 @@ from .digests import bytes_sha256hex
 from .staged_manifest import (PATH_ENV, SHA_ENV, READ_ENV, load_staged_manifest, publish_staged_json)
 
 CACHE_HELPER = '/mnt/shared/flux-migration/caching/fluxcache.py'
+CACHE_HELPER_SHA256 = 'a3d53765d2664a7c2c57980005ce3d1eb1d95088102ef992e8a6646cbe1d3e74'
 SCHEMA = 'prismaquant.staged_launch.v1'
 
 
@@ -95,6 +96,10 @@ def launch(binding, command):
                        'PRISMAQUANT_READ_CONTRACT_PATH': binding['read_contract_path'],
                        'PRISMAQUANT_STAGED_ALLOWED_TIERS': binding['allowed_tiers']})
     if manifest.lifetime['mode'] == 'host_local_cache':
+        from .staged_manifest import read_document
+        helper, _ = read_document(CACHE_HELPER, 1 << 20)
+        if bytes_sha256hex(helper) != CACHE_HELPER_SHA256:
+            raise ValueError('staged cache helper sha256 differs from reviewed pin')
         members = Path(os.environ['TMPDIR']) / 'staged-members.json'
         publish_staged_json(members, manifest.members())
         os.execv('/usr/bin/python3', ['/usr/bin/python3', '-s', CACHE_HELPER,

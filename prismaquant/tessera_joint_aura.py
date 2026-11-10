@@ -3405,7 +3405,7 @@ def main(argv=None):
     parser.add_argument("--cost-read-manifest-sha256")
     parser.add_argument("--cost-read-manifest-bytes", type=int)
     parser.add_argument("--data-manifest-sha256",
-                        help="the digest of the PrismaBuild data manifest this "
+                        help="the digest of the scientific read manifest this "
                              "pass was submitted with. It binds the read set a "
                              "residency map may answer for and nothing else; a "
                              "map composed for another manifest is refused.")

@@ -43,9 +43,9 @@ def test_immutable_coverage_cancel_and_unpublished_are_conclusive(tmp_path, monk
     cancel = threading.Event()
     cancel.set()
     assert residency_shard_reader.await_staged_spans(
-        None, wanted, deadline=0, cancel=cancel) == 'undeclared'
+        None, wanted,  cancel=cancel) == 'undeclared'
     assert residency_shard_reader.await_staged_spans(
-        resolver, wanted, deadline=0, published=lambda *args: False) == 'undeclared'
+        resolver, wanted,  published=lambda *args: False) == 'undeclared'
 
 
 def test_owned_whole_io_and_metadata_without_canonical_file(tmp_path, monkeypatch):

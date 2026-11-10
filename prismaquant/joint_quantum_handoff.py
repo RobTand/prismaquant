@@ -1017,7 +1017,6 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
         stream_exact_entry_tensors,
     )
     from .joint_adjoint_slices import checkpoint_is_packed
-    from .residency_shard_reader import staged_range_wait_s
 
     if (handoff["n_probes"], handoff["n_batches"]) != (int(n_probes), int(n_batches)):
         raise QuantumHandoffRefused(
@@ -1031,7 +1030,6 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
                 int(entry["file_bytes"]) for entry in shared_pass_entries) \
                 > shared_state_max_bytes:
             raise RuntimeError("handoff shared-state payloads exceed auxiliary byte ceiling")
-    deadline = time.monotonic() + staged_range_wait_s()
     entries = sorted(handoff["activation_entries"],
                      key=lambda entry: _plane_coordinates(entry)[:2])
     scratch_rows = []
@@ -1048,8 +1046,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
             total_bytes=sum(_entry_bytes(entry) for entry in entries))
         with closing(stream_exact_entry_tensors(
                 entries, expected_session=handoff["session"],
-                max_resident_bytes=max_resident_bytes, residency_check=residency_check,
-                deadline=deadline)) as stream:
+                max_resident_bytes=max_resident_bytes, residency_check=residency_check)) as stream:
             for entry, tensor in stream:
                 probe, batch, _at = _plane_coordinates(entry)
                 plane[(probe, batch)] = tensor
@@ -1058,7 +1055,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
         rate.done()
 
     def staged(path, entry, label):
-        _await_checkpoint_entry(entry, deadline=deadline)
+        _await_checkpoint_entry(entry)
         payload = _read_shared_state_payload(Path(path), entry)
         if (bytes_sha256hex(payload) != entry["sha256"]
                 or len(payload) != entry["file_bytes"]):
@@ -1081,7 +1078,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     shared_pass = {}
     if checkpoint_is_packed(checkpoint_record):
         (pack,) = shared_pass_entries
-        for name, member in read_shared_state_pack(pack, deadline=deadline):
+        for name, member in read_shared_state_pack(pack):
             kind, batch = shared_state_slot(name)
             if kind == "pass":
                 shared_pass[batch] = pickle.loads(member)

@@ -41,7 +41,7 @@ ROW_CLASS_FIELDS = frozenset({
 
 #: Where the placement facts live: ISA, container GPU runtime and the host
 #: interpreters actually observed running work under each tag, each with the
-#: PrismaBuild action key that ran it.  Fleet data maintained beside the
+#: recorded producer job identity that ran it.  Fleet data maintained beside the
 #: fleet tools; this owner reads it and imports nothing from ``tools``.
 FLEET_INTERPRETERS = (Path(__file__).resolve().parents[1] / "tools"
                       / "fleet_interpreters.json")
@@ -97,7 +97,7 @@ def load_fleet_interpreters(path=None) -> dict:
                         record.get("attested_by"), str) or not record["attested_by"]:
                     raise RowClassRefused(
                         f"{source}: interpreter {interpreter} on tag {tag!r} names no "
-                        "PrismaBuild action key that ran it")
+                        "recorded producer job identity that ran it")
         overlap = shape["interpreters"].keys() & shape.get("retired_interpreters", {}).keys()
         if overlap:
             raise RowClassRefused(
@@ -680,10 +680,6 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
     }
     if container_image is not None:
         row["container_images"] = [container_image]
-    if progress_phases:
-        # Preserve the measured stall policy. Native launch refuses this
-        # requirement until its owning payload enforces those deadlines.
-        row["progress_phases"] = [f"{name}={grace}" for name, grace in progress_phases]
     if timeout_s is not None:
         # Only when somebody asked for one.  A blanket default here is what
         # sealed 14,400 s into every pricing row and killed two of them mid
@@ -720,6 +716,10 @@ def validate_row(row):
                'gpu_memory_gb', 'priority', 'produced_outputs', 'pilot', 'staged_input'}
     if not isinstance(row, dict) or set(row) - allowed:
         raise ValueError('unsupported native row fields; requirements cannot be discarded')
+    # Report the actual qualification hold for every production GPU builder,
+    # before inspecting transport-specific requirements that cannot run yet.
+    if row.get('demand', {}).get('gpu', 0):
+        raise ValueError('GPU lane not qualified; requires plan step P-7')
     for field in ('pilot',):
         if field in row:
             raise ValueError(f'{field}: strict staging/publication/pilot contract is unqualified (units 2/4)')

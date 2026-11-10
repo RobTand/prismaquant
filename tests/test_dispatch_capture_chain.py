@@ -85,7 +85,7 @@ def test_a_gate_critical_chain_seals_every_row_in_the_band_it_is_given(tmp_path,
     assert [entry["row"]["priority"] for entry in document["rows"]] == [0, 0, 0, 0]
 
 
-def test_a_quantum_declares_its_progress_phase_only_when_asked(tmp_path, monkeypatch):
+def test_native_chain_builder_omits_retired_progress_even_when_requested(tmp_path, monkeypatch):
     fixture = _Chain(tmp_path, root=tmp_path / "calibration-cache", prepare=False)
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"model": str(fixture.source), "campaign_argv": ["--streaming"],
@@ -96,8 +96,13 @@ def test_a_quantum_declares_its_progress_phase_only_when_asked(tmp_path, monkeyp
                              timeout_s=TIMEOUT, bookend_timeout_s=BOOKEND,
                              progress_phases=((dispatch.QUANTUM_PROGRESS_PHASE, 600),))
     phases = {entry["name"]: entry["row"].get("progress_phases") for entry in document["rows"]}
-    assert phases == {"prep": None, "capture-000-001": ["capture=600"],
-                      "capture-001-002": ["capture=600"], "join": None}
+    assert phases == {"prep": None, "capture-000-001": None,
+                      "capture-001-002": None, "join": None}
+    from prismaquant.tessera_campaign_rows import validate_row
+    for entry in document["rows"]:
+        if entry["kind"] == "quantum":
+            with pytest.raises(ValueError, match="GPU lane not qualified"):
+                validate_row(entry["row"])
 
 
 @pytest.mark.parametrize("change, message", [

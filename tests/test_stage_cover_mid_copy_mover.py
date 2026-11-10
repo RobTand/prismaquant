@@ -83,7 +83,7 @@ def test_native_readiness_checks_exact_declared_spans(tmp_path, monkeypatch):
     resolver, paths, _manifest = _inputs(tmp_path, monkeypatch)
     from prismaquant.residency_map import RANGE_HIT, RANGE_UNDECLARED
     spans = [(path, 0, size, size) for path, size in zip(paths, [len(HEADER), len(BODY)])]
-    assert await_staged_spans(resolver, spans, deadline=None) == RANGE_HIT
-    assert await_staged_spans(resolver, [*spans, (tmp_path / 'undeclared', 0, 1, 1)], deadline=None) == RANGE_UNDECLARED
+    assert await_staged_spans(resolver, spans) == RANGE_HIT
+    assert await_staged_spans(resolver, [*spans, (tmp_path / 'undeclared', 0, 1, 1)]) == RANGE_UNDECLARED
     assert _read(resolver, paths[1], len(BODY)) == BODY
     assert resolver.report()['bytes_from_pool'] == 0 and resolver._windows == 0

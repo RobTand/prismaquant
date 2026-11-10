@@ -15,8 +15,8 @@ Arguments: PAIR_JSON PAIR_SHA CAPTURE_JSON CAPTURE_SHA FRESH_METADATA_ROOT, plus
 read manifest). The produced-output declaration is the submission's own template, which
 ``stage_b_preparation_submission`` writes with its ``native_argv``.
 Environment overrides: PQ_CHECKOUT, PQ_PYTHON, STAGEB_SPEC, STAGEB_SPEC_SHA256.
-The deadline is the job's walltime (1800 s); the spec's PRISMAQUANT_STAGED_RANGE_WAIT_S must stay below
-the chunk grace, which the preparation's own preflight enforces.
+The deadline is the job's finite walltime. Immutable staged coverage is checked once;
+there is no staged-range wait or wait-vs-progress-grace coupling.
 """
 from __future__ import annotations
 

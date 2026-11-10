@@ -797,7 +797,7 @@ def main(argv=None, *, finalize_publication=True) -> int:
     ap.add_argument("--data-manifest-sha256", default=None,
                     help="PQ #1092: the digest of the data manifest this "
                          "admitted action was submitted with. Every declared "
-                         "input is then read off PrismaBuild's stage through "
+                         "input is then read from the immutable stage through "
                          "the residency reader and checked against its "
                          "digest; a read the stage does not hold refuses, "
                          "never falling back to the pool. Needs --residency "

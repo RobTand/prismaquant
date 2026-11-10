@@ -1,4 +1,4 @@
-"""Original authenticated joint request -> actual PB rows -> scalar wires -> strict merge."""
+"""Original authenticated joint request -> actual native rows -> scalar wires -> strict merge."""
 
 from __future__ import annotations
 

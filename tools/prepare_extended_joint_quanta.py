@@ -211,7 +211,6 @@ def check_stage_b_spec(spec_path, spec, policy):
 
     The dispatcher's own wrapper runs here, with the grace set a Stage B
     quantum row declares: the head grace and the 900 s chunk grace. The spec's
-    ``PRISMAQUANT_STAGED_RANGE_WAIT_S`` must sit below the smaller one, its
     host/device envelope must equal the resource policy's limits, a
     declared cotangent workspace needs its identity mount, and a container
     cache pinned to the overlay needs an ``overlay_cache_reason`` (PQ #1129).
@@ -403,7 +402,7 @@ def main(argv=None):
                              'original plan')
     parser.add_argument('--campaign-identity-sha256', default=None)
     parser.add_argument('--data-manifest-sha256', default=None,
-                        help='read every declared input off the PrismaBuild stage, '
+                        help='read every declared input from the immutable stage, '
                              'digest-checked, and refuse rather than read the pool '
                              '(PQ #1092); the digest of the data manifest the action '
                              'was submitted with. Forwarded to the generator')
@@ -411,7 +410,7 @@ def main(argv=None):
                         help='with --data-manifest-sha256: the staged tiers a read '
                              'may come from (default ram,ssd)')
     parser.add_argument('--produced-output', action='store_true',
-                        help='commit every file as a PrismaBuild produced output of this '
+                        help='commit every file under the native produced-output declaration of this '
                              'admitted action (PQ #1070); the action must declare '
                              'the write-only template tools/stage_b_preparation_submission.py '
                              'writes, over --metadata-root')

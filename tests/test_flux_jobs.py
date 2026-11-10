@@ -154,6 +154,33 @@ class FluxJobsTests(unittest.TestCase):
             with self.assertRaises(jobs.SubmissionUnknown):
                 jobs.load_submission(self.record)
 
+    def test_acknowledged_job_survives_receipt_or_jobid_write_failure(self):
+        publish = jobs._publish_flux_json
+        write = Path.write_text
+        for filename in ('submission.json', 'jobid', 'submit.stdout'):
+            self.record = self.root / ('failure-' + filename)
+            def fail_publish(path, value):
+                if path.name == filename and value.get('state') == 'submitted':
+                    raise OSError('injected receipt failure')
+                return publish(path, value)
+            def fail_write(path, *args, **kwargs):
+                if path.name == filename:
+                    raise OSError('injected write failure')
+                return write(path, *args, **kwargs)
+            with self.subTest(filename=filename), \
+                    patch.object(jobs, '_publish_flux_json', side_effect=fail_publish), \
+                    patch.object(Path, 'write_text', fail_write):
+                with self.assertRaisesRegex(jobs.SubmissionUnknown, 'submitted as'):
+                    self.submit_fixture()
+            submission = jobs.load_submission(self.record)
+            self.assertEqual(submission.job_id, 'ƒBqv3wNoLK')
+            self.assertTrue((self.record / 'submitted-job.json').exists())
+            with patch.object(jobs, '_flux_run', return_value=self.completed('123.5\n')) as run:
+                result = jobs.collect_job(submission, wait=False)
+            self.assertEqual(result.status, 'unknown')
+            self.assertNotIn('invalid', result.query_error)
+            self.assertTrue(all(call.args[0][0] != 'submit' for call in run.call_args_list))
+
     def test_modified_launch_and_foreign_handle_refuse(self):
         submission, _ = self.submit_fixture()
         foreign = jobs.FluxSubmission('123', self.record, submission.launch_sha256)

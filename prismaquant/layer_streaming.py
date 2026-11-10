@@ -1761,56 +1761,15 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
 
 def _await_layer_readset(by_shard, *, source_authentication=None,
                          cancel=None):
-    """Let PrismaBuild's movers land this layer's ranges before the fan-out.
+    """Check this layer's immutable staged spans before gather fan-out.
 
-    Readiness is decided HERE, in the thread that is about to submit the
-    gather, and never inside a gather worker. The gather runs on
-    ``_LAYER_READ_POOL``, which is module-global and bounded and shared by
-    every streamed layer read: a worker sleeping on a cold future range is
-    a worker the current layer's already-staged reads queue behind. This
-    call blocks the submitting thread -- a layer prefetch worker, whose
-    whole job is getting a future layer ready -- and leaves every gather
-    slot free.
-
-    PQ #874: a speculative prefetch of layer 4 asked for
-    ``model-00087-of-00120`` while that shard's stage mover was still
-    queued (published 20:55:57 UTC, claimed 20:59:04 UTC, 7.832 s after
-    the consumer died -- root-verified), and the refusal killed layer 0,
-    which was the layer the run was actually working on.
-
-    Deliberately narrow, and the narrowness is the contract:
-
-    * It only ever **waits**; it never refuses and never reads payload.
-      The read that follows refuses exactly where and as it did before, so
-      an unreachable range fails with the same error from the same line.
-    * It waits only on ``RANGE_UNCOVERED`` -- a span PrismaBuild's sealed
-      readset declares and no mover has written yet, including a span every
-      covering entry reports missing for (PQ #903: a stale row whose staged
-      file an eviction unlinked, while the layer's own declared range has
-      not landed). A span the readset does not declare, or an entry that
-      covers it and fails a hard check (wrong size, non-regular, permission
-      or integrity), ends the wait at once.
-    * If the sealed readset is not bound (see
-      ``ResidencyResolver.declared_readset``) this process cannot tell
-      those apart, so it does not wait at all. Not knowing is not a
-      licence to wait: the pre-#874 behaviour stands, with a line saying
-      why. ``PRISMAQUANT_STAGED_RANGE_WAIT_S=0`` also disables it.
-    * It is the LAYER path only. Other strict readers -- the production
-      weight cache, wire blobs -- are unchanged and do not wait.
-
-    Cost when everything is already staged: one header parse per shard in
-    this thread (tens of KB against a multi-GB layer payload; the gather's
-    own readers parse their own headers as they always did) and one
-    resolver lookup per tensor, no sleeps.
-
-    ``cancel`` is the owning context's ``threading.Event``, forwarded to
-    ``await_staged_spans``. A set event raises ``CancelledError`` out of
-    the wait; cancellation never resolves as a verdict and the read below
-    never runs for a cancelled owner.
+    Coverage is checked once in the submitting thread. Missing or unbound
+    spans do not wait for a mover; the following strict read owns the refusal.
+    A set cancellation event prevents the coverage check.
     """
     from .residency_map import RANGE_HIT
     from .residency_shard_reader import (
-        await_staged_spans, residency_resolver, staged_range_wait_s,
+        await_staged_spans, residency_resolver,
     )
     from .staged_tier_policy import policy_is_active
 
@@ -1823,15 +1782,6 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
         return
     resolver = residency_resolver()
     if resolver is None:
-        return
-    budget = staged_range_wait_s()
-    if budget <= 0:
-        return
-    declared = resolver.declared_readset()
-    if declared.get("state") != "bound":
-        print("[residency] staged-range wait disabled: PrismaBuild's sealed "
-              f"readset is {declared.get('state')} "
-              f"({declared.get('reason')})", flush=True)
         return
     wanted = []
     for shard, pairs in by_shard.items():
@@ -1869,20 +1819,12 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
             return
     if not wanted:
         return
-    began = time.monotonic()
     from .staged_lease import stage_cover_is_published
-    verdict = await_staged_spans(resolver, wanted, deadline=began + budget,
+    verdict = await_staged_spans(resolver, wanted,
                                  published=stage_cover_is_published,
                                  cancel=cancel)
     if verdict != RANGE_HIT:
-        # The time that actually elapsed, never the budget: an undeclared
-        # span and a covering entry that failed a check both return from
-        # ``await_staged_spans`` immediately, and a line claiming "after
-        # 300s" would send an operator looking for a stall that never
-        # happened.
-        print(f"[residency] layer readset not staged ({verdict}) after "
-              f"{time.monotonic() - began:.1f}s (the landing record bounds the "
-              f"wait; {budget:.0f}s where none covers it); "
+        print(f"[residency] layer readset not staged ({verdict}); "
               "the read below decides", flush=True)
 
 

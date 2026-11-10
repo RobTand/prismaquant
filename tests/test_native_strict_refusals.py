@@ -6,9 +6,6 @@ import torch
 
 from prismaquant import io_engine, layer_streaming, perturbed_x_cache as pxc
 from prismaquant import joint_adjoint_checkpoints as checkpoints
-from prismaquant.residency_shard_reader import (
-    STAGED_RANGE_WAIT_ENV, STAGED_RANGE_WAIT_S, staged_range_wait_s,
-)
 from prismaquant.staged_manifest import load_staged_manifest
 from prismaquant.staged_tier_policy import active_policy, TierPolicyRefused, staged_tier_policy_test_context
 from prismaquant.staged_whole_file import read_staged_whole_file
@@ -148,14 +145,7 @@ def test_explicit_offline_unstaged_read_preserves_known_bytes_and_pool_accountin
         assert resolver.report()['bytes_from_stage'] == 0 and resolver._windows == 0
 
 
-def test_the_staged_range_wait_bound_must_be_finite(monkeypatch):
-    monkeypatch.delenv(STAGED_RANGE_WAIT_ENV, raising=False)
-    assert staged_range_wait_s() == STAGED_RANGE_WAIT_S
-    for good, want in (("0", 0.0), ("12.5", 12.5), ("  7 ", 7.0)):
-        monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, good)
-        assert staged_range_wait_s() == want
-    for bad in ("-1", "-0.5", "nan", "NaN", "inf", "Infinity", "-inf",
-                "1e400", "abc", "5s"):
-        monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, bad)
-        with pytest.raises(ValueError, match=STAGED_RANGE_WAIT_ENV):
-            staged_range_wait_s()
+def test_immutable_reader_has_no_configured_wait():
+    from prismaquant import residency_shard_reader as reader
+    assert not hasattr(reader, 'STAGED_RANGE_WAIT_S')
+    assert not hasattr(reader, 'staged_range_wait_s')

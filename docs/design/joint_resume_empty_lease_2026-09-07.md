@@ -41,7 +41,7 @@ PB `590484b22080` ran the following after the fix: **120 passed**, zero skips
 or missing collection, with 56 upstream Torch/Python deprecation warnings.
 
 ```text
-bash experiments/pq322_cpu_checks.sh \
+bash archive/pq_experiments_2026-11-09/experiments/pq322_cpu_checks.sh \
   tests/test_joint_aura_streamed.py tests/test_joint_aura_microbatch.py \
   tests/test_joint_aura_packed.py tests/test_joint_aura_projection.py \
   tests/test_joint_projection_backend.py tests/test_streamed_cost_checkpoints.py \

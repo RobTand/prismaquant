@@ -131,7 +131,7 @@ def readahead_depth(manifest: dict, lookahead: int) -> dict:
     declared = max((row["reach_bytes"] for row in rows if row["reading"] != "head"),
                    default=0)
     return {"lookahead": int(lookahead), "rows": rows, "declared_gib": -(-declared // GIB),
-            "rounding": "ceil(reach_bytes / GiB): PrismaBuild takes whole GiB"}
+            "rounding": "ceil(reach_bytes / GiB): declaration uses whole GiB"}
 
 
 def quantum_read_rate(described: dict, *, samples, n_batches, seconds_per_layer) -> dict:

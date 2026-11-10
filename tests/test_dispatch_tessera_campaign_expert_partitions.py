@@ -60,6 +60,15 @@ def test_real_plan_emits_distinct_rows_with_own_expert_demands(planned):
     assert all(Path(action["data_manifest"]).is_file() for action in actions)
 
 
+def test_real_pricing_builder_reaches_the_named_native_gpu_hold(planned):
+    spec, workspace, _seen = planned
+    assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
+    for row in json.loads((workspace / "manifest.json").read_text()):
+        assert "progress_phases" not in row
+        with pytest.raises(ValueError, match="GPU lane not qualified"):
+            campaign_rows.validate_row(row)
+
+
 def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned, monkeypatch):
     spec, workspace, _seen = planned
     assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0

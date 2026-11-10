@@ -173,7 +173,7 @@ def child_paths(args, slice_doc) -> dict:
             os.lstat(row["path"]).st_size
         wanted.append((row["path"], 0, size, size))
     started = time.monotonic()
-    verdict = await_staged_spans(resolver, wanted, deadline=started + args.land_wait_s,
+    verdict = await_staged_spans(resolver, wanted,
                                  published_batch=stage_covers_are_published)
     waited = time.monotonic() - started
     # The ram leg promotes each landed stage range afterwards; wait for it

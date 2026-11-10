@@ -1,5 +1,49 @@
 # PrismaQuant Architecture
 
+<!-- flux-current-start -->
+## Current execution: stock Flux
+
+As of: 2026-11-10, review corrections P-2 on P-3 `8ca8b3121`.
+Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
+`prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
+
+`flux_jobs.submit_job` admits a clean, detached shared checkout on the coordinator's
+explicit `FLUX_URI`. The CPU profile permits at most four cores, 16 GiB and
+1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply;
+the P-2 verification window permits one job at a time and at most 600 seconds.
+Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
+inside the Flux job's cgroup; it does not enforce the declared per-job memory
+size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
+The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
+
+`launch.json` records source, argv, instance and resource identity. The executor
+saves an acknowledged ID in fsynced `submitted-job.json` before `submission.json`,
+`jobid` or diagnostic logs. `load_submission` and `collect_job` recover from that
+acknowledgement if ordinary receipt publication fails. A lost acknowledgement
+stays unknown and never triggers another submit. Collection authenticates the
+saved launch and retains terminal status, eventlog, allocation, payload logs and
+scratch cleanup evidence in the same record directory.
+
+`tessera_campaign_container` authenticates admission before namespace setup.
+Its explicit container environment forwards `FLUX_JOB_ID` and `OUT` for pilot
+publication and Stage A produced-output binding. This fixes the argv contract;
+it does not qualify publication inside a real GPU container. The GPU lane
+remains held for P-7. `native_results` owns authenticated result selection;
+`quality_prefill_flux` owns the declared phase DAG. There is no live client for
+the retired execution service.
+
+`staged_launch` verifies the external cache helper against a source-pinned SHA256
+before executing it. Immutable staged coverage checks run once. They have no
+landing wait, poll deadline or progress-grace coupling. One resolver entry must
+cover the requested span; adjacent objects do not form a synthetic entry.
+The row builders omit retired progress-phase metadata. Production GPU rows
+refuse with `GPU lane not qualified; requires plan step P-7` before CPU admission.
+
+The dated entries below preserve earlier designs and measurements. Their
+execution-service descriptions are historical; this section and §7.0.2 describe
+the current native route. Numerical and serving gates remain independent.
+<!-- flux-current-end -->
+
 As of: 2026-11-10, stock Flux slot shape and runtime instance resolution, P-3.
 Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `cb07374d5`.
 The native CPU profile is `pq.flux.stock-slot.v3`. It submits
@@ -16538,7 +16582,7 @@ remain bit-exact, so the record keeps `build.binary_sha256` and replaces
 and carried in its receipt. Consequence, stated plainly: the packaged record no
 longer admits the spark-vllm image it was first qualified in. A record is
 retired and replaced per runtime, never extended.
-`experiments/joint_projection_reduce_run.sh` takes the image and run root as
+`archive/pq_experiments_2026-11-09/experiments/joint_projection_reduce_run.sh` takes the image and run root as
 inputs (defaults unchanged) and `joint_projection_reduce_bench.py` takes
 `--binary/--binary-sha256` to replay a bound binary instead of building one.
 Gates: `tests/test_joint_projection_backend.py`
@@ -20854,7 +20898,7 @@ executable census that fails for any future detection call inside a broad
 
 Re-stamped (2026-09-05, `claude/pq-decisions`) for the **replayed candidate
 decision in the paired validation driver** (§7.2; #87). The opt-in
-`experiments/pq87_paired_validation.py` counted a candidate arm as observed
+`archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py` counted a candidate arm as observed
 when the receipt's stored `decision.verdict` agreed with the client's exit
 status — a stored bit, which `replay_no_new_failures` exists to refuse and
 which had no caller outside the tests (pq-190 review, side-finding 3). The
@@ -20996,7 +21040,7 @@ dense/packed regressions, both shown failing before the refusal).
 
 Re-stamped (2026-09-04, `codex/pq87-paired-policy`) for a **frozen sequential
 native-candidate validation plan**, not a measured result. The opt-in
-`experiments/pq87_paired_validation.py` reuses the existing bounded BF16
+`archive/pq_experiments_2026-11-09/experiments/pq87_paired_validation.py` reuses the existing bounded BF16
 instrument helpers and the paired client. A committed manifest declares
 distinct native BF16/quantized sources, screen and disjoint held-out schedules,
 both-box telemetry URLs and the deadline. It freezes both artifacts before
@@ -21194,7 +21238,7 @@ dense. The helper delegates value validation to `ServingContext`; it does
 not change a runtime default or attest any new serving cell.
 
 Re-stamped (2026-09-04, `codex/pq87-physical-ab`) for the opt-in bounded
-physical boundary controller. `experiments/pq87_physical_ab.py` freezes and
+physical boundary controller. `archive/pq_experiments_2026-11-09/experiments/pq87_physical_ab.py` freezes and
 hashes native BF16 source before starting one read-only-model server, then
 requires the client to observe that same content. It journals every completed
 HTTP response and cap step, uses explicit one-sequence/4096-context/1-GiB-KV
@@ -29143,22 +29187,14 @@ fallback:
   That is the intent, not yet the code: 17 core modules still import lane
   modules or branch on Tessera names. `tests/test_tessera_core_boundary.py`
   (PQ #1534) freezes those sites and the private lane helpers other modules
-  import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
-  PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
-  only shrink. PQ's public door into PrismaBuild is `prismabuild.client`
-  (PB #1254, `PUBLIC_CLIENT` in that test): `staged_lease`,
-  `stage_a_produced_output`, `glm_capture_compatibility`, `residency_map` and
-  `quality_prefill_pb_adapter` reach PB only through it, via
-  `staged_lease.client_sdk`. `staged_lease.sdk_submodule` remains for
-  `joint_forward_resume`, `produced_output_spool` and some tools, which need
-  names the SDK does not publish yet.
-  The Tessera fleet drivers PrismaBuild used to carry (the whole-model
-  dispatcher and its worker, the per-shard export and ladder dispatchers, the
-  status screen and `render_identity.py`) live here since 2026-09-28
-  (RobTand/prismabuild#1076): `tools/tessera_fleet/` and `tools/render_identity.py`.
-  They reach PrismaBuild only by running the published `pbcampaign.py` and
-  `pbwait.py`, so they add no line to the PrismaBuild allowlist
-  (`docs/operations/tessera_fleet_drivers.md`).
+  import. `tests/test_prismabuild_boundary.py` bans static and dynamic loads
+  of the retired execution package. `tests/test_prismabuild_ban.py` checks live
+  mechanism tokens and the current execution documentation. Frozen evidence
+  schemas remain readable offline through `recorded_cas_receipt`.
+  `staged_lease` uses the immutable manifest resolver. `stage_a_produced_output`
+  binds native launch declarations; `quality_prefill_flux` submits and collects
+  the declared native DAG. `tools/tessera_fleet/` uses the same native row path.
+  There is no SDK doorway or boundary allowlist for the retired service.
 
 Activation-quantizer attestation requires all seven E2M1 midpoint magnitudes,
 a signed input, element saturation and the scale underflow boundary.
@@ -30372,7 +30408,7 @@ The configuration schema is `prismaquant.ship_gates/1`. Supply these fields:
 - `stages`: an ordered list with the card's `required_slots`, `offline.g3` and `task_suite` exactly once.
 
 Multi-node topology also needs explicit rank, master address, port and both
-multiprocessing backend selections. PrismaBuild's data manifest must declare
+multiprocessing backend selections. The immutable staged input binding must declare
 shared inputs in their read order.
 
 Each stage has a unique `output` path. Quality stages also have a `config` path.
@@ -30413,83 +30449,52 @@ is not evidence. A lane producer may need its serving owner's lifecycle driver.
 
 #### 7.0.2 Submit and retain evidence
 
-Inspect the published client's `--help` before submission.
-Run disk admission on every eligible host. Retain its complete JSON for the
-checkout, output, scratch and CAS mounts. Supply actual resource demand for
-the configured workload, including the controller and concurrent children.
-The examples use operator-supplied demands; they are not workload requirements.
+Set the coordinator's `FLUX_URI` using the Flux skill's "Reach the instance"
+section. Read `/mnt/shared/flux-migration/CAPS.md` before submission. Use a clean,
+detached checkout under `/mnt/shared`, a unique record directory outside that
+checkout, a finite walltime, and the actual aggregate CPU and memory demand.
+`flux_jobs` starts each payload environment empty with `--env=-*` and adds its
+explicit allow-list, bounded native threads, output directory and local scratch.
+The wrapper removes its job-specific scratch and records the cleanup outcome.
 
-`CLIENT`, `CHECKOUT`, `CONFIG`, `RESULT`, `DATA_MANIFEST` and interpreter
-variables name actual operator paths. CPU preflight uses the same entry point:
+Run CPU preflight through the repository's submission API. These Python values
+name operator-selected paths and measured resource demands:
 
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd "$CHECKOUT" --tag x86 --cpus "$CPUS" --demand "mem_gb=$HOST_MEMORY_GB" \
-  --max-attempts 1 --timeout-s "$TIMEOUT_S" --data-manifest "$DATA_MANIFEST" \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 \
-  --env OPENBLAS_NUM_THREADS=1 --env CUDA_VISIBLE_DEVICES= --env TMPDIR=/tmp \
-  --detach -- "$CPU_PYTHON" -m prismaquant.ship_gates \
-  --config "$CONFIG" --output "$RESULT" --preflight
+```python
+from pathlib import Path
+from prismaquant.flux_jobs import FluxResources, submit_job, collect_job
+
+submission = submit_job(
+    [CPU_PYTHON, '-s', '-m', 'prismaquant.ship_gates',
+     '--config', CONFIG, '--output', RESULT, '--preflight'],
+    checkout=Path(CHECKOUT), record_dir=Path(RECORD_DIR),
+    resources=FluxResources(CPUS, HOST_MEMORY_GB, 0, TIMEOUT_S),
+    staged_input=STAGED_BINDING,
+)
+ending = collect_job(submission)
 ```
 
-After CPU preflight succeeds, the single-host production command uses the same
-configuration and module. Declare aggregate CPUs, host memory and the GPU
-subset from the actual workload. The serving image must already exist on an
-eligible host. `IMAGE` is immutable; `SERVING_PYTHON` names its interpreter.
+`STAGED_BINDING` is the versioned immutable input binding, or `None` for a
+preflight with no staged inputs. Each required configuration and evidence file
+must be declared by the binding when strict staging is requested. Unsupported
+settings refuse before submission; there is no general environment passthrough.
+Keep the returned job ID and record directory. Reconnect with `load_submission`;
+never submit again to recover a lost receipt.
 
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
-  --cwd "$CHECKOUT" --tag gb10 --cpus "$CPUS" --gpu \
-  --demand "mem_gb=$HOST_MEMORY_GB" --gpu-memory-gb "$GPU_MEMORY_GB" \
-  --container-image "$IMAGE" --max-attempts 1 --timeout-s "$TIMEOUT_S" \
-  --data-manifest "$DATA_MANIFEST" --residency stage \
-  --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  --detach -- "$SERVING_PYTHON" -m prismaquant.ship_gates \
-  --config "$CONFIG" --output "$RESULT"
-```
+Read the job's own terminal state, payload exit, query errors, stdout, stderr,
+allocation and cleanup records. A submission acknowledgement is not a pass.
+For scientific artifacts, `native_results.read_selected_result` separately
+checks the authenticated producer, publication, source, runtime and file bytes.
+The ship-gates runner retains its per-stage exits, outputs, hashes and logs.
+A final pass still needs every quality criterion and required card slot, and
+`publish_artifact` remains the publication gate.
 
-This example grants no GPU priority. D49 still sets GPU order.
-A single-host declaration does not cover the two-Spark target.
-
-The HF-only task backend cannot complete native task quality for Tessera bytes.
-Keep that task limitation explicit in a Tessera production plan.
-An HF proxy score cannot replace current-artifact native task evidence.
-Serving-backed Tessera tasks require a backend with the native vLLM plugin.
-That backend remains a production prerequisite; this HF path does not provide native qualification.
-
-For multi-host submission, use published `pbgang.py --manifest M --cwd CHECKOUT`.
-Each member needs explicit topology, resource, image and data declarations.
-The kernels-owned `rank_window.py`, `managed_window.py` and `tp2_recipe.py`
-own rank lifecycle. Their reported recipe covers eager, graph, KL probe and
-determinism. Full route, served PPL, offline quality and complete one-action
-coverage remain unverified. The native gang orders no stages and stops no successful peers.
-
-Do not fork that lifecycle or add another transport.
-Full ordered stages and peer teardown remain explicit production prerequisites.
-The runner refuses multi-host execution without that complete lifecycle.
-CPU preflight can inspect its topology without qualifying it.
-
-Retain each action key at submission. Start the published completion client:
-
-```bash
-"$CLIENT" /mnt/shared/prismabuild-fleet/repo/tools/pbwait.py \
-  "$ACTION_KEY" --wait-s "$WAIT_S" --json
-```
-
-Run that client under the existing supervisor. Do not poll with an agent.
-Inspect the native ending, process exit, logs, result claim, CAS payload and
-receipt. Keep failed actions. A submission is not completion.
-
-The runner atomically writes `prismaquant.ship_gates_result/1` after each stage.
-It retains process exits, output and log paths, file hashes, source and device
-population. Compare retained files with the hashes printed in stdout.
-PrismaBuild seals input identity, not arbitrary output files.
-A final pass needs every quality criterion and required card slot.
-Publication still uses the existing `publish_artifact` gate.
-
-Use `--verify-only` to replay stored quality and card evidence without new inference.
-Missing evidence still refuses. A CPU preflight, selected tests or primitive
-parity does not establish serving, model quality or multi-host behavior.
+GPU submission, the G3 GPU smoke and GPU quality-prefill are held until P-7
+qualifies the GPU lane. CPU preflight does not grant GPU, serving or multi-host
+qualification. The runner refuses multi-host execution without the complete
+rank lifecycle and peer teardown. The HF-only task backend cannot establish
+native Tessera task quality; that requires the serving backend with the pinned
+native plugin. Use `--verify-only` to replay stored evidence without inference.
 
 
 ### 7.1 What runs where
@@ -34002,6 +34007,19 @@ polish, full rejected-methods catalog) is at
 `docs/results/`; superseded narrative docs under `docs/archive/`.
 
 ## 12. Known gaps and debt register
+
+Current execution debt, recorded 2026-11-10:
+
+- A4: `prismaquant/tessera_runtime/shape_time_checker_config.json` has an empty
+  checker table. `allocator --pact-shape-table` refuses every table containing
+  measured rows because no native checker source and argv has a reviewed pin.
+  Restore it by running the checker through Flux admission, independently
+  reviewing its source, argv and authenticated result, and adding the reviewed
+  v2 checker pin. Do not restore the retired v1 receipt.
+- A5: G3 and the GPU quality-prefill arm refuse because the current Flux profile
+  permits zero GPUs. Plan step P-7 must qualify GPU admission, container device
+  attachment and the required smoke before either arm can run. CPU tests do
+  not close this debt.
 
 Honest register, code-cited, as of 2026-08-03 (`release/prismaquant-0.8.0`, implementation
 baseline commit `7183d21`; external Gridbook pin

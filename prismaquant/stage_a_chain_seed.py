@@ -441,14 +441,12 @@ def compare_seed_plane(plan: ChainSeed, digests: dict, *, max_resident_bytes=Non
         checkpoint_entry_session,
         stream_exact_entry_tensors,
     )
-    from .residency_shard_reader import staged_range_wait_s
     import time
 
     if plan.compare is None:
         return None
     reference = plan.compare["record"]
-    deadline = time.monotonic() + staged_range_wait_s()
-    _verified_checkpoint_manifest(plan.source_space, reference, deadline=deadline)
+    _verified_checkpoint_manifest(plan.source_space, reference)
     if set(digests) != set(plan.compare["plane"]):
         raise ChainSeedRefused(
             "the seed did not roll a whole plane at the compare boundary")
@@ -457,7 +455,7 @@ def compare_seed_plane(plan: ChainSeed, digests: dict, *, max_resident_bytes=Non
     with closing(stream_exact_entry_tensors(
             [plan.compare["plane"][key] for key in keys],
             expected_session=checkpoint_entry_session(reference),
-            max_resident_bytes=max_resident_bytes, deadline=deadline)) as stream:
+            max_resident_bytes=max_resident_bytes)) as stream:
         for (probe, batch), (_row, tensor) in zip(keys, stream):
             entries.append({"probe": probe, "batch": batch,
                             "seed_sha256": digests[probe, batch],

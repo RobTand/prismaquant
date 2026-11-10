@@ -1566,9 +1566,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     from .residency_map import RANGE_HIT, residency_resolver
     from .residency_shard_reader import (
         await_staged_spans,
-        staged_range_wait_s,
     )
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    from .staged_lease import stage_cover_is_published
 
     window_index = int(window_index)
     block = record.get("executable_readset")
@@ -1593,9 +1592,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     # entry is missing falls back to one lookup per entry.
     verdict = await_staged_spans(
         resolver, wanted,
-        deadline=_time.monotonic() + staged_range_wait_s(),
         published=stage_cover_is_published,
-        published_batch=stage_covers_are_published, cancel=cancel)
+        cancel=cancel)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)

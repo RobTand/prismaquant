@@ -680,8 +680,9 @@ def podman_command(spec: dict, command: list[str], *, cwd: str, image_id: str,
     bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
     scratch = _forwarded_local_scratch_environment(spec, environ)
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
+    publication = {key: environ[key] for key in ("FLUX_JOB_ID", "OUT") if key in environ}
     forwarded = {SAFE_PATH_ENV: "1", **cache_defaults, **spec.get("env", {}),
-                 **bounded_defaults, **staged_env, **scratch}
+                 **bounded_defaults, **staged_env, **scratch, **publication}
     for key, value in sorted(forwarded.items()):
         argv += ["--env", f"{key}={value}"]
     if content_sha256 is not None:
@@ -930,8 +931,8 @@ def main(argv=None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
-    namespace_commit = validate_namespace_launch(spec, command, cwd=str(Path.cwd()), environ=os.environ)
     admission = native_admission(os.environ)
+    namespace_commit = validate_namespace_launch(spec, command, cwd=str(Path.cwd()), environ=os.environ)
     require_namespace_native_profile(spec, admission)
     requested = spec["container"]["image"]
     inspected = inspect_or_load(spec["container"])
@@ -966,4 +967,3 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

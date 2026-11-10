@@ -89,7 +89,6 @@ def test_default_class_row_is_unchanged_for_a_spec_with_no_classes():
         "env": {"OMP_NUM_THREADS": "1"},
         "tags": ["gb10"],
         "retry_safe": True,
-        "progress_phases": ["startup=3600", "pricing=900", "finalize=1800"],
     }
 
 

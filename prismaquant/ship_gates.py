@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import shlex
 import os
 from pathlib import Path
 import subprocess
@@ -48,6 +49,26 @@ def _validate_destinations(destinations: list[Path], protected: set[Path], artif
     if any(destination in protected or artifact == destination or artifact in destination.parents
            for destination in destinations):
         raise OutputConflict("outputs must not overwrite inputs or enter the artifact")
+
+
+def _submits_nested_job(argv: list[str]) -> bool:
+    """Inspect argv and shell command strings without executing them."""
+    for index, word in enumerate(argv):
+        if Path(word).name in {"flux", "flux_jobs.py"}:
+            return True
+        if word == "-m" and index + 1 < len(argv) and argv[index + 1] == "prismaquant.flux_jobs":
+            return True
+    if argv and Path(argv[0]).name in {"sh", "bash", "dash", "zsh"}:
+        for index, word in enumerate(argv[1:], 1):
+            if word.startswith("-") and "c" in word[1:] and index + 1 < len(argv):
+                try:
+                    lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=True)
+                    lexer.whitespace_split = True
+                    tokens = list(lexer)
+                except ValueError as exc:
+                    raise ValueError("invalid shell stage command") from exc
+                return _submits_nested_job(tokens)
+    return False
 
 
 def load_config(path: str | Path, *, report_output: Path | None = None,
@@ -103,8 +124,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
                 raise ValueError(f"{identity}: arguments must be a string array")
             if identity not in GOLD_TOOLS and not argv:
                 raise ValueError(f"{identity}: argv is empty")
-            if any(Path(word).name in {"flux", "flux_jobs.py"}
-                   for word in argv):
+            if _submits_nested_job(argv):
                 raise ValueError("stage processes must not submit nested jobs")
             if identity in GOLD_TOOLS:
                 reserved = {"--model", "--output", "--preflight", "--serve-image", "--mode"}
