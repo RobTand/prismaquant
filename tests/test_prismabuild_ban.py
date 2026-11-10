@@ -6,7 +6,7 @@ group, or a dependency declaration. Prose about history is allowed unless it des
 behaviour; that half is review, this test is the mechanical half. The frozen wire ids
 ``prismaquant.prismabuild.<name>`` are allowed by name.
 
-Excluded, each by an explicit list below (never by pattern guessing):
+Excluded by explicit lists in ``tests/prismabuild_scan.py``:
 
 - ``HISTORY_PREFIXES``: append-only records of retired runs and decisions;
 - ``BAN_DEFINITIONS``: the files that define the ban or prove that a retired name is refused, and so
@@ -15,29 +15,12 @@ Excluded, each by an explicit list below (never by pattern guessing):
 """
 from __future__ import annotations
 
+import ast
 import re
-import subprocess
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests import prismabuild_scan as scan
 
-HISTORY_PREFIXES = (
-    "docs/audits/", "docs/results/", "docs/measurements/", "docs/reports/", "docs/reviews/",
-    "docs/research/", "docs/archive/", "docs/experiments/",
-    "CHANGELOG.md", "experiments/measurements/", "tests/fixtures/", "tests/fixture-data/",
-    "reports/", "archive/", "fullstack-real-pq-report.md", "tools/fleet_interpreters.json",
-    "prismaquant/serving_runtime_patches/", "tests/g3job/data-manifest.json",
-)
-BAN_DEFINITIONS = ("tests/test_prismabuild_ban.py", "tests/test_prismabuild_boundary.py")
-# Recorded kernel evidence and dated design history are retained, not execution instructions.
-RECORDED_EVIDENCE = (
-    "docs/design/distributed_campaign_2026-09-19.md",
-    "docs/design/domain_numerics_census_1303_20261002.md",
-    "docs/design/joint_quanta_765_688_2026-09-19.md",
 
-    "prismaquant/kernels/kda_chunk_qualification.json",
-    "prismaquant/kernels/joint_projection_reduce_qualification.json",
-)
 # Exact token carve-outs for refusal fixtures and frozen evidence readers.
 # The rest of each file remains subject to the ban.
 REFUSAL_TOKENS = {
@@ -69,7 +52,6 @@ REFUSAL_TOKENS = {
     "tests/test_flux_jobs.py": ("'PB_ACTION_KEY'",),
     "tests/g3job/test_g3_submit.py": ('"pbrun"',),
 }
-CI_DATA = ("tools/ci/gate_durations.json",)  # measured timings keyed by node ids of tests that no longer exist
 
 _WIRE = re.compile(r"(['\"])prismaquant\.prismabuild\.[a-z_0-9.]+\1")
 MECHANISM = re.compile(
@@ -87,25 +69,10 @@ def mechanisms(text: str) -> list[str]:
             for m in MECHANISM.finditer(_WIRE.sub("", line))]
 
 
-def excluded(path: str) -> bool:
-    return (path.startswith(HISTORY_PREFIXES) or path in BAN_DEFINITIONS or path in CI_DATA or path in RECORDED_EVIDENCE
-            or path.endswith("BUILD.bazel"))
 
 
-def tracked() -> list[str]:
-    if (ROOT / ".git").exists():
-        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], check=True,
-                             capture_output=True).stdout.decode()
-        return [p for p in out.split("\0") if p]
-    return [p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts and ".git" not in p.parts]
 
 
-def read_text(path: str) -> str | None:
-    try:
-        return (ROOT / path).read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
 
 
 def current_text(path: str, text: str) -> str:
@@ -121,10 +88,10 @@ def current_text(path: str, text: str) -> str:
 
 def live_findings() -> dict[str, list[str]]:
     found = {}
-    for path in tracked():
-        if excluded(path):
+    for path in scan.tracked():
+        if scan.excluded(path):
             continue
-        text = read_text(path)
+        text = scan.read_text(path)
         if text is None:
             continue
         hits = mechanisms(current_text(path, text))
@@ -163,41 +130,105 @@ def test_the_ban_sees_every_mechanism_form_and_spares_wire_ids():
 
 
 def test_a_planted_violation_in_a_live_file_is_a_finding(tmp_path, monkeypatch):
-    import sys
-    module = sys.modules[__name__]
+    module = scan
     (tmp_path / "prismaquant").mkdir()
     (tmp_path / "prismaquant" / "planted.py").write_text("import prismabuild.pool\n")
     (tmp_path / "docs" / "results").mkdir(parents=True)
     (tmp_path / "docs" / "results" / "old.md").write_text("pbrun --old\n")
     monkeypatch.setattr(module, "ROOT", tmp_path)
     monkeypatch.setattr(module, "tracked", lambda: ["prismaquant/planted.py", "docs/results/old.md"])
-    assert module.live_findings() == {"prismaquant/planted.py": ["import prismabuild"]}
+    assert live_findings() == {"prismaquant/planted.py": ["import prismabuild"]}
 
 
 def test_token_carveouts_do_not_exempt_the_rest_of_a_file():
     for path in REFUSAL_TOKENS:
-        assert not excluded(path)
+        assert not scan.excluded(path)
         assert mechanisms(current_text(path, "pb_action = new_live_job")) == ["pb_action"]
 
 
 def test_only_explicit_recorded_evidence_files_are_exempt():
-    assert all(excluded(path) for path in RECORDED_EVIDENCE)
-    assert not excluded("prismaquant/kernels/new_qualification.json")
-    assert not excluded("docs/design/operator_runbook.md")
-    assert not excluded("docs/design/old_run_2026-09-01.md")
-    assert not excluded("docs/design/operator_runbook_2026-11-10.md")
+    assert all(scan.excluded(path) for path in scan.RECORDED_EVIDENCE)
+    assert not scan.excluded("prismaquant/kernels/new_qualification.json")
+    assert not scan.excluded("docs/design/operator_runbook.md")
+    assert not scan.excluded("docs/design/old_run_2026-09-01.md")
+    assert not scan.excluded("docs/design/operator_runbook_2026-11-10.md")
 
 
 def test_token_carveouts_still_name_existing_source():
     for path, tokens in REFUSAL_TOKENS.items():
-        text = read_text(path)
+        text = scan.read_text(path)
         assert text is not None
         for token in tokens:
             assert token in text, (path, token)
 
 
 def test_recorded_evidence_exemptions_still_have_mechanism_hits():
-    for path in RECORDED_EVIDENCE:
-        text = read_text(path)
+    for path in scan.RECORDED_EVIDENCE:
+        text = scan.read_text(path)
         assert text is not None, path
         assert mechanisms(text), path
+
+
+def dynamic_loads(source: str) -> list[str]:
+    """Imports of ``prismabuild``/``fleet_sdk`` and loads through ``import_module``/``sdk_submodule``."""
+    found = []
+    def retired(name):
+        return (name == "fleet_sdk" or name == "prismabuild" or name.startswith("prismabuild.")
+                or name.startswith("prismaquant.prismabuild"))
+    tree = ast.parse(source)
+    aliases = {alias.asname for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+               and node.module in {'importlib', 'importlib.util', 'builtins'}
+               for alias in node.names if alias.asname and alias.name in {'import_module', 'find_spec', '__import__'}}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or "", *[(node.module or "") + "." + a.name for a in node.names]]
+            if isinstance(node, ast.Import):
+                found += [n for n in names if retired(n)]
+            else:
+                found += [names[0]] if retired(names[0]) else [n for n in names[1:] if retired(n)]
+        elif isinstance(node, ast.Call) and node.args:
+            callee = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            arg = node.args[0]
+            head = (arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                    else arg.values[0].value if isinstance(arg, ast.JoinedStr) and arg.values
+                    and isinstance(arg.values[0], ast.Constant) else "")
+            if callee == "sdk_submodule" or (callee in {"import_module", "find_spec", "__import__", *aliases} and retired(str(head))):
+                found.append(callee)
+    return found
+
+
+def import_findings() -> dict[str, list[str]]:
+    found = {}
+    for path in scan.tracked():
+        if not path.endswith(".py") or scan.excluded(path):
+            continue
+        source = scan.read_text(path)
+        hits = dynamic_loads(source) if source is not None else []
+        if hits:
+            found[path] = sorted(set(hits))
+    return found
+
+
+def test_no_live_module_loads_prismabuild():
+    assert import_findings() == {}
+
+
+def test_the_scanner_sees_every_load_form():
+    source = ("import importlib\nimport prismabuild.pool\nfrom prismabuild import core\n"
+              "importlib.import_module(f'prismabuild.{name}')\nsdk_submodule('core')\n"
+              "importlib.import_module('json')\nimport fleet_sdk\n")
+    assert sorted(dynamic_loads(source)) == [
+        "fleet_sdk", "import_module", "prismabuild", "prismabuild.pool", "sdk_submodule"]
+
+
+def test_reexported_and_dynamic_package_loads_are_banned():
+    cases = {
+        "import prismaquant.prismabuild.client": "prismaquant.prismabuild.client",
+        "from prismaquant import prismabuild_progress": "prismaquant.prismabuild_progress",
+        "importlib.util.find_spec('prismabuild')": "find_spec",
+        "__import__('prismabuild')": "__import__",
+        "from importlib.util import find_spec as discover; discover('prismabuild')": "discover",
+    }
+    for source, expected in cases.items():
+        assert expected in dynamic_loads(source)
+    assert dynamic_loads("importlib.util.find_spec('json'); __import__('pathlib')") == []

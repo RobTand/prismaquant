@@ -1,4 +1,5 @@
 """An explicit recovery authority, never reuse of an unfinished generation."""
+from produced_native_fixtures import bound_file as _bound
 from prismaquant import aura_provenance
 import pytest
 import copy
@@ -213,9 +214,6 @@ def test_recovery_manifest_only_stages_boundaries_in_consuming_phases(tmp_path, 
 
 # --- Chained recovery: a resumed run that is itself contained mid-forward. ---
 
-def _bound(path):
-    import hashlib
-    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def test_two_hop_chained_recovery_equals_uninterrupted(tmp_path, monkeypatch):

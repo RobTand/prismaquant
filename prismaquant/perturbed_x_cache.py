@@ -50,7 +50,6 @@ from .digests import DIRECT_ASCII_LAX, DIRECT_ASCII_STRICT
 from .file_identity import file_stat_signature
 from .tensor_digests import tensor_hash_update as _tensor_hash_update
 
-_FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
 _SHARED_FROZEN_WEIGHT_FORMAT_CACHE: OrderedDict[
     tuple[str, str, int, str, str],
     torch.Tensor,
@@ -203,8 +202,6 @@ def _packed_activation_qdq_is_row_local(spec) -> bool:
                for name in ("NVFP4", "MXFP4", "MXFP8_E4M3", "MXFP8_E5M2",
                             "MXFP8_UE8M0_G32", "FP8_E4M3", "FP8_E5M2"))
 
-def activation_cache_filename(name: str) -> str:
-    return _FNAME_SUB.sub("__", name) + ".pt"
 
 
 class SerializedEntryDigest:
@@ -956,7 +953,9 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     return payload, execution
 
 
-from .exact_activation_contract import EXACT_ACTIVATION_SCHEMA, ExactActivationReference
+from .exact_activation_contract import (
+    EXACT_ACTIVATION_SCHEMA, ExactActivationReference, activation_cache_filename,
+)
 
 # The block hashlib.file_digest read these entries in before the digest was
 # folded into the load (its _bufsize default, pinned by the read-amplification

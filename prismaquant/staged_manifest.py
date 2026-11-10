@@ -11,13 +11,12 @@ import tempfile
 from types import MappingProxyType
 
 from .file_identity import file_stat_signature as signature
-from .file_identity import open_nofollow_directory as _open_directory
+from .io_buffers import open_nofollow_directory as _open_directory
 from .digests import bytes_sha256hex, file_digest_sha256hex, DIRECT_ASCII_LAX
 
+from .staged_tier_policy import PATH_ENV, SHA_ENV, READ_ENV
+
 SCHEMA = 'prismaquant.staged_input_manifest.v1'
-PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
-SHA_ENV = 'PRISMAQUANT_STAGED_MANIFEST_SHA256'
-READ_ENV = 'PRISMAQUANT_READ_CONTRACT_SHA256'
 MAX_BYTES = 16 << 20
 MAX_OBJECTS = 1024
 
@@ -259,7 +258,7 @@ def materialize(entries, *, destination, manifest_path, read_contract_sha256, ph
     recomputed by every launch. Object/extent digests are computed while copying.
     Caller owns admission and the explicitly provisioned publication directory.
     """
-    from .io_engine import copy_extent
+    from .io_buffers import copy_extent
     destination = Path(destination)
     rows = []
     for row in entries:

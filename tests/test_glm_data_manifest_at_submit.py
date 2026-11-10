@@ -22,6 +22,7 @@ and its seed wire directory are all built under ``tmp_path``.
 """
 
 from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant import data_manifest_contract
 import json
 import struct
 import sys
@@ -365,7 +366,7 @@ def test_the_producer_restates_the_limits_prismabuild_enforces(
 
     # The real ceilings are far above any GLM row, so the refusal is exercised
     # by lowering them rather than by building a million entries.
-    monkeypatch.setattr(glm_data_manifests, "MAX_ENTRIES", 1)
+    monkeypatch.setattr(data_manifest_contract, "MAX_ENTRIES", 1)
     with pytest.raises(ReadsetRefused, match="entries exceed 1"):
         glm_data_manifests.check_manifest(manifest)
     with pytest.raises(ReadsetRefused, match="over the"):

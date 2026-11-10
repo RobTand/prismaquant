@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from .file_identity import WriterIdentities
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.
@@ -509,7 +510,7 @@ def publish_files(publication: PreparationPublication | None, kind: str,
             raise PreparationPublicationRefused(
                 f"the preparation's {kind!r} batch: {exc}") from exc
     created: list[tuple[str, bytes]] = []
-    writer_identities = {}
+    writer_identities = WriterIdentities()
     if publication is not None:
         publication.prepare_directories([path for path, _, _ in planned])
     for path, payload, where in planned:

@@ -12,6 +12,7 @@ from . import flux_jobs, native_results
 from . import quality_prefill_contract as scientific
 from .cost_stage_checkpoint import publish_new_bytes
 from .digests import bytes_sha256hex
+from .file_identity import WriterIdentities
 from .flux_jobs import FluxResources
 from .native_results import _owned, validate_runtime
 from .schemas import Contract
@@ -737,7 +738,7 @@ def _publish_document(value: object, path: Path, limit: int, *, directory_identi
     raw = scientific.canonical_json_bytes(value) + b'\n'
     _check.require(len(raw) <= limit, 'document exceeds byte limit')
     directory = open_directory(str(filename.parent), identity=directory_identity)
-    written = {}
+    written = WriterIdentities()
     try:
         observed = os.fstat(directory)
         identity = (observed.st_dev, observed.st_ino)

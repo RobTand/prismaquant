@@ -23,7 +23,7 @@ import sysconfig
 from . import flux_jobs
 from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, file_digest_sha256hex
 from .file_identity import file_stat_signature, durable_package_path
-from .schemas import Contract, strict_json_loads
+from .contract_checks import Contract, strict_json_loads
 from .staged_manifest import read_document, publish_staged_json, open_regular
 
 _contract = Contract(ValueError, 'native result: ')

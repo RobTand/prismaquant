@@ -2,16 +2,10 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-import json
 from pathlib import Path
 from prismaquant.tessera_campaign_rows import collect_rows
-from tools.tessera_fleet.common import STATE, stage_state
-
-EXIT_DONE = 0
-EXIT_FAILED = 1
-EXIT_NOTHING = 3
-EXIT_RUNNING = 4
+from tools.tessera_fleet.common import (  # noqa: F401
+    EXIT_DONE, EXIT_FAILED, EXIT_NOTHING, EXIT_RUNNING, exit_status, show_status)
 
 _EPILOG = """\
 exit status:
@@ -23,16 +17,6 @@ exit status:
 """
 
 
-def exit_status(table: list[dict], expected: int) -> int:
-    statuses = [row.get("status", "") for row in table]
-    if len(table) != expected or any(s not in {"succeeded", "running"}
-                                     for s in statuses):
-        return EXIT_FAILED
-    if "running" in statuses:
-        return EXIT_RUNNING
-    return EXIT_DONE
-
-
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], epilog=_EPILOG,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -42,21 +26,7 @@ def main(argv=None) -> int:
                     help="export, ladder, or a dispatch_model stage (prepare, encode, "
                          "assemble)")
     args = ap.parse_args(argv)
-    state = stage_state(args.workspace, args.stage)
-    if not (state / 'manifest.json').exists():
-        print(f"no {args.stage} submissions recorded under {args.workspace / STATE}")
-        return EXIT_NOTHING
-    try:
-        table = collect_rows(state, wait=False)
-    except (OSError, ValueError, RuntimeError) as exc:
-        print(f'native status query failed: {exc}')
-        return EXIT_FAILED
-    expected = len(json.loads((state / 'manifest.json').read_text())['rows'])
-    print(json.dumps(table, indent=2))
-    counts = Counter(row.get("status", "?") for row in table)
-    print(f"{args.stage}: {expected} recorded, "
-          + ", ".join(f"{n} {status}" for status, n in sorted(counts.items())))
-    return exit_status(table, expected)
+    return show_status(args.workspace, args.stage, collect_rows=collect_rows)
 
 
 if __name__ == "__main__":

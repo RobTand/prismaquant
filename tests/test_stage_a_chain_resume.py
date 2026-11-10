@@ -295,7 +295,7 @@ def _capsule(tmp_path, monkeypatch):
     launch binds, so a chain resume must continue a capsule-bound run too.
     """
     from prismaquant import joint_forward_resume as recovery_mod
-    from test_joint_forward_resume import _bound
+    from produced_native_fixtures import bound_file as _bound
     from produced_native_fixtures import selected_publications, recovery_publication
     refs, identities = {}, []
     last = len(draw()) - 1
