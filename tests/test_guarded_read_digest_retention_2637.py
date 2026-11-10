@@ -39,26 +39,15 @@ MANIFEST_SOURCE_BLOBS = {
         "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037",
     ),
 }
-CURRENT_SOURCE_BLOBS = {
-    **MANIFEST_SOURCE_BLOBS,
-    # #2638/#3012: additive token recipe; existing owner profiles unchanged.
-    "prismaquant/tensor_digests.py": (
-        "0777758650869edc365cbf545280250e6fa175f2",
-        "8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a",
-    ),
-    "prismaquant/perturbed_x_cache.py": (
-        "99ed093fdf903ecf0ca8e4023a8c71b252829bea",
-        "4daf929763ce5eefc5c3ed31c0bfaa2489e29b3cf7827b5ecf17fd82b9bfdfbf",
-    ),
-    "prismaquant/tessera_census_cache.py": (
-        "b8158910df6d22720611dd9b8588bf51777170c4",
-        "c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1",
-    ),
-    "prismaquant/digests.py": (
-        "65c98d3bdeb16035ef4b104dc159e986e2279897",
-        "732c5e8e8774491f190eb866f6005ed3014d4fe16c1f2d837f22a39215e90f18",
-    ),
-}
+# Current native-migration sources; historical manifest pins above remain unchanged.
+CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('6b58ca7366fd5a95757ad6d5154f06a1a1f2679f',
+                                      '0f0737ab9ca2ca9baa916846a124b3cdf88d08f08791045d3d4e31bd272c73f4'),
+ 'prismaquant/tessera_census_cache.py': ('b8158910df6d22720611dd9b8588bf51777170c4',
+                                         'c67e32264f35f0f1b2ab953e00f4dab8dfb0753ccd6cebf04e613cc4346c90f1'),
+ 'prismaquant/digests.py': ('1511a8142cca4b1fb9067bb5cbbcf92098f95f69',
+                            'e8ab9ab2d8afd9fcbc3bc6fd57401247405bd17ec850fefb71e4694edb2dbb99'),
+ 'prismaquant/tensor_digests.py': ('0777758650869edc365cbf545280250e6fa175f2',
+                                   '8baeaf7541a23481b9d233a7c65ee5f679f4fcc248c004e83ad0ca16ea8ee50a')}
 
 # The original producer test is archived, not runnable current coverage. Keep its
 # historical evidence string below and check the active calibration-hash oracle.

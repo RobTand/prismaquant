@@ -106,6 +106,20 @@ RESOURCE = "resource"
 # ``ambiguous`` was listed in the PQ #1147 report; the ruling (2026-09-24)
 # keeps each such site a refusal in both modes, as on main.
 ALLOWLIST = {
+    # Native migration: these checks authenticate owned bytes, launch geometry,
+    # and containment. They are independent of dev-mode resume compatibility.
+    ("prismaquant/stage_a_chain_resume.py", "require_producer_contained"): (
+        1, STRUCTURE, "the stopped producer names the saved native job and immutable launch"),
+    ("prismaquant/streamed_boundary_artifacts.py", "StreamedBoundaryArtifacts.bind_produced_output"): (
+        1, RESOURCE, "runtime group and tensor ceilings equal the launch-bound declaration"),
+    ("tools/dispatch_joint_quanta.py", "parse_pilot_selector"): (
+        1, INTEGRITY, "explicit pilot selection bytes reproduce the caller's pinned digest"),
+    ("tools/tessera_campaign_container.py", "staged_input_environment"): (
+        1, INTEGRITY, "the staged manifest names the declared scientific read contract"),
+    ("tools/tessera_campaign_container.py", "native_admission"): (
+        1, INTEGRITY, "saved native launch bytes reproduce the authenticated launch digest"),
+    ("tools/tessera_campaign_container.py", "run_owned_container"): (
+        1, STRUCTURE, "actual container ID, image, CPU affinity and device roster match admission"),
     ("tools/dispatch_joint_quanta.py", "Gateway.status"): (
         1, STRUCTURE, "the saved native handle names the exact persisted job and launch receipt"),
     ("prismaquant/aura_checkpoint_journal.py", "_decode_unit"): (
@@ -188,11 +202,6 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/joint_cost_quantum.py", "main"): (
         1, STRUCTURE, "a path and its digest are supplied together"),
-    ("prismaquant/joint_forward_resume.py", "_read"): (
-        2, INTEGRITY, "proof bytes against the pinned digest"),
-    ("prismaquant/joint_forward_resume.py", "_checked_group"): (
-        3, INTEGRITY, "the export manifest, its action and descriptor bytes against their "
-        "digests"),
     ("prismaquant/joint_forward_resume.py", "validate_forward_state"): (
         1, INTEGRITY, "the stored session digest reproduces from the stored bind identity"),
     ("prismaquant/joint_forward_resume.py", "build_forward_recovery"): (
@@ -271,8 +280,8 @@ ALLOWLIST = {
         2, INTEGRITY, "pilot counters and independently reviewed source-contract bytes against "
         "their operator-bound digests (#1293); source/regime/shape admission is explicitly overridable"),
     ("tools/dispatch_joint_quanta.py", "_verify_pilot_result"): (
-        1, STRUCTURE, "authenticated PB counters and original quantum record name the same "
-        "producer identity; neither is compared with the running campaign"),
+        2, INTEGRITY, "native counters bytes reproduce their published digest and length; "
+        "counters and the original quantum record name the same producer identity"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
         5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
         "payload, its render prerequisite, the bound prepared contract and the Stage A "
@@ -399,9 +408,6 @@ ALLOWLIST = {
         1, INTEGRITY, "the manifest wire against its digest"),
     ("prismaquant/joint_quantum_handoff.py", "require_band_serial_readset"): (
         1, INTEGRITY, "the readset wire against the data manifest digest"),
-    ("prismaquant/joint_quantum_handoff.py", "bind_handoff_publication"): (
-        1, RESOURCE, "the handoff template's durable payload maximum against the owner's "
-        "running artifact ceiling"),
     ("prismaquant/joint_served_activation.py", "_policy_bytes"): (
         1, INTEGRITY, "policy input bytes against their bound digest"),
     ("prismaquant/joint_served_activation.py", "verify_policy"): (

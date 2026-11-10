@@ -29,7 +29,7 @@ REPO = Path(__file__).resolve().parents[1]
 TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route and authorized PB retirement.
 # Retired adapter scopes disappeared; retained byte-contract goldens stay fixed.
-TOKEN_ONLY_BASELINE_SHA256 = "78d379bc79f16c8529736bdcc272a085ee6c2c21754d0d1887a5f73fd59249c9"
+TOKEN_ONLY_BASELINE_SHA256 = "2062c270a775feee5ab366372df09fca9434f5fe55a75d83d393282bf530dfb7"
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs CUDA"))]
 
