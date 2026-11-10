@@ -91,7 +91,8 @@ class FluxJobsTests(unittest.TestCase):
         self.assertIn('--dependency=afterok:456', command)
         self.assertFalse(any(a.startswith(('-N', '--nodes', '--requires')) for a in command))
         exported = [a for a in command if a.startswith('--env=')][1:]
-        self.assertEqual(len(exported), 9)
+        self.assertEqual(len(exported), 8)
+        self.assertFalse(any(a.startswith('--env=LD_LIBRARY_PATH=') for a in exported))
         self.assertIn('--env=OMP_NUM_THREADS=1', exported)
         self.assertIn('--env=OUT=' + str(self.record), exported)
         self.assertEqual(jobs.load_submission(self.record), submission)
