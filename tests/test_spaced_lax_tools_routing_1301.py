@@ -7,7 +7,6 @@ consumer evidence matrix states which remaining outputs are not exercised here.
 from __future__ import annotations
 
 import copy
-import ast
 import importlib.util
 import json
 import os
@@ -144,14 +143,17 @@ def test_campaign_row_embeds_the_resolved_container_spec():
 
     spec = {"cwd": "/work", "python": "python3", "cpus": 2, "tags": ["gb10"],
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
-    frozen = json.loads((ROOT / "tests/fixtures/spaced_lax_tools_consumers_2320.json").read_text())
-    expected = ast.literal_eval(frozen['test_campaign_row_embeds_the_resolved_container_spec#0']['returned'])
-    # The serializer oracle predates campaign argument admission. Only the
-    # input flag changes; all serialized bytes and row obligations stay checked.
-    expected['argv'][-2] = '--model'
-    # Native rows retain the image, while unqualified progress enforcement is refused at launch.
-    expected.pop('progress_phases')
-    expected['container_images'] = ['sha256:' + 'a' * 64]
+    # The pre-refactor serializer bytes stay literal and independent of the
+    # row builder. Native intent retains the image and omits retired phases.
+    expected = {
+        'argv': ['python3', '-m', 'tools.tessera_campaign_container', '--spec',
+                 '{"container": {"image": "sha256:' + 'a' * 64 +
+                 '"}, "env": {"LABEL": "\\u00e9"}}', '--',
+                 'python3', '-u', '-m', 'prismaquant.tessera_campaign', '--model', 'é'],
+        'cwd': '/work', 'demand': {'gpu': 1, 'cpu': 2, 'mem_gb': 16},
+        'env': {'LABEL': 'é'}, 'tags': ['gb10'], 'retry_safe': True,
+        'container_images': ['sha256:' + 'a' * 64], 'timeout_s': 30,
+    }
     assert campaign_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
