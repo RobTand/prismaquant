@@ -24,17 +24,21 @@ size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
 The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
 
 Payloads use `PATH=/usr/bin:/bin`, so Torch Inductor selects the system compiler
-with its multiarch includes. Only coordinator CLI invocations use the Flux
-install and dependency tool directories and library paths. No coordinator
+with its multiarch includes. Coordinator CLI invocations retain the Flux
+install and dependency tool directories on PATH. Both environments retain
+the Flux library search path for native client calls. No coordinator
 `FLUX_SCRATCH` is exported. The wrapper uses an instance-provided job value when
 present, otherwise the existing host table: XFS
 `/home/rob/tl-gates/flux-validation` on dl380g10, ext4 `/tmp/flux-vanilla` on
 either Spark. The observed instance config has no `FLUX_SCRATCH` setting, and
-P-4's live probe records whether the job receives one. Each selected root must
-pass the host filesystem qualification. Scratch lives under the exact
+P-4's live probe on sparklina confirmed that the instance supplied no value.
+Its `scratch.json` records `root_source=host-table`; `cleanup.json` confirms
+removal. Evidence: `/mnt/shared/flux-migration/pq-tessera/jobs/p4-conform-01-probe/`
+and `/mnt/shared/flux-migration/pq-tessera/evidence/p4-conform/scratch-config-observation.json`.
+Each selected root must pass the host filesystem qualification. Scratch lives under the exact
 `$FLUX_SCRATCH/$FLUX_JOB_ID`, with the payload ID normalized to its equivalent
-ASCII f58 spelling for scientific path contracts. Scratch is removed on exit; its source and
-filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
+ASCII f58 spelling for scientific path contracts. Scratch is removed on exit.
+Its source and filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
 inside that same owned directory. Launcher allow-lists contain no variable
 names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
 the executor's allow-list, and container/staged names are checked alongside it.
