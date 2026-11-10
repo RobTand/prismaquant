@@ -54,7 +54,7 @@ class FluxJobsTests(unittest.TestCase):
                          b'{"a":"\xc6\x92","n":NaN}\n')
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(dir=os.environ['TEST_TMPDIR'])
+        self.temporary = tempfile.TemporaryDirectory(dir=tempfile.gettempdir())
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         shared_root = patch.object(jobs, '_SHARED_ROOT', self.root)
