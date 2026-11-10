@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -20,7 +21,7 @@ class NativeRowsTests(unittest.TestCase):
                 'timeout_s': 60, **extra}
 
     def test_unresolvable_instance_leaves_no_stage_state(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=os.environ['OUT']) as directory:
             state = Path(directory) / 'state'
             with patch.object(jobs, '_source_identity', return_value={}), \
                     patch.object(jobs, '_client_environment', return_value={}), \

@@ -165,6 +165,16 @@ class FluxJobsTests(unittest.TestCase):
             with self.assertRaises(jobs.SubmissionUnknown):
                 jobs.load_submission(self.record)
 
+    def test_diagnostic_write_failure_keeps_acknowledged_receipt(self):
+        write = Path.write_text
+        def fail(path, *args, **kwargs):
+            if path.name.startswith('submit.'):
+                raise OSError('injected diagnostic failure')
+            return write(path, *args, **kwargs)
+        with patch.object(Path, 'write_text', fail):
+            submission, _ = self.submit_fixture()
+        self.assertEqual(jobs.load_submission(self.record), submission)
+
     def test_recovery_write_failure_names_available_evidence(self):
         publish = jobs._publish_flux_json
         def fail(path, value):
