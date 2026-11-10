@@ -421,9 +421,25 @@ class FluxJobsTests(unittest.TestCase):
             self.assertFalse(any(call.args[0][0] == 'submit' for call in run.call_args_list))
             self.assertFalse(self.record.exists())
 
+    def test_instance_restarting_during_preflight_refuses_submission(self):
+        self.live_instance()
+        starts = iter(('900.5\n', '901.0\n'))
+        def query(args, **kwargs):
+            if args[0] == 'getattr':
+                return self.completed(next(starts))
+            return self.instance_query(args, **kwargs)
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_source_identity', return_value=self.source), \
+                patch.object(jobs, '_flux_run', side_effect=query) as run, \
+                self.assertRaisesRegex(ValueError, 'changed during preflight'):
+            jobs.submit_job(['/bin/true'], checkout=self.checkout,
+                resources=self.resources, record_dir=self.record)
+        self.assertFalse(any(call.args[0][0] == 'submit' for call in run.call_args_list))
+        self.assertFalse(self.record.exists())
+
     def test_missing_uri_and_missing_or_repeated_live_ranks_refuse(self):
         for uri in ('', 'local:///bad uri', 'local:///bad\0uri'):
-            with patch.dict(os.environ, {'FLUX_URI': uri}), self.assertRaises(ValueError):
+            with patch.object(os, 'environ', {'FLUX_URI': uri}), self.assertRaises(ValueError):
                 jobs._instance_uri()
         for rows in ([], [{'rank': '0-2'}, {'rank': '2'}], [{'rank': ''}]):
             with self.subTest(rows=rows), self.assertRaises(ValueError):
