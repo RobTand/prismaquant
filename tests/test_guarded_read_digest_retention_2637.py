@@ -18,7 +18,7 @@ REVALIDATED_COMMIT = "914bf79807120fa60f433714e95cffd44b917d92"
 
 # Keep the #2540 snapshot immutable. A separately reviewed integration snapshot
 # admits main's surrounding refactors, not arbitrary changes to callers/owners.
-# All six retained source segments are unchanged. The new file-range/JSON
+# All six retained raw-hashlib calls are unchanged. The new file-range/JSON
 # recipes still own none of their acquisition or BLAKE2b result contracts.
 # Each identity is (Git blob, SHA-256); no historical Git objects are needed.
 MANIFEST_SOURCE_BLOBS = {
@@ -42,6 +42,8 @@ MANIFEST_SOURCE_BLOBS = {
 # Reviewed native-migration pins, not refreshed historical evidence:
 # perturbed_x_cache: native lifecycle migration in 02c35277f and filename owner
 # extraction in ab18816fd; retained guarded-read scopes remain checked below.
+# afd626d6d adds staged object offsets in the two read scopes, preserving their
+# raw SHA-256 calls and digest comparisons against the logical entry bytes.
 # tessera_census_cache: native result selection replaces the PB service reader.
 # digests: bounded chunks_sha256hex owner supports the native byte writer.
 # tensor_digests: the additive retained token owner route from 58a2db300.
