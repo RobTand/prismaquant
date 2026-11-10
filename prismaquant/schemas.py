@@ -589,7 +589,7 @@ def strict_json_loads(
 
 
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}\Z")
-_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._-]+\Z")
+_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._+-]+\Z")
 
 
 class Contract:

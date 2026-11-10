@@ -218,14 +218,14 @@ def prepare_namespace_requests(*, requests: list[dict], selected: list[str],
             or set(provenance) != {"tessera_commit", "container_content_sha256",
                                    "native_profile", "native_runtime_sha256"}
             or not isinstance(profile, dict)
-            or set(profile) != {"profile", "config_sha256", "model_sha256"}
+            or set(profile) != {"profile", "config_sha256", "r_sha256"}
             or not isinstance(profile["profile"], str) or not profile["profile"]
             or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{" + str(size) + r"}", value) is None
                    for value, size in ((provenance["tessera_commit"], 40),
                                        (provenance["container_content_sha256"], 64),
                                        (provenance["native_runtime_sha256"], 64),
                                        (profile["config_sha256"], 64),
-                                       (profile["model_sha256"], 64)))):
+                                       (profile["r_sha256"], 64)))):
         raise RuntimeError("namespace requires exact dependency provenance")
     if set(readsets) != set(selected):
         raise RuntimeError("namespace selected readset roster differs")

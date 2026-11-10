@@ -663,6 +663,8 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
+    from .campaign_container_spec import admission_image_reference
+    image = admission_image_reference(container_spec) if "container" in resolved else None
     row = {
         "argv": command,
         "cwd": spec["cwd"],
@@ -673,6 +675,8 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
         # or adopts a result by key; reconnect uses the saved native ID.
         "retry_safe": True,
     }
+    if image is not None:
+        row["container_images"] = [image]
     if timeout_s is not None:
         # Only when somebody asked for one.  A blanket default here is what
         # sealed 14,400 s into every pricing row and killed two of them mid

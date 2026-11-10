@@ -31,7 +31,7 @@ def main():
                         help='verified per-cell qualification JSON, reused in place (repeatable)')
     parser.add_argument('--prior-child', nargs=2, action='append', default=[], metavar=('SHA256', 'PARENT_KEY'),
                         help='CAS child result manifest with pair task/output IDs (repeatable)')
-    parser.add_argument('--cas-root', required=True,
+    parser.add_argument('--cas-root',
                         help='CAS containing prior child manifests in blobs/<prefix>/<digest>')
     args = parser.parse_args()
     root = Path(args.root).resolve()
@@ -66,6 +66,8 @@ def main():
 
     for path, expected in args.prior_result:
         adopt_result(path, expected)
+    if args.prior_child and not args.cas_root:
+        raise ValueError('prior child requires an explicit --cas-root')
     for digest, parent_key in args.prior_child:
         if not is_sha256hex(digest) or not is_sha256hex(parent_key):
             raise ValueError('prior child requires SHA256 and full parent key')

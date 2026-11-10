@@ -60,7 +60,7 @@ from prismaquant import joint_quantum_row as quantum_row
 #: Tags retain conjunctive placement intent, subject to native admission.
 #: The historical host pair admitted neither Spark (#831).
 CONSUMER_TAGS = ("gb10",)
-SUBMISSION_PRIORITY = -5
+SUBMISSION_PRIORITY = 0
 ADJOINT_TAG = "sparky"
 DEV_MODE_ENV = "PRISMAQUANT_DEV_MODE=1"
 

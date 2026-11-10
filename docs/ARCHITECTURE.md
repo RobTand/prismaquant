@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4 D-fix. Sources below describe the current implementation.
+As of: 2026-11-10, P-4 hosted repair. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -17,6 +17,7 @@ Importing the module never reads shared storage. Every CLI call resolves the
 current prefix; no run name or install prefix is embedded in live launch code.
 The CPU profile permits at most four cores, 16 GiB and
 1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply.
+Scientific row builders retain image admission intent, with neutral queue priority by default. GPU rows still refuse native execution at P-7. Namespace provenance binds the admitting profile's `config_sha256` and `r_sha256`.
 Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
 inside the Flux job's cgroup; it does not enforce the declared per-job memory
 size. The job unit and aggregate fleet cgroup caps remain separate host bounds.

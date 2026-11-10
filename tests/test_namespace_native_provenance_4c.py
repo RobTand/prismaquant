@@ -22,7 +22,7 @@ def test_the_schema_is_v2_and_the_provenance_keys_are_exact(tmp_path):
     binding = namespace.validate_namespace_request(row)
     assert set(binding["provenance"]) == {"tessera_commit", "container_content_sha256",
                                          "native_profile", "native_runtime_sha256"}
-    assert set(binding["provenance"]["native_profile"]) == {"profile", "config_sha256", "model_sha256"}
+    assert set(binding["provenance"]["native_profile"]) == {"profile", "config_sha256", "r_sha256"}
 
 
 @pytest.mark.parametrize("change", ["retired_key", "missing_runtime", "extra_key", "profile_extra",
@@ -39,7 +39,7 @@ def test_malformed_provenance_is_refused(tmp_path, change):
     elif change == "profile_extra":
         provenance["native_profile"]["uri"] = "local:///x"
     elif change == "profile_missing":
-        del provenance["native_profile"]["model_sha256"]
+        del provenance["native_profile"]["r_sha256"]
     elif change == "short_runtime":
         provenance["native_runtime_sha256"] = "f" * 63
     elif change == "empty_profile":

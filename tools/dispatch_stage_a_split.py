@@ -28,7 +28,7 @@ if str(TOOLS) not in sys.path:
 ROUND_SCHEMA = "prismaquant.stage_a.split_round.v2"
 FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v2"
 ROUND_NAME = "round.json"
-PRIORITY = "-10"
+PRIORITY = "0"
 _PRIORITY = re.compile(r"-?\d+")
 GIB = 1 << 30
 _SOURCE = re.compile(r"\.safetensors$")

@@ -1591,8 +1591,6 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
     """Build native metadata; refuse unsupported explicit scheduling intent."""
     if args.priority != 0:
         raise ValueError("queue priority mapping is unqualified; priority must be 0")
-    if gpu_memory_gb is not None:
-        raise ValueError("GPU lane not qualified; requires plan step P-7")
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parsed = json.loads(Path(args.spec).read_text()) if container_spec is None else container_spec
     command = ['python3', '-m', 'tools.tessera_campaign_container',
@@ -1604,6 +1602,12 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
            'demand': demand, 'env': dict(parsed.get('env', {})),
            'tags': [args.tag] if args.tag else [],
            'data_manifest': str(manifest), 'timeout_s': args.timeout_s}
+    from prismaquant.campaign_container_spec import admission_image_reference
+    image = admission_image_reference(parsed)
+    if image is not None:
+        row['container_images'] = [image]
+    if gpu_memory_gb is not None:
+        row['gpu_memory_gb'] = gpu_memory_gb
     if residency is not None:
         row['residency'] = residency
     return row
@@ -2208,7 +2212,7 @@ def _add_submission_arguments(parser) -> None:
                         help="cores the action reserves")
     parser.add_argument("--tag", default=None,
                         help="placement tag; the joint pass needs a GB10 box")
-    parser.add_argument("--priority", type=int, default=-10,
+    parser.add_argument("--priority", type=int, default=0,
                         help="requested queue priority; nonzero values currently refuse native admission")
     parser.add_argument("--residency", default=None, choices=("stage",),
                         help="submit-joint strict stage-residency intent; retained in "
