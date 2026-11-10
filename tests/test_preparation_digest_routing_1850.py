@@ -11,6 +11,7 @@ import pytest
 from prismaquant import staged_whole_file
 from prismaquant import stage_b_prep_io as prep
 from prismaquant.staged_tier_policy import TierPolicyRefused
+from prismaquant.stage_a_produced_output import BoundaryProducedPublicationFailed
 
 
 RAW_VALUES = [b"", b"\x00\xff\xc3\xa9\r\n", bytearray(b"mutable"), memoryview(b"view")]
@@ -59,7 +60,7 @@ class _ProducedOutput:
     def publish(self, *, batch_id, descriptors):
         self.events.append(("publish", batch_id, descriptors))
         if not self.outcome["ok"]:
-            raise prep.PreparationPublicationRefused("native publication refused")
+            raise BoundaryProducedPublicationFailed("native publication refused")
         return self.outcome
 
 
@@ -181,7 +182,7 @@ def test_payload_type_refusal_precedes_descriptor_validation():
 def test_commit_refusal_keeps_exact_message_and_does_not_account():
     outcome = {"ok": False, "refusal": "credit"}
     publication, po = _publication(outcome=outcome)
-    with pytest.raises(prep.PreparationPublicationRefused) as refused:
+    with pytest.raises(BoundaryProducedPublicationFailed) as refused:
         publication.commit("records", [("a.bin", b"A")])
     assert str(refused.value) == "native publication refused"
     assert refused.value.__cause__ is None
