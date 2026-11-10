@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4F Flux receipts and placement health. Sources below describe the current implementation.
+As of: 2026-11-10, P-4F review follow-up on Flux receipts and placement health. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -41,7 +41,7 @@ Its source and filesystem are retained with cleanup evidence. As its final step,
 the wrapper records declared `memory_gib` and observed `memory_peak_bytes` in
 `scratch.json`, reading `memory.peak` under the full unified cgroup path from
 `/proc/self/cgroup`, including colons in unit names. An unavailable peak records
-`null` and `memory_peak_error` without failing the job. This observation adds no gate. The staged proof uses `TMPDIR`
+`null` and `memory_peak_error` without failing the job. A failed final receipt rewrite preserves the payload result. This observation adds no gate. The staged proof uses `TMPDIR`
 inside that same owned directory. Launcher allow-lists contain no variable
 names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
 the executor's allow-list, and container/staged names are checked alongside it.
@@ -55,6 +55,7 @@ acknowledgement if ordinary receipt publication fails. A lost acknowledgement
 stays unknown and never triggers another submit. Collection authenticates the
 saved launch and retains terminal status, eventlog, allocation, payload logs and
 scratch cleanup evidence in the same record directory.
+Saved pre-P-4F launches still load, but their old native argv cannot pass current launch validation or native verification.
 Stage preflight resolves the same instance and checks its health before creating
 state or manifests. An empty live configuration is hashed as evidence and is
 allowed; missing broker identity and offline ranks still refuse.
@@ -117,7 +118,7 @@ jobs; retained schema identifiers remain byte-for-byte unchanged. Numerical and
 serving gates remain independent.
 <!-- flux-current-end -->
 
-As of: 2026-11-10, Flux receipts and placement-scoped health, P-4F.
+As of: 2026-11-10, Flux receipts and placement-scoped health, P-4F review follow-up.
 Source: `prismaquant/flux_jobs.py`, `tests/test_flux_jobs.py`, based on `2c0c028d2`.
 The native CPU profile is `pq.flux.stock-slot.v3`. It submits
 `slot/[core=N;memory=M]`, with a GPU child only when requested by a future
@@ -130,12 +131,12 @@ described in the current execution section. There is no run-name guessing or
 newest-run discovery. Every eligible rank in live `resource.R` must be online
 and have a full broker overlay. Portable jobs consider only hosts supported by
 the executor; `host:NAME` selects that host's rank, and property placement uses
-R's property membership. Empty eligibility refuses. Other ranks, including
+R's property membership. Host mapping expands each `R_lite` row's ranks in row order against `nodelist`; a missing nodelist refuses. Empty eligibility refuses. Other ranks, including
 unknown hosts, do not block portable jobs. The identity evidence records every
 rank's eligibility, online state and overlay state in `rank_health`.
 Unbound identity observations record null eligibility without imposing a job
 placement. Both `validate_job` and `submit_job` enforce health from the job's
-resources, so phase preflight cannot add a portable-only health restriction. Live config and R response
+resources; quality-prefill phase preflight also checks its first child's resources before validating every child. Live config and R response
 SHA256 values, URI and broker starttime are recorded in both launch and
 submission receipts as observations, without config or model hash pins.
 Collection, cancellation and native verification use the saved URI and require

@@ -58,6 +58,12 @@ class FluxJobsTests(unittest.TestCase):
             path.write_text(json.dumps(receipt))
         self.assertEqual(jobs.load_submission(self.record), submission)
 
+    def test_ascii_job_environment_cannot_be_disabled(self):
+        self.assertEqual(jobs._environment(self.record, {'FLUX_F58_FORCE_ASCII': '1'})
+                         ['FLUX_F58_FORCE_ASCII'], '1')
+        with self.assertRaisesRegex(ValueError, 'unsupported environment setting'):
+            jobs._environment(self.record, {'FLUX_F58_FORCE_ASCII': '0'})
+
     def test_launch_encoding_keeps_exact_utf8_lax_identity_bytes(self):
         self.assertEqual(jobs._json_bytes({'n': float('nan'), 'a': 'ƒ'}),
                          b'{"a":"\xc6\x92","n":NaN}\n')
@@ -485,6 +491,31 @@ class FluxJobsTests(unittest.TestCase):
             profile = jobs._profile_identity(self.resources)
         self.assertEqual(profile['config_sha256'], hashlib.sha256(b'{}\n').hexdigest())
 
+    def test_host_mapping_preserves_unsorted_R_lite_order(self):
+        self.live_instance()
+        model = json.loads(self.live_r)
+        model['execution']['R_lite'].reverse()
+        self.live_r = json.dumps(model)
+        self.online = '4'
+        self.overlay = '0 worker0: offline\n1 worker1: offline\n4 coordinator: full\n5 worker5: offline\n'
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_flux_run', side_effect=self.instance_query):
+            profile = jobs._profile_identity(jobs.FluxResources(1, 1, 0, 30, 'host:dl380g10'))
+            self.assertEqual([row['rank'] for row in profile['rank_health'] if row['eligible']], [4])
+            self.online = '0'
+            with self.assertRaisesRegex(ValueError, 'eligible rank.*online'):
+                jobs._profile_identity(jobs.FluxResources(1, 1, 0, 30, 'host:dl380g10'))
+
+    def test_missing_nodelist_refuses_clearly(self):
+        self.live_instance()
+        model = json.loads(self.live_r)
+        del model['execution']['nodelist']
+        self.live_r = json.dumps(model)
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_flux_run', side_effect=self.instance_query), \
+                self.assertRaisesRegex(ValueError, 'live Flux R requires a nonempty nodelist'):
+            jobs._profile_identity(self.resources)
+
     def test_unbound_identity_records_health_without_imposing_portable_placement(self):
         self.live_instance()
         self.online = '0'
@@ -750,7 +781,14 @@ class FluxJobsTests(unittest.TestCase):
     def test_unreadable_memory_peak_is_nonfatal(self):
         self.run_payload_memory_case(True)
 
-    def run_payload_memory_case(self, unreadable):
+    def test_memory_receipt_write_failure_preserves_payload_exit(self):
+        self.run_payload_memory_case(False, write_failure=True, payload_exit=7)
+
+    def test_memory_bookkeeping_preserves_early_wrapper_error(self):
+        self.run_payload_memory_case(False, early_failure=True)
+
+    def run_payload_memory_case(self, unreadable, *, write_failure=False,
+                                early_failure=False, payload_exit=0):
         scratch_root = self.root / 'instance-scratch'
         scratch_root.mkdir()
         self.record.mkdir()
@@ -772,18 +810,39 @@ class FluxJobsTests(unittest.TestCase):
             if str(path) == '/sys/fs/cgroup/user.slice/shell-f123:sys.service/memory.peak':
                 return original_read(fake_peak)
             return original_read(path, *args, **kwargs)
+        original_write = Path.write_text
+        def write(path, data, *args, **kwargs):
+            if write_failure and path == self.record / 'scratch.json' and 'memory_peak_bytes' in data:
+                raise PermissionError('fixture final receipt write refused')
+            return original_write(path, data, *args, **kwargs)
+        def affinity(pid):
+            if early_failure:
+                raise RuntimeError('fixture affinity unavailable')
+            return {0}
         environment = {'OUT': str(self.record), 'FLUX_SCRATCH': str(scratch_root), 'FLUX_JOB_ID': 'ƒ123'}
         with patch.dict(os.environ, environment, clear=True), \
                 patch.object(sys, 'argv', ['payload', self.source['commit'], '3', '/bin/true']), \
                 patch.object(jobs.socket, 'gethostname', return_value='dl380g10'), \
                 patch.object(subprocess, 'check_output', side_effect=query), \
-                patch.object(subprocess, 'Popen', return_value=SimpleNamespace(pid=123, wait=lambda: 0)), \
+                patch.object(subprocess, 'Popen', return_value=SimpleNamespace(pid=123, wait=lambda: payload_exit)), \
                 patch.object(os, 'killpg', side_effect=ProcessLookupError()), \
+                patch.object(os, 'sched_getaffinity', side_effect=affinity), \
                 patch.object(Path, 'read_text', read), \
-                patch('signal.signal'), self.assertRaises(SystemExit) as exit:
+                patch.object(Path, 'write_text', write), \
+                patch('signal.signal'), self.assertRaises(RuntimeError if early_failure else SystemExit) as exit:
             exec(jobs._PAYLOAD, {})
-        self.assertEqual(exit.exception.code, 0)
+        self.assertFalse((scratch_root / 'f123').exists())
+        self.assertTrue(json.loads((self.record / 'cleanup.json').read_text())['removed'])
+        if early_failure:
+            self.assertEqual(str(exit.exception), 'fixture affinity unavailable')
+            self.assertFalse((self.record / 'scratch.json').exists())
+            return
+        self.assertEqual(exit.exception.code, payload_exit)
         observation = json.loads((self.record / 'scratch.json').read_text())
+        if write_failure:
+            self.assertEqual(observation['child_pid'], 123)
+            self.assertNotIn('memory_peak_bytes', observation)
+            return
         self.assertEqual(observation['memory_gib'], 3)
         self.assertEqual(observation['memory_peak_bytes'], None if unreadable else 123456)
         if unreadable:

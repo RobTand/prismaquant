@@ -156,9 +156,15 @@ def _instance_ranks(model):
 
 
 def _eligible_ranks(model, resources, uri):
-    ranks = sorted(_instance_ranks(model))
+    _instance_ranks(model)
+    ranks = [rank for row in model['execution']['R_lite']
+             for rank in sorted(_allocation_ids(row['rank']))]
+    nodelist = model['execution'].get('nodelist')
+    if not isinstance(nodelist, list) or not nodelist or any(
+            not isinstance(hosts, str) or not hosts for hosts in nodelist):
+        raise ValueError('live Flux R requires a nonempty nodelist')
     hosts = _checked(['hostlist', '--expand',
-                      ','.join(model['execution']['nodelist'])], uri=uri).split()
+                      ','.join(nodelist)], uri=uri).split()
     if len(hosts) != len(ranks) or len(set(hosts)) != len(hosts):
         raise ValueError('live Flux R host/rank mapping is ambiguous')
     placement = resources.placement
@@ -323,6 +329,7 @@ def stop(signum, frame):
 for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGALRM, signal.SIGUSR1):
     signal.signal(sig, stop)
 scratch.mkdir(mode=0o700)
+observation = None
 try:
     os.environ['TMPDIR'] = str(scratch)
     observation = {'schema': 'pq.flux.scratch.v1',
@@ -351,18 +358,22 @@ finally:
     (out / 'cleanup.json').write_text(json.dumps({'schema': 'pq.flux.cleanup.v1',
         'job_id': os.environ['FLUX_JOB_ID'], 'path': str(scratch), 'removed': not scratch.exists(),
         'process_group_empty': process_group_empty, 'signal': received}))
-    observation['memory_gib'] = memory_gib
-    observation['memory_peak_bytes'] = None
-    try:
-        cgroup = pathlib.Path('/proc/self/cgroup').read_text().splitlines()
-        unit_path = next(line.split(':', 2)[2] for line in cgroup if line.startswith('0::'))
-        peak = int((pathlib.Path('/sys/fs/cgroup') / unit_path.lstrip('/') / 'memory.peak').read_text())
-        if peak < 0:
-            raise ValueError('negative memory peak')
-        observation['memory_peak_bytes'] = peak
-    except (OSError, ValueError, StopIteration, IndexError) as exc:
-        observation['memory_peak_error'] = type(exc).__name__
-    (out / 'scratch.json').write_text(json.dumps(observation))
+    if observation is not None:
+        observation['memory_gib'] = memory_gib
+        observation['memory_peak_bytes'] = None
+        try:
+            cgroup = pathlib.Path('/proc/self/cgroup').read_text().splitlines()
+            unit_path = next(line.split(':', 2)[2] for line in cgroup if line.startswith('0::'))
+            peak = int((pathlib.Path('/sys/fs/cgroup') / unit_path.lstrip('/') / 'memory.peak').read_text())
+            if peak < 0:
+                raise ValueError('negative memory peak')
+            observation['memory_peak_bytes'] = peak
+        except (OSError, ValueError, StopIteration, IndexError) as exc:
+            observation['memory_peak_error'] = type(exc).__name__
+        try:
+            (out / 'scratch.json').write_text(json.dumps(observation))
+        except OSError:
+            pass
 sys.exit(128 - code if code < 0 else code)
 '''
 
