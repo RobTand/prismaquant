@@ -45,6 +45,9 @@ MANIFEST_SOURCE_BLOBS = {
 # tessera_census_cache: native result selection replaces the PB service reader.
 # digests: bounded chunks_sha256hex owner supports the native byte writer.
 # tensor_digests: the additive retained token owner route from 58a2db300.
+# G3 re-review against main f6c99e8ed: the six SCOPES/IDS and their raw
+# hashlib calls are identical; no retained site was deleted or archived.
+# Reproducer and per-site evidence: flux-migration/pq-tessera/evidence/p4-gfix/.
 # Future changed pins require a per-file --reason and print the source diff.
 CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27f4faf97025b1f93639bccbc1c3418457b45274',
                                       '93c787b84bace425b8e9f966b5ce894cd5491a4a09326966f50f448d72322e82'),
