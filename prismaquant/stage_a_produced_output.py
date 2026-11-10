@@ -15,7 +15,7 @@ import threading
 from . import native_results
 from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, text_sha256hex
 from .file_identity import file_stat_signature
-from .schemas import strict_json_loads
+from .contract_checks import strict_json_loads
 from .staged_manifest import (read_document, publish_staged_json, open_regular,
                               path as checked_path, digest, integer)
 

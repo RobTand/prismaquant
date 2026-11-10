@@ -434,7 +434,7 @@ def load_submission(record_dir: Path) -> FluxSubmission:
 
 
 def _native_document(raw):
-    from .schemas import strict_json_loads
+    from .contract_checks import strict_json_loads
     def invalid(key):
         return ValueError(f'invalid native receipt JSON: {key}')
     return strict_json_loads(raw, duplicate=invalid, constant=invalid)

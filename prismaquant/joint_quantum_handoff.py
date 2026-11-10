@@ -1372,11 +1372,16 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
 
 def bind_handoff_publication(*, boundary_storage: Mapping, env=None):
     """Bind this native launch to its explicit write-only declaration."""
-    from .joint_cost_stage_a import bind_stage_a_produced_output
-    publication = bind_stage_a_produced_output(
-        artifact_max_bytes=boundary_storage['max_artifact_bytes'])
-    if publication is not None and not publication.write_only:
-        raise QuantumHandoffRefused('handoff requires a write-only declaration')
+    from .joint_adjoint_checkpoints import AdjointIdentityRefused
+    from .stage_a_produced_output import BoundaryProducedPublication
+    if not os.environ.get('FLUX_JOB_ID'):
+        return None
+    publication = BoundaryProducedPublication.bind_from_admitted_owner()
+    declared = publication.durable_maxima()['payload_max_bytes']
+    if declared != boundary_storage['max_artifact_bytes'] or not publication.write_only:
+        raise (AdjointIdentityRefused('launch-bound artifact maximum differs from effective Stage A budget')
+               if declared != boundary_storage['max_artifact_bytes'] else
+               QuantumHandoffRefused('handoff requires a write-only declaration'))
     return publication
 
 

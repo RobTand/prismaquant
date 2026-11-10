@@ -55,6 +55,15 @@ Stage preflight resolves the same instance and checks its health before creating
 state or manifests. An empty live configuration is hashed as evidence and is
 allowed; missing broker identity and offline ranks still refuse.
 
+As of: 2026-11-10, P-4 dependency separation, based on `e70eb60c6`.
+Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
+`prismaquant/io_copy.py`, `prismaquant/joint_quantum_handoff.py`.
+Shared strict JSON and refusal checks live below numerical artifact schemas.
+The IO engine's sealed buffers and synchronous extent copy are shared leaves;
+staged metadata and readers use them without importing the engine's scheduler.
+Handoff publication binds its native owner directly, without importing the
+Stage A driver. Scientific budgets and publication authority remain checked.
+
 Graph receipt equality linkage uses a native arm's saved `job_id`. The legacy
 producer field remains a read-only fallback for recorded receipts that lack
 `job_id`; it cannot override a conflicting native ID.

@@ -101,7 +101,7 @@ def publish_inputs(tmp_path: Path, files, *, ranges=None, read_contract=None):
 @pytest.fixture
 def native_staged_state(monkeypatch):
     """Own native staged globals and environment for one test, with no SDK."""
-    from prismaquant import residency_map, stage_b_prep_io, staged_tier_policy
+    from prismaquant import residency_map, staged_tier_policy
 
     monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2')
     for name in ('PRISMAQUANT_STAGED_MANIFEST', 'PRISMAQUANT_STAGED_MANIFEST_SHA256',
@@ -112,10 +112,14 @@ def native_staged_state(monkeypatch):
     monkeypatch.setattr(staged_tier_policy, '_ACTIVE', None)
     monkeypatch.setattr(staged_tier_policy, '_OWNER', None)
     monkeypatch.setattr(staged_tier_policy, '_STACK', [])
-    stage_b_prep_io.reset_staged_reads_for_tests()
+    owner = sys.modules.get('prismaquant.stage_b_prep_io')
+    if owner is not None:
+        owner.reset_staged_reads_for_tests()
     try:
         yield
     finally:
-        stage_b_prep_io.reset_staged_reads_for_tests()
+        owner = sys.modules.get('prismaquant.stage_b_prep_io')
+        if owner is not None:
+            owner.reset_staged_reads_for_tests()
         residency_map.reset_residency_resolver_for_tests()
         assert not any(name == 'prismabuild' or name.startswith('prismabuild.') for name in sys.modules)

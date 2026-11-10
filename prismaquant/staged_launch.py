@@ -51,7 +51,7 @@ def read_contract_document(raw):
     import gzip
     import io
     from .staged_manifest import MAX_BYTES, path, integer, digest
-    from .schemas import strict_json_loads
+    from .contract_checks import strict_json_loads
     if raw.startswith(b'\x1f\x8b'):
         with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
             raw = stream.read(MAX_BYTES + 1)

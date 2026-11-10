@@ -187,7 +187,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             # One owned buffer, filled in place: the caller's digest hashes
             # these same bytes and the tensor below decodes from them, so one
             # staged read serves verification and decode alike.
-            from .io_engine import SealedBuffer
+            from .io_buffers import SealedBuffer
             raw = SealedBuffer(size) if sealed else bytearray(size)
             view = None if sealed else memoryview(raw)
             try:
