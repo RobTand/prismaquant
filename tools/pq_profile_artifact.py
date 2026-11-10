@@ -20,7 +20,7 @@ def load_profile_source(owner_name: str, path: Path) -> ModuleType:
     """Load only the profiler's three stdlib owners from this snapshot."""
     source = _PROFILE_OWNERS[owner_name]
     expected = Path(__file__).resolve().parents[1].joinpath('prismaquant', source + '.py')
-    if path.resolve() != expected:
+    if Path(path) != expected:
         raise KeyError(str(path))
     if owner_name not in sys.modules:
         spec = importlib.util.spec_from_file_location(owner_name, path)

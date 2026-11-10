@@ -144,3 +144,8 @@ def test_profile_source_uses_only_fixed_snapshot_owners(source, name, tmp_path):
     # Check before consulting the module cache, even for a known loaded owner.
     with pytest.raises(KeyError):
         load_profile_source(name, tmp_path / (source + '.py'))
+
+    alias = tmp_path / 'owner-alias.py'
+    alias.symlink_to(path)
+    with pytest.raises(KeyError):
+        load_profile_source(name, alias)
