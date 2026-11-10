@@ -1,6 +1,7 @@
 """Exact activation boundaries and their produced-output lifecycle."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 import dataclasses
 from dataclasses import dataclass
@@ -17,6 +18,19 @@ import torch
 from prismaquant.dev_mode import seal_check
 from .digests import bytes_sha256hex
 from .joint_stageb_resources import cotangent_scratch
+
+
+def bind_stage_a_publication(*, boundary_storage: Mapping):
+    """Bind the native declaration and check the effective Stage A ceiling."""
+    from .joint_adjoint_checkpoints import AdjointIdentityRefused
+    from .stage_a_produced_output import BoundaryProducedPublication
+    if not os.environ.get('FLUX_JOB_ID'):
+        return None
+    publication = BoundaryProducedPublication.bind_from_admitted_owner()
+    declared = publication.durable_maxima()['payload_max_bytes']
+    if declared != boundary_storage['max_artifact_bytes']:
+        raise AdjointIdentityRefused('launch-bound artifact maximum differs from effective Stage A budget')
+    return publication
 
 
 @dataclass

@@ -102732,8 +102732,6 @@ pq_py_test(
     path = "tests/test_profile_attribution_1942.py",
     library = ":test_profile_attribution_1942_lib",
     deps = [
-        "//:prismaquant/file_identity",
-        "//:prismaquant/io_spans",
         "//:tools/pq_profile_child",
         ":conftest",
     ],
@@ -102746,10 +102744,15 @@ pq_py_library(
         "test_profile_attribution_1942.py",
     ],
     data = [
-        "//:files/prismaquant",
+        "//:prismaquant/digests.py",
+        "//:prismaquant/file_identity.py",
+        "//:prismaquant/io_spans.py",
         "test_profile_attribution_1942.py",
     ],
     deps = [
+        "//:prismaquant/digests",
+        "//:prismaquant/file_identity",
+        "//:prismaquant/io_spans",
         "//:tools/__init__",
         "//:tools/pq_profile_artifact",
         "@pq_pip//pytest",

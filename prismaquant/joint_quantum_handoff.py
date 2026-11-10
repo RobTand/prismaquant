@@ -1370,21 +1370,9 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
             "handoff derives from the sealed readset")
 
 
-def bind_stage_a_publication(*, boundary_storage: Mapping):
-    """Bind the native declaration and check the effective Stage A ceiling."""
-    from .joint_adjoint_checkpoints import AdjointIdentityRefused
-    from .stage_a_produced_output import BoundaryProducedPublication
-    if not os.environ.get('FLUX_JOB_ID'):
-        return None
-    publication = BoundaryProducedPublication.bind_from_admitted_owner()
-    declared = publication.durable_maxima()['payload_max_bytes']
-    if declared != boundary_storage['max_artifact_bytes']:
-        raise AdjointIdentityRefused('launch-bound artifact maximum differs from effective Stage A budget')
-    return publication
-
-
 def bind_handoff_publication(*, boundary_storage: Mapping, env=None):
     """Additionally require a write-only declaration for handoff publication."""
+    from .streamed_boundary_artifacts import bind_stage_a_publication
     publication = bind_stage_a_publication(boundary_storage=boundary_storage)
     if publication is not None and not publication.write_only:
         raise QuantumHandoffRefused('handoff requires a write-only declaration')
