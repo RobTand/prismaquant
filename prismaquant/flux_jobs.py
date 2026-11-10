@@ -420,7 +420,8 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
         (record_dir / 'jobid').write_text(job_id + '\n')
     except OSError as exc:
         recovery = ('load submitted-job.json to reconcile' if recovery_written else
-                    'job id is only in this exception and submit.stdout')
+                    'job id is only in this exception' +
+                    (' and submit.stdout' if (record_dir / 'submit.stdout').is_file() else ''))
         raise SubmissionUnknown(
             f'submitted as {job_id} in {record_dir}; receipt publication failed; '
             f'{recovery}, do not resubmit') from exc

@@ -44,12 +44,20 @@ the executor's allow-list, and container/staged names are checked alongside it.
 No environment names were renamed.
 
 `launch.json` records source, argv, instance and resource identity. The executor
-saves an acknowledged ID in fsynced `submitted-job.json` before `submission.json`,
-`jobid` or diagnostic logs. `load_submission` and `collect_job` recover from that
+retains raw `submit.stdout` and `submit.stderr` before classifying the response,
+including failed or unparseable submissions. It then saves a parsed ID in fsynced
+`submitted-job.json` before the ordinary `submission.json` and `jobid` receipts. `load_submission` and `collect_job` recover from that
 acknowledgement if ordinary receipt publication fails. A lost acknowledgement
 stays unknown and never triggers another submit. Collection authenticates the
 saved launch and retains terminal status, eventlog, allocation, payload logs and
 scratch cleanup evidence in the same record directory.
+Stage preflight resolves the same instance and checks its health before creating
+state or manifests. An empty live configuration is hashed as evidence and is
+allowed; missing broker identity and offline ranks still refuse.
+
+Graph receipt equality linkage uses a native arm's saved `job_id`. The legacy
+producer field remains a read-only fallback for recorded receipts that lack
+`job_id`; it cannot override a conflicting native ID.
 
 `tessera_campaign_container` authenticates admission before namespace setup.
 Its explicit container environment forwards `FLUX_JOB_ID` and `OUT` for pilot
