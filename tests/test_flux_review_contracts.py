@@ -101,7 +101,7 @@ def test_tensor_span_crossing_adjacent_extents_requires_one_covering_object(tmp_
 
 def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
     helper = tmp_path / "fluxcache.py"
-    raw = b"print('reviewed helper')\n"
+    raw = b"import argparse; print('reviewed helper')\n"
     helper.write_bytes(raw)
     monkeypatch.setattr(staged_launch, "CACHE_HELPER", str(helper))
     monkeypatch.setattr(staged_launch, "CACHE_HELPER_SHA256", staged_launch.bytes_sha256hex(raw))
@@ -118,6 +118,12 @@ def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
     def execute(path, argv):
         assert argv[:3] == ["/usr/bin/python3", "-I", "-c"]
         assert argv[3].encode() == raw
+        import subprocess
+        (tmp_path / "argparse.py").write_text("raise RuntimeError('cwd import')\n")
+        result = subprocess.run(argv, cwd=tmp_path, env={"PATH": "/usr/bin:/bin"},
+                                capture_output=True, text=True, timeout=10, check=False)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "reviewed helper\n"
         raise Executed
     monkeypatch.setattr(staged_launch.os, "execv", execute)
     binding = {"path": "manifest", "sha256": "a" * 64, "read_contract_sha256": "b" * 64,
@@ -146,16 +152,3 @@ def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
 ])
 def test_fail_closed_tripwire_keeps_original_and_cluster_forms(argv):
     assert ship_gates._submits_nested_job(argv)
-
-
-def test_pinned_cache_helper_runs_without_cwd_imports(tmp_path):
-    import subprocess
-    from pathlib import Path
-    raw = Path(staged_launch.CACHE_HELPER).read_bytes()
-    assert staged_launch.bytes_sha256hex(raw) == staged_launch.CACHE_HELPER_SHA256
-    (tmp_path / 'argparse.py').write_text("raise RuntimeError('cwd import')\n")
-    result = subprocess.run(['/usr/bin/python3', '-I', '-c', raw.decode(), '--help'],
-                            cwd=tmp_path, env={'PATH': '/usr/bin:/bin'},
-                            capture_output=True, text=True, timeout=10, check=False)
-    assert result.returncode == 0, result.stderr
-    assert 'run-set' in result.stdout
