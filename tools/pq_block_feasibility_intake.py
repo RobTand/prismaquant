@@ -1,6 +1,6 @@
 """Read real trial inputs and existing profiles; make no quality claim.
 
-Research-only intake for eng-pq-fine-grained. Run through PrismaBuild on x86.
+Research-only intake for eng-pq-fine-grained. Run inside an admitted x86 CPU job.
 Table flags are reported, not substituted for Tessera's canonical admission.
 """
 from __future__ import annotations

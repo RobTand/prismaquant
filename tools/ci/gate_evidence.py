@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize PrismaBuild inventories and downloaded hosted gate artifacts."""
+"""Summarize retained execution inventories and downloaded hosted gate artifacts."""
 from __future__ import annotations
 
 import argparse

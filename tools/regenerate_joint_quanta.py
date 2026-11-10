@@ -80,17 +80,17 @@ Gates, all fail closed with exit 3:
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
-This is a producer, never a scheduler: it submits no PB rows and holds no
-state. Run it on a checkout inside the PB code closure (unlike the external
+This is a producer, never a scheduler: it submits no jobs and holds no
+state. Run it on the sealed source checkout (unlike the external
 binder script, which lives beside the data and cannot be captured), then
 submit from its outputs.
 
-With ``--produced-output`` (PQ #1070), as an admitted PrismaBuild action
-submitted with the data manifest and write-only produced-output template
-that ``tools/stage_b_preparation_submission.py`` writes, it files a prewrite
+The historical ``--produced-output`` route (PQ #1070) used an admitted job
+with the data manifest and write-only produced-output template
+from ``tools/stage_b_preparation_submission.py``. It files a prewrite
 for each group of files it creates under ``--metadata-root`` and commits
 them at their origin (``prismaquant.stage_b_prep_io``). Without the flag it
-writes exactly as before.
+writes exactly as before. This route remains unqualified for native execution.
 """
 from __future__ import annotations
 

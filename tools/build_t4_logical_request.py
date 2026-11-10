@@ -1,4 +1,4 @@
-"""Describe immutable logical cells; PrismaBuild alone partitions them.
+"""Describe immutable logical cells without scheduling or partitioning them.
 
 Prior qualifications are explicit, digest-bound inputs. No pilot, parent, model
 or format is inferred, and only the new logical request is written.

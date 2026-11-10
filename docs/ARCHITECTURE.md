@@ -43,7 +43,9 @@ refuse with `GPU lane not qualified; requires plan step P-7` before CPU admissio
 
 The dated entries below preserve earlier designs and measurements. Their
 execution-service descriptions are historical; this section and §7.0.2 describe
-the current native route. Numerical and serving gates remain independent.
+the current native route. CLI descriptions and placement errors name admitted
+jobs; retained schema identifiers remain byte-for-byte unchanged. Numerical and
+serving gates remain independent.
 <!-- flux-current-end -->
 
 As of: 2026-11-10, stock Flux slot shape and runtime instance resolution, P-3.

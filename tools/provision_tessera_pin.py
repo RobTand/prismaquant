@@ -6,7 +6,7 @@ GitHub CI checks out ``RobTand/tessera`` at the commit
 ``pip install --no-deps`` on that directory.  Nothing did the same for the
 fleet interpreters, so ``/home/rob/venvs/pq-cpu312`` sat on a Tessera from an
 ancestor of the pin: answer-equivalent, different bytes, and every
-byte-identity assertion red in PrismaBuild while green in CI (issue #455).
+byte-identity assertion red on fleet workers while green in CI (issue #455).
 
 This is that missing step, written so a re-pin can carry it.  A re-pin is
 already a reviewed change to the pin JSON and the module constants together;

@@ -1,7 +1,7 @@
 """Run one configured ship-gates sequence inside an admitted action.
 
-This module starts stage processes, not jobs. PrismaBuild owns admission and
-multi-host placement. Existing producers and the shipcard verifier own gates.
+This module starts stage processes, not jobs. The native Flux submitter owns
+admission and placement. Existing producers and the shipcard verifier own gates.
 """
 from __future__ import annotations
 

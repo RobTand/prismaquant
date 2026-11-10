@@ -1,4 +1,4 @@
-"""Seal a Stage A seed spec and the data manifest its PrismaBuild action stages.
+"""Seal a Stage A seed spec and the data manifest its admitted job reads.
 
 A seed (``prismaquant.stage_a_chain_seed``, PQ #1016) continues a source
 run's sealed checkpoint ``b`` down to ``through`` in a scratch output root.

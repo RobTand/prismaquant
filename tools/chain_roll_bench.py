@@ -31,7 +31,7 @@ no export to the pool behind them, and the roll stages no next layer
 
 Subcommands:
 
-* ``manifest`` (host, before submission) writes the PrismaBuild data
+* ``manifest`` (host, before submission) writes the immutable input data
   manifest the action declares: the head tensors and layer ``--layer``'s
   tensors as byte ranges of the source shards, the calibration rows, and the
   borrowed entries in the order the roll reads them.

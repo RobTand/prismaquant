@@ -214,8 +214,8 @@ def _attest_placement(resolved: dict, fleet: dict) -> None:
                     f"row class {resolved['name']!r} runs {resolved['python']}, "
                     f"which is not attested on tag {tag!r}; that tag attests "
                     f"{attested or 'no host interpreter'}. Run it there once and "
-                    f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                    f"action key, or give the class a container.{history}"))
+                    f"add it to {FLEET_INTERPRETERS.name} with the recorded "
+                    f"producer job identity, or give the class a container.{history}"))
 
 
 def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
