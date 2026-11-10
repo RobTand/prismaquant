@@ -110,6 +110,14 @@ def test_mapped_library_unavailable_map_files_falls_back_to_fd_mount(mapped_libr
     assert state.mapped_addresses == ['1000-2000']
 
 
+def test_mapped_library_map_files_uses_unpadded_hex_addresses(mapped_library):
+    state = mapped_library(fdinfo=None, mountinfo=None,
+        mapped_stat=SimpleNamespace(st_dev=31, st_ino=4242))
+    state.proc['maps'] = state.proc['maps'].replace('1000-2000', '00001000-00002000')
+    assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+    assert state.mapped_addresses == ['1000-2000']
+
+
 def test_mapped_library_other_map_files_io_errors_do_not_fall_back(mapped_library):
     state = mapped_library(mapped_stat=OSError('mapped file IO failure'))
     with pytest.raises(OSError, match='mapped file IO failure'):

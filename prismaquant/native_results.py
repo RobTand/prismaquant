@@ -260,8 +260,9 @@ def _runtime_proc_lines(filename, *, errors='strict'):
 
 def _runtime_mapped_stat(address):
     """Follow the kernel's link to this range's actual mapped file."""
+    start, end = (int(value, 16) for value in address.split('-'))
     try:
-        return os.stat(f'/proc/self/map_files/{address}')
+        return os.stat(f'/proc/self/map_files/{start:x}-{end:x}')
     except (PermissionError, FileNotFoundError):
         # Some kernels/containers hide or restrict even our own map_files.
         return None
