@@ -131,19 +131,19 @@ def test_profile_source_refuses_unknown_owner_or_path(name):
 
 
 @pytest.mark.parametrize('source,name', [
-    ('digests', 'pq_profile_shared_digest_owner'),
-    ('io_spans', 'pq_profile_shared_sampler_owner'),
-    ('file_identity', 'pq_profile_shared_file_identity_owner'),
+    (Path(__file__).resolve().parents[1] / 'prismaquant/digests.py', 'pq_profile_shared_digest_owner'),
+    (Path(__file__).resolve().parents[1] / 'prismaquant/io_spans.py', 'pq_profile_shared_sampler_owner'),
+    (Path(__file__).resolve().parents[1] / 'prismaquant/file_identity.py', 'pq_profile_shared_file_identity_owner'),
 ])
 def test_profile_source_uses_only_fixed_snapshot_owners(source, name, tmp_path):
     from tools.pq_profile_artifact import load_profile_source
-    path = Path(__file__).resolve().parents[1].joinpath('prismaquant', source + '.py')
+    path = source
     owner = load_profile_source(name, path)
     assert Path(owner.__file__).resolve() == path
     assert load_profile_source(name, path) is owner
     # Check before consulting the module cache, even for a known loaded owner.
     with pytest.raises(KeyError):
-        load_profile_source(name, tmp_path / (source + '.py'))
+        load_profile_source(name, tmp_path / Path(source).name)
 
     alias = tmp_path / 'owner-alias.py'
     alias.symlink_to(path)
