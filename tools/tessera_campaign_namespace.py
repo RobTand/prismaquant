@@ -9,7 +9,7 @@ import stat
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
-from tools.pq_profile_source import canonical_json_bytes, canonical_json_sha256
+from tools.pq_profile_artifact import canonical_json_bytes, canonical_json_sha256
 from tools.pq_profile_artifact import (
     profile_local_destination, profiled_row_command, profiled_workload_parts,
 )

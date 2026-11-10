@@ -56,7 +56,7 @@ Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
 `prismaquant/joint_quantum_handoff.py`,
 `prismaquant/data_manifest_contract.py`, `prismaquant/exact_activation_contract.py`,
 `tools/tessera_fleet/common.py`,
-`tools/pq_profile_artifact.py`, `tools/pq_profile_source.py`.
+`tools/pq_profile_artifact.py`.
 As of: 2026-11-10, P-4 graph round 3. Sources: `prismaquant/file_identity.py`,
 `prismaquant/cost_stage_checkpoint.py`, `prismaquant/staged_tier_policy.py`.
 Native writers pass a `WriterIdentities` registry that captures and retains their
