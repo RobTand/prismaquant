@@ -1,112 +1,49 @@
-"""Old byte profiles and owner routing for generic Stage A/B identities."""
+"""Native launch coordinates and retained scientific Stage A roster bytes."""
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import cast
 
 import pytest
 
 from prismaquant import stage_a_head as head
 from prismaquant import stage_a_produced_output as produced
-from prismaquant import stage_b_prep_io as preparation
 
 
-def _identity_publisher(owner: object = "owner"):
-    publication = object.__new__(produced.BoundaryProducedPublication)
-    publication.instance = {"owner_action_key": owner, "owner_attempt": {"nonce": "one"}}
-    publication._generation = None
-    return publication
+def test_generation_uses_full_native_launch_not_removed_pb_owner(tmp_path):
+    from produced_native_fixtures import publication
+    owner = publication(tmp_path)
+    owner.producer['launch_sha256'] = '0123456789abcdef' + 'b' * 48
+    assert owner.generation == '0123456789abcdef'
 
 
-@pytest.mark.parametrize("owner,payload", [
-    ("", b""), ("owner", b"owner"), ("é\x00💡", b"\xc3\xa9\x00\xf0\x9f\x92\xa1"),
-    (17, b"17"), (True, b"True"), (None, b"None"),
+@pytest.mark.parametrize('kind,boundary,group,probe', [
+    ('boundary', 0, 0, None), ('cotangent', 12, 3, 0), ('checkpoint', 2, 4, 9),
 ])
-def test_generation_preserves_text_and_sixteen_hex(owner, payload):
-    publication = _identity_publisher(owner)
-    expected = hashlib.sha256(payload).hexdigest()[:16]
-    assert publication.generation == expected
-    publication.instance["owner_action_key"] = "changed"
-    publication.instance["owner_attempt"] = {"nonce": "two"}
-    assert publication.generation == expected
+def test_batch_coordinates_bind_the_full_launch(tmp_path, kind, boundary, group, probe):
+    from produced_native_fixtures import publication
+    owner = publication(tmp_path)
+    for tail in ('a', 'b'):
+        launch = '0123456789abcdef' + tail * 48
+        owner.producer['launch_sha256'] = launch
+        raw = json.dumps([kind, boundary, group, probe, launch],
+                         separators=(',', ':'), ensure_ascii=True).encode()
+        readable = f'b{boundary}' + ('' if probe is None else f'p{probe}')
+        expected = f'stagea-{kind}-{readable}-g{group}-0123456789abcdef-{hashlib.sha256(raw).hexdigest()[:12]}'
+        assert owner.batch_id_for(kind=kind, boundary_index=boundary,
+            group_index=group, probe_index=probe) == expected
 
 
-def test_generation_native_missing_key_and_surrogate_refusals():
-    publication = _identity_publisher()
-    publication.instance = {}
-    with pytest.raises(KeyError, match="owner_action_key"):
-        _ = publication.generation
-    publication.instance = {"owner_action_key": "\ud800"}
-    with pytest.raises(UnicodeEncodeError) as refused:
-        _ = publication.generation
-    assert refused.value.__cause__ is None
-    assert publication._generation is None
-
-
-def test_generation_uses_existing_text_owner_once(monkeypatch):
-    calls = []
-    monkeypatch.setattr(produced, "text_sha256hex", lambda text: calls.append(text) or "d" * 64)
-    publication = _identity_publisher("é\x00owner")
-    assert publication.generation == "d" * 16
-    assert publication.generation == "d" * 16
-    assert calls == ["é\x00owner"]
-
-
-@pytest.mark.parametrize("kind,boundary,group,probe,text,readable", [
-    ("boundary", 0, 0, None, "boundary\x000\x00-\x000\x00cached", "b0"),
-    ("cotangent", 12, 3, 0, "cotangent\x0012\x000\x003\x00cached", "b12p0"),
-    ("é\x00💡", 2, 4, 9, "é\x00💡\x002\x009\x004\x00cached", "b2p9"),
+@pytest.mark.parametrize('field,value', [
+    ('boundary_index', -1), ('boundary_index', True), ('group_index', 1.0),
+    ('group_index', False), ('probe_index', -1), ('probe_index', True),
+    ('kind', ''), ('kind', 'a/b'), ('kind', 1), ('kind', '\ud800'),
 ])
-def test_batch_identity_preserves_legacy_nul_frame_and_twelve_hex(
-        kind, boundary, group, probe, text, readable):
-    publication = _identity_publisher()
-    publication._generation = "cached"
-    expected = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-    assert publication.batch_id_for(
-        kind=kind, boundary_index=boundary, group_index=group, probe_index=probe,
-    ) == f"stagea-{kind}-{readable}-g{group}-cached-{expected}"
-
-
-@pytest.mark.parametrize("field,value,message", [
-    ("boundary_index", -1, "boundary group coordinates must be nonnegative integers"),
-    ("boundary_index", True, "boundary group coordinates must be nonnegative integers"),
-    ("group_index", 1.0, "boundary group coordinates must be nonnegative integers"),
-    ("group_index", False, "boundary group coordinates must be nonnegative integers"),
-    ("probe_index", -1, "a boundary group probe index is nonnegative"),
-    ("probe_index", True, "a boundary group probe index is nonnegative"),
-    ("kind", "", "a boundary group kind is a bare name"),
-    ("kind", "a/b", "a boundary group kind is a bare name"),
-])
-def test_batch_refuses_coordinates_and_kind_before_generation(field, value, message):
-    publication = _identity_publisher()
-    publication.instance = {}
-    arguments = {"boundary_index": 0, "group_index": 0, field: value}
-    with pytest.raises(ValueError) as refused:
-        publication.batch_id_for(**arguments)
-    assert str(refused.value) == message
-    assert refused.value.__cause__ is None
-    assert publication._generation is None
-
-
-def test_batch_native_kind_and_utf8_refusals():
-    publication = _identity_publisher()
-    publication._generation = "cached"
-    with pytest.raises(TypeError):
-        publication.batch_id_for(kind=cast(str, 1), boundary_index=0, group_index=0)
-    with pytest.raises(UnicodeEncodeError):
-        publication.batch_id_for(kind="\ud800", boundary_index=0, group_index=0)
-
-
-def test_batch_uses_existing_text_owner_after_local_framing(monkeypatch):
-    calls = []
-    monkeypatch.setattr(produced, "text_sha256hex", lambda text: calls.append(text) or "e" * 64)
-    publication = _identity_publisher()
-    publication._generation = "cached"
-    assert publication.batch_id_for(
-        kind="cotangent", boundary_index=2, probe_index=1, group_index=4,
-    ) == "stagea-cotangent-b2p1-g4-cached-eeeeeeeeeeee"
-    assert calls == ["cotangent\x002\x001\x004\x00cached"]
+def test_native_batch_refuses_invalid_coordinates(tmp_path, field, value):
+    from produced_native_fixtures import publication
+    owner = publication(tmp_path)
+    with pytest.raises(produced.BoundaryProducedBindingError):
+        owner.batch_id_for(**{'boundary_index': 0, 'group_index': 0, field: value})
 
 
 def _roster_inputs(names, *, capsule=None):
@@ -171,53 +108,3 @@ def test_roster_uses_existing_text_owner_without_changing_frame(monkeypatch):
     assert _roster_inputs(["b", "a"]) == ("f" * 64, "local")
     assert calls == ["a\nb\n"]
 
-
-_TEMPLATE_BYTES = (
-    b'{"durable_maxima": {"checkpoint_max_bytes": 0, "payload_max_bytes": 13, '
-    b'"temp_max_bytes": 13}, "output_prefix": "/metadata", "permitted_tiers": ["tier"], '
-    b'"schema": "prismaquant.prismabuild.produced_output_template.v1", '
-    b'"slots": {"stage_b_metadata": {"class": "payload"}}, "version": 1, '
-    b'"working_demands": {"tier": {"minimum_gib": 0, "window_gib": 0}}, "write_only": true}'
-)
-
-
-def test_template_preserves_handwritten_spaced_json_bytes_and_sixteen_hex():
-    template = preparation.build_preparation_template(
-        metadata_root="/ignored/../metadata", tier="tier", payload_max_bytes=13,
-    )
-    expected = json.loads(_TEMPLATE_BYTES)
-    expected["template_id"] = "pq-stage-b-preparation-" + hashlib.sha256(
-        _TEMPLATE_BYTES).hexdigest()[:16]
-    assert template == expected
-
-
-@pytest.mark.parametrize("maximum", [0, -1, True, 1.0, "13"])
-def test_template_rejects_nonpositive_or_noninteger_maximum(maximum):
-    with pytest.raises(ValueError) as refused:
-        preparation.build_preparation_template(
-            metadata_root="/metadata", tier="tier", payload_max_bytes=maximum,
-        )
-    assert str(refused.value) == "the preparation template needs a positive payload maximum"
-    assert refused.value.__cause__ is None
-
-
-def test_template_root_and_nonstring_tier_profiles():
-    template = preparation.build_preparation_template(
-        metadata_root="/méta/\ud800", tier=cast(str, 17), payload_max_bytes=13,
-    )
-    body = {key: value for key, value in template.items() if key != "template_id"}
-    assert body["permitted_tiers"] == ["17"]
-    assert body["working_demands"] == {"17": {"minimum_gib": 0, "window_gib": 0}}
-    payload = json.dumps(body, sort_keys=True).encode("utf-8")
-    assert b"\\u00e9" in payload and b"\\ud800" in payload
-    assert template["template_id"] == "pq-stage-b-preparation-" + hashlib.sha256(payload).hexdigest()[:16]
-
-
-def test_template_uses_existing_text_owner_after_local_serialization(monkeypatch):
-    calls = []
-    monkeypatch.setattr(preparation, "text_sha256hex", lambda text: calls.append(text) or "a" * 64)
-    template = preparation.build_preparation_template(
-        metadata_root="/metadata", tier="tier", payload_max_bytes=13,
-    )
-    assert template["template_id"] == "pq-stage-b-preparation-" + "a" * 16
-    assert calls == [_TEMPLATE_BYTES.decode("utf-8")]

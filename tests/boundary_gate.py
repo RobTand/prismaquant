@@ -1,7 +1,7 @@
 """Shared mechanics for the shrink-only boundary gates (decoupling step 0).
 
 The gates themselves are ``tests/test_tessera_core_boundary.py`` and
-``tests/test_prismabuild_boundary.py``; this module holds what they share:
+``tests/test_package_tools_boundary.py``; this module holds what they share:
 docstring detection, the allowlist file format and the exact comparison.
 
 An allowlist is a text file under ``tests/boundary_allowlists/``. Each

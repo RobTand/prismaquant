@@ -57,15 +57,6 @@
       }
     },
     {
-      "target": "tests/test_dispatch_joint_quanta.py::test_a_stage_b_row_charges_spill_cotangent_and_spool_to_the_box",
-      "issue": 3184,
-      "reason": "AssertionError",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 28
-      }
-    },
-    {
       "target": "tests/test_dispatch_joint_quanta.py::test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed",
       "issue": 3184,
       "reason": "AssertionError",
@@ -441,24 +432,6 @@
       "evidence": {
         "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
         "legacy_line": 90
-      }
-    },
-    {
-      "target": "tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_fresh_root_reaches_only_private_queue_boundary",
-      "issue": 3190,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild' (fixture)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 93
-      }
-    },
-    {
-      "target": "tests/test_receipt_demo_root_ownership_audit.py::test_receipt_demo_refuses_existing_root_without_deleting_payload",
-      "issue": 3190,
-      "reason": "ModuleNotFoundError: No module named 'prismabuild' (fixture)",
-      "evidence": {
-        "source_commit": "8d72e303e2f070925077ce9e072b254df3856909",
-        "legacy_line": 94
       }
     },
     {

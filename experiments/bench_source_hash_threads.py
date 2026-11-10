@@ -1,6 +1,6 @@
 """Source-shard hashing throughput vs thread count, through cost_streaming._hash_source_shards (PQ #1363, #1379).
 
-Run under PB: pbrun --tag gb10 --demand cpu=8,mem_gb=4 --env PYTHONPATH=. -- <venv python> experiments/bench_source_hash_threads.py
+Run as an admitted Flux job (8 cores, 4 GiB) with PYTHONPATH=. : <venv python> experiments/bench_source_hash_threads.py
 
 Each thread count reads its own disjoint set of GLM-5.3 shards from the NFS
 pool. Page-cache residency (fincore) is recorded before each read so a warm

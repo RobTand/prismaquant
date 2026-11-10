@@ -12,7 +12,6 @@ import pytest
 import torch.nn as nn
 
 from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
-from fullstack_pb_generation import pinned_pb_source
 
 
 @pytest.fixture
@@ -212,7 +211,6 @@ def test_export_lane_declaration_is_native_only(profile):
 
 # Registration owns an import namespace, not just the restored error ledger.
 @pytest.mark.own_process
-@pytest.mark.usefixtures("pinned_pb_source")
 def test_rope_axis_mapping_matches_the_vendored_definition(profile):
     """The profile must ANSWER from the model, not restate its rule.
 

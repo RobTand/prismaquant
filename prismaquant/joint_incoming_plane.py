@@ -80,7 +80,7 @@ def open_incoming_stream(probe, entries, *, session, max_resident_bytes,
 
     generator = stream_exact_entry_tensors(
         entries, expected_session=session, max_resident_bytes=int(max_resident_bytes),
-        residency_check=residency_check, deadline_per_window=True)
+        residency_check=residency_check)
     primary = None
     try:
         stream = stream_factory(probe, entries, generator)

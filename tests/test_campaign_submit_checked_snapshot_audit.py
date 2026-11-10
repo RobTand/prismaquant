@@ -30,7 +30,7 @@ def planned(tmp_path, monkeypatch):
                       "wait_s": wait_s, "receipts": receipts})
         return 0
 
-    monkeypatch.setattr(dispatch, "_pbcampaign", record_submission)
+    monkeypatch.setattr(dispatch, "_flux_campaign", record_submission)
     args = SimpleNamespace(workspace=workspace, wait_s=7)
     return args, manifest, rows, calls
 

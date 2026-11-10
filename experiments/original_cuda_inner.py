@@ -13,7 +13,7 @@ from experiments.original_cuda_pack_dependencies import PINS
 
 def cuda_entry_preflight(args, torch):
     """Actual runtime entry/work/profile proof, never source-lifetime acceptance."""
-    profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+    profile=os.environ.get('PRISMAQUANT_ORIGINAL_TORCH_TRACE')
     if (not profile or not torch.cuda.is_available()
             or os.environ.get('PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST')=='1'):
         raise RuntimeError('entry proof requires real CUDA/profile, not source-qualification override')

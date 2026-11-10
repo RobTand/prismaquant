@@ -174,7 +174,8 @@ def adjoint_receipt_path(space: str | os.PathLike) -> Path:
 
 def write_checkpoint_cotangent_entry(
     checkpoint_dir: Path, *, probe_index: int, batch_index: int, tensor: torch.Tensor,
-    session: dict, max_file_bytes: int | None = None,
+    session: dict, max_file_bytes: int | None = None, writer_identities=None,
+    writer_directories=None,
 ) -> dict:
     """Publish one activation cotangent as a digest-checked exact entry.
 
@@ -200,7 +201,12 @@ def write_checkpoint_cotangent_entry(
     reference = write_exact_activation_cache_entry(
         checkpoint_dir / "entries", name, tensor,
         identity=identity, max_tensor_bytes=nbytes, max_file_bytes=max_file_bytes,
+        directory_identity=(None if writer_directories is None else
+                            writer_directories[str(checkpoint_dir / 'entries')]),
+        writer_identities=writer_identities,
     )
+    if writer_identities is not None:
+        writer_identities[reference.path] = reference.writer_file_identity
     return exact_entry_record(reference)
 
 
@@ -249,14 +255,12 @@ def reference_from_record(record: dict):
     )
 
 
-def read_exact_entry_tensors(records, *, expected_session, deadline=None) -> dict:
+def read_exact_entry_tensors(records, *, expected_session) -> dict:
     """Read whole exact entries back, digest-verified, name -> CPU tensor.
 
     Uses the activation owner's verified window reader (hash-then-load in one
     pass), sized to the caller's entry list. Checkpoint restoration passes one
     entry at a time so no read window owns the complete cotangent plane.
-    ``deadline`` is the caller's staged-range wait bound, passed on so an
-    entry the reader waits for again shares it (PQ #1204).
     """
     from .perturbed_x_cache import prefetch_exact_activation_cache_entries
 
@@ -267,9 +271,7 @@ def read_exact_entry_tensors(records, *, expected_session, deadline=None) -> dic
     total = sum(int(record["tensor_bytes"]) for record in records)
     references = [reference_from_record(record) for record in records]
     with prefetch_exact_activation_cache_entries(
-        references, max_tensor_bytes=total, expected_session=expected_session,
-        deadline=deadline,
-    ) as window:
+        references, max_tensor_bytes=total, expected_session=expected_session) as window:
         for reference in references:
             tensors[reference.name] = window.get(reference)
     return tensors
@@ -313,32 +315,25 @@ def exact_entry_windows(records, *, max_resident_bytes):
     return windows, read_ahead
 
 
-def _await_checkpoint_entries(entries, *, deadline):
-    """Wait for one window of entries at once; the exact reader keeps its pin checks.
-
-    :func:`_await_checkpoint_entry` for a list: one poll asks PrismaBuild
-    for every entry's cover in one lookup (PQ #997), and falls back to one
-    lookup per entry only when that answer cannot name the missing one.
-    """
+def _await_checkpoint_entries(entries):
+    """Check this window's immutable coverage once before opening its entries."""
     from .staged_tier_policy import policy_is_active
     if not entries or not policy_is_active():
         return None
     from .residency_map import residency_resolver
     from .residency_shard_reader import await_staged_spans
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    from .staged_lease import stage_cover_is_published
     resolver = residency_resolver()
     if resolver is None:
         return None  # The strict reader supplies its existing missing-context refusal.
     return await_staged_spans(
         resolver, [(entry["path"], 0, entry["file_bytes"], entry["file_bytes"])
                    for entry in entries],
-        deadline=deadline, published=stage_cover_is_published,
-        published_batch=stage_covers_are_published)
+        published=stage_cover_is_published)
 
 
 def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=None,
-                               residency_check=None, deadline=None,
-                               deadline_per_window=False):
+                               residency_check=None):
     """Yield ``(record, tensor)`` for every record, in order, window by window.
 
     The streaming form of :func:`read_exact_entry_tensors` for a whole
@@ -358,28 +353,14 @@ def stream_exact_entry_tensors(records, *, expected_session, max_resident_bytes=
     Close the generator (``contextlib.closing``) when the consumer may stop
     early: closing waits for a read in flight and releases its charge.
 
-    ``deadline`` is one bound for every staged wait of the stream, started
-    at its first read when ``None``: a load phase's rule. With
-    ``deadline_per_window`` each window's wait starts its own configured
-    bound when its read starts, as a boundary prefetch window's does: the
-    rule for a stream read across a compute pass (PQ #1143), whose later
-    windows are read minutes after its first.
+    Each window checks immutable coverage once before its verified reads.
     """
-    from .residency_shard_reader import staged_range_wait_s
     windows, read_ahead = exact_entry_windows(records, max_resident_bytes=max_resident_bytes)
     if not windows:
         return
-    if deadline_per_window and deadline is not None:
-        raise ValueError("a stream takes one deadline or one per window, not both")
-    if deadline is None and not deadline_per_window:
-        deadline = time.monotonic() + staged_range_wait_s()
-
     def read(window):
-        bound = (time.monotonic() + staged_range_wait_s() if deadline_per_window
-                 else deadline)
-        _await_checkpoint_entries(window, deadline=bound)
-        return read_exact_entry_tensors(window, expected_session=expected_session,
-                                        deadline=bound)
+        _await_checkpoint_entries(window)
+        return read_exact_entry_tensors(window, expected_session=expected_session)
 
     held = []  # (charge, future or tensors), oldest first
 
@@ -447,7 +428,8 @@ def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes)
 
 
 def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
-                                  *, max_file_bytes: int) -> dict:
+                                  *, max_file_bytes: int, writer_identities=None,
+                                  writer_directories=None) -> dict:
     """Stream one shared state to its pickle file with an admitted bound.
 
     Standard ``pickle.dump`` into the existing ``SerializedEntryDigest``
@@ -468,11 +450,12 @@ def _write_shared_state_streaming(checkpoint_dir: Path, name: str, state,
         pickle.dump(state, sink, protocol=pickle.HIGHEST_PROTOCOL)
 
     return _publish_streamed_file(path, name, body, max_file_bytes=max_file_bytes,
-                                  label=f"shared state {name}")
+                                  label=f"shared state {name}", writer_identities=writer_identities,
+                                  writer_directories=writer_directories)
 
 
 def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
-                           label: str) -> dict:
+                           label: str, writer_identities=None, writer_directories=None) -> dict:
     """Publish what ``body(sink)`` streams as one new file; returns its row.
 
     The one atomic-publication shape of the checkpoint's own small files: a
@@ -480,9 +463,12 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
     (the admitted envelope refuses before the handle can cross it), one
     fsync, ``os.replace``, one directory fsync. A failure unlinks the temp;
     an existing ``path`` refuses before anything is written.
+    Native sidecar mode uses exclusive links and saved directory identities
+    through the held nofollow directory FD instead of path replacement.
     """
     from .cost_stage_checkpoint import unique_temp_suffix
     from .perturbed_x_cache import SerializedEntryDigest
+    from .file_identity import file_stat_signature
 
     if type(max_file_bytes) is not int or max_file_bytes <= 0:
         raise RuntimeError(
@@ -491,31 +477,67 @@ def _publish_streamed_file(path: Path, name: str, body, *, max_file_bytes: int,
     if path.exists():
         raise RuntimeError("exact boundary checkpoint entry already exists")
     sink = _BoundedDigestSink(SerializedEntryDigest(), max_file_bytes, label=label)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    directory_fd = None
+    if writer_directories is None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        from .staged_manifest import open_directory
+        directory_fd = open_directory(str(path.parent), identity=writer_directories[str(path.parent)])
     temporary = path.with_name(path.name + unique_temp_suffix())
+    owned_temporary = None
     try:
-        with temporary.open("wb") as handle:
+        handle = (temporary.open('wb') if directory_fd is None else
+                  os.fdopen(os.open(temporary.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                    0o600, dir_fd=directory_fd), 'wb'))
+        from .file_identity import capture_writer_identity
+        with handle, capture_writer_identity(handle, (temporary, path), writer_identities,
+                                             directory_fd=directory_fd):
+            created = os.fstat(handle.fileno())
+            owned_temporary = (created.st_dev, created.st_ino)
             body(sink.sink(handle))
             handle.flush()
             os.fsync(handle.fileno())
-        published = temporary.stat().st_size
-        if published != sink.bytes_written:
-            raise RuntimeError(
-                "exact boundary checkpoint entry differs from its "
-                "serialized bytes")
-        if published > max_file_bytes:
-            raise RuntimeError(
-                "exact boundary checkpoint shared-state file exceeds its "
-                f"admitted envelope for {name}")
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
+            published = os.fstat(handle.fileno()).st_size
+            if published != sink.bytes_written:
+                raise RuntimeError(
+                    "exact boundary checkpoint entry differs from its "
+                    "serialized bytes")
+            if published > max_file_bytes:
+                raise RuntimeError(
+                    "exact boundary checkpoint shared-state file exceeds its "
+                    f"admitted envelope for {name}")
+            if directory_fd is None:
+                os.replace(temporary, path)
+                fsync_directory = os.open(path.parent, os.O_RDONLY)
+            else:
+                os.link(temporary.name, path.name, src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd, follow_symlinks=False)
+                os.unlink(temporary.name, dir_fd=directory_fd)
+                fsync_directory = os.dup(directory_fd)
+            try:
+                os.fsync(fsync_directory)
+                if writer_identities is not None:
+                    writer_identities[str(path)] = file_stat_signature(os.fstat(handle.fileno()))
+            finally:
+                os.close(fsync_directory)
+    except BaseException as error:
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
+            if directory_fd is None:
+                temporary.unlink(missing_ok=True)
+            elif owned_temporary is not None:
+                # A replaced pathname cannot redirect this attempt's cleanup.
+                try:
+                    current = os.stat(temporary.name, dir_fd=directory_fd, follow_symlinks=False)
+                    if (current.st_dev, current.st_ino) == owned_temporary:
+                        os.unlink(temporary.name, dir_fd=directory_fd)
+                except FileNotFoundError:
+                    pass
+        except BaseException as cleanup:
+            error.add_note('checkpoint temporary cleanup also failed: ' + repr(cleanup))
         raise
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
     return {
         "name": name,
         "path": str(path),
@@ -587,7 +609,8 @@ def _shared_state_pack_envelope(estimates) -> int:
             + _SHARED_STATE_PACK_TRAILER_BYTES)
 
 
-def _write_shared_state_pack(plan: dict, states: dict, *, hold) -> dict:
+def _write_shared_state_pack(plan: dict, states: dict, *, hold, writer_identities=None,
+                             writer_directories=None) -> dict:
     """Stream every shared state into the one pack file ``plan`` admits.
 
     ``states`` maps state name -> state and must name exactly the members
@@ -627,7 +650,8 @@ def _write_shared_state_pack(plan: dict, states: dict, *, hold) -> dict:
 
     return _publish_streamed_file(
         Path(plan["path"]), plan["name"], body,
-        max_file_bytes=plan["file_envelope"], label="shared-state pack")
+        max_file_bytes=plan["file_envelope"], label="shared-state pack",
+        writer_identities=writer_identities, writer_directories=writer_directories)
 
 
 def unpack_shared_states(payload) -> list:
@@ -960,7 +984,7 @@ def _checkpoint_window_references(cotangents, plans):
 
 
 def _checkpoint_tensor_window(cotangents, plans, owner):
-    """Reuse the owner's bounded read grouping, including PB group retirement.
+    """Reuse the owner's bounded read grouping and native reader lifetime.
 
     A one-entry window would retire and restage a complete produced group
     for each of its entries. Match the existing prefetch batch width, keeping
@@ -1042,8 +1066,11 @@ def write_adjoint_checkpoint(
             for key in sorted(cotangents):
                 attempt.reference_activation(key[0], key[1], cotangents[key])
             return attempt.seal()
-        except BaseException:
-            attempt.abandon()
+        except BaseException as error:
+            try:
+                attempt.abandon()
+            except BaseException as cleanup:
+                error.add_note('checkpoint abandonment also refused: ' + repr(cleanup))
             raise
     if owner is None:
         checkpoint_dir.mkdir(parents=True, exist_ok=False)
@@ -1124,8 +1151,11 @@ def write_adjoint_checkpoint(
                         # Release before the window closes/reuses its scratch.
                         tensor = None
         return attempt.seal()
-    except BaseException:
-        attempt.abandon()
+    except BaseException as error:
+        try:
+            attempt.abandon()
+        except BaseException as cleanup:
+            error.add_note('checkpoint abandonment also refused: ' + repr(cleanup))
         raise
 
 
@@ -1177,6 +1207,24 @@ class AdjointCheckpointAttempt:
         self._activation_entries = {}
         self._shared_state_entries = None
         self._record = None
+        cleanup = owner._checkpoint_reservations[reservation]
+        self._writer_identities = cleanup['writer_identities']
+        self._writer_directories = cleanup['writer_directories']
+        if self._writer_identities is not None:
+            from .staged_manifest import open_directory
+            recorded = owner._checkpoint_reservations[reservation]['directory_identity']
+            root_fd = open_directory(str(checkpoint_dir), identity=recorded)
+            try:
+                self._writer_directories[str(checkpoint_dir)] = recorded
+                os.mkdir('entries', mode=0o700, dir_fd=root_fd)
+                descriptor = os.open('entries', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+                try:
+                    info = os.fstat(descriptor)
+                    self._writer_directories[str(checkpoint_dir / 'entries')] = (info.st_dev, info.st_ino)
+                finally:
+                    os.close(descriptor)
+            finally:
+                os.close(root_fd)
         #: Seconds spent in ``write_activation``: the checkpoint's share of
         #: the pass that feeds it.
         self.write_seconds = 0.0
@@ -1223,7 +1271,8 @@ class AdjointCheckpointAttempt:
                 entry = write_checkpoint_cotangent_entry(
                     self.checkpoint_dir, probe_index=probe_index,
                     batch_index=batch_index, tensor=tensor, session=self.session,
-                    max_file_bytes=plan["file_envelope"])
+                    max_file_bytes=plan["file_envelope"],
+                    **self._writer_kwargs())
         finally:
             self.write_seconds += time.monotonic() - started
         if entry["file_bytes"] > plan["file_envelope"]:
@@ -1336,7 +1385,7 @@ class AdjointCheckpointAttempt:
             (plan,) = self._shared_plan
             self._shared_state_entries = [_write_shared_state_pack(
                 plan, dict(_iter_shared_states(shared_adjoint, shared_pass)),
-                hold=self.owner.hold_transient_metadata)]
+                hold=self.owner.hold_transient_metadata, **self._writer_kwargs())]
             return
         # Holds count live auxiliary usage plus transient bytes against the
         # one auxiliary ceiling. An empty shared set skips the loop.
@@ -1347,8 +1396,12 @@ class AdjointCheckpointAttempt:
                     plan["file_envelope"], f"checkpoint shared state {plan['name']}"):
                 entries.append(_write_shared_state_streaming(
                     self.checkpoint_dir, plan["name"], state,
-                    max_file_bytes=plan["file_envelope"]))
+                    max_file_bytes=plan["file_envelope"], **self._writer_kwargs()))
         self._shared_state_entries = entries
+
+    def _writer_kwargs(self):
+        return {} if self._writer_identities is None else {
+            'writer_identities': self._writer_identities, 'writer_directories': self._writer_directories}
 
     def seal(self) -> dict:
         """Write the manifest and commit the receipt; returns the record."""
@@ -1394,12 +1447,12 @@ class AdjointCheckpointAttempt:
                 raise RuntimeError(
                     "exact boundary checkpoint manifest exceeds its admitted envelope")
             atomic_write_bytes(self.checkpoint_dir / "checkpoint.json",
-                               manifest_payload)
+                               manifest_payload, **self._writer_kwargs())
         if references is None:
-            self.owner.commit_checkpoint_artifact(self.reservation, record)
+            self.owner.commit_checkpoint_artifact(self.reservation, record, **self._writer_kwargs())
         else:
             self.owner.commit_checkpoint_artifact(
-                self.reservation, record, references=references)
+                self.reservation, record, references=references, **self._writer_kwargs())
         self._record = record
         return record
 
@@ -1603,6 +1656,7 @@ def _reserve_checkpoint_attempt(owner, checkpoint_dir: Path, *, boundary, sessio
     except BaseException:
         owner.cancel_checkpoint_artifact(reservation)
         raise
+    owner.checkpoint_directory_created(reservation)
     return AdjointCheckpointAttempt(
         owner=owner, checkpoint_dir=checkpoint_dir, boundary=boundary,
         session=session, activation_plan=activation_plan,
@@ -1636,15 +1690,13 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     Serves the shared-state pickles and ``checkpoint.json``; refusal
     reasons name which of the two diverged.
 
-    Under the active allowed-tier policy the bytes come from a
-    lifetime-pinned window (RAM with qualified covers, SSD re-acquired
-    after an availability refusal): exact length plus one probe byte
-    through the held descriptor, the SDK serving record registered at the
-    successful actual open, the descriptor closed and the exact ref
-    released before the caller deserializes. Unmapped/unfenced refuses
-    before a pool bulk byte. Inactive policy reads the declared path
-    exactly as before. No cache, no re-read: the owned buffer is hashed
-    once by the caller.
+    Under the active allowed-tier policy the bytes come from the immutable
+    staged resolver through an owned descriptor window. The reader checks
+    exact declared length, object bounds, descriptor identity and digest.
+    The descriptor closes and the window releases before deserialization.
+    Undeclared or changed inputs refuse before a pool bulk byte. Inactive
+    policy reads the declared path directly. The caller receives an owned
+    buffer, with no re-read of the source.
     """
     from .staged_tier_policy import policy_is_active
     if not policy_is_active():
@@ -1674,8 +1726,8 @@ def _read_shared_state_payload(path: Path, entry: dict) -> bytes | bytearray:
     return read_staged_buffer(resolver, path, staged, label=label, expected_bytes=size)
 
 
-def _await_checkpoint_entry(entry, *, deadline):
-    """Wait within the entered checkpoint phase; the exact reader keeps its pin checks."""
+def _await_checkpoint_entry(entry):
+    """Check immutable coverage; the exact reader keeps its pin checks."""
     from .staged_tier_policy import policy_is_active
     if not policy_is_active():
         return
@@ -1687,12 +1739,11 @@ def _await_checkpoint_entry(entry, *, deadline):
         return  # The strict reader supplies its existing missing-context refusal.
     size = entry["file_bytes"]
     return await_staged_spans(
-        resolver, [(entry["path"], 0, size, size)], deadline=deadline,
+        resolver, [(entry["path"], 0, size, size)],
         published=stage_cover_is_published)
 
 
-def _verified_checkpoint_manifest(space, record: dict, *, deadline,
-                                  shared_state_max_bytes=None) -> dict:
+def _verified_checkpoint_manifest(space, record: dict, *, shared_state_max_bytes=None) -> dict:
     """``record``, once the checkpoint's ``checkpoint.json`` is its exact bytes."""
     checkpoint_dir = checkpoint_directory(space, int(record["boundary"]))
     manifest_path = checkpoint_dir / "checkpoint.json"
@@ -1712,7 +1763,7 @@ def _verified_checkpoint_manifest(space, record: dict, *, deadline,
         raise RuntimeError(
             "adjoint checkpoint entries are not under the checkpoint "
             f"directory the loader reads ({manifest_path})")
-    _await_checkpoint_entry(manifest_entry, deadline=deadline)
+    _await_checkpoint_entry(manifest_entry)
     try:
         payload = _read_shared_state_payload(manifest_path, manifest_entry)
     except OSError as exc:
@@ -1734,15 +1785,14 @@ def _verified_checkpoint_manifest(space, record: dict, *, deadline,
     return stored
 
 
-def _load_checkpoint_shared_states(stored: dict, *, deadline,
-                                   shared_state_max_bytes=None) -> tuple[dict, dict]:
+def _load_checkpoint_shared_states(stored: dict, *, shared_state_max_bytes=None) -> tuple[dict, dict]:
     if checkpoint_is_packed(stored):
         return _load_packed_shared_states(
-            stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+            stored,  shared_state_max_bytes=shared_state_max_bytes)
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
     for entry in stored["shared_state_entries"]:
-        _await_checkpoint_entry(entry, deadline=deadline)
+        _await_checkpoint_entry(entry)
         path = Path(entry["path"])
         payload = _read_shared_state_payload(path, entry)
         digest = bytes_sha256hex(payload)
@@ -1764,14 +1814,14 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
     return shared_adjoint, shared_pass
 
 
-def read_shared_state_pack(entry: dict, *, deadline) -> list:
+def read_shared_state_pack(entry: dict) -> list:
     """``[(name, member bytes)]`` of a packed checkpoint's one pack row.
 
     Read through the same staged small-file reader as every shared-state
     file (so tier counts are per whole file), checked against the row's
     digest and size, then unpacked and checked member by member.
     """
-    _await_checkpoint_entry(entry, deadline=deadline)
+    _await_checkpoint_entry(entry)
     payload = _read_shared_state_payload(Path(entry["path"]), entry)
     if (bytes_sha256hex(payload) != entry["sha256"]
             or len(payload) != entry["file_bytes"]):
@@ -1780,12 +1830,11 @@ def read_shared_state_pack(entry: dict, *, deadline) -> list:
     return unpack_shared_states(payload)
 
 
-def _load_packed_shared_states(stored: dict, *, deadline,
-                               shared_state_max_bytes=None) -> tuple[dict, dict]:
+def _load_packed_shared_states(stored: dict, *, shared_state_max_bytes=None) -> tuple[dict, dict]:
     (entry,) = stored["shared_state_entries"]
     shared_adjoint, shared_pass = {}, {}
     shared_tensor_bytes = 0
-    for name, member in read_shared_state_pack(entry, deadline=deadline):
+    for name, member in read_shared_state_pack(entry):
         state = pickle.loads(member)
         kind, key = shared_state_slot(name)
         (shared_adjoint if kind == "adjoint" else shared_pass)[key] = state
@@ -1806,12 +1855,10 @@ def load_checkpoint_shared_states(
     Stage A chain (PQ #1001) reads the checkpoint's activation cotangents by
     reference, one bounded window at a time, and needs only these.
     """
-    from .residency_shard_reader import staged_range_wait_s
-    deadline = time.monotonic() + staged_range_wait_s()
     stored = _verified_checkpoint_manifest(
-        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        space, record,  shared_state_max_bytes=shared_state_max_bytes)
     return _load_checkpoint_shared_states(
-        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        stored,  shared_state_max_bytes=shared_state_max_bytes)
 
 
 def _entry_bytes(entry) -> int:
@@ -1952,12 +1999,10 @@ def load_adjoint_checkpoint(
     """
     if type(stream_incoming) is not bool:
         raise ValueError("checkpoint stream_incoming must be a bool")
-    from .residency_shard_reader import staged_range_wait_s
-    deadline = time.monotonic() + staged_range_wait_s()
     if stream_incoming:
         record = _checkpoint_metadata_snapshot(record)
     stored = _verified_checkpoint_manifest(
-        space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        space, record,  shared_state_max_bytes=shared_state_max_bytes)
     try:
         plane = (_validated_checkpoint_stream_plane(stored) if stream_incoming
                  else checkpoint_cotangent_plane(stored))
@@ -1976,14 +2021,14 @@ def load_adjoint_checkpoint(
             total_bytes=sum(_entry_bytes(entry) for entry in entries))
         with closing(stream_exact_entry_tensors(
                 entries, expected_session=session, max_resident_bytes=max_resident_bytes,
-                residency_check=residency_check, deadline=deadline)) as stream:
+                residency_check=residency_check)) as stream:
             for entry, tensor in stream:
                 cotangents[by_name[entry["name"]]] = tensor
                 del tensor
                 rate.entry(_entry_bytes(entry))
         rate.done()
     shared_adjoint, shared_pass = _load_checkpoint_shared_states(
-        stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
+        stored,  shared_state_max_bytes=shared_state_max_bytes)
     return cotangents, shared_adjoint, shared_pass
 
 

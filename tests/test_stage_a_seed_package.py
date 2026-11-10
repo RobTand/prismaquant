@@ -30,7 +30,6 @@ from tools.build_stagea_seed_package import (
     build,
     peak_consecutive_bytes,
 )
-from fullstack_pb_generation import pinned_pb_source
 
 LAYERS = 5
 PARENT = "d" * 64
@@ -191,19 +190,15 @@ def test_a_seed_without_a_compare_stages_no_reference(tmp_path, monkeypatch):
     assert all("boundary-002" not in path for paths in phases.values() for path in paths)
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_the_seed_manifest_passes_the_prismabuild_validator(tmp_path, monkeypatch):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
+def test_the_seed_manifest_preserves_exact_phase_bytes(tmp_path, monkeypatch):
     source = _source(tmp_path, monkeypatch)
     package = _build(tmp_path, source)
     manifest, _ = _read(package)
-    prefix = str(tmp_path)
-    for entry in manifest["entries"]:
-        entry["path"] = "/mnt/shared/fixture" + entry["path"][len(prefix):]
-    ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(manifest))
+    ranges = manifest["read_plan"]["phases"]
+    assert ranges[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+    assert all(p["bytes"] == sum(manifest["entries"][i]["bytes"]
+               for i in p["entry_indices"]) for p in ranges)
     assert [item["name"] for item in ranges] == ["head", "chain-003", "chain-002"]
-    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
 
 
 def test_peak_consecutive_bytes():

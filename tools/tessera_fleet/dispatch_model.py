@@ -1,30 +1,9 @@
-"""Dispatch a complete Tessera serving export as PrismaBuild layer quanta.
+"""Dispatch Tessera serving export stages with saved native Flux IDs.
 
-The caller supplies the whole source, plan, scales and pinned encoder and
-image. The worker (``model_worker.py``, staged as ``worker.py``) derives
-partition ownership from the producer's contract; this driver submits each
-stage through ``pbcampaign``, requires every action of a stage to finish, and
-only then admits assembly behind the complete-set barrier.
-
-Moved from PrismaBuild's ``tools/fleet/dispatch_tessera_model.py`` on
-2026-09-28 (RobTand/prismabuild#1076). Two things changed with the move,
-because PrismaQuant reaches PrismaBuild only through its public commands:
-
-- **Preparation hosts are named.** The source identity is prepared once on
-  every host an encode may land on, and the hosts must agree. The old driver
-  read PrismaBuild's live worker offers to find them; this one takes them as
-  ``--prepare-host``, repeated, and seals the list into the export contract.
-- **Results come from the worker's own records.** Each prepare action writes
-  ``<out>.prepare/<host>.json`` and each part and the assembly write
-  ``pb-result.json`` beside their bytes. The assembly action re-hashes every
-  part against the barrier inside its admitted slot, as before.
-
-Example::
-
-    python3 -m tools.tessera_fleet.dispatch_model --workspace W \\
-        --source S --plan P --encoder-checkout /home/rob/tessera \\
-        --encoder-revision <40-hex> --image repo@sha256:<64-hex> --out O \\
-        --prepare-host sparky --prepare-host sparklina
+Source and output contracts are preserved independently of native execution
+facts. GPU/container admission remains unqualified in the CPU baseline.
+Existing pb-result.json scientific records keep their historical name/schema;
+only a native terminal success can admit them for downstream validation.
 """
 from __future__ import annotations
 
@@ -51,6 +30,7 @@ def stage_checkout(encoder, revision, workspace, plan, scales):
     if commit != revision:
         raise ValueError('--encoder-revision must be the full immutable commit ID')
     archive = subprocess.check_output(['git', '-C', str(encoder), 'archive', commit])
+    workspace = workspace / common.SOURCE
     workspace.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
         bundle.extractall(workspace / 'encoder', filter='data')
@@ -62,30 +42,52 @@ def stage_checkout(encoder, revision, workspace, plan, scales):
         raise ValueError('plan must be a JSON object')
     if scales:
         shutil.copyfile(scales, workspace / 'scales.safetensors')
-    # pbrun snapshots tracked and untracked bytes. Nothing reaches main here.
-    common.initialize_git(workspace, message='PrismaQuant sealed producer workspace')
     return commit
 
 
-def campaign_row(workspace, spec, command, *, index=None, host=None):
+def sealed_stage_source(workspace, stage, spec, *, barrier=None):
+    source = workspace / f'{stage}-source'
+    if not source.exists():
+        shutil.copytree(workspace / common.SOURCE, source, ignore=shutil.ignore_patterns('.git'))
+        model.atomic_json(source / 'job.json', spec)
+        if barrier is not None:
+            model.atomic_json(source / 'barrier.json', barrier)
+        common.initialize_git(source, message=f'PrismaQuant immutable {stage} source')
+    if model.read_json(source / 'job.json') != spec:
+        raise ValueError('stage source differs from saved specification')
+    if barrier is not None and model.read_json(source / 'barrier.json') != barrier:
+        raise ValueError('assembly barrier differs from saved source')
+    return source
+
+
+def saved_stage(workspace, stage):
+    from prismaquant.flux_jobs import load_submission
+    state = common.stage_state(workspace, stage)
+    intent = model.read_json(state / 'manifest.json')
+    return [load_submission(state / 'rows' / f'{index:05d}')
+            for index in range(len(intent['rows']))]
+
+
+def model_export_row(workspace, spec, command, *, index=None, host=None, source=None):
     gpu = command == 'encode'
     argv = ['/usr/bin/python3', 'worker.py', command]
     if index is not None:
         argv += ['--index', str(index)]
     if host is not None:
         argv += ['--host', host]
-    return {'cwd': str(workspace), 'argv': argv,
+    return {'cwd': str(source or Path(workspace) / common.SOURCE), 'argv': argv,
             'demand': {'cpu': spec['cpus'] if gpu else 1,
                        'mem_gb': spec['mem_gb'] if gpu else spec['assembly_mem_gb'],
                        **({'gpu': 1} if gpu else {})},
             'tags': sorted(set(spec['tags'] + ([host] if host else []))),
             'env': {'OMP_NUM_THREADS': '1', 'MKL_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1'},
-            'retry_safe': True}
+            'retry_safe': True, 'timeout_s': 1800,
+            'container_images': [spec['image']] if 'image' in spec else []}
 
 
 def prepare_source_identity(spec, workspace, wait_s):
     """Prepare the source identity on every named host, and require agreement."""
-    rows = [campaign_row(workspace, spec, 'prepare', host=host) for host in spec['prepare_hosts']]
+    rows = [model_export_row(workspace, spec, 'prepare', host=host) for host in spec['prepare_hosts']]
     common.run_stage(rows, workspace, 'prepare', wait_s=wait_s)
     prepared = [model.read_json(model.prepared_path(spec, host)) for host in spec['prepare_hosts']]
     if any(row != prepared[0] for row in prepared[1:]):
@@ -136,7 +138,7 @@ def main(argv=None):
         setup = export_setup(args.source, model.read_json(args.plan))
         spec = {'cpus': args.cpus, 'mem_gb': args.mem_gb,
                 'assembly_mem_gb': args.assembly_mem_gb, 'tags': args.tags or ['gb10']}
-        setup['encode_rows'] = [campaign_row(args.workspace or Path('<workspace>'), spec,
+        setup['encode_rows'] = [model_export_row(args.workspace or Path('<workspace>'), spec,
                                             'encode', index=part['index'])
                                 for part in setup['partitions']]
         setup['execution_inputs'] = {'encoder_revision': args.encoder_revision,
@@ -149,7 +151,7 @@ def main(argv=None):
     if args.resume:
         if any(getattr(args, name) is not None for name in ('source', 'plan', 'input_scales', 'encoder_checkout', 'encoder_revision', 'image', 'out', 'prepare_hosts')):
             parser.error('--resume uses the sealed workspace; input overrides require a new workspace')
-        spec = model.read_json(workspace / 'job.json')
+        spec = model.read_json(workspace / common.STATE / 'job.json')
     else:
         for name, flag in (('source', '--source'), ('plan', '--plan'),
                            ('encoder_checkout', '--encoder-checkout'),
@@ -171,29 +173,35 @@ def main(argv=None):
         spec = {'schema': model.SCHEMA, 'source': str(args.source.resolve()),
                 'out': str(args.out.resolve()), 'parts': str(args.out.resolve()) + '.parts',
                 'encoder_commit': commit, 'image': args.image,
-                'adapter_sha256': model.digest_file(workspace / 'worker.py'),
-                'plan_sha256': model.digest_file(workspace / 'plan.json'),
-                'scales': model.digest_file(workspace / 'scales.safetensors') if args.input_scales else None,
+                'adapter_sha256': model.digest_file(workspace / common.SOURCE / 'worker.py'),
+                'plan_sha256': model.digest_file(workspace / common.SOURCE / 'plan.json'),
+                'scales': model.digest_file(workspace / common.SOURCE / 'scales.safetensors') if args.input_scales else None,
                 'cpus': args.cpus, 'mem_gb': args.mem_gb, 'assembly_mem_gb': args.assembly_mem_gb,
                 'tags': args.tags or ['gb10'], 'grid': args.grid, 'q256': args.q256,
                 'prepare_hosts': sorted(set(args.prepare_hosts))}
-        model.atomic_json(workspace / 'job.json', spec)
+        model.atomic_json(workspace / common.STATE / 'job.json', spec)
+        model.atomic_json(workspace / common.SOURCE / 'job.json', spec)
+        common.initialize_git(workspace / common.SOURCE, message='PrismaQuant pinned export source')
+    # The complete export requires a GPU and qualified container execution.
+    # Refuse before even its CPU preparation, never partly start this workflow.
+    common.campaign_rows.validate_row(model_export_row(workspace, spec, 'encode', index=0))
     if 'contract' not in spec:
         spec.update(prepare_source_identity(spec, workspace, args.wait_s))
         spec['contract'] = model.digest_json(spec)
-        model.atomic_json(workspace / 'job.json', spec)
+        model.atomic_json(workspace / common.STATE / 'job.json', spec)
     print(f"export {spec['contract']}: {spec['count']} whole-layer actions", flush=True)
-    rows = [campaign_row(workspace, spec, 'encode', index=index) for index in range(spec['count'])]
-    common.run_stage(rows, workspace, 'encode', wait_s=args.wait_s)
+    encode_source = sealed_stage_source(workspace, 'encode', spec)
+    rows = [model_export_row(workspace, spec, 'encode', index=index, source=encode_source)
+            for index in range(spec['count'])]
+    common.run_stage(rows, workspace, 'encode', wait_s=args.wait_s,
+                     afterok=saved_stage(workspace, 'prepare'))
     # Full payload hashing runs in the admitted assembler, never as an
     # unreserved large validation stage on the submitting machine.
     parts = part_records(spec)
-    assembly = workspace / common.STATE / 'assembly'
-    if not assembly.exists():
-        shutil.copytree(workspace, assembly, ignore=shutil.ignore_patterns('.git', common.STATE))
-        common.initialize_git(assembly, message='PrismaQuant assembly barrier')
-    model.atomic_json(assembly / 'barrier.json', parts)
-    common.run_stage([campaign_row(assembly, spec, 'assemble')], workspace, 'assemble', wait_s=args.wait_s)
+    assembly = sealed_stage_source(workspace, 'assemble', spec, barrier=parts)
+    common.run_stage([model_export_row(workspace, spec, 'assemble', source=assembly)],
+                     workspace, 'assemble', wait_s=args.wait_s,
+                     afterok=saved_stage(workspace, 'encode'))
     result = model.read_json(Path(spec['out']) / 'pb-result.json')
     if result.get('contract') != spec['contract'] or result.get('index') is not None:
         raise ValueError('assembled output record belongs to another export')

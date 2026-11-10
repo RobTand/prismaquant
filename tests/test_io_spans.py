@@ -261,14 +261,14 @@ def test_rate_lines_carry_this_process_io_since_the_start():
     assert rate["proc_io"]["read_bytes"] == 4096
 
 
-def test_rate_lines_report_no_prismabuild_units(monkeypatch):
-    """A read into a disposable scratch is not durable work (PB #480)."""
-    import prismaquant.prismabuild_progress as progress
+def test_rate_lines_report_no_durable_units(monkeypatch):
+    """A read into disposable scratch is not durable work."""
+    from prismaquant import joint_run_progress
 
     def refuse(*args, **kwargs):
-        raise AssertionError("a rate line reported PrismaBuild units")
+        raise AssertionError("a rate line reported durable units")
 
-    monkeypatch.setattr(progress, "report", refuse)
+    monkeypatch.setattr(joint_run_progress, "log_progress", refuse)
     reporter = ReadRateReporter("checkpoint-load", total_entries=200,
                                 total_bytes=200, log=lambda line: None)
     for _ in range(200):

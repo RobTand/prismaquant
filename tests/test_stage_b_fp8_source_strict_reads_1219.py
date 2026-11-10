@@ -43,6 +43,8 @@ for _entry in (ROOT, ROOT / "tools"):
 
 from prismaquant import layer_streaming as ls  # noqa: E402
 from prismaquant import stage_b_prep_io as io  # noqa: E402
+from prismaquant.staged_manifest import READ_ENV  # noqa: E402
+from staged_native_fixtures import native_staged_state  # noqa: E402
 from test_quantum_executable_readset import (  # noqa: E402
     _exec_campaign, _exec_receipt)
 from test_stage_b_prep_io_1070 import (  # noqa: E402
@@ -66,14 +68,13 @@ QWEN35_MOE_FP8_CONFIG = {
 
 
 @pytest.fixture(autouse=True)
-def _unbind_staged_reads():
-    io.reset_staged_reads_for_tests()
+def _unbind_staged_reads(native_staged_state):
     yield
-    io.reset_staged_reads_for_tests()
 
 
 def _fp8(rows, cols):
-    return torch.randn(rows, cols).clamp(-4, 4).to(torch.float8_e4m3fn)
+    values = torch.arange(rows * cols, dtype=torch.float32).reshape(rows, cols)
+    return ((values % 17 - 8) / 2).to(torch.float8_e4m3fn)
 
 
 def _fp8_model(root: Path, config: dict, *, experts: bool = False) -> Path:
@@ -311,8 +312,8 @@ def test_a_strict_run_over_an_fp8_source_never_opens_its_config_or_index_in_the_
     assert len(expected) == 4
 
     built = _spy_fp8_map(monkeypatch)
-    copies = _bind_stage(tmp_path, monkeypatch, manifest,
-                         argv[argv.index("--data-manifest-sha256") + 1])
+    copies = _bind_stage(tmp_path, monkeypatch, manifest)
+    argv[argv.index('--data-manifest-sha256') + 1] = os.environ[READ_ENV]
     capsys.readouterr()
     code, opened = _recorded_reads(lambda: regen.main(argv))
     assert code == 0

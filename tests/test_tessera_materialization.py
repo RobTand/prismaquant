@@ -108,7 +108,7 @@ def _plan(selection, monkeypatch):
     def row(spec, argv, **kwargs):
         calls.append((argv, kwargs))
         return dict(argv=argv, **kwargs)
-    monkeypatch.setattr(campaign_rows, 'prismabuild_row', row)
+    monkeypatch.setattr(campaign_rows, 'campaign_row', row)
     result = tm.plan(selection.request, selection.census, selection.workspace, selection.spec)
     return selection.workspace / 'plan.json', result, calls
 
@@ -126,6 +126,15 @@ def test_plan_uses_census_quanta_and_pb_row_sizing(selection):
     assert rows[0]['demand']['gpu'] == rows[0]['demand']['cpu'] == 1
     assert rows[0]['demand']['mem_gb'] >= 3
     assert not s.output.exists()
+
+
+def test_real_materialization_builder_reaches_the_named_native_gpu_hold(selection):
+    s = selection
+    tm.plan(s.request, s.census, s.workspace, s.spec)
+    for row in json.loads((s.workspace / 'manifest.json').read_text()):
+        assert 'progress_phases' not in row
+        with pytest.raises(ValueError, match='GPU lane not qualified'):
+            campaign_rows.validate_row(row)
 
 
 @pytest.mark.parametrize('campaign_argv', [[], ['--max-act-rows', '1024'],
@@ -737,4 +746,3 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
         assert len(links) == 1 and len(reads) == 3
         assert seen_cache[-1]._campaign_wire_coordinates == set(group["assignment"].items())
     assert seed_path.read_bytes() == seed_blob
-

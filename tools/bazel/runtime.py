@@ -45,7 +45,6 @@ def gate_environment(environ, root, scratch):
                    if not name.startswith(BAZEL_PREFIXES) and name not in BAZEL_NAMES and not secret(name)}
     environment.update(GATE_ENVIRONMENT)
     environment['TMPDIR'] = environment['HOME'] = str(scratch)
-    environment['PRISMABUILD_BOX_STATE_ROOT'] = str(scratch / 'pb-box-state')
     # gate_run puts tools/ci first; the gate workflow sets PYTHONPATH=. at the root.
     environment['PYTHONPATH'] = os.pathsep.join([str(root / 'tools/ci'), str(root)])
     return environment

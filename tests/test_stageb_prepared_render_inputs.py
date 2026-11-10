@@ -17,10 +17,10 @@ through the normal CLI + bound files + FakeGateway. Legacy
 sequencing-only rows and malformed/foreign prepared contracts keep the
 typed ``ExecutableBindingUnsupported`` refusal. The strict-PWC
 acceptance fixture below serves two real retained windows through the
-real leased stack (real PB writers, real resolver, real pinned SDK):
+existing immutable materializer, native resolver and PWC:
 phase entry precedes each window's file opens, payload bytes come from
 stage with ``bytes_from_pool == 0``, serving records carry pin IDs, and
-pins release.
+reader windows close after their loads join.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ import copy
 import gzip
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -48,19 +49,16 @@ from prismaquant import joint_layer_quanta as jl
 from test_quantum_executable_readset import (
     CALIB, N_PROBES, RENDER_PREREQ, STRIDED, _bound_inputs,
 )
-import test_strict_reader_tier_enforcement as strict
-# The strict-PWC tests below drive ``strict._leased_fixture``, so they take
-# the same state reset its own module does, before and after each test. The
-# lease helper root, the test-only SDK injection and the residency resolver
-# are process-global in ``staged_lease`` and ``staged_tier``, and a PB action
-# also inherits ``PRISMABUILD_READER_HELPER_ROOT`` (the worker's runtime
-# generation). Without the reset, ``_sdk()`` checks that generation against
-# whatever ``prismabuild.reader_lease`` an earlier module in the same process
-# imported (the qualification bundle's, through ``_pb_source``), and the
-# window refuses ``lease-helper-divergent`` (PQ #1032, PB ``e75555fbef1c``).
-# The injection these tests make was also never cleared, so it outlived them.
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: E402,F401 (autouse)
-from fullstack_pb_generation import pinned_pb_source
+from prismaquant.staged_manifest import load_staged_manifest
+from prismaquant.staged_tier_policy import staged_tier_policy_test_context
+from staged_native_fixtures import bind, native_staged_state, publish_inputs
+from test_native_strict_reader_contract import _forbid_source
+
+
+@pytest.fixture(autouse=True)
+def _native_policy(native_staged_state):
+    with staged_tier_policy_test_context("ssd"):
+        yield
 
 WINDOW_PAIRS = (
     (0, (("unit-w00-a", "FMT-A"), ("unit-w00-b", "FMT-A"))),
@@ -346,16 +344,15 @@ def test_dispatch_main_accepts_complete_prepared_input_contract(
         f"(exit {code}: {refused.strip()}); every executable row still "
         "refuses before submission")
     assert len(gateway.submitted) == 1
-    argv = gateway.submitted[0]["argv"]
+    application_row = gateway.submitted[0]["row"]
+    argv = application_row["argv"]
     wire = Path(bound["executable_readset"]["manifest_path"]).read_bytes()
     digest = hashlib.sha256(wire).hexdigest()
     assert digest in " ".join(argv)
-    manifest_at = argv[argv.index("--data-manifest") + 1]
+    manifest_at = application_row["data_manifest"]
     assert hashlib.sha256(Path(manifest_at).read_bytes()).hexdigest() == (
         digest)
-    declared = [argv[i + 1].split("=", 1)[0]
-                for i, word in enumerate(argv)
-                if word == "--progress-phase"]
+    declared = [phase.split("=", 1)[0] for phase in application_row["progress_phases"]]
     assert "render-00" in declared and "render-01" in declared
     assert declared.index("render-00") + 1 == declared.index(
         "replay-00-p0")
@@ -454,53 +451,13 @@ def test_dispatch_refuses_mover_reference_shaped_contract(
     assert gateway.submitted == []
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_prepared_manifest_passes_pb_phase_planner(tmp_path):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
-    record, receipt, parent, _kwargs = _bound_inputs(tmp_path)
-    files = _render_files(tmp_path)
-    manifest = jl.build_quantum_executable_manifest(
-        record, receipt, parent, strided_boundaries=STRIDED,
-        n_probes=N_PROBES, calib=dict(CALIB),
-        render_prerequisite=dict(RENDER_PREREQ),
-        prepared_inputs=_prepared_inputs(record, files))
-    prefix = str(tmp_path)
-    for entry in manifest["entries"]:
-        if entry["path"].startswith("/fixture"):
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len(
-                "/fixture"):]
-        elif entry["path"].startswith(prefix):
-            entry["path"] = "/mnt/shared/fixture-renders" + entry[
-                "path"][len(prefix):]
-    normalized = core.validate_data_manifest(manifest)
-    ranges = tiers.manifest_phase_ranges(normalized)
-    assert [item["name"] for item in ranges] == [
-        phase["name"] for phase in manifest["read_plan"]["phases"]]
-    assert "render-00" in [item["name"] for item in ranges]
-    assert ranges[-1]["end_bytes"] == manifest["read_plan"]["read_bytes"]
-
-
 # -- strict PWC acceptance (real leased stack, two retained windows) --------
 
 def _leased_renders(tmp_path, monkeypatch, files):
-    """Stage the declared render files through the REAL PB writers.
-
-    Returns (cache, keys_by_window, resolver, consumer): the PWC serves
-    the DECLARED pool paths while the strict resolver pins the staged
-    copies -- no pool/HDD byte may serve.
-    """
+    """Materialize declared renders through the existing native IO owner."""
     from prismaquant.production_weight_cache import ProductionWeightCache
-    staged = {}
-    for pair, spec in files.items():
-        declared = Path(spec["path"])
-        target = strict._stage_root(tmp_path) / declared.name
-        target.write_bytes(declared.read_bytes())
-        staged[pair] = (declared, target, None)
-    rows = {name: (declared, target, None)
-            for name, (declared, target, _ram) in staged.items()}
-    resolver, consumer, _mover = strict._leased_fixture(
-        tmp_path, monkeypatch, rows)
+    binding = publish_inputs(tmp_path, [Path(row["path"]) for row in files.values()])
+    resolver = bind(monkeypatch, binding)
     weights = {(pair[0], pair[1]): files[pair]["path"] for pair in files}
     cache = ProductionWeightCache(weights=weights, levers={})
     cache.enable_lru(1 << 20)
@@ -508,14 +465,16 @@ def _leased_renders(tmp_path, monkeypatch, files):
     cache.require_file_load_sha256(
         digests,
         max_file_bytes=max(spec["bytes"] for spec in files.values()))
-    return cache, resolver, consumer
+    return cache, resolver, binding
 
 
 def test_strict_pwc_serves_two_windows_with_phase_order(
         tmp_path, monkeypatch):
     files = _render_files(tmp_path)
-    cache, resolver, consumer = _leased_renders(
+    cache, resolver, _binding = _leased_renders(
         tmp_path, monkeypatch, files)
+    source_opens = [_forbid_source(monkeypatch, Path(row["path"]))
+                    for row in files.values()]
     order: list[str] = []
     current = {"phase": "none"}
     real_load = io_engine.load_file
@@ -564,18 +523,28 @@ def test_strict_pwc_serves_two_windows_with_phase_order(
     assert report["bytes_from_stage"] > 0
     assert report["serving_tiers"] and all(
         tier["pin_id"] for tier in report["serving_tiers"])
-    assert strict._pins_live(tmp_path, consumer) == []
+    assert all(not opened for opened in source_opens)
+    assert resolver._windows == 0
+    descriptors = [fd for fd, _signature in resolver._fds.values()]
+    assert descriptors
+    resolver.close()
+    for fd in descriptors:
+        with pytest.raises(OSError):
+            os.fstat(fd)
 
 
 def test_strict_pwc_corrupt_staged_payload_fails_clear(
         tmp_path, monkeypatch):
     files = _render_files(tmp_path)
-    cache, resolver, _consumer = _leased_renders(
+    cache, resolver, binding = _leased_renders(
         tmp_path, monkeypatch, files)
     pair = ("unit-w00-a", "FMT-A")
-    staged = strict._stage_root(tmp_path) / Path(files[pair]["path"]).name
+    manifest = load_staged_manifest(binding["path"], binding["sha256"])
+    staged = next(Path(row.object_path) for row in manifest.extents
+                  if row.source_path == files[pair]["path"])
     raw = bytearray(staged.read_bytes())
     raw[len(raw) // 2] ^= 0xFF
+    staged.chmod(0o600)
     staged.write_bytes(bytes(raw))
     with pytest.raises(Exception):
         with cache.retained_window(
@@ -583,6 +552,7 @@ def test_strict_pwc_corrupt_staged_payload_fails_clear(
                 max_load_buffer_bytes=1 << 20):
             cache.prefetch([pair], max_workers=1)
     assert resolver.report()["bytes_from_pool"] == 0
+    assert resolver._windows == 0
 
 
 def test_strict_pwc_undeclared_render_refuses(tmp_path, monkeypatch):
@@ -603,17 +573,12 @@ def test_strict_pwc_undeclared_render_refuses(tmp_path, monkeypatch):
             + [ghost.stat().st_size]))
     # The ghost file is declared to PWC but staged NOWHERE: the strict
     # resolver must refuse before any pool byte serves.
-    rows = {}
-    for pair, spec in files.items():
-        declared = Path(spec["path"])
-        target = strict._stage_root(tmp_path) / declared.name
-        target.write_bytes(declared.read_bytes())
-        rows[pair] = (declared, target, None)
-    resolver, _consumer, _mover = strict._leased_fixture(
-        tmp_path, monkeypatch, rows)
+    binding = publish_inputs(tmp_path, [Path(row["path"]) for row in files.values()])
+    resolver = bind(monkeypatch, binding)
     with pytest.raises(Exception):
         cache.prefetch([("ghost", "FMT-A")], max_workers=1)
     assert resolver.report()["bytes_from_pool"] == 0
+    assert resolver._windows == 0
 
 
 def test_progress_reports_render_phases_without_pricing_units():

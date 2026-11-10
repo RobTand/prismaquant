@@ -120,39 +120,12 @@ def test_an_insufficient_group_budget_refuses_before_read(source, tmp_path, monk
         assert owner.telemetry["resident_tensor_bytes"] == 0
 
 
-def test_frozen_adapter_changes_only_the_existing_per_group_hook():
-    calls = []
-    class Backend:
-        max_bytes = 123
-        def submit_group(self, batch_id, *, entries, paced=None):
-            calls.append((batch_id, entries, paced))
-            return {"ok": True, "export_key": "f" * 64}
-        def release_group(self, batch_id):
-            calls.append(("release", batch_id))
-    arms = {"first": True, "second": False}
-    backend = exp.FrozenArmBackend(Backend(), arms)
-    arms["first"] = False
-    entries = [{"original": "unchanged"}]
-    assert backend.submit_group("first", entries=entries)["ok"]
-    assert backend.submit_group("second", entries=entries)["ok"]
-    assert calls == [("first", entries, True), ("second", entries, False)]
-    assert backend.max_bytes == 123
-    backend.release_group("second")
-    assert calls[-1] == ("release", "second")
-    with pytest.raises(ValueError, match="roster"):
-        backend.submit_group("foreign", entries=entries)
-    assert len(backend.observations) == 2
-    assert [row["paced"] for row in backend.observations] == [True, False]
-
-
-def test_adapter_preserves_a_primary_submission_failure():
-    class Backend:
-        def submit_group(self, *args, **kwargs):
-            raise OSError("funding unavailable")
-    backend = exp.FrozenArmBackend(Backend(), {"first": True})
-    with pytest.raises(OSError, match="funding unavailable"):
-        backend.submit_group("first", entries=[])
-    assert backend.observations[0]["status"] == "failed"
+@pytest.mark.parametrize("entrypoint", ["prepare", "load_runtime_packet", "run_component"])
+def test_retired_pacing_entrypoints_refuse_before_writing(tmp_path, entrypoint):
+    before = list(tmp_path.iterdir())
+    with pytest.raises(ValueError, match="fleet pacing experiment is retired"):
+        getattr(exp, entrypoint)(evidence_directory=tmp_path)
+    assert list(tmp_path.iterdir()) == before
 
 
 def test_evidence_publication_does_not_adopt_existing_bytes(tmp_path):
@@ -238,21 +211,12 @@ def test_packet_change_refuses_before_any_body_read(source, tmp_path, fault):
         exp.check_packet(packet)
 
 
-def test_authentication_scope_projects_exactly_one_logical_cohort(source, tmp_path, monkeypatch):
+def test_authentication_scope_projects_exactly_one_logical_cohort(source, tmp_path):
     packet = _packet(tmp_path, source)
-    captured = []
-    class Core:
-        DATA_MANIFEST_SCHEMA_V2 = "fixture-data-v2"
-        @staticmethod
-        def validate_data_manifest(value):
-            captured.append(value)
-            return value
-    import prismaquant.staged_lease as lease
-    monkeypatch.setattr(lease, "sdk_submodule", lambda name: Core)
     result = exp.data_manifest(packet, tmp_path / "packet.json", b"packet", group_index=8)
+    assert result["schema"] == "prismaquant.read_contract.v1"
     assert len(result["entries"]) == 66
-    assert [phase["name"] for phase in result["read_plan"]["phases"]] == ["input-check", "group-08"]
     assert [entry["path"] for entry in result["entries"][2:]] == [
         row["path"] for row in packet["groups"][8]["entries"]]
-    assert result["total_bytes"] == 6 + packet["checkpoint"]["bytes"] + packet["group_bytes"]
-    assert captured == [result]
+    assert sum(row["bytes"] for row in result["entries"]) == (
+        6 + packet["checkpoint"]["bytes"] + packet["group_bytes"])

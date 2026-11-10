@@ -422,6 +422,7 @@ def test_the_parallel_capture_window_sums_both_budgets(tmp_path, host):
         thread.join(5)
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_both_gpu_commands_are_capped_before_any_device_work(tmp_path, monkeypatch):
     """``run`` was uncapped: the envelope reached ``prepare`` and that was it.
 
@@ -472,3 +473,9 @@ def test_both_gpu_commands_are_capped_before_any_device_work(tmp_path, monkeypat
                                        plan_sha256="0" * 64)
     assert seen["calls"] == 2
     assert seen["fraction"] == pytest.approx(80 / 121)
+
+
+from cpu_staged_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

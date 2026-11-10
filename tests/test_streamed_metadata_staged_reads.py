@@ -1,4 +1,4 @@
-"""Streamed metadata is served from real PB material, never an undeclared pool."""
+"""Streamed metadata is served from immutable staged extents, never the pool."""
 from __future__ import annotations
 
 import builtins
@@ -16,10 +16,23 @@ from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import (
     TierPolicyRefused, activate_staged_tier_policy,
 )
-from test_stage_b_prep_staged_reads_1092 import _stage_manifest
-from test_strict_reader_tier_enforcement import MANIFEST, _forget_state  # noqa: F401
+from prismaquant.staged_manifest import materialize, publish_staged_json
+from staged_native_fixtures import bind
 
 pytestmark = pytest.mark.own_process
+
+
+@pytest.fixture(autouse=True)
+def _forget_state(monkeypatch):
+    from prismaquant import residency_map, staged_tier_policy, stage_b_prep_io
+    monkeypatch.setattr(staged_tier_policy, '_ACTIVE', None)
+    monkeypatch.setattr(staged_tier_policy, '_OWNER', None)
+    monkeypatch.setattr(staged_tier_policy, '_STACK', [])
+    residency_map.reset_residency_resolver_for_tests()
+    stage_b_prep_io.reset_staged_reads_for_tests()
+    yield
+    residency_map.reset_residency_resolver_for_tests()
+    stage_b_prep_io.reset_staged_reads_for_tests()
 
 
 @pytest.fixture
@@ -48,6 +61,8 @@ def _deny_pool_opens(monkeypatch, root, *, names=(
         def opened(path, *args, **kwargs):
             if isinstance(path, (str, bytes, os.PathLike)):
                 value = os.fsdecode(os.fspath(path))
+                if not os.path.isabs(value) and kwargs.get('dir_fd') is not None:
+                    value = os.path.join(os.readlink(f"/proc/self/fd/{kwargs['dir_fd']}"), value)
                 if os.path.abspath(value) in paths:
                     raise AssertionError(f"undeclared pool metadata open: {value}")
             return original(path, *args, **kwargs)
@@ -58,10 +73,44 @@ def _deny_pool_opens(monkeypatch, root, *, names=(
     monkeypatch.setattr(os, "open", guard(os.open))
 
 
+def test_canonical_guard_observes_a_relative_open(checkpoint, monkeypatch):
+    root, _config, _index, _manifest = checkpoint
+    _deny_pool_opens(monkeypatch, root)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(AssertionError, match='undeclared pool metadata open'):
+            os.open('config.json', os.O_RDONLY, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
 def _activate(tmp_path, monkeypatch, manifest, *, skip=(), corrupt=()):
-    _stage_manifest(tmp_path, monkeypatch, manifest, skip=skip, corrupt=corrupt)
-    bind_residency_manifest(MANIFEST)
-    activate_staged_tier_policy("ram,ssd")
+    root = tmp_path / 'native-staged'; root.mkdir()
+    contract = root / 'read-contract.json'
+    read_sha = publish_staged_json(contract, {'schema': 'prismaquant.read_contract.v1', 'entries': manifest['entries']})
+    entries = []
+    for entry in manifest['entries']:
+        if entry['path'] in skip:
+            continue
+        filename = Path(entry['path'])
+        payload = filename.read_bytes()
+        entries.append({'source': {'path': str(filename), 'bytes': len(payload),
+                                    'sha256': hashlib.sha256(payload).hexdigest()},
+                        'source_offset': entry['offset'], 'length': entry['bytes'],
+                        'sha256': entry['sha256']})
+    target = root / 'staged.json'
+    digest = materialize(entries, destination=root, manifest_path=target, read_contract_sha256=read_sha,
+        phase_id='metadata-regression', producer={'source_commit': '1'*40, 'receipt_sha256': '2'*64},
+        lifetime={'mode': 'retained_shared_phase', 'namespace': str(root),
+                  'reader_scopes': ['metadata-regression'], 'retention': 'until_all_readers_stopped_or_fenced'})
+    resolver = bind(monkeypatch, {'path': str(target), 'sha256': digest,
+        'read_contract_path': str(contract), 'read_contract_sha256': read_sha})
+    for extent in resolver.manifest.extents:
+        if extent.source_path in corrupt:
+            path = Path(extent.object_path)
+            path.chmod(0o600)
+            path.write_bytes(b'corrupt')
+    activate_staged_tier_policy('ssd')
 
 
 @pytest.mark.parametrize("reader", ["json", "weight-map", "identity-index"])

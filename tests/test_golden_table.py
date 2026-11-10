@@ -14,6 +14,15 @@ import pytest
 from tests import golden_table
 from tests.golden_table import GoldenTable, unfinished_tests_if_whole_module_ran
 
+
+def test_outcome_normalizes_unicode_temporary_paths_in_json_and_its_repr(tmp_path):
+    root = tmp_path / 'ƒ漢'
+    encoded = json.dumps({'path': str(root / 'fixed'), 'label': 'é'})
+    assert golden_table.outcome(lambda: encoded, tmp=root) == {
+        'returned': '\'{"path": "<tmp>/fixed", "label": "\\\\u00e9"}\''}
+    assert golden_table.outcome(lambda: encoded.encode('ascii'), tmp=root) == {
+        'returned': 'b\'{"path": "<tmp>/fixed", "label": "\\\\u00e9"}\''}
+
 MODULE = Path("/repo/tests/test_m.py")
 ROWS = {"test_a#0": {"returned": "1"}, "test_a#1": {"returned": "2"},
         "test_b[x]#0": {"returned": "3"}, "test_gone[y]#0": {"returned": "4"}}

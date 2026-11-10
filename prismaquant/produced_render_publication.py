@@ -1,9 +1,8 @@
-"""Render-specific binding and planning on PrismaBuild's existing lifecycle.
+"""Render planning on the shared native application publication lifecycle.
 
-This adapter does not enable produced-output writes in ProductionWeightCache.
-Its plans accept explicit reservation envelopes, not tensors or archive-size
-estimates. Writer and reader integration remain separate. PrismaBuild owns
-admission, immutable prewrite accounting, publication and retirement.
+This adapter does not enable writes in ProductionWeightCache. It binds explicit
+archive ceilings and native launch identity; writer and serving qualification
+remain independent.
 """
 from __future__ import annotations
 
@@ -22,13 +21,12 @@ class ProducedRenderWritePlan:
 
     qname: str
     fmt: str
-    owner_action_key: str
-    template_sha256: str
-    owner_nonce: str
-    owner_scope_id: str
+    job_id: str
+    launch_sha256: str
+    declaration_sha256: str
     batch_id: str
     origin_root: str
-    attempt_component: str
+    launch_component: str
     relative_final_path: str
     final_path: str
     temporary_path: str
@@ -70,7 +68,7 @@ def _require_available_destination(root: Path, path: Path) -> None:
 class ProducedRenderPublication(BoundaryProducedPublication):
     """One admitted action's rendered-weight payload publication.
 
-    Bind using the owner's sealed template and live attempt. Rendered weights
+    Bind using the owner's sealed template and authenticated launch. Rendered weights
     are read by their producer, so a write-only template is not a render lane.
     No caller-supplied owner, generation, CAS topology or budget is invented.
     """
@@ -86,13 +84,13 @@ class ProducedRenderPublication(BoundaryProducedPublication):
         strip, sanitize or truncate the qualified Linear name: distinct entries
         must not share prewrite credit. The bound template and full owner key
         scope this identity; rebinding and retrying that owner remain stable,
-        as in the shared boundary adapter. PB still authenticates the attempt.
-        This is not a payload/content digest or a PB generation identifier.
+        as in the shared boundary adapter. native launch still authenticates this producer.
+        This is not a payload/content digest or a launch identifier.
         """
         qname, fmt = _render_coordinate(qname, fmt)
         coordinate = [
-            "prismaquant.render_batch.v1", self.instance["owner_action_key"],
-            self.instance["template_sha256"], qname, fmt,
+            "prismaquant.render_batch.v1", self.producer["launch_sha256"],
+            self.binding["sha256"], qname, fmt,
         ]
         return "render-" + DIRECT_ASCII_STRICT.sha256(coordinate)
 
@@ -125,12 +123,9 @@ class ProducedRenderPublication(BoundaryProducedPublication):
         if leaf_bytes > 255:
             raise ValueError("render archive filename exceeds the supported leaf bound")
 
-        owner = str(self.instance["owner_action_key"])
-        template = str(self.instance["template_sha256"])
-        attempt = self.instance["owner_attempt"]
-        nonce, scope = str(attempt["nonce"]), str(attempt["scope_id"])
-        component = "attempt-" + DIRECT_ASCII_STRICT.sha256([
-            "prismaquant.render_attempt.v1", owner, template, nonce, scope])
+        launch = self.producer["launch_sha256"]
+        declaration = self.binding["sha256"]
+        component = "launch-" + launch
         batch = self.render_batch_id_for(qname, fmt)
         root = Path(os.path.normpath(self.output_prefix))
         if not root.is_absolute():
@@ -143,15 +138,15 @@ class ProducedRenderPublication(BoundaryProducedPublication):
                 raise ValueError("render destination fails origin containment")
             _require_available_destination(root, path)
         return ProducedRenderWritePlan(
-            qname=qname, fmt=fmt, owner_action_key=owner,
-            template_sha256=template, owner_nonce=nonce, owner_scope_id=scope,
-            batch_id=batch, origin_root=str(root), attempt_component=component,
+            qname=qname, fmt=fmt, job_id=self.producer["job_id"],
+            launch_sha256=launch, declaration_sha256=declaration,
+            batch_id=batch, origin_root=str(root), launch_component=component,
             relative_final_path=str(relative), final_path=str(final),
             temporary_path=str(temporary), payload_ceiling_bytes=archive_max_bytes,
             temp_ceiling_bytes=archive_max_bytes, producer_generation=batch)
 
     def require_render_prewrite(self, plan: ProducedRenderWritePlan) -> dict:
-        """Revalidate a plan, then delegate immutable accounting to PrismaBuild."""
+        """Revalidate a plan, then enforce immutable application ceilings."""
         if type(plan) is not ProducedRenderWritePlan:
             raise ValueError("render plan must be ProducedRenderWritePlan")
         expected = self.plan_render_prewrite(

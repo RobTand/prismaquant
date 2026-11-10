@@ -1,16 +1,12 @@
-"""Read one whole declared file off the stage, never the pool.
+"""Read declared extents into owned buffers under native staged windows.
 
-The whole-file counterpart of the range readers: a small input a PB action
-declared in its data manifest (a calibration draw, a sealed control slice, a
-pickled cache index) is opened through the residency resolver's
-lifetime-pinned window -- RAM first where offered and allowed, SSD otherwise
--- and read once into an owned buffer under sealed size and change fences.
-Extracted from ``calibration_data`` (PQ #1010) so every head input a Stage B
-quantum declares is served the way the calibration draw already was.
+Canonical sources are never opened by this reader. Every whole-entry read
+checks its declared digest, object bounds and descriptor identity.
 """
 from __future__ import annotations
 
 import os
+from contextlib import ExitStack
 from pathlib import Path
 
 
@@ -93,9 +89,8 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     The whole-file counterpart to the checkpoint shared-state staged read:
     the bound map entry (whole file at offset 0, digest-bound to the
     caller's independently pinned ``expected_sha256``) is opened through a
-    lifetime-pinned window — RAM first where offered and allowed, honest
-    SSD re-acquire otherwise, never the pool — and read once into an owned
-    buffer with the same sealed size/change fences. The descriptor closes
+    lifetime-pinned SSD window and read once into an owned buffer with
+    sealed size/change fences. The descriptor closes
     and the exact ref releases before the caller decodes: no raw fd or
     mapping escapes, and the returned bytes outlive the lease.
     """
@@ -113,7 +108,7 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
 
 
 def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=False,
-                      delivery_receipt=None, max_bytes: int | None = None):
+                      delivery_receipt=None, max_bytes: int | None = None, lease=None):
     """The whole of one resolved map entry, read under a lifetime-pinned window.
 
     ``staged`` is the resolver's answer for ``path``: a whole-file entry
@@ -123,7 +118,7 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
     caller verifies the bytes against the digest it requires.
     """
     raw = _read_staged_material(resolver, path, staged, label=label, sealed=sealed,
-                                delivery_receipt=delivery_receipt, max_bytes=max_bytes)
+                                delivery_receipt=delivery_receipt, max_bytes=max_bytes, lease=lease)
     return raw if sealed else bytes(raw)
 
 
@@ -140,7 +135,7 @@ def read_staged_buffer(resolver, path: Path, staged: dict, *, label: str,
 
 def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
                           sealed=False, delivery_receipt=None,
-                          max_bytes: int | None = None, expected_bytes: int | None = None):
+                          max_bytes: int | None = None, expected_bytes: int | None = None, lease=None):
     """Own one pinned entry's read, fences, material and successful accounting."""
     from .staged_lease import LeaseRefused, acquire_entry_window
     from .staged_tier_policy import refuse_pool_bulk_read
@@ -152,13 +147,22 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
     if max_bytes is not None:
         if size > max_bytes:
             raise BoundReadLimitExceeded(f"{label}: staged input exceeds its read bound")
-    window, key = acquire_entry_window(resolver, path, staged)
+    if lease is None:
+        window, key = acquire_entry_window(resolver, path, staged)
+    else:
+        window, key, pinned_entry = lease
+        if pinned_entry != staged:
+            raise LeaseRefused('group entry differs from immutable binding', kind='integrity')
     witness = None
     raw = None
     try:
-        with window:
+        with ExitStack() as scope:
+            if lease is None:
+                scope.enter_context(window)
             try:
                 fd, serving = window.open(key)
+                if lease is not None:
+                    scope.callback(window.close_fd, fd)
             except LeaseRefused as refusal:
                 resolver.record_fallback(path, str(refusal))
                 raise
@@ -171,7 +175,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             # Sealed bounds before allocation: the held descriptor's size must
             # match the staged entry's, or no buffer is built.
             first = os.fstat(fd)
-            if first.st_size != size:
+            if first.st_size != staged.get('object_bytes', size):
                 raise LeaseRefused(f"{label}-changed-under-pin",
                                    kind="integrity")
             if delivery_receipt is not None:
@@ -183,18 +187,19 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
             # One owned buffer, filled in place: the caller's digest hashes
             # these same bytes and the tensor below decodes from them, so one
             # staged read serves verification and decode alike.
-            from .io_engine import SealedBuffer
+            from .io_buffers import SealedBuffer
             raw = SealedBuffer(size) if sealed else bytearray(size)
             view = None if sealed else memoryview(raw)
             try:
                 remaining = size
                 offset = 0
+                object_offset = staged.get('object_offset', 0)
                 if sealed:
-                    remaining = 0 if raw.fill(fd) else size
+                    remaining = 0 if raw.fill(fd, source_offset=object_offset, require_eof=False) else size
                 else:
                     while remaining > 0:
                         try:
-                            moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+                            moved = os.preadv(fd, [view[offset:offset + remaining]], object_offset + offset)
                         except OSError as exc:
                             raise LeaseRefused(
                                 f"{label}-unreadable: {exc.strerror}",
@@ -205,8 +210,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
                         remaining -= moved
                 if remaining:
                     raise LeaseRefused(f"{label}-truncated", kind="integrity")
-                if os.pread(fd, 1, size):
-                    raise LeaseRefused(f"{label}-grew-during-read", kind="integrity")
+                window.check_fd(fd)
                 last = os.fstat(fd)
                 if (last.st_ino, last.st_size, last.st_mtime_ns) != (
                         first.st_ino, first.st_size, first.st_mtime_ns):
@@ -216,6 +220,10 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
                     raw.require_sealed()
                     if digest != staged.get("sha256"):
                         raise LeaseRefused(f"{label}-digest-mismatch", kind="integrity")
+                else:
+                    from .digests import bytes_sha256hex
+                    if bytes_sha256hex(raw) != staged['sha256']:
+                        raise LeaseRefused(f'{label}-digest-mismatch', kind='integrity')
             except BaseException:
                 if sealed:
                     raw.close()
@@ -226,7 +234,7 @@ def _read_staged_material(resolver, path: Path, staged: dict, *, label: str,
         if delivery_receipt is not None:
             # Reaching this gap proves both the native descriptor close and
             # exact-ref release succeeded. No receipt escapes a failed exit.
-            witness.update(descriptors_closed=True, lease_released=True)
+            witness.update(descriptors_closed=True, lease_released=lease is None)
             delivery_receipt.update(witness)
         if tier == "ram":
             resolver.record_ram_read(path, len(raw))
@@ -243,7 +251,7 @@ def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: in
                             delivery_receipt=None):
     """Return owned immutable whole-file material, pinned through acquisition.
 
-    Always requires the independently bound PB entry, even with no global tier
+    Always requires the independently bound immutable entry, even with no global tier
     policy. The caller reserves and retains the memfd until its last consumer.
     No pool fallback, partial range, or lease assertion qualifies these bytes.
     """

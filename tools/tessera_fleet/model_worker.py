@@ -1,16 +1,9 @@
-"""The worker side of a whole-model Tessera serving export on PrismaBuild.
+"""Scientific worker and output validation for Tessera fleet exports.
 
-``tools.tessera_fleet.dispatch_model`` copies this file into a sealed
-workspace as ``worker.py``, and every PrismaBuild action runs it there, or
-inside the pinned producer image, with the standard library alone. It owns no
-queue: the dispatcher supplies all work through ``pbcampaign``.
-
-Moved from PrismaBuild's ``src/prismabuild/tessera_model.py`` on 2026-09-28
-(RobTand/prismabuild#1076). Every result the dispatcher reads is a record
-this worker writes beside the bytes it describes -- ``pb-result.json`` in each
-part and in the assembled output, and one prepared identity per host under
-``<out>.prepare/`` -- because PrismaBuild's public commands report whether an
-action ran, not what it printed.
+Source and output contracts are preserved independently of native execution
+facts. GPU/container admission remains unqualified in the CPU baseline.
+Existing pb-result.json scientific records keep their historical name/schema;
+only a native terminal success can admit them for downstream validation.
 """
 from __future__ import annotations
 

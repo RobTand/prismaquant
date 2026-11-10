@@ -52,7 +52,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "prismaquant/joint_replay_spill.py::StageBReplaySpill._start_arenas": (1, "writer"),
     "prismaquant/layer_streaming.py::_layer_read_pool": (1, "reader"),
     "prismaquant/perturbed_x_cache.py::_exact_read_pool": (1, "reader"),
-    "prismaquant/produced_stager.py::ProducedStager.__init__": (1, "writer"),
     "prismaquant/production_weight_cache.py::ProductionWeightCache.prefetch": (1, "reader"),
     "prismaquant/residency_shard_reader.py::_chunk_pool": (1, "reader"),
     "prismaquant/source_prefetch.py::prefetch_files_to_page_cache": (1, "reader"),

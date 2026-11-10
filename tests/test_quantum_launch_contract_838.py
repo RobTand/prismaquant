@@ -166,7 +166,7 @@ def _publish_layer_000(tmp_path: Path, out: dict) -> tuple[dict, Path, Path]:
 
 
 def _payload(argv: list[str]) -> list[str]:
-    tail = argv[argv.index("--") + 1:]
+    tail = argv["argv"]
     inner = tail[tail.index("--", tail.index("--spec")) + 1:]
     assert inner[:3] == ["python3", "-m", "prismaquant.joint_cost_quantum"]
     return inner

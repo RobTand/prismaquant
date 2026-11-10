@@ -1,59 +1,18 @@
-"""The Stage A chain's main-thread I/O profile and digest manifest (PQ #1128).
+"""Opt-in CPU profile and exact digest manifests through existing native IO owners.
 
-The suite does not collect this file (it is ``bench_*``). PrismaBuild runs it
-by name, once at the pull request's base and once at its head:
-
-    PQ_IO_BENCH_OUT=<directory> python -m pytest -q tests/bench_stage_a_io_overlap.py
-
-Two fixtures, each written to ``<directory>``:
-
-* ``chain.json``: ``test_stage_a_same_box_readback``'s reverse roll on the
-  real owner, writer, strict reader, queue and fleet, at entries of
-  ``ENTRY_SHAPE`` and with a fixed stand-in for the GPU step: ``COMPUTE_S``
-  of sleep per roll, which releases the GIL as a CUDA synchronize does.
-  PrismaBuild's local exporter is a thread that copies and lands each group
-  it is given, so no export copy runs on the thread that polls. The profile
-  is cProfile on the calling thread only, over the roll. The file carries
-  the wall seconds, per-function cumulative seconds and calls on that
-  thread, the export polls made on each thread, and the digest manifest:
-  every written reference's name, sha256 and file size in write order, the
-  final plane's payload digests, and the sha256 of every entry file left
-  after settle, by path relative to the run root.
-* ``capture.json``: ``test_stage_a_chain_resume``'s five-layer Stage A
-  capture at stride 2 through ``run_adjoint_capture_core``: the sha256 of
-  every file under its root by relative path, with JSON documents hashed
-  after dropping their ``telemetry`` (timings, not bytes the run decides)
-  and with the run root written as ``<run>``, so a path is compared relative
-  to the run root and not to pytest's temporary directory.
-  That covers every entry, checkpoint manifest, the chain state and the
-  receipt. The capture runs twice into one path and says whether the two
-  agree, so a difference between base and head is not run-to-run noise.
-  The first run's tree is kept as ``capture-run/``, so ``compare`` can name
-  the fields in which a JSON document differs. A checkpoint manifest's
-  ``cotangent_sha256`` and the chain state's seal hash records that hold
-  absolute entry paths, so run the base and the head with the same
-  ``PQ_IO_BENCH_RUN_ROOT``: the capture then runs at that one path and those
-  digests compare byte for byte. That root must be absent when the benchmark
-  starts. The benchmark creates it exclusively and removes its owned run
-  after both captures; the first capture's evidence remains in ``capture-run/``.
-  Use separate base/head output directories: ``capture-run/`` and
-  ``capture.json`` must not preexist. Other benchmark products may share OUT.
-
-The session id is pinned in both, so a file's bytes are comparable across
-runs. Compare the two runs' manifests with ``compare`` below.
+Run only inside admitted work with PQ_IO_BENCH_OUT naming an owned output
+directory. Profiles describe this fixture; no fleet or production speed claim
+follows. Capture manifests retain the scientific repeatability comparison.
 """
 from __future__ import annotations
 
 import cProfile
-import collections
 import hashlib
 import json
 import os
 from pathlib import Path
 import pstats
-import queue
 import shutil
-import threading
 import time
 import uuid
 
@@ -62,11 +21,7 @@ import torch
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 
-import test_produced_output_spool as spool_tests
 import test_stage_a_produced_boundary_chain as chain
-# Autouse, and it must apply HERE too (RobTand/prismaquant#889).
-from test_stage_a_produced_boundary_chain import (  # noqa: F401
-    _isolated_launch_context)
 
 pytestmark = pytest.mark.own_process
 
@@ -81,7 +36,6 @@ TOP = 4
 ENTRY_SHAPE = (512, 2048)
 ENTRY_BYTES = ENTRY_SHAPE[0] * ENTRY_SHAPE[1] * 4
 ENVELOPE = 65536
-COMPUTE_S = float(os.environ.get("PQ_IO_BENCH_COMPUTE_S", "0.02"))
 GROUP_CEILING_BYTES = GROUP_SIZE * (ENTRY_BYTES + ENVELOPE)
 PAYLOAD_MAX_BYTES = GROUP_CEILING_BYTES * (
     TOP * N_BATCHES // GROUP_SIZE + 2 * N_PROBES * N_BATCHES // GROUP_SIZE)
@@ -103,7 +57,6 @@ ROWS = {
     "spool.submit": ("produced_output_spool.py", "submit"),
     "fsync": ("~", "<built-in method posix.fsync>"),
     "unlink": ("~", "<built-in method posix.unlink>"),
-    "compute.sleep": ("~", "<built-in method time.sleep>"),
     "compute.roll": ("bench_stage_a_io_overlap.py", "_roll"),
 }
 
@@ -111,44 +64,12 @@ ROWS = {
 def _out(*, run_root: Path | None = None) -> Path:
     value = os.environ.get(OUT_ENV)
     if not value:
-        pytest.skip(f"{OUT_ENV} names no output directory")
+        raise ValueError(f"{OUT_ENV} names no output directory")
     path = Path(value)
     if run_root is not None and path.resolve().is_relative_to(run_root.resolve()):
         raise ValueError(f"{OUT_ENV} must be outside {RUN_ROOT_ENV}")
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-class ThreadedExport(spool_tests.ControlledExport):
-    """PrismaBuild's local exporter: its own thread copies and lands a group."""
-
-    def __init__(self, root, **kwargs):
-        super().__init__(root, **kwargs)
-        self.poll_threads = collections.Counter()
-        self._jobs = queue.Queue()
-        self._thread = threading.Thread(target=self._run, name="bench-exporter",
-                                        daemon=True)
-        self._thread.start()
-
-    def submit_group(self, batch_id, *, entries):
-        answer = super().submit_group(batch_id, entries=entries)
-        self._jobs.put(batch_id)
-        return answer
-
-    def poll_group(self, batch_id):
-        self.poll_threads[threading.current_thread().name] += 1
-        return super().poll_group(batch_id)
-
-    def _run(self):
-        while True:
-            batch_id = self._jobs.get()
-            if batch_id is None:
-                return
-            self.acknowledge(batch_id)
-
-    def close(self):
-        self._jobs.put(None)
-        self._thread.join(timeout=60)
 
 
 def _pinned_session(monkeypatch):
@@ -221,7 +142,6 @@ def _roll_chain(storage, batches, grad_outs, final, write):
                     then=following) as windows:
                 for index, _batch, boundary, incoming in windows:
                     rolled = _roll(incoming, boundary)
-                    time.sleep(COMPUTE_S)
                     if layer == 0:
                         final[probe][index] = rolled.clone()
                     grad_outs[probe][index] = write(
@@ -255,56 +175,44 @@ def _files(root: Path, pattern: str):
 
 
 def test_chain_profile_and_manifest(tmp_path, monkeypatch):
-    from prismaquant.produced_output_spool import ProducedOutputSpool
+    from produced_native_fixtures import publication, selected_publications
+    from prismaquant.streamed_boundary_artifacts import StreamedBoundaryArtifacts, BOUNDARY_STORAGE_SCHEMA
     from prismaquant.stage_a_chain_seed import tensor_payload_sha256
 
     out = _out()
     _pinned_session(monkeypatch)
-    storage, publication, q, env, pb_repo = chain._bound_owner(
-        tmp_path, n_batches=N_BATCHES, window_gib=8, gib=16,
-        payload_max_bytes=PAYLOAD_MAX_BYTES, n_probes=N_PROBES,
-        staging_timeout_s=120.0, max_entry_tensor_bytes=ENTRY_BYTES,
-        storage_config={"max_resident_bytes": MAX_RESIDENT_BYTES,
-                        "max_artifact_bytes": MAX_ARTIFACT_BYTES})
-    storage._published = True
-    backend = ThreadedExport(tmp_path / "local", capacity=8 << 30)
-    storage._local_output_spool = ProducedOutputSpool(
-        backend, capacity_deferred=spool_tests.CapacityDeferred)
-    enable = getattr(storage, "enable_io_overlap", None)
+    pub = publication(tmp_path, payload_max=PAYLOAD_MAX_BYTES, group_size=GROUP_SIZE,
+        tensor_bytes=ENTRY_BYTES, spool_bytes=1 << 30)
+    register = selected_publications(monkeypatch)
+    monkeypatch.setattr(pub, "finalize", lambda *a, **k: register(pub))
+    storage = StreamedBoundaryArtifacts({"schema": BOUNDARY_STORAGE_SCHEMA,
+        "directory": str(Path(pub.output_prefix) / "boundaries"),
+        "max_resident_bytes": MAX_RESIDENT_BYTES, "max_auxiliary_bytes": 1 << 20,
+        "max_artifact_bytes": MAX_ARTIFACT_BYTES, "prefetch_batches": GROUP_SIZE})
+    storage.bind({"fixture": "native-io-profile"}, n_probes=N_PROBES, published=True)
+    storage.bind_produced_output(pub, group_size=GROUP_SIZE, n_batches=N_BATCHES,
+        max_entry_tensor_bytes=ENTRY_BYTES)
     written = []
-    try:
-        with chain._fleet(q, tmp_path):
-            chain._strict(monkeypatch, env, pb_repo, q)
-            if enable is not None:
-                enable()
-            profiler = cProfile.Profile()
-            final, roll_wall_s = _chain(storage, written, profiler)
-            settle_started = time.perf_counter()
-            assert storage.drain_produced_stager(120.0)
-            storage.settle_local_output()
-            storage.settle_produced_releases()
-            assert storage.drain_produced_stager(120.0)
-            settle_s = time.perf_counter() - settle_started
-    finally:
-        storage._produced_stop_stager()
-        backend.close()
+    with storage:
+        profiler = cProfile.Profile()
+        final, roll_wall_s = _chain(storage, written, profiler)
+        settle_started = time.perf_counter()
+        storage.settle_local_output()
+        settle_s = time.perf_counter() - settle_started
     rows = _rows(profiler)
-    compute = (rows["compute.sleep"]["cumulative_s"]
-               + rows["compute.roll"]["cumulative_s"])
+    compute = rows["compute.roll"]["cumulative_s"]
     record = {
         "schema": "pq1128.bench.chain.v1",
         "fixture": {"group_size": GROUP_SIZE, "n_batches": N_BATCHES,
                     "n_probes": N_PROBES, "top": TOP,
                     "entry_shape": list(ENTRY_SHAPE), "entry_bytes": ENTRY_BYTES,
-                    "compute_s_per_roll": COMPUTE_S,
                     "max_resident_bytes": MAX_RESIDENT_BYTES,
-                    "io_overlap": enable is not None},
+                    "io_overlap": True},
         "roll_wall_s": round(roll_wall_s, 6),
         "settle_s": round(settle_s, 6),
         "main_thread_compute_s": round(compute, 6),
         "main_thread_other_share": round(1.0 - compute / roll_wall_s, 6),
         "rows": rows,
-        "export_polls_by_thread": dict(backend.poll_threads),
         "telemetry": {key: value for key, value in storage.telemetry.items()
                       if isinstance(value, (int, float))},
         "manifest": {
@@ -312,15 +220,14 @@ def test_chain_profile_and_manifest(tmp_path, monkeypatch):
             "final_payload_sha256": {
                 str(p): [tensor_payload_sha256(t) for t in final[p]]
                 for p in sorted(final)},
-            "entry_files": _files(tmp_path / "outputs", "*.pt"),
+            "entry_files": _files(Path(pub.output_prefix), "*.pt"),
         },
     }
     (out / "chain.json").write_text(json.dumps(record, indent=1, sort_keys=True))
     # This chain exercises every owner operation in the table. A stale
     # filename must fail instead of publishing zero calls for real work.
-    for label in ROWS:
-        if label.startswith("owner."):
-            assert rows[label]["calls"] > 0, f"profile missed {label}"
+    for label in ("owner.write", "owner.prefetch", "entry.write", "entry.read"):
+        assert rows[label]["calls"] > 0, f"profile missed {label}"
 
 
 def _without_telemetry(value):

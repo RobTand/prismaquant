@@ -9,7 +9,6 @@ checked against its frozen row.
 from __future__ import annotations
 
 import io
-import statistics
 import subprocess
 
 import pytest
@@ -23,7 +22,7 @@ GOLDEN = GoldenTable("telemetry_tools_1299")
 MOUNTSTATS = """\
 device rootfs mounted on / with fstype rootfs
 device proc mounted on /proc with fstype proc
-device tmpfs mounted on /ram/prewarm with fstype tmpfs
+device tmpfs mounted on /ram/staged with fstype tmpfs
 device 192.168.1.10:/tank/shared mounted on /mnt/shared with fstype nfs4 statvers=1.1
 \topts:\trw,vers=4.2,rsize=1048576,wsize=1048576,namlen=255,acregmin=3
 \tage:\t86034
@@ -43,7 +42,7 @@ device 192.168.1.10:/tank/shared mounted on /mnt/shared with fstype nfs4 statver
 \t      LOOKUP: 3 3 0 400 600 1 2 3 1
 \t      ACCESS: 2 2 0 300 200 0 1 1
 \t        OPEN: 9 9 0 1800 2700 0 11 12 0
-device 192.168.1.10:/stage mounted on /stage/prewarm with fstype nfs4 statvers=1.1
+device 192.168.1.10:/stage mounted on /stage/staged with fstype nfs4 statvers=1.1
 \topts:\trw,vers=4.2
 \tbytes:\t7 8 9 10 11 12 13 14
 \tper-op statistics
@@ -63,13 +62,13 @@ def mountstats(tmp_path, monkeypatch):
 
 def test_nfs_read_bytes_is_the_old_mount_bytes(mountstats):
     assert nfs_read_bytes(mountstats) == {
-        "/mnt/shared": (812345678, 790000000), "/stage/prewarm": (7, 11)}
+        "/mnt/shared": (812345678, 790000000), "/stage/staged": (7, 11)}
 
 
 def test_profile_head_mount_ops_is_unchanged(mountstats):
     from tools import profile_stage_b_head as head
 
-    for mount in ("/mnt/shared", "/stage/prewarm", "/ram/prewarm", "/absent"):
+    for mount in ("/mnt/shared", "/stage/staged", "/ram/staged", "/absent"):
         GOLDEN.value(head.mount_ops(mount))
     assert head.mount_ops()["READ"] == 193000
 
@@ -79,8 +78,8 @@ def test_staged_exact_mountstats_is_unchanged(mountstats):
 
     new = bench.mountstats()
     GOLDEN.value(new)
-    assert list(new) == ["/ram/prewarm", "/mnt/shared", "/stage/prewarm"]
-    assert new["/ram/prewarm"] == {"bytes": None, "ops": {}}
+    assert list(new) == ["/ram/staged", "/mnt/shared", "/stage/staged"]
+    assert new["/ram/staged"] == {"bytes": None, "ops": {}}
     assert new["/mnt/shared"]["ops"]["ACCESS"] == [2, 2, 0, 300, 200, 0, 1, 1]
 
 
@@ -223,7 +222,6 @@ def test_gpu_power_sampler_loop_argument(monkeypatch, interval, loop):
 
 
 def test_power_windows_are_unchanged(monkeypatch):
-    from tools import pwc_window_load_bench as pwc
     from tools import render_window_bench as rwb
 
     monkeypatch.setattr(subprocess, "Popen",
@@ -233,17 +231,19 @@ def test_power_windows_are_unchanged(monkeypatch):
     sampler.stop()
     assert sampler.samples == [30.25, 12.5, 41.0] and len(sampler.times) == 3
     sampler.times = [100.0, 100.1, 100.2]
-    pairs = list(zip(sampler.times, sampler.samples))
-    for start, end in ((100.0, 100.2), (100.05, 100.2), (100.1, 100.1), (101.0, 102.0)):
+    for start, end, expected in (
+        (100.0, 100.2, [30.25, 12.5, 41.0]),
+        (100.05, 100.2, [12.5, 41.0]),
+        (100.1, 100.1, [12.5]),
+        (101.0, 102.0, []),
+    ):
+        assert sampler.watts_between(start, end) == expected
         GOLDEN.value(rwb._power_summary(sampler.watts_between(start, end)))
-        values = [w for when, w in pairs if start <= when <= end]
-        assert pwc._power_between(sampler, start, end) == (
-            statistics.fmean(values) if values else None, len(values))
 
 
 @pytest.mark.parametrize("name", [
-    "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head", "pwc_window_load_bench",
-    "render_window_bench", "stage_fed_demonstration", "staged_exact_read_bench",
+    "chain_roll_bench", "checkpoint_parse_probe", "nvfp4_served_qdq_bench", "profile_stage_b_head",
+    "render_window_bench", "staged_exact_read_bench",
     "staged_read_stream_ab", "unit_journal_bench"])
 def test_migrated_tool_imports(name):
     import importlib

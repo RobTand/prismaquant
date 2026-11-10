@@ -104,6 +104,7 @@ from .joint_quantum_handoff import (
 )
 from prismaquant.joint_quantum_row import (HANDOFF_LOAD_PHASE, PROGRESS_GRACE_FLAG)
 from .tessera_joint_aura import restores_activation_scale_env
+from .joint_run_progress import log_progress
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -557,10 +558,9 @@ class QuantumProgress:
     only once the journal shard is on disk.
     """
 
-    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None):
-        from .joint_run_progress import declared_phases
-
-        self._phases = declared_phases()
+    def __init__(self, *, frontier: ChunkFrontier, base_units=0, log=None,
+                 phases=None):
+        self._phases = None if phases is None else tuple(phases)
         self._log = log or (lambda message: print(message, flush=True))
         self._base_units = int(base_units)
         self._units = 0
@@ -573,6 +573,7 @@ class QuantumProgress:
 
     def _enter(self, name: str) -> None:
         if self._phases is None:
+            self._phase = str(name)
             return
         try:
             index = self._phases.index(str(name))
@@ -621,9 +622,7 @@ class QuantumProgress:
             self._enter(self._frontier.phase_name)
 
     def commit(self) -> bool:
-        """Report the cumulative count under the current phase (inert no-op)."""
-        from .prismabuild_progress import report
-
+        """Log local cumulative advancement after the durable journal boundary."""
         if self._phase is None:
             return False
         advanced = (self._committed == (None, None)
@@ -631,8 +630,8 @@ class QuantumProgress:
                     or self._phase != self._committed[1])
         if not advanced:
             return False
-        if report(self._phase, self.units(), unit="quantum_units"):
-            self.commits += 1
+        log_progress(self.units(), self._phase, unit="quantum_units", log=self._log)
+        self.commits += 1
         self._committed = (self.units(), self._phase)
         return True
 
@@ -896,7 +895,7 @@ class QuantumCounters:
             power = gpu.get("gpu_power_w_p50")
             counters["pilot"] = {
                 "binding": self.pilot_binding,
-                "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                "job_id": os.environ.get("FLUX_JOB_ID"),
                 "gpu_envelope_fraction": None if power is None else power / 140.0,
             }
         if self._kernel_error:
@@ -1567,9 +1566,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     from .residency_map import RANGE_HIT, residency_resolver
     from .residency_shard_reader import (
         await_staged_spans,
-        staged_range_wait_s,
     )
-    from .staged_lease import stage_cover_is_published, stage_covers_are_published
+    from .staged_lease import stage_cover_is_published
 
     window_index = int(window_index)
     block = record.get("executable_readset")
@@ -1594,9 +1592,8 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
     # entry is missing falls back to one lookup per entry.
     verdict = await_staged_spans(
         resolver, wanted,
-        deadline=_time.monotonic() + staged_range_wait_s(),
         published=stage_cover_is_published,
-        published_batch=stage_covers_are_published, cancel=cancel)
+        cancel=cancel)
     print(f"[residency] retained render window {window_index:02d}: "
           f"{verdict} for {len(wanted)} staged entr"
           f"{'y' if len(wanted) == 1 else 'ies'}", flush=True)
@@ -4261,7 +4258,7 @@ def run_layer_quantum(
 
 
 def quantum_completion_record(result: Mapping, *, record_path, record_bytes: bytes) -> dict:
-    """The producer's single completion record carried by PB stdout.
+    """The producer's single completion record, printed on stdout and published natively when the job is native.
 
     ``record_bytes`` is the exact owned quantum wire read the identity gate
     authenticated (PQ #1293); ``record_path`` is the sealed ``--quantum``
@@ -4314,6 +4311,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run one layer quantum of the distributed joint-AURA "
                     "cost campaign (contract §6).")
+    from .stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     parser.add_argument("--quantum", type=Path, required=True,
                         help="the producer's sealed layer-quantum record")
     parser.add_argument("--quantum-sha256", required=True)
@@ -4451,7 +4450,15 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps(quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)))
+    completion = quantum_completion_record(result, record_path=args.quantum, record_bytes=record_bytes)
+    print(json.dumps(completion))
+    counters_path = Path(completion["counters"]["path"])
+    # Only a pilot (counters carrying a pilot binding) is published, and only by a native job.
+    if (os.environ.get("FLUX_JOB_ID") and os.environ.get("OUT")
+            and "pilot" in json.loads(counters_path.read_bytes())):
+        from .joint_dispatch_pilot import publish_pilot_result
+        publish_pilot_result(counters_path.with_name("pilot-publication.json"), completion=completion,
+                             counters_path=counters_path, quantum_record=completion["quantum_record"])
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK

@@ -11,7 +11,7 @@ description = "Mixed-precision quantization allocator for LLMs: every layer refr
 readme = "README.md"
 license = "LicenseRef-PrismaQuant-Attribution-1.0"
 # 3.12 is the supported floor as of 2026-08-29. Hosted CI and release checks
-# exercise that floor; the PrismaBuild queue uses a newer interpreter.
+# exercise that floor; a newer interpreter is also supported.
 # Python 3.11 is no longer tested or claimed as supported.
 requires-python = ">=3.12"
 authors = [
@@ -59,18 +59,9 @@ task-suite = ["lm-eval[hf]==0.4.12"]
 test = ["torch>=2.6", "pytest>=8", "pytest-cov>=5", "pytest-timeout>=2.3", "pytest-xdist>=3.8",
         # tests/test_prismaquant_visual_phase2.py imports PIL at module
         # level; a venv without pillow fails at collection (observed in the
-        # PB campaign venvs, 2026-10-04). Runtime deps already declare it;
+        # a campaign venv, 2026-10-04). Runtime deps already declare it;
         # this records the test-scope need for --no-deps provisions.
         "pillow>=10.0"]
-
-[dependency-groups]
-# The reviewed PrismaBuild client SDK, for the tests that drive it (PQ #3216).
-# The commit must equal staged_lease.PB_READER_LEASE_PIN_COMMIT; pbtest's pin
-# guard requires this exact non-editable Git install on the fleet, and
-# tests/test_pb_sdk_test_env_3216.py holds the group and uv.lock to it. A
-# group, not the test extra: extras are published metadata, and PyPI refuses
-# a direct Git reference there.
-pbsdk = ["prismabuild @ git+https://github.com/RobTand/prismabuild@027103d9a8417e06c7f13356e58779a313cd7088"]
 
 [project.urls]
 Repository = "https://github.com/RobTand/prismaquant"

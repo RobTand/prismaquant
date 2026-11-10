@@ -2,7 +2,7 @@
 
 This module owns three things and performs no I/O:
 
-* the frozen run manifest ``prismaquant.quality_prefill_experiment.v1``
+* the frozen run manifest ``prismaquant.quality_prefill_experiment.v2``
   (:data:`MANIFEST_SCHEMA`), with the eleven closed sections of the
   specification's section 3.1;
 * the seven evidence envelopes of section 3.2, and the one price-table object
@@ -13,9 +13,10 @@ It is a closed, strictly typed, canonically hashed contract.  It reuses the
 package's one hasher (``cost_stage_checkpoint.canonical_json_sha256``) and its
 one strict reader and field checks (``schemas.strict_json_loads`` and
 ``schemas.Contract``) rather than introducing second copies.
-:mod:`prismaquant.quality_prefill_pb_adapter` is this experiment's other half,
-not a copy: it turns one phase into a PrismaBuild logical request, and its
-wrappers raise its own error with PrismaBuild's id grammar (PQ #1302).
+Scientific task payload validation also lives here. The finite native roster
+in :mod:`prismaquant.quality_prefill_flux` uses that same scientific meaning.
+Native observation and phase-result provenance is authenticated by that I/O
+owner. Pure envelope validation alone does not establish execution or coverage.
 
 Three rules the specification states and this module enforces mechanically:
 
@@ -51,15 +52,24 @@ from prismaquant.cost_stage_checkpoint import (
 from prismaquant.schemas import Contract, strict_json_loads
 
 
-MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v1"
+MANIFEST_SCHEMA = "prismaquant.quality_prefill_experiment.v2"
 PRICE_TABLE_SCHEMA = "prismaquant.quality_prefill_experiment.price_table.v1"
 CANDIDATE_SCHEMA = "prismaquant.quality_prefill_experiment.candidate.v1"
-OBSERVATION_SCHEMA = "prismaquant.quality_prefill_experiment.observation.v1"
+OBSERVATION_SCHEMA = "prismaquant.quality_prefill_experiment.observation.v2"
 SCREEN_DECISION_SCHEMA = "prismaquant.quality_prefill_experiment.screen_decision.v1"
 TRANSFER_SEAL_SCHEMA = "prismaquant.quality_prefill_experiment.transfer_seal.v1"
-PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_experiment.phase_result.v1"
+PHASE_RESULT_SCHEMA = "prismaquant.quality_prefill_phase_result.v2"
 ASSIGNMENT_SCHEMA = "prismaquant.quality_prefill_experiment.assignment.v1"
 FRONTIER_REPORT_SCHEMA = "prismaquant.quality_prefill_experiment.frontier_report.v1"
+TASK_PAYLOAD_SCHEMA = "prismaquant.quality_prefill_task.v1"
+WORK_ESTIMATES_SCHEMA = "prismaquant.quality_prefill_work_estimates.v1"
+MEASUREMENT_SCHEMA = "prismaquant.quality_prefill_measurement.v1"
+MAX_PREFILL_TASKS = 1024
+MAX_PREFILL_CHILDREN = 256
+MAX_PREFILL_CHILD_TASKS = 64
+MAX_PREFILL_INPUTS = 32
+MAX_WORK_ESTIMATES_BYTES = 16 << 20
+MAX_ESTIMATE_EVIDENCE_BYTES = 1 << 20
 
 
 class QualityPrefillContractError(ValueError):
@@ -257,6 +267,7 @@ for _spec in PHASE_DAG:  # pragma: no cover - static guard
 # ---------------------------------------------------------------------------
 
 _ID_RE = re.compile(r"[a-z0-9][a-z0-9._:-]{0,127}\Z")
+_TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,255}\Z")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+-]{0,255}\Z")
 _GIT_SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _IMAGE_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -281,7 +292,10 @@ def _finite_number(
 ) -> float:
     if type(value) not in (int, float):
         _fail(f"{where} must be a finite number")
-    number = float(value)  # type: ignore[arg-type]
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except OverflowError:
+        _fail(f"{where} must be a finite representable number")
     if not math.isfinite(number):
         _fail(f"{where} must be a finite number")
     if minimum is not None and number < minimum:
@@ -329,6 +343,19 @@ def _artifact_reference(value: object, *, where: str) -> Mapping[str, object]:
     return body
 
 
+def prefill_file_binding(value: object, *, where: str) -> dict:
+    """The finite native document binding, without granting I/O authority."""
+    from .staged_manifest import integer, path
+    body = _exact_mapping(value, keys=_ARTIFACT_REFERENCE_KEYS | {'bytes'}, where=where)
+    _sha256(body['sha256'], where=f'{where}.sha256')
+    try:
+        path(body['path'])
+        integer(body['bytes'])
+    except ValueError as exc:
+        raise QualityPrefillContractError(f'{where}: {exc}') from exc
+    return dict(body)
+
+
 def _named_version(value: object, *, where: str) -> Mapping[str, object]:
     body = _exact_mapping(value, keys=frozenset({"name", "version"}), where=where)
     _string(body["name"], where=f"{where}.name", pattern=_ID_RE)
@@ -348,6 +375,35 @@ def _unresolved_sentinel(value: object, *, where: str) -> None:
 # ---------------------------------------------------------------------------
 # Canonical hashing (reused, never re-implemented)
 # ---------------------------------------------------------------------------
+
+
+def prefill_identifier(value: object, *, where: str) -> str:
+    """One bounded application identifier, independent of execution transport."""
+    return _string(value, where=where, pattern=_TASK_ID_RE)
+
+
+def validate_task_payload(value: object, *, where: str) -> dict[str, object]:
+    """Validate scientific task meaning without consulting an execution SDK."""
+    body = _exact_mapping(value, keys=frozenset({
+        "schema", "serving_unit", "members", "family", "rate", "context_id", "currency",
+    }), where=where)
+    if body["schema"] != TASK_PAYLOAD_SCHEMA:
+        _fail(f"{where}.schema must be {TASK_PAYLOAD_SCHEMA}")
+    members = [
+        prefill_identifier(member, where=f"{where}.members[{index}]")
+        for index, member in enumerate(_sequence(
+            body["members"], where=f"{where}.members", minimum=1,
+        ))
+    ]
+    if len(members) != len(set(members)):
+        _fail(f"{where}.members repeats a member")
+    identifiers = {key: prefill_identifier(body[key], where=f"{where}.{key}")
+                   for key in ("serving_unit", "family", "context_id")}
+    return {
+        "schema": TASK_PAYLOAD_SCHEMA, **identifiers, "members": members,
+        "rate": _integer(body["rate"], where=f"{where}.rate", minimum=1),
+        "currency": _enum(body["currency"], where=f"{where}.currency", allowed=CURRENCIES),
+    }
 
 
 def canonical_sha256(value: object) -> str:
@@ -622,7 +678,7 @@ _EXECUTION_KEYS = frozenset(
     {
         "phases",
         "setup_cost_reference",
-        "pb_policy",
+        "native_policy",
         "retry_policy",
         "withdrawal_policy",
     }
@@ -647,7 +703,7 @@ _RESOURCE_POLICY_KEYS = frozenset(
     {"partition_producer", "independent_recomputation", "energy_attribution"}
 )
 _SOLVER_LIMIT_KEYS = frozenset({"max_seconds", "max_states"})
-_PB_POLICY_KEYS = frozenset({"batch_policy", "progress_policy", "priority"})
+_NATIVE_POLICY = {"dispatch": "explicit-roster-v1", "progress": "local-log-v1"}
 _RETRY_POLICY_KEYS = frozenset({"max_attempts"})
 _PHASE_ENTRY_KEYS = frozenset(
     {"task_roster", "dependencies", "work_limit", "cost_limit"}
@@ -884,7 +940,7 @@ def _validate_execution(value: object, *, where: str) -> None:
     for name, spec in PHASE_BY_NAME.items():
         entry_where = f"{where}.phases.{name}"
         entry = _exact_mapping(phases[name], keys=_PHASE_ENTRY_KEYS, where=entry_where)
-        _artifact_reference(entry["task_roster"], where=f"{entry_where}.task_roster")
+        prefill_file_binding(entry["task_roster"], where=f"{entry_where}.task_roster")
         declared = _sequence(entry["dependencies"], where=f"{entry_where}.dependencies")
         declared_names = _unique_ids(declared, where=f"{entry_where}.dependencies")
         if declared_names != spec.dependencies:
@@ -897,16 +953,11 @@ def _validate_execution(value: object, *, where: str) -> None:
     _artifact_reference(
         body["setup_cost_reference"], where=f"{where}.setup_cost_reference"
     )
-    pb_policy = _exact_mapping(
-        body["pb_policy"], keys=_PB_POLICY_KEYS, where=f"{where}.pb_policy"
+    native_policy = _exact_mapping(
+        body["native_policy"], keys=frozenset(_NATIVE_POLICY), where=f"{where}.native_policy"
     )
-    _string(pb_policy["batch_policy"], where=f"{where}.pb_policy.batch_policy", pattern=_ID_RE)
-    _string(
-        pb_policy["progress_policy"], where=f"{where}.pb_policy.progress_policy", pattern=_ID_RE
-    )
-    _integer(
-        pb_policy["priority"], where=f"{where}.pb_policy.priority", minimum=-20, maximum=20
-    )
+    if native_policy != _NATIVE_POLICY:
+        _fail(f"{where}.native_policy must be {_NATIVE_POLICY}")
     retry = _exact_mapping(
         body["retry_policy"], keys=_RETRY_POLICY_KEYS, where=f"{where}.retry_policy"
     )
@@ -1021,6 +1072,60 @@ def freeze_manifest(draft: Mapping[str, object]) -> dict[str, object]:
 # Evidence envelopes (specification section 3.2)
 # ---------------------------------------------------------------------------
 
+
+def validate_work_estimates(value: object) -> dict:
+    """Validate finite planning evidence; native admission authenticates its bytes."""
+    raw = canonical_json_bytes(value)
+    if len(raw) + 1 > MAX_WORK_ESTIMATES_BYTES:
+        _fail('work estimates document exceeds byte limit')
+    body = decode_strict_json(raw.decode('utf-8'), where='work estimates')
+    _exact_mapping(body, keys=frozenset({'schema', 'phases'}), where='work estimates')
+    if body['schema'] != WORK_ESTIMATES_SCHEMA:
+        _fail('work estimates schema differs')
+    phases = _CHECK.mapping(body['phases'], where='work estimates.phases')
+    if not phases or not set(phases) <= set(PHASE_BY_NAME):
+        _fail('work estimates must name existing phases')
+    for phase, entry in phases.items():
+        _exact_mapping(entry, keys=frozenset({'command_sha256', 'runtime_sha256', 'children'}),
+                       where=phase)
+        for key in ('command_sha256', 'runtime_sha256'):
+            _sha256(entry[key], where=f'{phase}.{key}')
+        children = _sequence(entry['children'], where=f'{phase}.children', minimum=1)
+        if len(children) > MAX_PREFILL_CHILDREN:
+            _fail('work estimates child count exceeds limit')
+        child_ids, task_ids = set(), set()
+        for child in children:
+            _exact_mapping(child, keys=frozenset({'child_id', 'resources_sha256',
+                'setup_seconds', 'setup_evidence', 'tasks'}), where='estimated child')
+            child_id = prefill_identifier(child['child_id'], where='estimated child_id')
+            if child_id in child_ids:
+                _fail('duplicate estimated child_id')
+            child_ids.add(child_id)
+            _sha256(child['resources_sha256'], where='estimated resources_sha256')
+            _finite_number(child['setup_seconds'], where='setup_seconds', minimum=0)
+            evidence = prefill_file_binding(child['setup_evidence'], where='setup_evidence')
+            if evidence['bytes'] > MAX_ESTIMATE_EVIDENCE_BYTES:
+                _fail('setup evidence exceeds byte limit')
+            tasks = _sequence(child['tasks'], where='estimated tasks', minimum=1)
+            if len(tasks) > MAX_PREFILL_CHILD_TASKS:
+                _fail('estimated child tasks exceed limit')
+            for task in tasks:
+                _exact_mapping(task, keys=frozenset({'task_id', 'payload_sha256',
+                    'estimated_seconds', 'estimate_evidence'}), where='estimated task')
+                task_id = prefill_identifier(task['task_id'], where='estimated task_id')
+                if task_id in task_ids:
+                    _fail('duplicate estimated task_id')
+                task_ids.add(task_id)
+                _sha256(task['payload_sha256'], where='estimated payload_sha256')
+                if _finite_number(task['estimated_seconds'], where='estimated_seconds', minimum=0) <= 0:
+                    _fail('estimated_seconds must be positive')
+                evidence = prefill_file_binding(task['estimate_evidence'], where='estimate_evidence')
+                if evidence['bytes'] > MAX_ESTIMATE_EVIDENCE_BYTES:
+                    _fail('task evidence exceeds byte limit')
+            if len(task_ids) > MAX_PREFILL_TASKS:
+                _fail('estimated task count exceeds limit')
+    return body
+
 _CANDIDATE_KEYS = frozenset(
     {
         "schema",
@@ -1050,9 +1155,10 @@ _OBSERVATION_KEYS = frozenset(
         "measurement_status",
         "value",
         "artifacts",
-        "action_key",
+        "child_id",
+        "selection",
         "attempt",
-        "receipt_sha256",
+        "value_sha256",
         "validity",
         "unknown_reason",
     }
@@ -1100,7 +1206,7 @@ _PHASE_RESULT_KEYS = frozenset(
         "refusal_reasons",
     }
 )
-_CHILD_RECEIPT_KEYS = frozenset({"task_id", "action_key", "receipt_sha256"})
+_CHILD_RECEIPT_KEYS = frozenset({"task_id", "child_id", "selection", "value_sha256"})
 _ASSIGNMENT_KEYS = frozenset(
     {
         "schema",
@@ -1174,12 +1280,57 @@ def validate_candidate(value: object, *, where: str = "candidate") -> dict[str, 
     return _check_seal(body, where=where)
 
 
+def validate_task_measurement(value: object, *, payload: dict) -> dict:
+    """Validate a task's finite scientific value before native selection exists."""
+    where = 'task measurement'
+    expected = validate_task_payload(payload, where='expected task payload')
+    body = decode_strict_json(canonical_json_bytes(value).decode('utf-8'), where=where)
+    _exact_mapping(body, keys=frozenset({
+        'schema', 'payload', 'units', 'measurement_status', 'value', 'artifacts',
+    }), where=where)
+    if body['schema'] != MEASUREMENT_SCHEMA:
+        _fail(f'{where} schema differs')
+    if validate_task_payload(body['payload'], where=where + '.payload') != expected:
+        _fail(f'{where} payload differs from frozen task')
+    _string(body['units'], where=where + '.units', pattern=_TOKEN_RE)
+    status = _enum(body['measurement_status'], where=where + '.measurement_status',
+                   allowed=_COVERAGE_SET)
+    if expected['currency'] == JOINT_CURRENCY and status not in _JOINT_STATUSES:
+        _fail(f'{where} joint currency requires measured status')
+    _finite_number(body['value'], where=where + '.value', minimum=0.0)
+    artifacts = _sequence(body['artifacts'], where=where + '.artifacts', minimum=1)
+    if len(artifacts) > 32:
+        _fail(f'{where} artifact count exceeds32')
+    paths = set()
+    for artifact in artifacts:
+        binding = prefill_file_binding(artifact, where=where + '.artifact')
+        if binding['bytes'] > 1 << 20:
+            _fail(f'{where} artifact exceeds1MiB')
+        if binding['path'] in paths:
+            _fail(f'{where} duplicate artifact path')
+        paths.add(binding['path'])
+    return body
+
+
+def _selected_child_fields(body: Mapping[str, object], *, where: str) -> None:
+    """Check finite provenance structure; this grants no execution authority."""
+    child = prefill_identifier(body['child_id'], where=where + '.child_id')
+    selection = body['selection']
+    if not isinstance(selection, dict) or len(canonical_json_bytes(selection)) > 16 << 20:
+        _fail(f'{where}.selection must be a finite native selection')
+    if (selection.get('schema') != 'prismaquant.flux_result_selection.v1' or
+            selection.get('producer_id') != child):
+        _fail(f'{where}.selection producer differs from child')
+    _sha256(body['value_sha256'], where=where + '.value_sha256')
+
+
 def validate_observation(value: object, *, where: str = "observation") -> dict[str, object]:
     body = _envelope(
         value, keys=_OBSERVATION_KEYS, schema=OBSERVATION_SCHEMA, where=where
     )
-    for field in ("observation_id", "candidate_id", "phase_id", "task_id"):
+    for field in ("observation_id", "candidate_id", "phase_id"):
         _string(body[field], where=f"{where}.{field}", pattern=_ID_RE)
+    prefill_identifier(body['task_id'], where=where + '.task_id')
     if body["phase_id"] not in PHASE_BY_NAME:
         _fail(f"{where}.phase_id is not a phase of the v1 DAG")
     _sha256(body["context_sha256"], where=f"{where}.context_sha256")
@@ -1200,9 +1351,8 @@ def validate_observation(value: object, *, where: str = "observation") -> dict[s
     artifacts = _sequence(body["artifacts"], where=f"{where}.artifacts", minimum=1)
     for index, raw in enumerate(artifacts):
         _artifact_reference(raw, where=f"{where}.artifacts[{index}]")
-    _string(body["action_key"], where=f"{where}.action_key", pattern=_TOKEN_RE)
+    _selected_child_fields(body, where=where)
     _integer(body["attempt"], where=f"{where}.attempt", minimum=1)
-    _sha256(body["receipt_sha256"], where=f"{where}.receipt_sha256")
     validity = _enum(body["validity"], where=f"{where}.validity", allowed=VALIDITY)
     reason = body["unknown_reason"]
     if type(reason) is not str:
@@ -1334,18 +1484,17 @@ def validate_phase_result(
             f"{where}.parent_phase_ids must be "
             f"{list(PHASE_BY_NAME[phase_id].dependencies)}"
         )
-    expected = _unique_ids(
-        _sequence(body["expected_task_ids"], where=f"{where}.expected_task_ids", minimum=1),
-        where=f"{where}.expected_task_ids",
-    )
+    expected = tuple(prefill_identifier(item, where=where + '.expected_task_ids')
+        for item in _sequence(body['expected_task_ids'], where=where + '.expected_task_ids', minimum=1))
+    if len(set(expected)) != len(expected) or len(expected) > MAX_PREFILL_TASKS:
+        _fail(f'{where}.expected_task_ids repeats or exceeds the finite limit')
     receipts = _sequence(body["child_receipts"], where=f"{where}.child_receipts")
     covered: list[str] = []
     for index, raw in enumerate(receipts):
         entry_where = f"{where}.child_receipts[{index}]"
         entry = _exact_mapping(raw, keys=_CHILD_RECEIPT_KEYS, where=entry_where)
-        covered.append(_string(entry["task_id"], where=f"{entry_where}.task_id", pattern=_ID_RE))
-        _string(entry["action_key"], where=f"{entry_where}.action_key", pattern=_TOKEN_RE)
-        _sha256(entry["receipt_sha256"], where=f"{entry_where}.receipt_sha256")
+        covered.append(prefill_identifier(entry['task_id'], where=entry_where + '.task_id'))
+        _selected_child_fields(entry, where=entry_where)
     if len(set(covered)) != len(covered):
         _fail(f"{where}.child_receipts contains a duplicate task_id")
     foreign = sorted(set(covered) - set(expected))
@@ -1580,12 +1729,15 @@ def transition(
                 "expected task set"
             )
         covered = [
-            _string(entry["task_id"], where="receipt.task_id", pattern=_ID_RE)
+            prefill_identifier(entry['task_id'], where='receipt.task_id')
             for entry in receipts
         ]
         if len(set(covered)) != len(covered):
             _fail(f"{current.phase}: duplicate child receipt task_id")
-        expected = set(_unique_ids(list(expected_task_ids), where="expected_task_ids"))
+        expected_rows = [prefill_identifier(item, where='expected_task_ids') for item in expected_task_ids]
+        if len(set(expected_rows)) != len(expected_rows):
+            _fail('expected_task_ids repeats a task')
+        expected = set(expected_rows)
         if set(covered) != expected:
             missing = sorted(expected - set(covered))
             foreign = sorted(set(covered) - expected)

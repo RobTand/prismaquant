@@ -1,66 +1,15 @@
-"""Retire superseded Stage A checkpoint pins and committed forward entries.
+"""Retire exact owned files after native containment and whole binding proof.
 
-Since #1036/#1037 a Stage A checkpoint names the owner's own cotangent entries
-at its boundary instead of copying them, so a checkpoint pins them: roll
-retirement leaves them on the pool, and each run attempt leaves its whole set
-of checkpoint planes behind. A chain resume (#1001) keeps and reads them. A
-fresh restart does not; it supersedes the run, and nothing retired the pins.
-
-This module is that retirement. It runs as a PrismaBuild action, in three
-steps, and every check comes before the first unlink:
-
-1. **Proof.** The run is superseded, cannot resume, and nothing live names it:
-
-   * a successor run is named under a pinned digest (its ``chain-state.json``
-     or its ``adjoint-capture.json``) and its run identity differs from this
-     run's. The same identity would be a resume of this run, not a successor;
-   * every PrismaBuild owner that wrote the run (the chain state's
-     ``producer`` and each resume record's) is contained
-     (``stage_a_chain_resume.require_producer_contained``). A run no owner
-     wrote must not be ``running``;
-   * no document under the declared binding roots names a path inside the
-     run's adjoint space, or the digest of its chain state, its receipt or any
-     of its checkpoints. Seed specs, band receipts and Stage B metadata all
-     name a checkpoint by path and digest. The roots are declared, never
-     discovered: the tool cannot know every document in the fleet, so the
-     operator names where live consumers keep theirs, and at least one root
-     is required.
-
-2. **Plan.** From PrismaBuild's own records (each owner's filed instance, its
-   ``commitments.json`` and its batch records), every committed batch that is
-   not reclaimed is classified against the referenced cotangent entries,
-   files under ``checkpoints/``, and sealed forward records owned by this run
-   inside its generation and binding-proof namespace. A batch entirely inside
-   that set is retired. Only selected PB-committed forward paths become unlink
-   targets; uncommitted copies and imported/foreign forward inputs stay put.
-   A batch with no eligible path is left alone and reported. A batch mixing
-   eligible and unrelated files refuses: part of it is not this retirement's. Each
-   file a retired batch names must still be the file its commit recorded
-   (the batch's ``origin_identity``); a changed file refuses.
-
-3. **Apply.** The retirement record (``stage-a-retired.json``) is sealed into
-   the space first. From then on a chain resume, a seed and the band tool
-   refuse the space (:func:`refuse_retired_space`). Then ``checkpoints/`` is
-   removed, the persisted cotangent/selected forward entries are unlinked, and ``reclaim_origin`` is
-   called for each retired batch, so PrismaBuild stops charging it on its own
-   evidence that every path is gone. A rerun after a crash reads the sealed
-   record and finishes: a path already gone is not a refusal.
-
-The queue root comes from each producer record, so the tool needs no
-produced-output binding of its own. It reads each staged batch's descriptors
-and charge through PrismaBuild's public batch reader
-(``produced_output.batch_records``, prismabuild#955, PQ #1571): the batch
-record is the only place the committed paths and identities live. That
-reader reads every batch, reclaimed ones too, and refuses a record it cannot
-read, so a reclaimed batch whose record is gone refuses a rerun. Reclaim
-never unlinks a record, so a missing one is damaged PrismaBuild state.
+An immutable record seals every deletion target before the first unlink.
+Interrupted application rechecks all current barriers and finishes that roster;
+missing targets are permitted only after the record exists. Replacements retain.
 """
 from __future__ import annotations
 
 import gzip
+import io
 import json
 import os
-import shutil
 import stat
 import zlib
 from dataclasses import dataclass, field
@@ -70,39 +19,41 @@ from typing import Iterable, Mapping
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .digests import bytes_sha256hex
 from .schemas import strict_json_loads
+from .staged_manifest import read_document, open_regular, open_directory, unlink_owned
+from .file_identity import file_stat_signature
+from .stage_a_produced_output import read_produced_selection, MAX_ENTRIES, MAX_GROUPS
 
-RETIREMENT_SCHEMA = "prismaquant.stage_a.retirement.v1"
-RETIREMENT_NAME = "stage-a-retired.json"
-#: The largest binding document the scan reads. PrismaBuild's own data
-#: manifest bound. A larger or unreadable document refuses the negative proof.
-BINDING_MAX_BYTES = 64 * 1024 * 1024
+RETIREMENT_SCHEMA = 'prismaquant.stage_a.retirement.v2'
+RETIREMENT_NAME = 'stage-a-retired.json'
+BINDING_MAX_BYTES = 64 << 20
+MAX_BINDING_DOCUMENTS = 65536
+MAX_BINDING_ROOTS = 64
+MAX_BINDING_AGGREGATE_BYTES = 256 << 20
 _SHA256_LEN = 64
 
 
 class RetirementRefused(RuntimeError):
-    """Retirement admission or completion was refused."""
+    pass
 
 
-def retirement_record_path(space) -> Path:
+def retirement_record_path(space):
     return Path(space) / RETIREMENT_NAME
 
 
-def refuse_retired_space(space, error=RuntimeError, *, what: str) -> None:
-    """Raise ``error`` when ``space`` carries a retirement record.
-
-    Written before the first unlink, so a space mid-retirement refuses too.
-    """
+def refuse_retired_space(space, error=RuntimeError, *, what):
     path = retirement_record_path(space)
-    if path.exists():
-        raise error(f"{path} retires this Stage A run: {what}")
+    if os.path.lexists(path):
+        raise error(f'{path} retires this Stage A run: {what}')
 
 
-# --------------------------------------------------------------------------
-# Reading the run
-# --------------------------------------------------------------------------
+def decode_retirement_document(raw):
+    def invalid(key):
+        return RetirementRefused(f'invalid retirement JSON: {key}')
+    return strict_json_loads(raw, duplicate=invalid, constant=invalid)
 
-def _read_json(path: Path):
-    return json.loads(Path(path).read_bytes())
+
+def _read_json(path):
+    return decode_retirement_document(read_document(path, BINDING_MAX_BYTES)[0])
 
 
 def _session_of(document, where) -> dict:
@@ -122,13 +73,13 @@ def _load_chain_state(space: Path) -> tuple[dict, str]:
 
     path = chain_state_path(space)
     try:
-        raw = path.read_bytes()
+        raw = read_document(path, BINDING_MAX_BYTES)[0]
     except FileNotFoundError:
         raise RetirementRefused(
             f"{path} is missing: without the run's chain state there is no "
-            "record of the owners that wrote it, and no PrismaBuild batch to "
+            "record of the native owners that wrote it; no publication to "
             "reclaim can be found") from None
-    document = json.loads(raw)
+    document = decode_retirement_document(raw)
     if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA
             or _seal(document)["chain_state_sha256"] != document.get("chain_state_sha256")):
         raise RetirementRefused(f"{path} is not a sealed chain state")
@@ -155,7 +106,7 @@ def _successor(path, sha256, *, space: Path, session: dict) -> dict:
 
     path = Path(path)
     try:
-        raw = path.read_bytes()
+        raw = read_document(path, BINDING_MAX_BYTES)[0]
     except OSError as exc:
         raise RetirementRefused(f"the successor run is not readable at {path}: {exc}") from exc
     if bytes_sha256hex(raw) != str(sha256):
@@ -163,7 +114,7 @@ def _successor(path, sha256, *, space: Path, session: dict) -> dict:
     real = Path(os.path.realpath(path))
     if real.is_relative_to(os.path.realpath(space)):
         raise RetirementRefused("the successor lies inside the run it would supersede")
-    successor = _session_of(json.loads(raw), f"the successor {path}")
+    successor = _session_of(decode_retirement_document(raw), f"the successor {path}")
     if successor["run_identity_sha256"] == session["run_identity_sha256"]:
         raise RetirementRefused(
             "the successor carries this run's own identity: that is a resume of "
@@ -186,7 +137,7 @@ def _checkpoint_planes(space: Path, session: dict) -> tuple[list[str], dict]:
     for directory in occupied_checkpoint_directories(space):
         manifest = directory / "checkpoint.json"
         if not manifest.is_file():
-            continue  # A partial checkpoint names nothing; its directory goes.
+            continue  # A partial checkpoint names no referenced tensor plane.
         boundary = int(directory.name.removeprefix("boundary-"))
         try:
             record, _binding = read_sealed_checkpoint(space, boundary)
@@ -196,7 +147,7 @@ def _checkpoint_planes(space: Path, session: dict) -> tuple[list[str], dict]:
             raise RetirementRefused(
                 f"checkpoint {boundary} was sealed by another run "
                 f"({record['session'].get('generation')})")
-        digests[boundary] = bytes_sha256hex(manifest.read_bytes())
+        digests[boundary] = bytes_sha256hex(read_document(manifest, BINDING_MAX_BYTES)[0])
         if checkpoint_is_referenced(record):
             try:
                 plane = checkpoint_cotangent_plane(record)
@@ -226,17 +177,25 @@ def _binding_documents(roots: Iterable, *, skip: Path):
         raise RetirementRefused(
             f"the binding scan cannot read {error.filename}: {error}") from error
 
+    roots = list(roots)
+    if len(roots) > MAX_BINDING_ROOTS:
+        raise RetirementRefused('binding root roster exceeds finite bound')
+    candidates = set()
+    visited = 0
     for root in roots:
         root = Path(root)
-        if root.is_symlink():
+        if not root.is_absolute() or root.resolve() != root:
             raise RetirementRefused(f"the binding root {root} is a symlink")
-        root = root.resolve()
         if root.is_file():
-            candidates = [root]
+            candidates.add(root)
         elif root.is_dir():
-            candidates = []
+            descriptor = open_directory(str(root))
+            os.close(descriptor)
             for directory, subdirs, files in os.walk(root, onerror=unreadable):
                 here = Path(directory)
+                visited += 1 + len(subdirs) + len(files)
+                if visited > MAX_BINDING_DOCUMENTS * 4 or len(here.relative_to(root).parts) > 64:
+                    raise RetirementRefused('binding tree exceeds finite entry/depth bound')
                 if here == skip or here.is_relative_to(skip):
                     subdirs[:] = []
                     continue
@@ -250,11 +209,16 @@ def _binding_documents(roots: Iterable, *, skip: Path):
                             f"the binding directory {child} is a symlink")
                     kept.append(name)
                 subdirs[:] = kept
-                candidates += [here / name for name in files
-                               if name.endswith((".json", ".json.gz"))]
+                candidates.update(here / name for name in files
+                                  if name.endswith((".json", ".json.gz")))
+                if len(candidates) > MAX_BINDING_DOCUMENTS:
+                    raise RetirementRefused('binding document roster exceeds finite bound')
         else:
             raise RetirementRefused(f"the binding root {root} does not exist")
-        for path in sorted(candidates):
+    if len(candidates) > MAX_BINDING_DOCUMENTS:
+        raise RetirementRefused('binding document roster exceeds finite bound')
+    aggregate = 0
+    for path in sorted(candidates):
             if path.is_symlink():
                 raise RetirementRefused(f"the binding document {path} is a symlink")
             try:
@@ -265,13 +229,17 @@ def _binding_documents(roots: Iterable, *, skip: Path):
                 if metadata.st_size > BINDING_MAX_BYTES:
                     raise RetirementRefused(
                         f"the binding document {path} exceeds {BINDING_MAX_BYTES} bytes")
-                opener = gzip.open if path.name.endswith(".gz") else open
-                with opener(path, "rb") as source:
-                    raw = source.read(BINDING_MAX_BYTES + 1)
+                raw = read_document(path, BINDING_MAX_BYTES)[0]
+                if path.name.endswith('.gz'):
+                    with gzip.GzipFile(fileobj=io.BytesIO(raw)) as source:
+                        raw = source.read(BINDING_MAX_BYTES + 1)
                 if len(raw) > BINDING_MAX_BYTES:
                     raise RetirementRefused(
                         f"the binding document {path} exceeds {BINDING_MAX_BYTES} "
                         "decoded bytes")
+                aggregate += len(raw)
+                if aggregate > MAX_BINDING_AGGREGATE_BYTES:
+                    raise RetirementRefused('binding documents exceed finite aggregate bound')
                 document = strict_json_loads(
                     raw, duplicate=lambda key: ValueError(
                         f"duplicate JSON member {key!r}"),
@@ -307,6 +275,8 @@ def check_bindings(roots, *, space: Path, digests: Mapping[str, str]) -> int:
     read = 0
     for path, document in _binding_documents(roots, skip=Path(real_space)):
         read += 1
+        if read > MAX_BINDING_DOCUMENTS:
+            raise RetirementRefused("binding roster exceeds finite bound")
         for pointer, value in _strings(document):
             if value in digests:
                 raise RetirementRefused(
@@ -317,104 +287,6 @@ def check_bindings(roots, *, space: Path, digests: Mapping[str, str]) -> int:
                     f"{path} names {value} inside this run at {pointer or '/'}: "
                     "a live binding holds the run")
     return read
-
-
-# --------------------------------------------------------------------------
-# PrismaBuild's records
-# --------------------------------------------------------------------------
-
-def _sdk():
-    from .joint_forward_resume import _sdk as forward_sdk
-    return forward_sdk()
-
-
-def producer_instances(producer: Mapping) -> list[tuple]:
-    """``[(queue, instance, template), ...]`` PrismaBuild filed for one owner attempt."""
-    sdk = _sdk()
-    po, pool = sdk["produced_output"], sdk["pool"]
-    root = Path(producer["queue_root"])
-    attempt = producer["owner_attempt"]
-    if not isinstance(attempt, Mapping) or "nonce" not in attempt:
-        raise RetirementRefused(
-            f"the producer {str(producer.get('owner_action_key'))[:12]} names no "
-            "attempt nonce")
-    owner_dir = root / "residency" / po.OUTPUT_SCOPES_SUBDIR / str(producer["owner_action_key"])
-    queue = pool.PoolQueue(root)
-    found = []
-    for directory in sorted(owner_dir.glob(f"*.{attempt['nonce']}")):
-        try:
-            instance = po.validate_instance(_read_json(directory / "instance.json"))
-            template = po.validate_template(_read_json(
-                root / "residency" / po.OUTPUT_TEMPLATES_SUBDIR
-                / f"{instance['template_id']}.json"))
-        except (OSError, ValueError, po.ProducedOutputError) as exc:
-            raise RetirementRefused(f"{directory} is not a filed instance: {exc}") from exc
-        if instance["template_sha256"] != po.template_sha256(template):
-            raise RetirementRefused(f"{directory} is bound to another template")
-        found.append((queue, instance, template))
-    return found
-
-
-def _charged_records(queue, instance, template) -> list[dict]:
-    """PB's public records for every batch it still charges this instance."""
-    po = _sdk()["produced_output"]
-    try:
-        records = po.batch_records(queue, instance, template)
-    except po.ProducedOutputError as exc:
-        raise RetirementRefused(f"unreadable batch records: {exc}") from exc
-    return [record for record in records if record["state"] != po.BATCH_STATE_RECLAIMED]
-
-
-def _batch_charge(record: Mapping) -> int:
-    classes = record["commitment"].get("class_bytes") or {}
-    return sum(int(classes.get(name) or 0) for name in ("payload", "checkpoint", "temp"))
-
-
-def _batches(queue, instance, template) -> list[dict]:
-    return [{"batch_id": record["batch_id"], "filed": record["record"],
-             "paths": sorted(os.path.normpath(entry["path"]) for entry in record["entries"]),
-             "bytes": _batch_charge(record)}
-            for record in _charged_records(queue, instance, template)]
-
-
-def durable_charge(queue, instance, template) -> int:
-    """Committed origin bytes PrismaBuild still charges this instance."""
-    return sum(map(_batch_charge, _charged_records(queue, instance, template)))
-
-
-def _identity_holds(filed: Mapping, path: str) -> bool:
-    """Is ``path`` absent, or still the file the batch's commit recorded?"""
-    sdk = _sdk()
-    recorded = (filed.get("origin_identity") or {}).get(path)
-    try:
-        info = os.lstat(path)
-    except FileNotFoundError:
-        return True
-    if not isinstance(recorded, Mapping):
-        return False
-    live = sdk["reader_lease"].portable_identity(info)
-    return bool(sdk["reader_lease"].file_id_matches(recorded, live))
-
-
-# --------------------------------------------------------------------------
-# Plan and apply
-# --------------------------------------------------------------------------
-
-@dataclass
-class Retirement:
-    space: Path
-    record: dict
-    entry_paths: list
-    batches: list = field(default_factory=list)       # [(queue, instance, template, row)]
-    untouched: list = field(default_factory=list)     # [{"batch_id", "bytes", "owner"}]
-    bindings_read: int = 0
-
-
-def _files_under(directory: Path) -> set[str]:
-    if not directory.is_dir():
-        return set()
-    return {os.path.normpath(str(path)) for path in directory.rglob("*")
-            if path.is_file() or path.is_symlink()}
 
 
 def _owned_forward_paths(document: Mapping, *, space: Path, session: Mapping) -> set[str]:
@@ -463,167 +335,165 @@ def _owned_forward_paths(document: Mapping, *, space: Path, session: Mapping) ->
     return paths
 
 
-def _classify_batches(producers, retired_paths) -> tuple[list, list]:
-    """Classify PB-owned batches against the already-derived retirement set."""
-    retired_set = set(retired_paths)
-    plan_batches, untouched = [], []
-    for producer in producers:
-        for queue, instance, template in producer_instances(producer):
-            for row in _batches(queue, instance, template):
-                inside = [p for p in row["paths"] if p in retired_set]
-                if not inside:
-                    untouched.append({"batch_id": row["batch_id"], "bytes": row["bytes"],
-                                      "owner": instance["owner_action_key"]})
-                    continue
-                if len(inside) != len(row["paths"]):
-                    outside = sorted(set(row["paths"]) - set(inside))
-                    raise RetirementRefused(
-                        f"batch {row['batch_id']} mixes checkpoint entries with "
-                        f"{len(outside)} path(s) no checkpoint names ({outside[0]}): "
-                        "part of it is not this retirement's")
-                changed = [p for p in row["paths"] if not _identity_holds(row["filed"], p)]
-                if changed:
-                    raise RetirementRefused(
-                        f"batch {row['batch_id']}: {changed[0]} is not the file its "
-                        "commit recorded")
-                plan_batches.append((queue, instance, template, row))
-    return plan_batches, untouched
+
+@dataclass
+class Retirement:
+    space: Path
+    record: dict
+    entry_paths: list
+    batches: list = field(default_factory=list)
+    untouched: list = field(default_factory=list)
+    bindings_read: int = 0
+
+
+def _producer_key(producer):
+    from .flux_jobs import job_id_number
+    return (job_id_number(producer['job_id']), producer['record_dir'], producer['launch_sha256'])
+
+
+def _identity_holds(row, *, missing):
+    try:
+        fd = open_regular(row['path'])
+    except FileNotFoundError:
+        if missing:
+            return
+        raise RetirementRefused('unsealed retirement target is absent') from None
+    try:
+        if list(file_stat_signature(os.fstat(fd))) != row['file_identity']:
+            raise RetirementRefused(f"retirement target changed: {row['path']}")
+    finally:
+        os.close(fd)
+
+
+def _selected(producers, selections, *, missing):
+    if not isinstance(selections, (list, tuple)) or not 0 < len(selections) <= 16:
+        raise RetirementRefused('explicit finite native producer selections required')
+    expected, seen, groups = {_producer_key(p) for p in producers}, set(), []
+    count = 0
+    for row in selections:
+        if not isinstance(row, dict) or set(row) != {'selection', 'checkpoint_exit'}:
+            raise RetirementRefused('exact native selection/checkpoint contract required')
+        verified = read_produced_selection(row['selection'], checkpoint_exit=row['checkpoint_exit'],
+                                          verify_payloads=not missing)
+        key = _producer_key(verified.index['producer'])
+        if key not in expected or key in seen:
+            raise RetirementRefused('selected producer differs from recorded run owners')
+        seen.add(key)
+        groups.extend(verified.groups)
+        count += sum(len(g['entries']) for g in verified.groups)
+        if len(groups) > MAX_GROUPS or count > MAX_ENTRIES:
+            raise RetirementRefused('aggregate retirement roster exceeds bound')
+    if seen != expected:
+        raise RetirementRefused('selection roster does not cover every recorded producer')
+    return groups
 
 
 def plan_retirement(output_root, *, successor_path, successor_sha256,
-                    binding_roots) -> Retirement:
-    """Check everything and classify every batch. Writes nothing."""
+                    binding_roots, producer_selections=()):
     from .joint_adjoint_checkpoints import adjoint_receipt_path, adjoint_space
-    from .stage_a_chain_resume import ChainResumeRefused, require_producer_contained
-
+    from .stage_a_chain_resume import require_producer_contained
     space = adjoint_space(output_root)
     document, chain_sha = _load_chain_state(space)
-    session = _session_of(document, "the chain state")
+    session = _session_of(document, 'chain state')
     successor = _successor(successor_path, successor_sha256, space=space, session=session)
     producers = _producers(space, document)
-    for producer in producers:
-        try:
-            require_producer_contained(producer)
-        except ChainResumeRefused as exc:
-            raise RetirementRefused(str(exc)) from exc
     if not producers:
-        status_path = (Path(document["boundary_storage"]["directory"])
-                       / session["generation"] / "generation.json")
-        try:
-            status = _read_json(status_path).get("status")
-        except (OSError, ValueError):
-            status = None
-        if status not in ("complete", "failed"):
-            raise RetirementRefused(
-                f"no PrismaBuild owner wrote this run and its generation status is "
-                f"{status!r}: nothing proves it will not write again")
-
+        raise RetirementRefused('no authenticated native producer recorded for this run')
+    for producer in producers:
+        require_producer_contained(producer)
     sealed_path = retirement_record_path(space)
-    if sealed_path.exists():
-        # A rerun finishes the retirement its record seals.
-        record = _read_json(sealed_path)
-        body = {k: v for k, v in record.items() if k != "record_sha256"}
-        if (record.get("schema") != RETIREMENT_SCHEMA
-                or record.get("record_sha256") != canonical_json_sha256(body, where="retirement")
-                or record.get("session") != session):
-            raise RetirementRefused(f"{sealed_path} is not this run's sealed retirement")
-        entry_paths = list(record["entry_paths"])
-        checkpoint_files = list(record["checkpoint_files"])
-        digests = dict(record["digests"])
+    sealed = _read_json(sealed_path) if os.path.lexists(sealed_path) else None
+    if sealed is not None:
+        body = {k: v for k, v in sealed.items() if k != 'record_sha256'}
+        if (sealed.get('schema') != RETIREMENT_SCHEMA or
+                sealed.get('record_sha256') != canonical_json_sha256(body, where='retirement') or
+                sealed.get('session') != session or sealed.get('chain_state_sha256') != chain_sha or
+                sealed.get('superseded_by') != successor or sealed.get('producers') != producers or
+                sealed.get('producer_selections') != list(producer_selections) or
+                sealed.get('binding_roots') != [str(Path(p)) for p in binding_roots]):
+            raise RetirementRefused('sealed retirement no longer matches all current barriers')
+        digests = sealed['digests']
     else:
-        entry_paths, checkpoint_digests = _checkpoint_planes(space, session)
-        checkpoint_files = sorted(_files_under(space / "checkpoints"))
-        digests = {chain_sha: "chain state"}
+        _entries, checkpoint_digests = _checkpoint_planes(space, session)
+        digests = {chain_sha: 'chain state', **{v: f'checkpoint {k}' for k, v in checkpoint_digests.items()}}
         receipt = adjoint_receipt_path(space)
-        if receipt.is_file():
-            digests[bytes_sha256hex(receipt.read_bytes())] = "receipt"
-        for boundary, digest in checkpoint_digests.items():
-            digests[digest] = f"checkpoint {boundary}"
-        record = None
-
+        if receipt.exists():
+            digests[bytes_sha256hex(read_document(receipt, BINDING_MAX_BYTES)[0])] = 'receipt'
     read = check_bindings(binding_roots, space=space, digests=digests)
-    # On retry, only the sealed list: vanished files must not change targets,
-    # and an old retirement must never acquire new forward entries.
-    forward_paths = _owned_forward_paths(document, space=space, session=session) if record is None else set()
-    plan_batches, untouched = _classify_batches(
-        producers, set(entry_paths) | set(checkpoint_files) | forward_paths)
+    groups = _selected(producers, producer_selections, missing=sealed is not None)
+    targets, batches, untouched = {}, [], []
+    if sealed is None:
+        entry_paths, _ = _checkpoint_planes(space, session)
+        eligible = set(entry_paths) | _owned_forward_paths(document, space=space, session=session)
+        for group in groups:
+            if group['session'] != session:
+                raise RetirementRefused('selected batch session differs from retired run')
+            rows = group['entries']
+            inside = [r for r in rows if r['path'] in eligible or
+                      Path(r['path']).is_relative_to(space / 'checkpoints')]
+            if not inside:
+                untouched.append(group['batch_id'])
+                continue
+            if len(inside) != len(rows):
+                raise RetirementRefused('batch mixes eligible and unrelated paths')
+            batches.append(group['batch_id'])
+            for row in rows:
+                target = {k: row[k] for k in ('path', 'sha256', 'bytes', 'file_identity')}
+                if row['path'] in targets:
+                    raise RetirementRefused('duplicate selected retirement target')
+                targets[row['path']] = target
+        # Unrecorded files in checkpoints are retained, never swept.
+        if not targets:
+            raise RetirementRefused('no selected native files eligible for retirement')
+        body = canonical_json({'schema': RETIREMENT_SCHEMA, 'session': session,
+            'chain_state_sha256': chain_sha, 'superseded_by': successor, 'producers': producers,
+            'producer_selections': list(producer_selections), 'digests': digests,
+            'binding_roots': [str(Path(p)) for p in binding_roots],
+            'targets': [targets[p] for p in sorted(targets)], 'batches': batches,
+            'untouched': untouched}, where='Stage A retirement')
+        sealed = {**body, 'record_sha256': canonical_json_sha256(body, where='retirement')}
+    else:
+        available = {r['path']: r for g in groups for r in g['entries']}
+        if not isinstance(sealed['targets'], list) or not 0 < len(sealed['targets']) <= MAX_ENTRIES:
+            raise RetirementRefused('finite sealed target roster required')
+        for row in sealed['targets']:
+            if row != {k: available.get(row['path'], {}).get(k)
+                       for k in ('path', 'sha256', 'bytes', 'file_identity')}:
+                raise RetirementRefused('sealed target differs from immutable selected descriptor')
+    for row in sealed['targets']:
+        _identity_holds(row, missing=os.path.lexists(sealed_path))
+    return Retirement(space, sealed, [r['path'] for r in sealed['targets']],
+                      sealed['batches'], sealed['untouched'], read)
 
-    if record is None:
-        # A sealed forward record is eligibility, not permission to sweep it.
-        # Only the real PB committed batches we selected add deletion targets.
-        committed_forward = {path for *_, row in plan_batches
-                             for path in row["paths"] if path in forward_paths}
-        entry_paths = sorted(set(entry_paths) | committed_forward)
-        body = canonical_json({
-            "schema": RETIREMENT_SCHEMA,
-            "session": session,
-            "chain_state_sha256": chain_sha,
-            "superseded_by": successor,
-            "producers": producers,
-            "entry_paths": entry_paths,
-            "checkpoint_files": checkpoint_files,
-            "digests": digests,
-            "batches": sorted(row["batch_id"] for *_, row in plan_batches),
-            "binding_roots": [str(Path(root)) for root in binding_roots],
-        }, where="Stage A retirement")
-        record = {**body, "record_sha256": canonical_json_sha256(body, where="retirement")}
-    return Retirement(space=space, record=record, entry_paths=entry_paths,
-                      batches=plan_batches, untouched=untouched, bindings_read=read)
 
-
-def apply_retirement(plan: Retirement) -> dict:
-    """Seal the record, remove the files, reclaim each batch. Returns a report."""
+def apply_retirement(plan):
+    # Recollect stopped scopes, selected authority, successor and all current
+    # consumers immediately before sealing and every apply, including restart.
+    from .joint_adjoint_checkpoints import adjoint_space
+    output_root = plan.space.parent.parent
+    if adjoint_space(output_root) != plan.space:
+        raise RetirementRefused('retirement space is not the canonical adjoint space')
+    record = plan.record
+    fresh = plan_retirement(output_root,
+        successor_path=record['superseded_by']['path'], successor_sha256=record['superseded_by']['sha256'],
+        binding_roots=record['binding_roots'], producer_selections=record['producer_selections'])
+    if fresh.record != record:
+        raise RetirementRefused('retirement changed between planning and apply')
     path = retirement_record_path(plan.space)
-    payload = (json.dumps(plan.record, sort_keys=True, indent=1, allow_nan=False) + "\n").encode()
-    if not publish_new_bytes(path, payload) and path.read_bytes() != payload:
-        raise RetirementRefused(f"{path} already seals another retirement")
-    po = _sdk()["produced_output"]
-    charged_before = {}
-    for queue, instance, template, _row in plan.batches:
-        key = (str(queue.root), instance["owner_action_key"], instance["template_id"])
-        charged_before.setdefault(key, durable_charge(queue, instance, template))
-
-    checkpoints = plan.space / "checkpoints"
-    if checkpoints.exists():
-        shutil.rmtree(checkpoints)
-    removed_bytes = removed = 0
-    for entry in plan.entry_paths:
-        try:
-            size = os.lstat(entry).st_size
-        except FileNotFoundError:
+    payload = (json.dumps(record, sort_keys=True, indent=1, allow_nan=False) + '\n').encode()
+    if not publish_new_bytes(path, payload) and read_document(path, BINDING_MAX_BYTES)[0] != payload:
+        raise RetirementRefused('another retirement already sealed this space')
+    for row in record['targets']:
+        _identity_holds(row, missing=True)
+    removed, nbytes = 0, 0
+    for row in record['targets']:
+        _identity_holds(row, missing=True)
+        if not unlink_owned(row['path'], row['file_identity'], missing_ok=True):
             continue
-        os.unlink(entry)
         removed += 1
-        removed_bytes += size
-
-    outcomes = {}
-    for queue, instance, template, row in plan.batches:
-        out = dict(po.reclaim_origin(queue, instance, template, batch_id=row["batch_id"]))
-        outcomes[row["batch_id"]] = "reclaimed" if out.get("ok") else str(out.get("refusal"))
-    charged_after = {}
-    for queue, instance, template, _row in plan.batches:
-        key = (str(queue.root), instance["owner_action_key"], instance["template_id"])
-        charged_after.setdefault(key, durable_charge(queue, instance, template))
-    refused = {batch: state for batch, state in outcomes.items() if state != "reclaimed"}
-    report = {
-        "schema": "prismaquant.stage_a.retirement_report.v1",
-        "record": str(path), "record_sha256": plan.record["record_sha256"],
-        "entries_removed": removed, "entry_bytes_removed": removed_bytes,
-        "batches": outcomes,
-        "durable_charge_before": sum(charged_before.values()),
-        "durable_charge_after": sum(charged_after.values()),
-        "untouched_batches": plan.untouched,
-        "bindings_read": plan.bindings_read,
-    }
-    if refused:
-        raise RetirementRefused(
-            f"PrismaBuild kept {len(refused)} batch(es) charged: {refused}; report: "
-            + json.dumps(report, sort_keys=True))
-    return report
-
-
-__all__ = [
-    "RETIREMENT_NAME", "RETIREMENT_SCHEMA", "Retirement", "RetirementRefused",
-    "apply_retirement", "check_bindings", "durable_charge", "plan_retirement",
-    "producer_instances", "refuse_retired_space", "retirement_record_path",
-]
+        nbytes += row['bytes']
+    return {'schema': 'prismaquant.stage_a.retirement_report.v2',
+        'record': str(path), 'record_sha256': record['record_sha256'],
+        'entries_removed': removed, 'entry_bytes_removed': nbytes,
+        'batches': record['batches'], 'untouched_batches': record['untouched'],
+        'bindings_read': fresh.bindings_read}

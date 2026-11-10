@@ -13,23 +13,15 @@ from pathlib import PurePosixPath
 import re
 
 
-#: PB's protected reader identity (RobTand/prismabuild#730): the resource_exec
-#: proxy injects these from the exact launch identity -- the 64-hex action key
-#: it already ran under, the launch-bound nonce/scope pair the reader SDK
-#: checks against the live claim row, and the sealed helper generation root
-#: readers import from. The container-side SDK (PQ #846) appends ``/src`` to
-#: the helper root itself, so this names the generation directory, never the
-#: ``src`` tree beneath it. The literals are repeated here rather than
-#: imported from ``prismabuild``, whose initialisation must not run on the
-#: host before Docker starts.
-ACTION_KEY_ENV = "PRISMABUILD_ACTION_KEY"
-ACTION_NONCE_ENV = "PRISMABUILD_ACTION_NONCE"
-ACTION_SCOPE_ENV = "PRISMABUILD_ACTION_SCOPE"
-READER_HELPER_ROOT_ENV = "PRISMABUILD_READER_HELPER_ROOT"
-QUEUE_ROOT_ENV = "PRISMABUILD_QUEUE_ROOT"
-#: Every name the launcher -- never the spec -- may supply for reader context.
-READER_CONTEXT_ENV = (ACTION_KEY_ENV, ACTION_NONCE_ENV, ACTION_SCOPE_ENV,
-                      READER_HELPER_ROOT_ENV, QUEUE_ROOT_ENV)
+#: No PB name is a valid spec setting: the PB action, reader, queue, produced-spool and
+#: local-scratch charge contexts no longer exist, and a spec naming one promises a
+#: service that is gone.
+KEPT_PB_SPEC_ENV = ()
+#: The native staged-input names the launcher alone supplies (``staged_launch.launch`` exports
+#: the same five); a spec naming one is forged or conflicting, never a default.
+LAUNCHER_STAGED_ENV = ("PRISMAQUANT_STAGED_MANIFEST", "PRISMAQUANT_STAGED_MANIFEST_SHA256",
+                       "PRISMAQUANT_READ_CONTRACT_SHA256", "PRISMAQUANT_READ_CONTRACT_PATH",
+                       "PRISMAQUANT_STAGED_ALLOWED_TIERS")
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -136,6 +128,25 @@ def container_memory_budget_gb(spec: dict) -> float | None:
     return float(raw)
 
 
+def refuse_retired_produced_env(env) -> None:
+    """Refuse the retired produced-output service names (the spool's bound is the launch-bound declaration's)."""
+    for name in env:
+        if name.startswith("PRISMABUILD_PRODUCED_"):
+            raise RuntimeError(
+                f"the {name} setting belongs to the retired produced-output service context; "
+                "the spool root and bound are the launch-bound declaration's, never environment")
+
+
+def refuse_retired_pb_env(env) -> None:
+    """Refuse every PB service setting a spec names, except the kept scratch wire."""
+    refuse_retired_produced_env(env)
+    for name in env:
+        if name.startswith("PRISMABUILD_") and name not in KEPT_PB_SPEC_ENV:
+            raise RuntimeError(
+                f"the {name} setting belongs to the retired PB action/reader/spool context; "
+                "the native launch supplies no such service, so a spec cannot name it")
+
+
 def validate_container(spec: dict, *, bounded: bool = False) -> None:
     """Check a container spec, with the bounded-capture env gate opt-in.
 
@@ -211,14 +222,10 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
         raise RuntimeError('the import guard is supplied by the launcher, not by a spec')
     if CHECKOUT_COMMIT_ENV in env:
         raise RuntimeError('the checkout commit is supplied by the inspected launcher, not by a spec')
-    for name in READER_CONTEXT_ENV:
-        # Sealed reader identity is the launcher's to forward from the exact
-        # launch environment, exactly like PB's own core refuses a sealed
-        # variable of any of these names rather than overwriting it: a spec
-        # that names one is forged or conflicting, never a default.
+    for name in LAUNCHER_STAGED_ENV:
         if name in env:
-            raise RuntimeError(
-                f'the {name} is supplied by the launcher, not by a spec')
+            raise RuntimeError(f"the {name} setting is supplied by the launcher, not by a spec")
+    refuse_retired_pb_env(env)
     for name, expected in BOUNDED_CAPTURE_ENV.items():
         # Declaring it is optional -- the launcher supplies it -- but a spec may
         # not weaken it, and the refusal names the field so a reader of the spec
@@ -231,21 +238,10 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
                 "with the wrong value is refused by the pass before metadata intake")
 
 
-#: The PrismaBuild option that declares the container image a submission
-#: requires present on its claiming box before it runs (RobTand/prismabuild#714).
-#: PrismaBuild does not pull, load or transfer an image: the declaration is a
-#: placement requirement over the box's own Docker, so the reference has to be
-#: an immutable identity the receipt can be held against (``sha256:<64 hex>``
-#: for a local image ID or ``repository@sha256:<64 hex>`` for a manifest
-#: digest).  The spelling lives here because this module owns the spec's image
-#: contract and both PB submitters must agree on the flag.
-CONTAINER_IMAGE_FLAG = "--container-image"
-
-
 def admission_image_reference(
     spec: object, *, portable_refusal: type[Exception] = RuntimeError,
 ) -> str | None:
-    """The image reference PrismaBuild must admit this spec against, or ``None``.
+    """The image reference a launch must admit this spec against, or ``None``.
 
     One reader for every submission path (the joint dispatcher's stage-A and
     quantum rows, the campaign dispatcher's direct commands and its generated

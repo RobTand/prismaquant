@@ -1,13 +1,8 @@
-"""${LABEL} ${campaign_name} Stage A: admitted local output spool with explicit CPU/device budgets."""
+"""${LABEL} ${campaign_name}: verify an immutable native recovery row and saved IDs."""
 import argparse
-import contextlib
 import hashlib
 import json
-import os
 from pathlib import Path
-import subprocess
-import sys
-import tempfile
 
 ROOT = Path(__file__).resolve().parent
 PANEL = Path(${panel})
@@ -15,142 +10,89 @@ RUN = PANEL / ${run}
 HEAD = ${source_head}
 MANIFEST = ROOT / ${manifest_name}
 MANIFEST_SHA = ${manifest_sha256}
-
-# The JSON bytes, expected digest and this program are in the command PB seals.
-# Materialization is inside the admitted container, immediately before exec.
-MATERIALIZE = '''import hashlib, os, pathlib, sys, tempfile
-target, raw, expected = pathlib.Path(sys.argv[1]), sys.argv[2].encode(), sys.argv[3]
-if hashlib.sha256(raw).hexdigest() != expected:
-    raise RuntimeError("sealed prefetch override digest mismatch")
-target.parent.mkdir(parents=True, exist_ok=True)
-fd, temporary = tempfile.mkstemp(prefix=".prefetch-", dir=target.parent)
-try:
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(raw)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(temporary, 0o400)
-    os.replace(temporary, target)
-finally:
-    if os.path.exists(temporary):
-        os.unlink(temporary)
-os.environ["PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE"] = str(target)
-os.execvp(sys.argv[4], sys.argv[4:])
-'''
+CAPSULE = {'path': ${capsule_path}, 'sha256': ${capsule_sha256}}
 
 
-def bind_override(argv, spec, raw):
-    result = list(argv)
-    demand_index = result.index('--demand') + 1
-    if result[demand_index] != ${reviewed_demand}:
-        raise RuntimeError('unreviewed Stage A base demand')
-    result[demand_index] = ${bound_demand}
-    cpu_index = result.index('--cpus') + 1
-    if result[cpu_index] != ${reviewed_cpus}:
-        raise RuntimeError('unreviewed Stage A CPU demand')
-    result[cpu_index] = ${bound_cpus}
-    first_separator = result.index('--')
-    for name in ('PRISMABUILD_PRODUCED_SPOOL_ROOT', 'PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES'):
-        result[first_separator:first_separator] = ['--env', name + '=' + spec['env'][name]]
-        first_separator += 2
-    inner_separator = result.index('--', first_separator + 1)
-    original = result[inner_separator + 1:]
-    original += ['--forward-recovery', ${capsule_path}, '--forward-recovery-sha256', ${capsule_sha256}]
-    path = spec['env']['PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE']
-    original[original.index('--prefetch-override') + 1] = path
-    digest = hashlib.sha256(raw.encode()).hexdigest()
-    return result[:inner_separator + 1] + [
-        'python3', '-c', MATERIALIZE, path, raw, digest, *original]
+def bound_document(filename, expected=None):
+    from prismaquant.staged_manifest import read_document
+    from prismaquant.schemas import strict_json_loads
+    raw, _ = read_document(str(filename), 16 << 20)
+    if expected is not None and hashlib.sha256(raw).hexdigest() != expected:
+        raise RuntimeError('immutable launcher input changed')
+    def invalid(value):
+        return ValueError('invalid launcher JSON: ' + value)
+    return strict_json_loads(raw, duplicate=invalid, constant=invalid)
 
 
-def dispatch_args():
-    return ['--records', str(PANEL / ${records}),
-            '--output-root', str(RUN), '--adjoint-manifest', str(MANIFEST),
-            '--stage-a-prefetch-override', str(ROOT / 'prefetch-override-r7.json'),
-            '--stage-a-artifact-budget-bytes', ${artifact_budget_bytes},
-            '--stage-a-produced-output-template', str(ROOT / 'stagea-512-template-r7.json'),
-            '--spec', str(ROOT / 'stage-a-spec-r7.json'),
-            '--plan', str(ROOT / 'stage-a-dispatch-config.json')]
+def require_argument(argv, flag, expected):
+    positions = [i for i, value in enumerate(argv) if value == flag]
+    if len(positions) != 1 or argv[positions[0] + 1:positions[0] + 2] != [str(expected)]:
+        raise RuntimeError('reviewed native argv differs at ' + flag)
 
 
-def bound_gateway(dispatch, checkout, document, base=None):
-    raw = (ROOT / 'prefetch-override-r7.json').read_text()
-
-    class BoundGateway(base or dispatch.Gateway):
-        def submit(self, argv):
-            bound = bind_override(argv, document['spec'], raw)
-            bound[2:2] = ['--cwd', str(checkout)]
-            if bound != document['argv']:
-                raise RuntimeError('dispatch changed after reviewed Stage A plan')
-            return super().submit(bound)
-
-    return BoundGateway()
-
-
-def plan(checkout):
-    pins = json.loads((ROOT / 'package-pins.json').read_text())
-    for name, digest in pins.items():
-        if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != digest:
+def plan(checkout, row_path, row_sha256):
+    from prismaquant.staged_manifest import read_document
+    from prismaquant.stage_a_produced_output import declaration_launch_arguments
+    from prismaquant.joint_forward_resume import _read, chain_records
+    pins = bound_document(ROOT / 'package-pins.json')
+    if not isinstance(pins, dict) or len(pins) > 64:
+        raise ValueError('finite package pin roster required')
+    for name, expected in pins.items():
+        if Path(name).name != name or name in ('.', '..'):
+            raise ValueError('package member escapes root')
+        raw, _ = read_document(str(ROOT / name), 64 << 20)
+        if hashlib.sha256(raw).hexdigest() != expected:
             raise RuntimeError('package input changed: ' + name)
-    if hashlib.sha256(MANIFEST.read_bytes()).hexdigest() != MANIFEST_SHA:
+    wire, _ = read_document(str(MANIFEST), 64 << 20)
+    if hashlib.sha256(wire).hexdigest() != MANIFEST_SHA:
         raise RuntimeError('scientific read manifest changed')
-    record = json.loads((PANEL / ${first_record}).read_text())
-    campaign = record['campaign']
-    scope = campaign['campaign_scope']
+    campaign = bound_document(PANEL / ${first_record})['campaign']
     for name, expected in ${campaign_scope}.items():
-        if scope.get(name) != expected:
+        if campaign['campaign_scope'].get(name) != expected:
             raise RuntimeError(${scope_refusal} + name)
     for name, expected in ${campaign_bindings}.items():
         if campaign.get(name) != expected:
             raise RuntimeError('scientific campaign binding changed: ' + name)
-    spec = json.loads((ROOT / 'stage-a-spec-r7.json').read_text())
-    raw = (ROOT / 'prefetch-override-r7.json').read_text()
-    cmd = [sys.executable, 'tools/dispatch_joint_quanta.py', *dispatch_args(), '--dry-run']
-    proc = subprocess.run(cmd, cwd=checkout, capture_output=True, text=True)
-    if proc.returncode:
-        raise RuntimeError(proc.stderr)
-    document = json.loads(proc.stdout)
-    if len(document['rows']) != 1 or document['rows'][0]['kind'] != 'stage-a':
-        raise RuntimeError('${LABEL} must submit Stage A alone')
-    argv = bind_override(document['rows'][0]['argv'], spec, raw)
-    # Snapshot exactly the reviewed source, regardless of the launcher's cwd.
-    argv[2:2] = ['--cwd', str(checkout)]
-    return {'schema': 'prismaquant.stagea.${label}.forward_recovery.v1', 'argv': argv,
-            'prefetch_sha256': hashlib.sha256(raw.encode()).hexdigest(),
-            'source_head': HEAD, 'spec': spec, 'prefetch': json.loads(raw)}
+    capsule, _ = _read(CAPSULE['path'], CAPSULE['sha256'])
+    chain_records(capsule)
+    row = bound_document(row_path, row_sha256)
+    if row.get('cwd') != str(checkout) or row.get('data_manifest') != str(MANIFEST):
+        raise RuntimeError('native row source/read manifest differs')
+    argv = row['argv']
+    for flag, value in (('--forward-recovery', CAPSULE['path']),
+                        ('--forward-recovery-sha256', CAPSULE['sha256']),
+                        ('--artifact-budget-bytes', ${artifact_budget_bytes}),
+                        ('--prefetch-override', ROOT / 'prefetch-override-r7.json')):
+        require_argument(argv, flag, value)
+    declaration = declaration_launch_arguments(ROOT / 'stagea-512-template-r7.json')
+    for flag, value in zip(declaration[::2], declaration[1::2]):
+        require_argument(argv, flag, value)
+    return {'schema': 'prismaquant.stagea.${label}.native_forward_recovery.v2',
+            'source_head': HEAD, 'row': row, 'capsule': CAPSULE, 'output_root': str(RUN)}
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('checkout', type=Path)
+    parser.add_argument('--row', type=Path, required=True)
+    parser.add_argument('--row-sha256', required=True)
+    parser.add_argument('--state-dir', type=Path, required=True)
+    parser.add_argument('--afterok', type=Path, action='append', default=[])
     parser.add_argument('--launch', action='store_true')
     args = parser.parse_args()
-    if args.launch:
-        head = subprocess.check_output(['git', '-C', str(args.checkout), 'rev-parse', 'HEAD'], text=True).strip()
-        dirty = subprocess.check_output(['git', '-C', str(args.checkout), 'status', '--short'], text=True).strip()
-        if head != HEAD or dirty:
-            raise RuntimeError('launch requires clean accepted ${LABEL} source')
-        runtime = Path('/mnt/shared/prismabuild-fleet/repo').resolve()
-        if str(runtime) != (ROOT / 'accepted-runtime.txt').read_text().strip():
-            raise RuntimeError('parent must accept and pin the deployed runtime')
-        stale = sorted((RUN / 'layer-quanta/adjoint/checkpoints').glob('boundary-[0-9][0-9][0-9]'))
-        if stale:
-            raise RuntimeError('adjoint checkpoint paths are occupied: ' + ', '.join(map(str, stale)))
-    document = plan(args.checkout)
+    document = plan(args.checkout, args.row, args.row_sha256)
     if not args.launch:
         print(json.dumps(document, sort_keys=True, indent=2))
         return
-    attempt = Path(tempfile.mkdtemp(prefix='attempt-${label}-', dir=ROOT))
-    (attempt / 'sealed-command.json').write_text(json.dumps(document, sort_keys=True, indent=2) + '\n')
-    with (attempt / 'submit.stdout').open('w') as out, (attempt / 'submit.stderr').open('w') as err:
-        sys.path.insert(0, str(args.checkout))
-        from tools import dispatch_joint_quanta as dispatch
-        gateway = bound_gateway(dispatch, args.checkout, document)
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            code = dispatch.main(dispatch_args(), _gateway=gateway)
-    (attempt / 'result.json').write_text(json.dumps({'returncode': code}) + '\n')
-    print(attempt)
-    raise SystemExit(code)
+    from prismaquant.flux_jobs import load_submission
+    from prismaquant.tessera_campaign_rows import submit_rows
+    import subprocess
+    head = subprocess.check_output(['git', '-C', str(args.checkout), 'rev-parse', 'HEAD'], text=True).strip()
+    if head != HEAD:
+        raise RuntimeError('launcher requires the reviewed source commit')
+    submissions = submit_rows([document['row']], args.state_dir,
+        afterok=[load_submission(path) for path in args.afterok])
+    print(json.dumps({'job_ids': [submission.job_id for submission in submissions]}, sort_keys=True))
 
 
 if __name__ == '__main__':

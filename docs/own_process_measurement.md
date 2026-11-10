@@ -1,6 +1,6 @@
 # Isolated pytest measurement
 
-Set `PQ_OWN_PROCESS_MEASURE=1` on an admitted PrismaBuild test action to
+Set `PQ_OWN_PROCESS_MEASURE=1` on an admitted Flux test job to
 instrument the existing `own_process` child runner. Use pytest's `--basetemp`
 to choose the run's temporary root. Each xdist worker uses the shared parent
 of its own temporary root, as the existing runner does.
@@ -9,7 +9,7 @@ The ordinary path keeps the same child command, terminal state, and outcome
 reports. Measurement adds cProfile to the child launch and records durations
 from pytest's actual child reports. It preserves the chosen node IDs, group
 lock, per-test bounds, and terminal-exit handling. It does not submit nested
-PrismaBuild actions or drive pytest hooks itself.
+jobs or drive pytest hooks itself.
 
 The private child launcher uses `cProfile.Profile.runcall` and writes its
 profile in `finally`. Pytest's `SystemExit` propagates unchanged. The standard
@@ -79,7 +79,7 @@ and [coverage combination API](https://coverage.readthedocs.io/en/latest/api_cov
 
 ## Verify the runner
 
-Run these files through PrismaBuild with the supplied interpreter:
+Run these files as an admitted Flux job with the supplied interpreter:
 
 - `tests/test_own_process_measurement.py`
 - `tests/test_own_process_isolation.py`

@@ -81,7 +81,7 @@ measurement, using a complete checkout of that commit:
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --cwd CHECKOUT --cpus 4 --demand mem_gb=12 --gpu --gpu-memory-gb 8 \
-  --measurement --detach -- bash experiments/pq322_anchor_verify_ab.sh \
+  --measurement --detach -- bash archive/pq_experiments_2026-11-09/experiments/pq322_anchor_verify_ab.sh \
   SAMPLER_OUTPUT --plan PLAN --plan-sha256 PLAN_SHA256
 ```
 

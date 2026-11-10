@@ -34,7 +34,7 @@ from prismaquant.glm_source_derivative import bind_source_derivative
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
 from prismaquant.kl_fisher import fisher_probe_scalar
-from prismaquant.stage_a_produced_output import BoundaryProducedPublication
+from prismaquant.stage_a_produced_output import BoundaryProducedPublication, add_declaration_arguments
 from prismaquant.joint_replay_spill import StageBReplaySpill, spill_geometry
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
 import prismaquant.joint_cost_stage_a as stage_a
@@ -59,7 +59,7 @@ def dependency_identity():
 
 
 def commit(units, phase):
-    from prismaquant.prismabuild_progress import commit as report_progress
+    from prismaquant.joint_run_progress import log_progress as report_progress
     report_progress(units, phase, 'durable_tiny_glm_control')
 
 
@@ -328,16 +328,18 @@ def spill_control(rows, modules, device, root):
                 'telemetry': session.telemetry}
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    add_declaration_arguments(parser)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--reuse-fp32-direct', action='store_true')
     parser.add_argument('--reuse-direct', action='store_true')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
-    parser.add_argument('--only-dtype', choices=('float32', 'bfloat16'))
-    args = parser.parse_args()
+    parser.add_argument('--only-dtype', choices=('float32', 'bfloat16'), required=True,
+                        help='one scientific session per native produced declaration')
+    args = parser.parse_args(argv)
     args.output.mkdir(exist_ok=False)
     device = torch.device('cuda', torch.cuda.current_device()) if args.device == 'cuda' else torch.device('cpu')
     torch.set_num_threads(1)
@@ -375,55 +377,52 @@ def main():
             if hasattr(function, '__wrapped__'):
                 setattr(modeling, name, function.__wrapped__)
         results['substitutions'] = ['CPU preflight only: library Torch short-convolution implementations']
-    try:
-        dtypes = [getattr(torch, args.only_dtype)] if args.only_dtype else (torch.float32, torch.bfloat16)
-        for index, dtype in enumerate(dtypes):
-            label = str(dtype).split('.')[-1]
-            model, runner, modules = model_and_runner(config, state, dtype, device)
-            with profiled(args.output / label, device):
-                reuse_direct = args.reuse_direct or (dtype == torch.float32 and args.reuse_fp32_direct)
-                if reuse_direct:
-                    prior = json.loads(raw['inputs.ready.json'])
-                    assert prior['source_identity_sha256'] == source['model_identity']['content_sha256']
-                    assert prior['tokens_sha256'] == source['tokens_sha256']
-                    direct_result = torch.load(io.BytesIO(raw[f'{label}.direct.pt']), map_location='cpu', weights_only=True)
-                    assert {r['unit'] for r in direct_result['rows']} == set(modules)
-                else:
-                    direct_result = direct(model, modules, ids.to(device))
-                torch.save(direct_result, args.output / f'{label}.direct.pt')
-                captured = capture(runner, model, modules, ids, source['model_identity'], args.output / label, publication)
-                cotangent_differences = {f'L{layer}/p{p}': difference(direct_result['gradients'][layer, p],
-                    torch.cat([captured['rolled'][layer, batch, p] for batch in range(4)]))
-                    for layer in range(2) for p in range(2)}
-                direct_components = components(direct_result['rows'], modules)
-                capture_components = components(captured['rows'], modules)
-                operator_components = statistics(captured['rows'], modules, device)
-                spill = (spill_control(captured['rows'], modules, device,
-                    Path(os.environ['PRISMAQUANT_STAGE_B_SPILL_ROOT']) / f'action-{os.getpid()}')
-                    if dtype == torch.bfloat16 else {'scope': 'FP32 not admitted by production spill operand dtype contract'})
-            tensors = {'direct': direct_result, 'capture': captured}
-            torch.save(tensors, args.output / f'{label}.pt')
-            results['legs'][label] = {'runtime': runtime_identity(model) if device.type == 'cuda' else {'device': 'cpu', 'torch': torch.__version__},
-                'cotangent_differences': cotangent_differences,
-                'direct_components': {f'{n}/p{p}': v for (n, p), v in direct_components.items()},
-                'capture_components': {f'{n}/p{p}': v for (n, p), v in capture_components.items()},
-                'operator_components': operator_components, 'spill': spill,
-                'capture_receipt': captured['receipt']}
+    dtypes = [getattr(torch, args.only_dtype)]
+    for index, dtype in enumerate(dtypes):
+        label = str(dtype).split('.')[-1]
+        model, runner, modules = model_and_runner(config, state, dtype, device)
+        with profiled(args.output / label, device):
+            reuse_direct = args.reuse_direct or (dtype == torch.float32 and args.reuse_fp32_direct)
             if reuse_direct:
-                results['legs'][label]['direct_reuse'] = {
-                    'action': ('51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2'
-                               if dtype == torch.float32 else '7668acbf4020878f30ae2c0cd1beef59778542c35d3bc3bbf0107f45f6e52a7f'),
-                    'scope': 'banked direct graph completed before capture refusal; same unchanged direct function/source/inputs/arithmetic'}
-            (args.output / 'result.partial.json').write_text(json.dumps(results, indent=2) + '\n')
-            commit(index + 2, 'control')
-            del model, runner, direct_result, captured, tensors
-            torch.cuda.empty_cache()
-        results['complete'] = True
-        (args.output / 'result.json').write_text(json.dumps(results, indent=2) + '\n')
-        commit(2 + len(dtypes), 'publish')
-        print('PASS: tiny GLM direct and production capture legs complete; inspect numerical differences')
-    finally:
-        results['publication_release'] = publication.release()
+                prior = json.loads(raw['inputs.ready.json'])
+                assert prior['source_identity_sha256'] == source['model_identity']['content_sha256']
+                assert prior['tokens_sha256'] == source['tokens_sha256']
+                direct_result = torch.load(io.BytesIO(raw[f'{label}.direct.pt']), map_location='cpu', weights_only=True)
+                assert {r['unit'] for r in direct_result['rows']} == set(modules)
+            else:
+                direct_result = direct(model, modules, ids.to(device))
+            torch.save(direct_result, args.output / f'{label}.direct.pt')
+            captured = capture(runner, model, modules, ids, source['model_identity'], args.output / label, publication)
+            cotangent_differences = {f'L{layer}/p{p}': difference(direct_result['gradients'][layer, p],
+                torch.cat([captured['rolled'][layer, batch, p] for batch in range(4)]))
+                for layer in range(2) for p in range(2)}
+            direct_components = components(direct_result['rows'], modules)
+            capture_components = components(captured['rows'], modules)
+            operator_components = statistics(captured['rows'], modules, device)
+            spill = (spill_control(captured['rows'], modules, device,
+                Path(os.environ['PRISMAQUANT_STAGE_B_SPILL_ROOT']) / f'action-{os.getpid()}')
+                if dtype == torch.bfloat16 else {'scope': 'FP32 not admitted by production spill operand dtype contract'})
+        tensors = {'direct': direct_result, 'capture': captured}
+        torch.save(tensors, args.output / f'{label}.pt')
+        results['legs'][label] = {'runtime': runtime_identity(model) if device.type == 'cuda' else {'device': 'cpu', 'torch': torch.__version__},
+            'cotangent_differences': cotangent_differences,
+            'direct_components': {f'{n}/p{p}': v for (n, p), v in direct_components.items()},
+            'capture_components': {f'{n}/p{p}': v for (n, p), v in capture_components.items()},
+            'operator_components': operator_components, 'spill': spill,
+            'capture_receipt': captured['receipt']}
+        if reuse_direct:
+            results['legs'][label]['direct_reuse'] = {
+                'action': ('51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2'
+                           if dtype == torch.float32 else '7668acbf4020878f30ae2c0cd1beef59778542c35d3bc3bbf0107f45f6e52a7f'),
+                'scope': 'banked direct graph completed before capture refusal; same unchanged direct function/source/inputs/arithmetic'}
+        (args.output / 'result.partial.json').write_text(json.dumps(results, indent=2) + '\n')
+        commit(index + 2, 'control')
+        del model, runner, direct_result, captured, tensors
+        torch.cuda.empty_cache()
+    results['complete'] = True
+    (args.output / 'result.json').write_text(json.dumps(results, indent=2) + '\n')
+    commit(2 + len(dtypes), 'publish')
+    print('PASS: tiny GLM direct and production capture legs complete; inspect numerical differences')
 
 
 if __name__ == '__main__':

@@ -9,25 +9,25 @@ def test_topmost_containing_mount_owns_options(tmp_path, kind):
     if kind == "mountinfo":
         rows = (
             r"1 0 0:1 / / rw - ext4 /dev/root rw",
-            r"2 1 0:2 / /stage/prewarm rw - autofs systemd-1 rw",
-            r"3 2 0:3 / /stage/prewarm rw - nfs4 host:/export rw,timeo=600,retrans=2,nconnect=8",
-            r"4 1 0:4 / /stage/prewarm/local\040disk rw - tmpfs tmpfs rw,size=100k",
+            r"2 1 0:2 / /stage/staged rw - autofs systemd-1 rw",
+            r"3 2 0:3 / /stage/staged rw - nfs4 host:/export rw,timeo=600,retrans=2,nconnect=8",
+            r"4 1 0:4 / /stage/staged/local\040disk rw - tmpfs tmpfs rw,size=100k",
         )
     else:
         rows = (
             r"/dev/root / ext4 rw 0 0",
-            r"systemd-1 /stage/prewarm autofs rw 0 0",
-            r"host:/export /stage/prewarm nfs4 rw,timeo=600,retrans=2,nconnect=8 0 0",
-            r"tmpfs /stage/prewarm/local\040disk tmpfs rw,size=100k 0 0",
+            r"systemd-1 /stage/staged autofs rw 0 0",
+            r"host:/export /stage/staged nfs4 rw,timeo=600,retrans=2,nconnect=8 0 0",
+            r"tmpfs /stage/staged/local\040disk tmpfs rw,size=100k 0 0",
         )
     table.write_text("\n".join(rows))
-    mounted = find_mount("/stage/prewarm/model/weights", table=table)
-    assert mounted.point == "/stage/prewarm"
+    mounted = find_mount("/stage/staged/model/weights", table=table)
+    assert mounted.point == "/stage/staged"
     assert mounted.filesystem == "nfs4"
     assert mounted.options["timeo"] == "600"
     assert mounted.options["nconnect"] == "8"
-    assert find_mount("/stage/prewarm/local disk/a", table=table).filesystem == "tmpfs"
-    assert find_mount("/stage/prewarm-other/a", table=table).filesystem == "ext4"
+    assert find_mount("/stage/staged/local disk/a", table=table).filesystem == "tmpfs"
+    assert find_mount("/stage/staged-other/a", table=table).filesystem == "ext4"
 
 
 def test_missing_or_malformed_mount_table_has_no_facts(tmp_path):

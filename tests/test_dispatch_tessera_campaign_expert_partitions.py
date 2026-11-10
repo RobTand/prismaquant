@@ -60,6 +60,15 @@ def test_real_plan_emits_distinct_rows_with_own_expert_demands(planned):
     assert all(Path(action["data_manifest"]).is_file() for action in actions)
 
 
+def test_real_pricing_builder_reaches_the_named_native_gpu_hold(planned):
+    spec, workspace, _seen = planned
+    assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
+    for row in json.loads((workspace / "manifest.json").read_text()):
+        assert "progress_phases" not in row
+        with pytest.raises(ValueError) as gpu_refused:
+            campaign_rows.validate_row(row)
+
+
 def test_partition_readsets_contain_only_chunk_captures_and_weight_bytes(planned, monkeypatch):
     spec, workspace, _seen = planned
     assert dispatch.cmd_plan(_plan_args(spec, workspace, experts_per_row=2)) == 0
@@ -219,3 +228,43 @@ def test_partition_merge_checks_actual_group_and_priced_rung(partition_payloads,
     with pytest.raises(campaign_table.MergeRefused, match="partition"):
         campaign_table.merge_payloads(payloads, census=census, capture_sha256="merged",
                                 plan_coverage=coverage)
+
+
+def test_native_post_campaign_builder_retains_requirements_and_refuses_execution(tmp_path):
+    from types import SimpleNamespace
+    args = SimpleNamespace(container_arg=[], demand="cpu=1,mem_gb=1", cpus=None,
+                           tag=None, priority=0, timeout_s=60)
+    spec = {"cwd": str(tmp_path), "env": {}, "container": {"image": "qualified:fixed"}}
+    row = dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
+                                     inner=["python3", "payload.py"], container_spec=spec,
+                                     progress_phases=("head", "layer-0"))
+    assert "priority" not in row and "gpu_memory_gb" not in row
+    assert row["container_images"] == [spec["container"]["image"]]
+    assert row["progress_phases"] == ["head=1800", "layer-0=900"]
+    state = tmp_path / "never-submitted"
+    with pytest.raises(ValueError) as refused:
+        campaign_rows.submit_rows([row], state)
+    assert str(refused.value) == "data_manifest: strict staging is unqualified without a bound staged_input"
+    assert not state.exists()
+    assert json.loads(row["argv"][row["argv"].index("--spec") + 1]) == spec
+    args.priority = -10
+    with pytest.raises(ValueError, match="queue priority mapping is unqualified"):
+        dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
+                                   inner=["true"], container_spec=spec)
+    args.priority = 0
+    args.demand = "gpu=1,cpu=1,mem_gb=1"
+    gpu_row = dispatch._native_action_row(args, manifest=tmp_path / "manifest.json",
+                                         inner=["true"], container_spec=spec, gpu_memory_gb=1)
+    assert gpu_row["gpu_memory_gb"] == 1
+    assert gpu_row["container_images"] == row["container_images"]
+    with pytest.raises(ValueError) as gpu_refused:
+        campaign_rows.submit_rows([gpu_row], state)
+    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
+    assert not state.exists()
+    # Exercise the GPU refusal alone as well as its precedence above staging.
+    gpu_only = {key: value for key, value in gpu_row.items()
+                if key not in {'data_manifest', 'container_images', 'progress_phases', 'gpu_memory_gb'}}
+    with pytest.raises(ValueError) as gpu_refused:
+        campaign_rows.submit_rows([gpu_only], state)
+    assert str(gpu_refused.value) == 'GPU lane not qualified; requires plan step P-7'
+    assert not state.exists()

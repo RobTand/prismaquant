@@ -9,7 +9,6 @@ import torch
 
 from prismaquant.joint_aura import arithmetic_identity
 from prismaquant.joint_aura_rows import joint_identity_sha256, make_joint_aura_entry
-from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
 from prismaquant.native_moe_panel import (EXECUTION, FORMAT, INPUT_SCHEMA, ROLES, consume_moe_receipt,
     freeze_moe_panel, packed_reference, validate_routing, validate_transport, _validate_phase_tensors)
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity as tensor_id
@@ -858,10 +857,12 @@ def bound_protocol_document(tmp_path, name, value):
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
+from native_runtime_fixtures import synthetic_runtime
+
 def original_protocol_case(tmp_path, layer=3):
     """Isolated SYNTHETIC metadata/completion fixture, never an actual receipt.
 
-    Native descriptors, claims and CUDA completion rows below are deliberately
+    Native descriptors, retained phases and CUDA completion rows below are deliberately
     synthetic parser inputs. No real owner receipt is altered or presented as
     CUDA proof. Qualification/root admission are absent, so this record cannot
     authorize a launch. Actual CPU owner receipts are tested separately.
@@ -907,7 +908,7 @@ def original_protocol_case(tmp_path, layer=3):
             'fit_ids_sha256': hashlib.sha256(calibration_ids.int().numpy().tobytes()).hexdigest(),
             'text_sha256': 'a' * 64, 'model': str(model_root), 'seed': 0,
             'source': 'SYNTHETIC/parser-control', 'split_role': 'calibration'}}
-    runtime = {'schema': 'prismaquant.original_source_runtime.v1',
+    runtime = {'schema': 'prismaquant.original_source_runtime.v2',
         'prismaquant_source_sha256': 'b' * 64, 'tessera_source_sha256': 'c' * 64,
         'modeling_source': {'path': '/synthetic/modeling_glm5_next.py', 'sha256': 'd' * 64},
         'model_class': contract['model_class'], 'profile': 'glm5_next', 'config': config,
@@ -919,8 +920,7 @@ def original_protocol_case(tmp_path, layer=3):
         'material_pipeline': {'decoder': 'safetensors.safe_open', 'framework': 'pt', 'decoder_device': 'cpu',
                              'cast_owner': 'prismaquant.layer_streaming', 'direct_gpu_decode': False,
                              'target_dtype': 'torch.bfloat16', 'tensor_dtypes': {}, 'scale_inv_map': {}},
-        'prismabuild': {'sdk_version': PB_CLIENT_SDK_VERSION, 'helper_root': '/synthetic-sdk5', 'runtime_generation': 'synthetic-sdk5',
-                       'source_tree': {'package_sha256': 'e' * 64, 'helper_tree_sha256': None}}}
+        'native_runtime': synthetic_runtime()}
     resources = {'schema': 'prismaquant.original_source_resources.v1', 'material_bytes': 1024,
         'cpu_bytes': 128 * 1024**2, 'source_cache_bytes': 1024, 'copy_bytes': 1024, 'gpu_bytes': 0,
         'native_bytes': 0, 'serialization_bytes': 8 * 1024**2, 'artifact_bytes': 16 * 1024**2,
@@ -959,21 +959,15 @@ def original_protocol_case(tmp_path, layer=3):
         calibration_sha256=calibration['calibration_sha256'], calibration_shape=calibration['shape'],
         calibration_dtype=calibration['dtype'],
         scope='first calibration sequence; decode uses its first row, not autoregressive generation')
-    claim = {'queue_root': '/synthetic-queue', 'action_key': '2' * 64, 'nonce': 'synthetic-producer-nonce',
-        'scope_id': 'synthetic-scope', 'worker': 'synthetic-worker', 'host': 'synthetic-host',
-        'incarnation': 'synthetic-worker', 'attempt_source': 'launch-env', 'map_path': '/synthetic-map',
-        'helper_root': '/synthetic-sdk5'}
     deliveries = []
     for index, (name, digest) in enumerate(sorted(digests.items()), 1):
         key = residency_map_key(paths[name], 0)
         deliveries.append({'name': name, 'sha256': digest, 'bytes_hashed': 128, 'delivery_index': 1,
             'held': name == 'lookahead.safetensors', 'material_windows': int(name == 'lookahead.safetensors'),
             'readers': 0, 'storage_aliases': int(name == 'lookahead.safetensors'), 'payload_reads': 1,
-            'native_delivery': {'claim': copy.deepcopy(claim), 'ref_id': 'synthetic-ref-' + name,
-                'serving': {'tier_id': 'synthetic-tier', 'epoch': '', 'pin_id': 'synthetic-pin-' + name, 'range_ref': key},
-                'entry': {'key': key, 'stage_path': paths[name], 'bytes': 128, 'sha256': digest,
-                    'file_id': {'ino': index, 'size': 128, 'mtime_ns': 1, 'ctime_ns': 1},
-                    'mover_action_key': '3' * 64, 'generation': 'synthetic-delivery'},
+            'native_delivery': {'staged_manifest_sha256': '4' * 64,
+                'read_contract_sha256': authority['readset']['sha256'],
+                'pin_id': 'synthetic-pin-' + name, 'range_ref': key,
                 'source_fd_stat': [1, index, 128, 1, 1], 'sealed_fd_stat': [2, index, 128, 1, 1],
                 'kernel_seals': _SEALS, 'descriptors_closed': True, 'lease_released': True}})
     generations = {row['name']: row['delivery_index'] for row in deliveries}
@@ -1165,8 +1159,7 @@ def test_original_prior_completed_delivery_is_not_overwritten_by_new_pending_sam
     current = copy.deepcopy(old)
     current.update(delivery_index=old['delivery_index'] + 1, held=True,
                    material_windows=1, storage_aliases=1, payload_reads=1)
-    current['native_delivery']['ref_id'] += '-new'
-    current['native_delivery']['serving']['pin_id'] += '-new'
+    current['native_delivery']['pin_id'] += '-new'
     material['deliveries'].append(current)
     material['deliveries'].sort(key=lambda row: (row['name'], row['delivery_index']))
     material['material_live_bytes'] += current['bytes_hashed']

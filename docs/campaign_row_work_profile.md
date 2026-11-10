@@ -3,8 +3,8 @@
 `tools/dispatch_tessera_campaign.py plan --row-work-profile PATH` packs whole
 non-routed anchor groups using supplied timing predictions. The default remains
 count-based `--groups-per-row` packing. Work-based packing requires
-`--groups-per-row 1`. The planner writes a new layout; it does not resize PB
-actions. It does not detect whether a workspace has already been submitted.
+`--groups-per-row 1`. The planner writes a new layout; it does not resize
+admitted jobs. It does not detect whether a workspace has already been submitted.
 Use a new workspace for a different layout so replanning does not overwrite
 selection files named by published rows. An existing row journal can seed only
 an identical selection, as before.
@@ -71,7 +71,7 @@ validated contents, plus each packed row's predicted pricing and startup share.
 `_row_memory_gb` still derives the packed row's full demand, and
 `partition_rows_by_fit` still declines rows that do not fit. Packing never
 lowers a demand to force co-residency and does not split a declined bundle.
-PrismaBuild alone admits, places, retries and balances the published rows.
+The execution system alone admits, places, retries and balances the published rows.
 
 ## Validation boundary
 

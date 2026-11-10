@@ -177,7 +177,7 @@ def main(argv=None) -> int:
         "command": command,
         "host": socket.gethostname().split(".")[0],
         "runtime": runtime_versions(SCHEMA),
-        "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+        "job_id": os.environ.get("FLUX_JOB_ID"),
         "cache_env": {name: os.environ.get(name) for name in (
             "HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR",
             "XDG_CACHE_HOME", "PRISMAQUANT_TMPDIR",

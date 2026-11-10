@@ -89,7 +89,7 @@ from prismaquant.joint_quantum_row import (
     adjoint_chain_phase_name,
     adjoint_forward_phase_name,
 )
-from .produced_output_spool import plane_partitions, sealed_spool_root
+from .produced_output_spool import plane_partitions
 from .source_read_plan import chain_opening_window, chain_prefetch_window
 from .tessera_joint_aura import restores_activation_scale_env
 
@@ -120,7 +120,7 @@ EXIT_IDENTITY_REFUSED = 3
 #: a frozen plan's sealed ``boundary_storage.max_artifact_bytes`` stays the
 #: campaign's identity, and one run may replace it with an explicitly
 #: recorded byte count -- stamped into the run's result, counters and
-#: receipt provenance, never silent, never a default. The PB channel is the
+#: receipt provenance, never silent, never a default. The launch channel is the
 #: CLI flag (the container launcher forwards no ambient action environment
 #: into the payload); the environment variable serves direct invocations,
 #: and two explicit sources that disagree refuse. Units are bytes, always.
@@ -147,7 +147,7 @@ ARTIFACT_FILE_HEADER_BYTES = 65536
 #: ``source_prefetch`` budget stays the campaign's identity, and one run may
 #: replace it with an explicitly recorded override document -- stamped into
 #: the run's result and counter provenance, never silent, never a default.
-#: The PB channel is the CLI flag (the container launcher forwards no ambient
+#: The launch channel is the CLI flag (the container launcher forwards no ambient
 #: action environment into the payload); the environment variable serves
 #: direct invocations, and two explicit sources that disagree refuse.
 PREFETCH_OVERRIDE_ENV = "PRISMAQUANT_STAGE_A_PREFETCH_OVERRIDE"
@@ -670,7 +670,7 @@ def preflight_stage_a_artifact_budget(
         raise AdjointIdentityRefused(
             "stage A artifact budget below the read-back allowance: this "
             "owner reads its groups back from its local output spool and "
-            "never commits them, so PrismaBuild keeps each group charged at "
+            "retains its prewrite allowance for each group at "
             "its prewrite ceiling, every entry at the bound entry size plus "
             f"{ARTIFACT_FILE_HEADER_BYTES} B (PQ #1110, #1120). Need >= "
             f"{allowance} bytes ({allowance / 1024 ** 3:.2f} GiB, the "
@@ -711,25 +711,13 @@ def preflight_stage_a_artifact_budget(
 
 
 def stage_a_owner_reads_back_locally(environ=None) -> bool:
-    """Whether this launch's Stage A owner reads back from a local spool.
-
-    Stage A binds its produced-output owner from the launch environment
-    (:func:`bind_stage_a_produced_output`): an admitted action, one with a
-    ``PRISMABUILD_ACTION_KEY``, binds one, and its local output spool is the
-    root that environment seals (``produced_output_spool.sealed_spool_root``,
-    which ``ProducedOutputSpool.from_publication`` reads). The owner always
-    reads its groups back: the capture passes no ``origin_lifetime``, which
-    a write-only template requires
-    (``StreamedBoundaryArtifacts.bind_produced_output``). Such an owner reads
-    the groups it wrote from its own box and never commits them, so each
-    group stays charged at its prewrite ceiling (PQ #1110, #1120).
-    ``environ`` defaults to ``os.environ``, the environment the owner binds
-    from.
-    """
+    """Read-back geometry comes from the authenticated native declaration."""
     source = os.environ if environ is None else environ
-    if not source.get("PRISMABUILD_ACTION_KEY"):
+    if not source.get("FLUX_JOB_ID"):
         return False
-    return sealed_spool_root(source) is not None
+    from .stage_a_produced_output import current_declaration
+    declaration, _binding = current_declaration()
+    return declaration["spool"] is not None and not declaration["write_only"]
 
 
 def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
@@ -753,7 +741,7 @@ def _run_artifact_preflight(runner, calib_ids, execution, stride_value,
     (:func:`stage_a_owner_reads_back_locally`, read from ``environ``) is
     gated on its read-back allowance, not the floor (PQ #1120): the planning
     allowance with a partial last batch priced as a full one, because
-    PrismaBuild reserves every entry of a group at the bound entry size, the
+    The declaration bounds every entry of a group at the bound entry size, the
     full batch's (``boundary_group_ceiling_bytes``).
     """
     _n_probes = int(execution["n_probes"])
@@ -1088,13 +1076,11 @@ def run_adjoint_capture_core(
 
     ``produced_output`` (optional) is a bound
     ``stage_a_produced_output.BoundaryProducedPublication`` -- this
-    action's own PrismaBuild produced-output instance. With it, the
-    boundary entries this capture writes are declared, staged and read
-    back through PrismaBuild instead of being unreadable to their own
-    writer: an admitted action's outputs are not in the run's sealed input
-    map, so the strict allowed-tier reader refuses them, and there is no
-    own-session exemption. Without it the capture behaves exactly as
-    before and its entries resolve through the ordinary input map.
+    launch's immutable application publication. The existing IO engine copies
+    complete groups into canonical files before publication. Own in-process
+    reads use its bounded same-box spool and exact tensor reader. Independent
+    readers require terminal native selected-input authority. Unbound offline
+    captures retain the ordinary input-map behavior.
 
     The publication's geometry is derived HERE, from the numbers this
     invocation actually runs under, not from a planning figure: the
@@ -1599,12 +1585,12 @@ def run_adjoint_capture_core(
                 # A split quantum writes only its own range's groups (PQ #738).
                 **({"batch_range": samples} if ranged else {}))
             log("boundary capture: produced-output binding "
-                f"{produced_output.instance['owner_action_key']} "
+                f"{produced_output.producer['job_id']} "
                 f"prefix={produced_output.output_prefix} "
                 f"group={int(storage_policy['prefetch_batches'])}")
         if quantum:
             # What a later prep reads before it removes this range's rolling
-            # entries: the PrismaBuild owner that writes them (PQ #738).
+            # entries: the native application owner that writes them (PQ #738).
             storage.stamp_owner(
                 producer=producer_binding(produced_output),
                 split={"from": resume_plan.boundary, "through": split["through"],
@@ -1909,7 +1895,7 @@ def run_adjoint_capture_core(
             # The chain's first layer reads a plane the forward pass wrote
             # and retired long ago; every later layer's plane is asked for
             # by the roll before it (``render_free_layer_roll``). Asking
-            # here starts its movers before the first window needs them.
+            # here prepares the existing IO reader before the first window needs it.
             storage.stage_produced_boundary_ahead(chain_top - 1)
             # The same holds for the chain's source layers: each install
             # refuses a layer that is neither resident nor in flight, and each
@@ -2213,7 +2199,7 @@ def run_adjoint_capture_core(
     }
     # After the owner closed: ``retention`` above was taken inside the
     # ``with`` block, so it cannot see the settle, and a stage copy
-    # PrismaBuild would not retire must be on the artifact, not only on
+    # the publication must retain must be on the artifact, not only on
     # stdout.
     receipt["telemetry"].update(_produced_output_block(storage))
     return receipt
@@ -2312,7 +2298,7 @@ def _produced_output_block(storage) -> dict:
 
     This runs after the last layer, so it may only add to the receipt. The
     receipt is sealed with ``json.dumps(allow_nan=False)``: a reason
-    PrismaBuild worded with something JSON cannot carry travels as its repr,
+    a failure described with something JSON cannot carry travels as its repr,
     and a report that cannot be taken or carried is recorded as its own
     error. A finished capture is never failed by its own telemetry. An
     unbound owner adds nothing, so its receipt is unchanged.
@@ -2391,74 +2377,10 @@ def _io_counters() -> dict:
     return read_proc_io()
 
 
-def bind_stage_a_produced_output(*, artifact_max_bytes, tier=None,
-                                 queue_root=None, env=None,
-                                 command_extra=()):
-    """This action's own PrismaBuild produced-output publication, or None.
-
-    The boundary entries Stage A writes are its OWN outputs, so they are
-    not in the run's sealed input map and the strict allowed-tier reader
-    refuses them (``staged-not-serving``) with no own-session exemption.
-    Binding here is what lets the same action read them back, through
-    PrismaBuild, without touching the input resolver.
-
-    The template is NOT built here. It is sealed pre-submit as an input of
-    this action's own request, and ``bind_from_admitted_owner`` reads the
-    declaration the submission made -- an operator dictionary assembled at
-    runtime would be a second source for a number admission already fixed.
-    What this DOES check is that the two agree: the declared durable
-    payload maximum must equal the EFFECTIVE artifact max this invocation
-    runs under (the plan's sealed ``max_artifact_bytes`` or this run's
-    override). A capture admitted against one budget and running under
-    another is producer/consumer drift and must refuse, not adapt.
-
-    ``tier`` is optional and normally omitted: the payload carries tier
-    CLASSES, not a tier id, so the tier is the declaration's own -- derived
-    when the template permits exactly one, refused when it permits several
-    (that choice belongs to whoever declared the template).
-
-    ``None`` is returned in exactly ONE case: this process carries no
-    PrismaBuild launch context at all (a legacy or local invocation), so
-    there is no owner to bind and the capture behaves as it always did.
-    An ADMITTED action that fails to bind REFUSES, carrying the original
-    reason -- a missing SDK, a bad claim, a template mismatch. The
-    alternative is the shape that costs the most here: the binding is lost
-    silently, 512 boundary files are written again, and the failure
-    surfaces only when the first read asks for bytes nobody declared.
-    """
-
-    from .stage_a_produced_output import (
-        BoundaryProducedBindingError, BoundaryProducedPublication)
-
-    source = dict(os.environ) if env is None else dict(env)
-    admitted = bool(source.get("PRISMABUILD_ACTION_KEY"))
-    if not admitted:
-        if queue_root is not None:
-            raise AdjointIdentityRefused(
-                "stage A was given a PrismaBuild queue root but carries no "
-                "PRISMABUILD_ACTION_KEY: a produced-output owner is an "
-                "ADMITTED action, and binding one from a half-present "
-                "launch context is refused rather than guessed")
-        return None
-    try:
-        publication = BoundaryProducedPublication.bind_from_admitted_owner(
-            queue_root=queue_root, tier=tier, env=source,
-            command_extra=tuple(command_extra))
-    except BoundaryProducedBindingError as exc:
-        raise AdjointIdentityRefused(
-            "stage A is an admitted PrismaBuild action "
-            f"({source['PRISMABUILD_ACTION_KEY'][:12]}) and cannot bind its "
-            f"own produced output: {exc}") from exc
-    declared = int(publication.durable_maxima().get("payload_max_bytes", 0))
-    if declared != int(artifact_max_bytes):
-        raise AdjointIdentityRefused(
-            "stage A produced-output template declares a durable payload "
-            f"maximum of {declared} bytes, but this invocation runs under "
-            f"{int(artifact_max_bytes)}: the admitted budget and the "
-            "effective budget must be the same number (re-declare the "
-            "template, or drop the run override) -- refusing rather than "
-            "writing origin bytes against a budget nobody admitted")
-    return publication
+def bind_stage_a_produced_output(*, artifact_max_bytes):
+    """Use the shared launch binding and effective artifact ceiling check."""
+    from .streamed_boundary_artifacts import bind_stage_a_publication
+    return bind_stage_a_publication(boundary_storage={'max_artifact_bytes': artifact_max_bytes})
 
 
 def _stage_a_device_envelope(config, *, environ=None):
@@ -2468,7 +2390,7 @@ def _stage_a_device_envelope(config, *, environ=None):
     Keep legacy calls without it unchanged; an explicit value must be finite
     and positive and can only tighten the scientific plan's post-hoc ceiling.
     CUDA runtime/native allocations remain outside Torch's allocator and are
-    bounded by PrismaBuild's GPU and aggregate action backstops.
+    bounded by the independent native GPU and aggregate job envelope.
     """
     import math
     from .memory_management import enforce_device_envelope
@@ -2671,7 +2593,7 @@ def run_adjoint_capture(
     chain_seed=None, head_walk=False, chain_split=None, forward_split=None,
     source_authentication=None, selected_row_diagnostic=None,
 ) -> dict:
-    """Load the head phase and run the adjoint capture (one PB action).
+    """Load the head phase and run the adjoint capture (one native launch).
 
     The head is the prepared completion's (``stage_a_head``, PQ #1051): the
     roster, the counts and the progress base come from the completion the
@@ -2715,7 +2637,6 @@ def run_adjoint_capture(
     from .joint_run_progress import JointRunProgress
     from .residency_map import bind_residency_manifest, residency_report
     from .stage_a_head import prepared_head, stage_a_roster, walked_head
-    from .prismabuild_progress import commit as _pb_commit
     from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
@@ -2854,7 +2775,7 @@ def run_adjoint_capture(
             print("joint_cost_stage_a: enforced Torch allocator envelope "
                   f"{result['device_envelope']['device_envelope_bytes']} bytes "
                   "before backend/model allocation; native CUDA allocations "
-                  "remain covered by PB action limits", flush=True)
+                  "require the independent native resource envelope", flush=True)
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
@@ -2889,11 +2810,6 @@ def run_adjoint_capture(
                                calibration=calibration)
         else:
             head = prepared_head(completion, prepared=prepared, calibration=calibration)
-            # The completion attests the units the prepare's walk verified:
-            # reported once, at the cumulative count the walk would have
-            # reached, as the Stage B head slice does (PQ #1010).
-            from .joint_run_progress import HEAD_PHASE
-            _pb_commit(head.progress_units, HEAD_PHASE)
         from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
         result["encoding_calibration_input"] = calibration
         ids, calibration, eval_panel = select_evaluation(ids, calibration, config)
@@ -2954,7 +2870,7 @@ def run_adjoint_capture(
         kernel.__enter__()
         progress = JointRunProgress(
             layers=runner.num_layers, partitions=1,
-            base_units=head.progress_units, log=lambda message: print(
+            base_units=head.progress_units, phases=[], log=lambda message: print(
                 f"joint_cost_stage_a: {message}", flush=True))
         publication = bind_stage_a_produced_output(
             artifact_max_bytes=int(artifact["run_used"]))
@@ -3384,6 +3300,8 @@ def main(argv=None) -> int:
                         help="accepted from the sealed Stage A row; Stage A takes "
                              "its head from the prepared completion and has no "
                              "head walk to resume (PQ #1051)")
+    from .stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(parser)
     parser.add_argument("--forward-recovery", type=Path)
     parser.add_argument("--forward-recovery-sha256")
     parser.add_argument("--chain-batch-size", type=int, default=1,

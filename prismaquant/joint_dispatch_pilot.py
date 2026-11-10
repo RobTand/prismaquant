@@ -14,13 +14,16 @@ from .digests import bytes_sha256hex, canonical_json_sha256, is_sha256hex
 from .io_spans import EXPOSED_WAIT_SCHEMA, GB10_POWER_ENVELOPE_W, derive_wait_bound
 from .joint_replay_regime import normalize_replay_regime
 
-PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
+PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v2"
 QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
 #: The CEO approved this 4 MiB quantum control bound in PQ #2603.
 #: The producer and consumer use the same bound through the shared reader.
 #: The completion carries a descriptor, never the wire or its base64 form.
 QUANTUM_RECORD_MAX_BYTES = 4 * 1024 * 1024
-PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
+PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v2"
+PILOT_PRODUCER_ID = "prismaquant.joint_dispatch_pilot.producer"
+#: Aggregate byte ceiling of one pilot publication: completion + counters + original quantum record.
+PILOT_PUBLICATION_MAX_BYTES = 16 * 1024 * 1024
 PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
 PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
 #: The completion's external original-quantum-record entry names these three
@@ -38,10 +41,10 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
                               counters_sha256: str, counters_bytes: int,
                               quantum_record_sha256: str, quantum_record_path,
                               quantum_record_bytes: int | None = None) -> dict:
-    """Match supplied counters to an authenticated PB producer completion.
+    """Match supplied counters to an authenticated native producer completion.
 
-    The caller must obtain ``completion`` from the successful action's
-    verified CAS result. A caller-supplied completion or terminal key alone
+    The caller must obtain ``completion`` from the selected native result of
+    the successful job. A caller-supplied completion or terminal key alone
     does not establish this provenance. Paths are retained as provenance;
     the byte digest permits an exact copy of the counters to be consumed.
 
@@ -55,11 +58,11 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
     """
     try:
         if not isinstance(completion, Mapping) or completion.get("schema") != QUANTUM_COMPLETION_SCHEMA:
-            raise PilotRefused("pilot PB result has no quantum completion reference")
+            raise PilotRefused("pilot native result has no quantum completion reference")
         if (completion.get("quantum_id") != counters.get("quantum_id")
                 or not isinstance(counters.get("quantum_id"), str)
                 or not counters["quantum_id"]):
-            raise PilotRefused("pilot PB result belongs to another quantum")
+            raise PilotRefused("pilot native result belongs to another quantum")
         units = counters.get("units")
         if (not isinstance(units, list) or len(units) != 2
                 or any(type(unit) is not int for unit in units)
@@ -69,25 +72,25 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
                 or type(completion.get("units_done")) is not int
                 or type(completion.get("units_total")) is not int
                 or [completion["units_done"], completion["units_total"]] != units):
-            raise PilotRefused("pilot PB completion and counters disagree on completed units")
+            raise PilotRefused("pilot native completion and counters disagree on completed units")
         reference = completion["counters"]
         if (not isinstance(reference, Mapping)
                 or set(reference) != {"path", "sha256", "bytes"}
                 or not isinstance(reference["path"], str) or not reference["path"]
                 or type(reference["bytes"]) is not int or reference["bytes"] <= 0
                 or type(counters_bytes) is not int or counters_bytes <= 0):
-            raise PilotRefused("pilot PB counters reference is malformed")
+            raise PilotRefused("pilot native counters reference is malformed")
         _pilot_binding_digest(counters_sha256, "supplied counters digest")
         _pilot_binding_digest(reference["sha256"], "producer counters digest")
         if (reference["sha256"] != counters_sha256 or reference["bytes"] != counters_bytes):
-            raise PilotRefused("pilot counters bytes differ from the PB producer result")
+            raise PilotRefused("pilot counters bytes differ from the native producer result")
         record = _authenticated_quantum_record(
             completion, quantum_record_sha256=quantum_record_sha256,
             quantum_record_bytes=quantum_record_bytes,
             quantum_record_path=quantum_record_path)
         return {**dict(reference), "quantum_record": record}
     except (KeyError, TypeError, AttributeError) as error:
-        raise PilotRefused("pilot PB completion reference is incomplete or malformed") from error
+        raise PilotRefused("pilot native completion reference is incomplete or malformed") from error
 
 
 def _authenticated_quantum_record(completion, *, quantum_record_sha256,
@@ -103,7 +106,7 @@ def _authenticated_quantum_record(completion, *, quantum_record_sha256,
     """
     entry = completion.get("quantum_record")
     if not isinstance(entry, Mapping) or set(entry) != set(QUANTUM_RECORD_FIELDS):
-        raise PilotRefused("pilot PB completion carries no original quantum record")
+        raise PilotRefused("pilot native completion carries no original quantum record")
     path = entry["path"]
     declared_bytes = entry["bytes"]
     declared_sha = entry["sha256"]
@@ -144,37 +147,46 @@ def _pilot_binding_digest(value, where):
 def validate_pilot_source_contract(value, *, implementation_sha256) -> dict:
     """An independently supplied, reviewed source/invocation contract.
 
-    The snapshot-to-package relation is an explicit reviewer input. Neither
-    a result payload nor its counter table can introduce an accepted source.
-    PB authenticates the matching declared input descriptor; this domain
-    contract supplies the source and environment the reviewer accepted.
+    The source-to-package relation is an explicit reviewer input. Neither
+    a result publication nor its counter table can introduce an accepted
+    source. The native launch authenticates the executed source (commit and
+    tree); this domain contract supplies the source and container spec the
+    reviewer accepted. The outer environment is the finite native allowlist,
+    not reviewer input.
     """
-    fields = {"schema", "snapshot", "snapshot_selection", "implementation_sha256", "launcher_argv",
-              "quantum_argv", "container_spec", "outer_environment"}
+    fields = {"schema", "source", "implementation_sha256", "launcher_argv",
+              "quantum_argv", "container_spec"}
     if not isinstance(value, dict) or set(value) != fields or value["schema"] != PILOT_SOURCE_SCHEMA:
         raise PilotRefused("pilot source contract is missing, malformed or unsupported")
     if _pilot_binding_digest(value["implementation_sha256"], "accepted code digest") != implementation_sha256:
         raise PilotRefused("pilot source contract does not name the proposed implementation")
-    descriptor = value["snapshot"]
-    if (not isinstance(descriptor, dict) or set(descriptor) != {"id", "sha256", "bytes"}
-            or descriptor["id"] != "pbrun.checkout-snapshot"
-            or type(descriptor["bytes"]) is not int or descriptor["bytes"] <= 0):
-        raise PilotRefused("pilot source contract needs an exact snapshot input descriptor")
-    _pilot_binding_digest(descriptor["sha256"], "accepted snapshot digest")
-    selection = value["snapshot_selection"]
-    if (not isinstance(selection, dict) or selection.get("input") != descriptor
-            or not isinstance(selection.get("commit"), str)
-            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", selection["commit"]) is None):
-        raise PilotRefused("pilot source contract needs the exact snapshot selection")
+    source = value["source"]
+    if (not isinstance(source, dict) or set(source) != {"commit", "tree"}
+            or any(not isinstance(source[key], str)
+                   or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source[key]) is None
+                   for key in ("commit", "tree"))):
+        raise PilotRefused("pilot source contract needs the exact commit and tree")
     if value["launcher_argv"] != PILOT_LAUNCHER or value["quantum_argv"] != PILOT_ENTRY:
         raise PilotRefused("pilot source contract names an unsupported launcher or quantum entry")
-    spec, environment = value["container_spec"], value["outer_environment"]
-    if (not isinstance(spec, dict) or not isinstance(spec.get("container"), dict)
-            or not isinstance(spec.get("env", {}), dict)
-            or not isinstance(environment, dict) or not environment.get("PATH")
-            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in environment.items())):
-        raise PilotRefused("pilot source contract needs explicit container and outer environments")
+    spec = value["container_spec"]
+    if not isinstance(spec, dict) or not isinstance(spec.get("container"), dict) or not isinstance(spec.get("env", {}), dict):
+        raise PilotRefused("pilot source contract needs an explicit container spec")
     return value
+
+
+def publish_pilot_result(publication_path, *, completion: Mapping, counters_path, quantum_record: Mapping) -> dict:
+    """Publish one quantum completion as a native result: the completion and counters are
+    the artifacts, the original quantum record is the input. Returns the publication binding."""
+    from . import native_results
+    from .staged_manifest import publish_staged_json
+    publication_path = Path(publication_path)
+    completion_path = publication_path.with_name(publication_path.name + ".completion.json")
+    publish_staged_json(completion_path, dict(completion))
+    return native_results.publish_result(
+        publication_path, producer_id=PILOT_PRODUCER_ID,
+        inputs={"quantum_record": {key: quantum_record[key] for key in QUANTUM_RECORD_FIELDS}},
+        artifacts={"completion": completion_path, "counters": Path(counters_path)},
+        max_artifact_bytes=PILOT_PUBLICATION_MAX_BYTES)
 
 
 def pilot_binding(record: Mapping, *, implementation_sha256: str,
@@ -235,7 +247,7 @@ def _pilot_measurement_phase(counters, start):
 def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
     """Check a published producer receipt; re-derive bounds from its rates.
 
-    The caller binds the exact counter bytes to the selected PB result,
+    The caller binds the exact counter bytes to the selected native result,
     reviewed source contract and authenticated invocation/record. Aggregate
     bound/excess fields alone never authorize a fanout.
     """
@@ -243,7 +255,12 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
         pilot = counters["pilot"]
         if pilot.get("binding") != expected:
             raise PilotRefused("pilot code, plan, replay regime or row shape does not match")
-        key = _pilot_binding_digest(pilot.get("action_key"), "PB action key")
+        job = pilot.get("job_id")
+        try:
+            from .flux_jobs import job_id_number
+            job_id_number(job)
+        except ValueError as exc:
+            raise PilotRefused("pilot counters name no native producer job") from exc
         units = counters["units"]
         if (not isinstance(units, list) or len(units) != 2
                 or any(type(n) is not int for n in units)
@@ -335,7 +352,7 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
                     and spans and all(s["end_unix"] <= first_take for s in spans)):
                 continue
             raise PilotRefused(f"pilot underived wait kind {kind}: {wait:g}s; no rate bound")
-        return {"schema": PILOT_SCHEMA, "mode": "verified", "action_key": key,
+        return {"schema": PILOT_SCHEMA, "mode": "verified", "job_id": job,
                 "binding": dict(expected), "gpu_envelope_fraction": fraction,
                 "steady_wait_s": steady_wait, "bound_s": bound_sum}
     except (KeyError, TypeError, AttributeError, OverflowError) as exc:

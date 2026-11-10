@@ -1,35 +1,7 @@
-"""Stage B preparation as a PrismaBuild action: its reads and its outputs (PQ #1070).
+"""Stage B input preparation and retained output-authority boundaries.
 
-``tools/prepare_extended_joint_quanta.py`` and the generator it runs,
-``tools/regenerate_joint_quanta.py``, read the gzip parent manifest, the
-production pickle, the head walk's inputs and the source checkpoint's
-safetensors headers, and write the Stage B metadata generation: records,
-slices, manifests and the launch recipe. Before #1070 none of those reads
-was declared and every write went straight to the pool.
-
-This module gives both halves a PrismaBuild shape:
-
-* **Reads.** :func:`preparation_read_entries` lists what the preparation
-  reads as data-manifest entries, and :func:`preparation_read_manifest`
-  seals them. ``pbrun --data-manifest`` attaches the manifest, so the reads
-  are declared before the action is claimed. With the tools'
-  ``--data-manifest-sha256`` flag, :func:`bind_staged_reads` makes every
-  declared read come from PrismaBuild's stage through the residency reader,
-  its bytes checked against the entry's digest, and refuses a read the stage
-  does not hold instead of reading the pool (PQ #1092). Without the flag the
-  reads are plain file reads, as before.
-* **Writes.** :func:`build_preparation_template` is the write-only
-  produced-output template (#912) over the metadata root, submitted with
-  ``pbrun --produced-output-template``. With the tools' ``--produced-output``
-  flag, inside the admitted action, :func:`publish_files` files one prewrite
-  for the files a group creates, writes them first-writer as before, and
-  commits them at their origin (``produced_output.commit_origin_batch``).
-  Without the flag it writes exactly as before.
-
-What stays as it was: every output keeps its bytes and its path, a file
-already present with the same bytes is left alone, and one with other bytes
-still refuses. A file this action did not create belongs to the action that
-did, so only created files enter this action's batches.
+Immutable staged inputs use the existing resolver and whole-file reader.
+Read-set/template builders retain their scientific wire formats. Launch-bound outputs use the application publication owner.
 """
 from __future__ import annotations
 
@@ -37,21 +9,19 @@ import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from .file_identity import WriterIdentities
 from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_range_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
 #: The template id prefix; the id's suffix digests the template body, so a
-#: changed root, tier or ceiling files a template of its own (PQ #1054).
+#: changed root or ceiling files a declaration of its own (PQ #1054).
 PREPARATION_TEMPLATE_PREFIX = "pq-stage-b-preparation"
-#: PrismaBuild's produced-output template schema (``produced_output.
-#: TEMPLATE_SCHEMA_V1``), restated for the submitter, which runs outside PB.
-PRODUCED_OUTPUT_TEMPLATE_SCHEMA = "prismaquant.prismabuild.produced_output_template.v1"
+#: Immutable application output declaration schema.
+PRODUCED_OUTPUT_TEMPLATE_SCHEMA = "prismaquant.produced_declaration.v1"
 #: The read phase the preparation's manifest declares.
 PREPARATION_READ_PHASE = "stage-b-preparation"
-#: PrismaBuild's own per-manifest bound (``prismabuild.core
-#: DATA_MANIFEST_MAX_BYTES``), restated as ``campaign_data_manifests``
-#: restates it: this module runs where PrismaBuild is not importable.
+#: Bound for the retained scientific manifest format.
 DATA_MANIFEST_MAX_BYTES = 64 * 1024 * 1024
 #: Files the preparation writes besides one set per quantum: the catalog
 #: extension, the parent, the partition, the derivation input, the spec, the
@@ -104,7 +74,7 @@ def file_entry(path: str | os.PathLike, sha256: str | None = None) -> dict:
 
     ``sha256`` is the file's bound digest when the caller holds one; without
     it the file is hashed. Every entry declares its digest (PQ #1092), so
-    PrismaBuild's staged copy is bound to these bytes and the preparation
+    the staged copy is bound to these bytes and the preparation
     checks what it reads against them.
     """
     path = os.path.normpath(os.path.abspath(os.fspath(path)))
@@ -126,7 +96,7 @@ def preparation_read_entries(*, head: Sequence[Mapping], files: Iterable,
     safetensors index and headers: ``header_reads`` of
     ``layer_streaming.streaming_source_plan``). A range
     that a whole-file entry at the same offset already covers is dropped;
-    PrismaBuild refuses a repeated ``(path, offset)``.
+    the reader refuses a repeated ``(path, offset)``.
 
     A ``files`` item is a path or a ``(path, sha256)`` pair; a bare path, and
     every range, is hashed here, so each entry the tools add declares its
@@ -201,26 +171,11 @@ class PreparationReadRefused(ValueError):
 
 
 class StagedPreparationReads:
-    """This process's strict reads: the stage, or a refusal.
+    """Strict whole-file and header-prefix reads through the existing resolver.
 
-    Bound once per process by :func:`bind_staged_reads`, from the tools'
-    ``--data-manifest-sha256``. Every read of a declared input goes through
-    the process residency resolver, bound to that manifest digest, and a
-    lifetime-pinned lease window (``staged_whole_file.read_staged_entry``).
-    The bytes read must hash to the map entry's digest, which PrismaBuild
-    derives from the sealed manifest's declared digest, and to the caller's
-    own pinned digest when it has one. A path the stage does not hold
-    refuses. It is never read from the pool.
-
-    ``own_outputs`` are the roots this action writes (the metadata root). A
-    file under one was written by this run or by an earlier run of the same
-    generation. It is not a manifest input, so it is read where it is.
-
-    Not routed yet: the Stage B head walk
-    (``tessera_joint_aura.load_measured_anchor_input``, run by the
-    generator's ``--head-slices``) opens its inputs itself. Those reads still
-    come from the pool under this binding until PQ #1082 routes them. That
-    exemption is named here and in ``docs/ARCHITECTURE.md``, not silent.
+    Every declared input is read from an immutable staged extent and checked
+    against its digest. Own outputs retain their existing local read path.
+    Source-generation and produced-output authority remain separate unit4 work.
     """
 
     def __init__(self, resolver, *, manifest_sha256: str, own_outputs=()):
@@ -304,7 +259,7 @@ def bind_staged_reads(*, manifest_sha256: str, allowed_tiers: str,
     submitted with (``stage_b_preparation_submission`` seals it into the
     command line). This activates the strict tier policy with
     ``allowed_tiers`` and binds the process residency resolver to the
-    manifest. A process without ``PRISMABUILD_RESIDENCY_MAP`` was not
+    manifest. A process without an explicit staged-manifest path was not
     launched with ``--residency stage`` and refuses. A second call with
     the same digest adds its roots to the bound reads; another digest refuses.
     """
@@ -346,6 +301,11 @@ def bind_staged_reads(*, manifest_sha256: str, allowed_tiers: str,
 
 def staged_reads() -> StagedPreparationReads | None:
     """The bound strict reads, or None when the process reads plainly."""
+    if _STAGED_READS is None:
+        from .staged_manifest import READ_ENV
+        digest = os.environ.get(READ_ENV)
+        if digest:
+            return bind_staged_reads(manifest_sha256=digest, allowed_tiers='ssd')
     return _STAGED_READS
 
 
@@ -366,7 +326,7 @@ def reset_staged_reads_for_tests() -> None:
 
 def read_input(path, *, sha256: str | None = None, where: str) -> bytes:
     """A declared input's bytes: off the stage when bound, else read plainly."""
-    reads = _STAGED_READS
+    reads = staged_reads()
     if reads is None:
         return Path(path).read_bytes()
     return reads.whole(path, sha256=sha256, where=where)
@@ -379,7 +339,7 @@ def read_input(path, *, sha256: str | None = None, where: str) -> bytes:
 def preparation_payload_ceiling(quanta: int, *, indexes: int = 1) -> int:
     """The template's durable payload maximum for ``quanta`` quanta.
 
-    Every file the preparation writes is at most PrismaBuild's own manifest
+    Every file the preparation writes is at most the scientific manifest
     bound: the manifests it seals must fit it to be submitted at all, and a
     record, slice or control document is smaller than the manifest that
     names it. The file count is the generator's per-quantum set plus the
@@ -394,144 +354,96 @@ def preparation_payload_ceiling(quanta: int, *, indexes: int = 1) -> int:
     return files * DATA_MANIFEST_MAX_BYTES
 
 
-def build_preparation_template(*, metadata_root: str | os.PathLike, tier: str,
-                               payload_max_bytes: int) -> dict:
-    """The write-only produced-output template over ``metadata_root`` (#912).
-
-    Write-only: the preparation never reads its outputs back through a stage,
-    so every tier it names carries a zero window, and its batches commit at
-    their origin. ``tier`` is the stage tier the declaration permits, a fleet
-    fact the submitter names. The temp maximum equals the payload maximum:
-    each file passes through a staging file of its own size before the link
-    (``cost_stage_checkpoint.publish_new_bytes``).
-    """
+def build_preparation_template(*, metadata_root, payload_max_bytes):
+    from .stage_a_produced_output import build_boundary_template
     root = os.path.normpath(os.path.abspath(os.fspath(metadata_root)))
-    if type(payload_max_bytes) is not int or payload_max_bytes <= 0:
-        raise ValueError("the preparation template needs a positive payload maximum")
-    body = {"schema": PRODUCED_OUTPUT_TEMPLATE_SCHEMA, "version": 1,
-            "output_prefix": root,
-            "slots": {PREPARATION_SLOT: {"class": "payload"}},
-            "durable_maxima": {"payload_max_bytes": payload_max_bytes,
-                               "checkpoint_max_bytes": 0,
-                               "temp_max_bytes": payload_max_bytes},
-            "working_demands": {str(tier): {"minimum_gib": 0, "window_gib": 0}},
-            "permitted_tiers": [str(tier)], "write_only": True}
-    digest = text_sha256hex(DIRECT_ASCII_SPACED_LAX.text(body))[:16]
-    return {**body, "template_id": f"{PREPARATION_TEMPLATE_PREFIX}-{digest}"}
+    declaration = build_boundary_template(output_prefix=root,
+        artifact_max_bytes=payload_max_bytes, checkpoint_max_bytes=0,
+        group_size=1024, max_entry_tensor_bytes=min(payload_max_bytes, (4 << 30) - 65536),
+        template_id=PREPARATION_TEMPLATE_PREFIX, write_only=True)
+    declaration['slot'] = PREPARATION_SLOT
+    return declaration
 
 
 class PreparationPublication:
-    """This admitted action's produced output for the preparation's files."""
+    """One native launch's write-only metadata publication."""
 
     def __init__(self, publication):
         self.publication = publication
-        self._po = publication._po
-        if not callable(getattr(self._po, "commit_origin_batch", None)):
-            raise PreparationPublicationRefused(
-                "the sealed PrismaBuild produced_output API has no "
-                "commit_origin_batch: this runtime cannot commit write-only "
-                "outputs (#912)")
-        if not self.publication.template.get("write_only"):
-            raise PreparationPublicationRefused(
-                "the declared produced-output template is not write-only: the "
-                "preparation commits its outputs at their origin (#912)")
-        self.batches: list[dict] = []
-        self._kinds: set[str] = set()
+        if not publication.write_only:
+            raise PreparationPublicationRefused('preparation requires a write-only declaration')
+        publication.bind_session({'generation': publication.generation,
+            'run_identity_sha256': publication.binding['sha256']})
+        self.batches, self._kinds = [], set()
+        self._writer_directories = {}
 
     @property
-    def output_prefix(self) -> str:
+    def output_prefix(self):
         return self.publication.output_prefix
 
-    def batch_id(self, kind: str) -> str:
-        if not kind or "/" in kind:
-            raise ValueError("a preparation batch kind is a bare name")
-        return f"stage-b-prep-{kind}-{self.publication.generation}"
+    def batch_id(self, kind):
+        from .stage_a_produced_output import produced_identifier
+        return produced_identifier(
+            f'stage-b-prep-{produced_identifier(kind)}-{self.publication.generation}')
 
-    def claim_kind(self, kind: str) -> None:
-        """Reserve ``kind`` for one batch in this action.
-
-        The batch id is the kind plus the owner's generation, so a retry of
-        the same action re-derives it; a second group of the same kind in one
-        action would reuse it, and PrismaBuild refuses a reused batch id with
-        other entries. Refused here, before any prewrite, with the kind named.
-        """
+    def claim_kind(self, kind):
         if kind in self._kinds:
-            raise PreparationPublicationRefused(
-                f"the preparation publishes its {kind!r} group once per action")
+            raise PreparationPublicationRefused('preparation group may be written once per launch')
         self._kinds.add(kind)
 
-    def commit(self, kind: str, created: Sequence[tuple[str, bytes]]) -> dict:
-        descriptors = [self._po.validate_descriptor({
-            "schema": self._po.DESCRIPTOR_SCHEMA_V2, "slot": PREPARATION_SLOT,
-            "artifact_class": "payload", "path": path, "bytes": len(payload),
-            "sha256": bytes_sha256hex(payload),
-            "producer_generation": self.batch_id(kind),
-            "owner_action_key": self.publication.instance["owner_action_key"],
-            "owner_attempt": dict(self.publication.instance["owner_attempt"]),
-        }, self.publication.template, self.publication.instance)
+    def commit(self, kind, created, *, writer_identities=None):
+        from .streamed_boundary_artifacts import ProducedFileReference
+        batch = self.batch_id(kind)
+        descriptors = [self.publication.descriptor_for(ProducedFileReference(
+            path, Path(path).name, len(payload), bytes_sha256hex(payload)),
+            producer_generation=batch,
+            file_identity=None if writer_identities is None else writer_identities.get(path))
             for path, payload in created]
-        out = dict(self._po.commit_origin_batch(
-            self.publication.queue, self.publication.instance,
-            self.publication.template, descriptors, batch_id=self.batch_id(kind)))
-        if not out.get("ok"):
-            raise PreparationPublicationRefused(
-                f"the preparation's {kind!r} batch did not commit: {out}")
-        self.batches.append({"kind": kind, "batch_id": self.batch_id(kind),
-                             "files": len(descriptors),
-                             "bytes": sum(len(payload) for _, payload in created),
-                             "ref": out.get("ref")})
+        out = self.publication.publish(batch_id=batch, descriptors=descriptors)
+        self.batches.append({'kind': kind, 'batch_id': batch, 'files': len(descriptors),
+            'bytes': sum(len(payload) for _, payload in created), 'ref': out['ref']})
         return out
 
+    def prepare_directories(self, paths):
+        from .staged_manifest import open_directory
+        for directory in dict.fromkeys([self.output_prefix, *(str(Path(path).parent) for path in paths)]):
+            prior = self._writer_directories.get(directory)
+            descriptor = open_directory(directory, create=prior is None, identity=prior)
+            try:
+                info = os.fstat(descriptor)
+                self._writer_directories[directory] = (info.st_dev, info.st_ino)
+            finally:
+                os.close(descriptor)
+        return self._writer_directories
 
-_BOUND: dict[str, PreparationPublication] = {}
+    def finalize(self, path):
+        return self.publication.finalize(path)
 
 
-def bind_preparation_publication(metadata_root: str | os.PathLike | None, *,
-                                 required: bool,
-                                 env: Mapping[str, str] | None = None):
-    """This action's preparation publication, or None when not asked for.
+_BOUND = {}
 
-    ``required`` is the tools' ``--produced-output`` flag, which the
-    submission's command line carries. Without it the preparation writes as
-    before, wherever it runs: a test shard is a PrismaBuild action too, and
-    its launch context names no produced-output template. With it the
-    process must be an admitted action (``PRISMABUILD_ACTION_KEY``), its
-    declared template must be the write-only preparation template, and the
-    template's output prefix must be ``metadata_root``; anything else
-    refuses before the first write. Bound once per process: the preparation
-    and the generator it runs share it.
-    """
+
+def bind_preparation_publication(metadata_root, *, required):
     if not required:
         return None
-    source = dict(os.environ) if env is None else dict(env)
-    owner = source.get("PRISMABUILD_ACTION_KEY")
-    if not owner:
-        raise PreparationPublicationRefused(
-            "--produced-output needs an admitted PrismaBuild action: "
-            "PRISMABUILD_ACTION_KEY is unset")
+    from .stage_a_produced_output import BoundaryProducedPublication, BoundaryProducedBindingError
+    class MetadataPublication(BoundaryProducedPublication):
+        DEFAULT_SLOT = PREPARATION_SLOT
     if metadata_root is None:
-        raise PreparationPublicationRefused(
-            "--produced-output writes under --metadata-root, the prefix the "
-            "produced-output template declares")
-    root = os.path.normpath(os.path.abspath(os.fspath(metadata_root)))
-    bound = _BOUND.get(owner)
-    if bound is None:
-        from .stage_a_produced_output import (
-            BoundaryProducedBindingError, BoundaryProducedPublication)
-        try:
-            publication = BoundaryProducedPublication.bind_from_admitted_owner(
-                slot=PREPARATION_SLOT, env=source)
-        except BoundaryProducedBindingError as exc:
-            raise PreparationPublicationRefused(
-                f"this preparation is an admitted PrismaBuild action ({owner[:12]}) "
-                f"and cannot bind its produced output: {exc}") from exc
-        bound = PreparationPublication(publication)
-        _BOUND[owner] = bound
-    if os.path.realpath(bound.output_prefix) != os.path.realpath(root):
-        raise PreparationPublicationRefused(
-            f"the produced-output template declares {bound.output_prefix}, but "
-            f"this preparation writes under {root}")
-    return bound
+        raise PreparationPublicationRefused('explicit metadata root required')
+    try:
+        publication = MetadataPublication.bind_from_admitted_owner()
+    except BoundaryProducedBindingError as exc:
+        raise PreparationPublicationRefused(f'native preparation declaration unavailable: {exc}') from exc
+    root = str(Path(metadata_root).absolute())
+    if root != publication.output_prefix:
+        raise PreparationPublicationRefused('metadata root differs from launch declaration')
+    key = publication.producer['launch_sha256']
+    if key not in _BOUND:
+        _BOUND[key] = PreparationPublication(publication)
+    elif _BOUND[key].publication.binding != publication.binding:
+        raise PreparationPublicationRefused('metadata publication declaration changed')
+    return _BOUND[key]
 
 
 def reset_preparation_publications_for_tests() -> None:
@@ -594,13 +506,18 @@ def publish_files(publication: PreparationPublication | None, kind: str,
                 temp_ceiling_bytes=max(len(payload) for _, payload, _ in planned),
                 paths=[os.path.normpath(os.path.abspath(str(path)))
                        for path, _, _ in planned])
-        except (BoundaryProducedPrewriteRefused,
-                publication._po.ProducedOutputError) as exc:
+        except BoundaryProducedPrewriteRefused as exc:
             raise PreparationPublicationRefused(
                 f"the preparation's {kind!r} batch: {exc}") from exc
     created: list[tuple[str, bytes]] = []
+    writer_identities = WriterIdentities()
+    if publication is not None:
+        publication.prepare_directories([path for path, _, _ in planned])
     for path, payload, where in planned:
-        if publish_new_bytes(path, payload):
+        writer_kwargs = ({'nofollow': True, 'writer_identities': writer_identities,
+                          'writer_directories': publication.prepare_directories([path])}
+                         if publication is not None else {})
+        if publish_new_bytes(path, payload, **writer_kwargs):
             created.append((os.path.normpath(os.path.abspath(str(path))), payload))
             continue
         # Another writer reached the name between the check and the link.
@@ -609,7 +526,7 @@ def publish_files(publication: PreparationPublication | None, kind: str,
                 f"refusing to overwrite differing bytes at {path}: a re-seal "
                 f"is a new reviewed directory, never an edit")
     if publication is not None and created:
-        publication.commit(kind, created)
+        publication.commit(kind, created, writer_identities=writer_identities)
     return [Path(path) for path, _ in created]
 
 

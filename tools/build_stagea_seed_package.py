@@ -1,4 +1,4 @@
-"""Seal a Stage A seed spec and the data manifest its PrismaBuild action stages.
+"""Seal a Stage A seed spec and the data manifest its admitted job reads.
 
 A seed (``prismaquant.stage_a_chain_seed``, PQ #1016) continues a source
 run's sealed checkpoint ``b`` down to ``through`` in a scratch output root.
@@ -245,9 +245,14 @@ def build(*, original_manifest, original_manifest_sha256, plan, checkpoint, caps
     return package
 
 
-def _pb_validate():
-    from prismaquant.staged_lease import sdk_submodule
-    return sdk_submodule("core").validate_data_manifest
+def _manifest_validator():
+    """The CLI has no manifest validator: the retired execution system's was its only authority.
+
+    Failing closed is the named limit; a native manifest contract must supply one before this runs.
+    """
+    def refuse(manifest):
+        raise SystemExit("no native data-manifest validator is available; the seed package is not built")
+    return refuse
 
 
 def main(argv=None) -> int:
@@ -283,7 +288,7 @@ def main(argv=None) -> int:
         implementation_to=args.implementation_to,
         compare=(None if args.compare is None
                  else _pin(args.compare, args.compare_sha256, "compare checkpoint")),
-        output=args.output, validate=_pb_validate())
+        output=args.output, validate=_manifest_validator())
     print(DIRECT_ASCII_SPACED_LAX.text(package))
     return 0
 

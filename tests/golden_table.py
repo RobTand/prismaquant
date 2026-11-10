@@ -39,7 +39,14 @@ def _qualified(kind: type) -> str:
 def outcome(call, *, tmp=None) -> dict:
     """What ``call()`` did, as a JSON row two runs can be compared by."""
     def text(value: str) -> str:
-        return value if tmp is None else value.replace(str(tmp), "<tmp>")
+        if tmp is None:
+            return value
+        path = str(tmp)
+        escaped = json.dumps(path)[1:-1]
+        # JSON output and its repr can each escape a non-ASCII job directory.
+        for spelling in sorted({path, escaped, repr(escaped)[1:-1]}, key=len, reverse=True):
+            value = value.replace(spelling, "<tmp>")
+        return value
 
     try:
         value = call()

@@ -11,6 +11,10 @@ name no evidence shows; the generator turns each into its library.
 """
 
 TEST_INPUTS = {
+    "//tests:test_research_instrument_metadata_boundaries_audit": struct(
+        modules = ["experiments/glm_manifest_read.py", "experiments/glm_nfs_row_read.py"],
+        reason = "the reader module names are composed from parametrized f-strings.",
+    ),
     "//tests:test_conftest_names_the_test_environment": struct(
         deps = ["@pq_pip//tessera_quant", "@pq_pip//torch", "@pq_pip//transformers"],
         reason = "it checks the terminal summary names torch, transformers and tessera-quant versions, which conftest reads from installed metadata without importing them.",
@@ -49,27 +53,9 @@ TEST_INPUTS = {
         data = ["//:files/prismaquant"],
         reason = "it scans every prismaquant module for imports of tools.",
     ),
-    "//tests:test_prismabuild_boundary": struct(
-        data = ["//:files/prismaquant", "//:files/tools"],
-        reason = "it scans prismaquant and tools for prismabuild references.",
-    ),
-    "//tests:test_prismabuild_import_leak_1281": struct(
-        modules = [
-            "tests/test_dispatch_shared_tag_placement.py",
-            "tests/test_fleet_acceptance_level1.py",
-            "tests/test_fullstack_real_chain.py",
-            "tests/test_pb_sdk5_pin_2152.py",
-            "tests/test_pilot_verified_result_1293.py",
-            "tests/test_quality_prefill_pb_adapter_serve_once.py",
-            "tests/test_quantum_boundary_readset.py",
-            "tests/test_quantum_executable_readset.py",
-            "tests/test_slice_manifest_pb_staging.py",
-            "tests/test_stage_a_produced_boundary_chain.py",
-            "tests/test_stagea_forward_read_plan.py",
-            "tests/test_stagea_readset_source_coverage.py",
-            "tests/test_strict_reader_tier_enforcement.py",
-        ],
-        reason = "its source-family selector launches these pytest consumers dynamically in a child; their module libraries carry the child's package dependencies. test_bazel_inputs checks this list against the selector.",
+    "//tests:test_prismabuild_ban": struct(
+        data = ["//:files/prismaquant", "//:files/tools", "//tests:files"],
+        reason = "it scans the live source tree for retired execution-system mechanisms.",
     ),
     "//tests:test_serving_runtime_patch_set": struct(
         data = ["//:files/prismaquant/serving_runtime_patches"],

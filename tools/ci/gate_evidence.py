@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize PrismaBuild inventories and downloaded hosted gate artifacts."""
+"""Summarize retained execution inventories and downloaded hosted gate artifacts."""
 from __future__ import annotations
 
 import argparse
@@ -16,57 +16,6 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from prismaquant.digests import file_sha256hex
 from tools.ci.gate_run import gate_junit_identity
-
-
-def inventory(reports, *, action_evidence=None):
-    """Reduce pbtest reports with optional exported public pb_action responses."""
-    action_evidence = {} if action_evidence is None else action_evidence
-    outcomes = defaultdict(dict)
-    timings = defaultdict(list)
-    actions = []
-    incomplete = []
-    for repeat, path in enumerate(reports, 1):
-        for row in json.loads(path.read_text()):
-            key = row['action_key']
-            record = action_evidence.get(key, {})
-            receipt = Path(row['receipt_path']) if row.get('receipt_path') else None
-            complete = record.get('complete') is True and not record.get('timed_out') and not record.get('unavailable')
-            actions.append({'repeat': repeat, 'key': key, 'exit': row['returncode'],
-                'summary': row.get('summary'), 'terminal_state': record.get('state') if complete else None,
-                'evidence_complete': complete,
-                'host': record.get('outcome', {}).get('finished_host') if complete else None,
-                'receipt': str(receipt) if receipt else None,
-                'receipt_exists': bool(receipt and receipt.is_file()),
-                'memory_peak_bytes': record.get('resource_profile', {}).get('scope', {}).get('memory_peak_bytes')
-                    if complete and record.get('resource_profile') else None})
-            parsed = None
-            for line in row.get('output', '').splitlines():
-                if line.startswith('pbtest-outcomes: '):
-                    parsed = json.loads(line.removeprefix('pbtest-outcomes: '))
-            if parsed is None:
-                incomplete.append({'repeat': repeat, 'key': key, 'reason': 'missing outcome record'})
-                continue
-            for filename, seconds in parsed.get('file_durations', {}).items():
-                timings[filename].append(seconds)
-            nodes = defaultdict(list)
-            for report in parsed.get('reports', []):
-                nodes[report[0]].append(report[1:3])
-            for node, phases in nodes.items():
-                labels = {outcome for phase, outcome in phases}
-                outcome = 'fail' if labels & {'failed', 'error'} else 'skip' if 'skipped' in labels else 'pass'
-                outcomes[node][repeat] = outcome
-            missing = row.get('verdict', {}).get('unobserved_files', [])
-            if missing:
-                incomplete.append({'repeat': repeat, 'key': key, 'files': missing})
-    return {'schema': 'prismaquant.gate_inventory.v1',
-        'reports': [{'path': str(path), 'sha256': file_sha256hex(path)} for path in reports],
-        'actions': actions, 'incomplete': incomplete,
-        'always_failing': sorted(node for node, values in outcomes.items()
-                                 if len(values) == len(reports) and set(values.values()) == {'fail'}),
-        'changed_outcomes': {node: values for node, values in sorted(outcomes.items())
-                             if len(set(values.values())) > 1},
-        'files': {name: max(values) for name, values in sorted(timings.items())},
-        'observed_nodes': len(outcomes)}
 
 
 def hosted(directories, default, *, file_budgets=()):
@@ -188,17 +137,14 @@ def hosted(directories, default, *, file_budgets=()):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('kind', choices=['inventory', 'hosted'])
+    parser.add_argument('kind', choices=['hosted'])
     parser.add_argument('inputs', nargs='+', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--default-seconds', type=float, default=20)
     parser.add_argument('--file-budget', action='append', default=[],
                         help='test file with shared fixture cost; calibrate its complete JUnit total')
-    parser.add_argument('--action-evidence', type=Path, help='mapping of action keys to exported public pb_action responses')
     args = parser.parse_args()
-    actions = json.loads(args.action_evidence.read_text()) if args.action_evidence else None
-    result = inventory(args.inputs, action_evidence=actions) if args.kind == 'inventory' else hosted(
-        args.inputs, args.default_seconds, file_budgets=args.file_budget)
+    result = hosted(args.inputs, args.default_seconds, file_budgets=args.file_budget)
     args.output.write_text(json.dumps(result, indent=2) + '\n')
 
 

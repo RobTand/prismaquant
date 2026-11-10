@@ -1,13 +1,16 @@
 """Run one configured ship-gates sequence inside an admitted action.
 
-This module starts stage processes, not jobs. PrismaBuild owns admission and
-multi-host placement. Existing producers and the shipcard verifier own gates.
+This module starts stage processes, not jobs. The native Flux submitter owns
+admission and placement. Existing producers and the shipcard verifier own gates.
 """
 from __future__ import annotations
 
 import argparse
+import ast
+import re
 import copy
 import json
+import shlex
 import os
 from pathlib import Path
 import subprocess
@@ -48,6 +51,87 @@ def _validate_destinations(destinations: list[Path], protected: set[Path], artif
     if any(destination in protected or artifact == destination or artifact in destination.parents
            for destination in destinations):
         raise OutputConflict("outputs must not overwrite inputs or enter the artifact")
+
+
+def _submits_nested_job(argv: list[str]) -> bool:
+    """Refuse Flux argv words anywhere, plus shell and Python submit forms."""
+    if any(Path(word).name in {"flux", "flux_jobs.py"} for word in argv):
+        return True
+    # Split shell command segments before inspecting embedded Python or shell source.
+    for index, word in enumerate(argv):
+        if word and all(char in ";&|()" for char in word):
+            if _submits_nested_job(argv[:index]) or _submits_nested_job(argv[index + 1:]):
+                return True
+            return False
+    while argv and ("=" in argv[0] or Path(argv[0]).name in {"env", "command", "exec"}):
+        argv = argv[1:]
+    if not argv:
+        return False
+    executable = Path(argv[0]).name
+    if executable in {"flux", "flux_jobs.py"}:
+        return True
+    if re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", executable):
+        for index, word in enumerate(argv[1:], 1):
+            if index > 1 and argv[index - 1] in {"-W", "-X"}:
+                continue
+            option = re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]*(m|c)(.*)", word)
+            if option and option[1] == "m":
+                module = option[2] or (argv[index + 1] if index + 1 < len(argv) else "")
+                return module == "prismaquant.flux_jobs"
+            if option and option[1] == "c" and (option[2] or index + 1 < len(argv)):
+                source = option[2] or argv[index + 1]
+                try:
+                    tree = ast.parse(source)
+                except SyntaxError as exc:
+                    raise ValueError("invalid Python stage command") from exc
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import) and any(
+                            alias.name == "prismaquant.flux_jobs" for alias in node.names):
+                        return True
+                    if isinstance(node, ast.ImportFrom) and (
+                            node.module == "prismaquant.flux_jobs" or
+                            node.module == "prismaquant" and any(alias.name == "flux_jobs" for alias in node.names)):
+                        return True
+                    if isinstance(node, ast.Call):
+                        name = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                            node.func.id if isinstance(node.func, ast.Name) else "")
+                        if name in {"import_module", "__import__"} and node.args and isinstance(
+                                node.args[0], ast.Constant) and node.args[0].value == "prismaquant.flux_jobs":
+                            return True
+                        if name not in {"run", "call", "Popen", "check_call", "check_output",
+                                        "system", "popen", "execv", "execvp", "execvpe", "execve"}:
+                            continue
+                        for argument in node.args:
+                            try:
+                                value = ast.literal_eval(argument)
+                            except (ValueError, TypeError):
+                                continue
+                            if isinstance(value, str):
+                                value = shlex.split(value)
+                            if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
+                                if _submits_nested_job(list(value)):
+                                    return True
+                return False
+            if not word.startswith("-"):
+                break
+    if executable in {"sh", "bash", "dash", "zsh"}:
+        index = 1
+        while index < len(argv):
+            word = argv[index]
+            if word in {"--rcfile", "--init-file", "-o", "-O"}:
+                index += 2
+                continue
+            if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word) and index + 1 < len(argv):
+                try:
+                    lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=";&|()`{}")
+                    lexer.whitespace_split = True
+                    return _submits_nested_job(list(lexer))
+                except ValueError as exc:
+                    raise ValueError("invalid shell stage command") from exc
+            if word == "--" or not word.startswith("-"):
+                break
+            index += 1
+    return False
 
 
 def load_config(path: str | Path, *, report_output: Path | None = None,
@@ -103,8 +187,7 @@ def load_config(path: str | Path, *, report_output: Path | None = None,
                 raise ValueError(f"{identity}: arguments must be a string array")
             if identity not in GOLD_TOOLS and not argv:
                 raise ValueError(f"{identity}: argv is empty")
-            if any(Path(word).name in {"pbrun.py", "pbtest.py", "pbgang.py", "pbcampaign.py"}
-                   for word in argv):
+            if _submits_nested_job(argv):
                 raise ValueError("stage processes must not submit nested jobs")
             if identity in GOLD_TOOLS:
                 reserved = {"--model", "--output", "--preflight", "--serve-image", "--mode"}

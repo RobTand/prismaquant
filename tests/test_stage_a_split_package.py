@@ -46,7 +46,6 @@ from tools.build_stagea_split_package import (
     build,
     quantum_manifest_name,
 )
-from fullstack_pb_generation import pinned_pb_source
 
 LAYERS = 5
 WALK_READS = ("walk/census.json", "walk/merged_checkpoint.json.parts/units/0.pkl")
@@ -244,10 +243,7 @@ def test_a_later_round_stages_the_joined_checkpoint(tmp_path, monkeypatch):
                       through=2, resume_from=3, stride=1)
 
 
-@pytest.mark.usefixtures("pinned_pb_source")
-def test_the_round_manifests_pass_the_prismabuild_validator(tmp_path, monkeypatch):
-    from test_quantum_executable_readset import _pb
-    core, tiers, _plans = _pb()
+def test_the_round_manifests_preserve_exact_phase_bytes(tmp_path, monkeypatch):
     root = tmp_path / "run"
     _interrupted(root, monkeypatch, interrupt=_at(3, 1, 2))
     package = _build(tmp_path, root)
@@ -255,9 +251,10 @@ def test_the_round_manifests_pass_the_prismabuild_validator(tmp_path, monkeypatc
                              *((quantum, ["head", "chain-003", "chain-002"])
                                for quantum in package["quanta"])]:
         manifest, _ = _phases(described["data_manifest"]["path"])
-        for entry in manifest["entries"]:
-            entry["path"] = "/mnt/shared/fixture" + entry["path"][len(str(tmp_path)):]
-        ranges = tiers.manifest_phase_ranges(core.validate_data_manifest(manifest))
+        ranges = manifest["read_plan"]["phases"]
+        assert ranges[-1]["cumulative_bytes"] == manifest["read_plan"]["read_bytes"]
+        assert all(p["bytes"] == sum(manifest["entries"][i]["bytes"]
+                   for i in p["entry_indices"]) for p in ranges)
         assert [item["name"] for item in ranges] == names
 
 

@@ -454,7 +454,7 @@ class QuantumRowDemand:
 
 
 @dataclass(frozen=True)
-class QuantumPBEnvelope:
+class QuantumRow:
     manifest_path: str
     progress: Sequence[tuple[str, int]]
     demand: QuantumRowDemand
@@ -462,26 +462,36 @@ class QuantumPBEnvelope:
     priority: int
     command: Sequence[str]
     environment: Sequence[tuple[str, str]] = ()
-    produced_output_template: str | None = None
+    produced_declaration: str | None = None
     container_image: str | None = None
+    produced_declaration_wire: bytes | None = None
 
-    def argv(self, *, python: str, pbrun: str, container_image_flag: str,
-             dev_mode_assignment: str) -> list[str]:
-        argv = [python, str(pbrun)]
-        for tag in self.tags:
-            argv += ["--tag", str(tag)]
-        argv += ["--data-manifest", str(self.manifest_path),
-                 "--residency", "stage", "--residency-ram", "auto"]
-        for name, grace in self.progress:
-            argv += ["--progress-phase", f"{name}={grace}"]
-        argv += ["--priority", str(self.priority),
-                 "--demand", f"gpu=1,mem_gb={self.demand.memory_gib}",
-                 "--gpu-memory-gb", self.demand.gpu_gib,
-                 "--cpus", str(self.demand.cpus)]
-        if self.produced_output_template is not None:
-            argv += ["--produced-output-template", str(self.produced_output_template)]
-        if self.container_image is not None:
-            argv += [container_image_flag, self.container_image]
+    def row(self, *, checkout: str) -> dict:
+        """Scientific launch intent. Admission and resource rendering belong to Flux."""
+        if self.produced_declaration is None and self.produced_declaration_wire is not None:
+            raise ValueError('unpublished declaration bytes need an explicit path')
+        from decimal import Decimal
+        def number(text):
+            value = Decimal(text)
+            return int(value) if value == value.to_integral_value() else float(value)
+        environment = {}
         for name, value in self.environment:
-            argv += ["--env", f"{name}={value}"]
-        return [*argv, "--env", dev_mode_assignment, "--detach", "--", *self.command]
+            if name in environment and environment[name] != value:
+                raise ValueError(f"conflicting explicit environment setting {name}")
+            environment[name] = value
+        row = {"argv": list(self.command), "cwd": checkout,
+               "demand": {"gpu": 1, "mem_gb": number(self.demand.memory_gib),
+                          "cpu": self.demand.cpus},
+               "gpu_memory_gb": number(self.demand.gpu_gib),
+               "tags": list(self.tags), "priority": self.priority,
+               "env": environment, "retry_safe": True,
+               "data_manifest": self.manifest_path,
+               "residency": {"tier": "stage", "ram": "auto"},
+               "progress_phases": [f"{name}={grace}" for name, grace in self.progress]}
+        if self.produced_declaration is not None:
+            from .stage_a_produced_output import declaration_launch_arguments
+            row['argv'] += declaration_launch_arguments(
+                self.produced_declaration, wire=self.produced_declaration_wire)
+        if self.container_image is not None:
+            row["container_images"] = [self.container_image]
+        return row

@@ -189,7 +189,7 @@ def test_graph_impact_gate(capsys):
         assert graph_impact_pq.main([]) == 0
 
 
-def test_pra_baseline_matches_main_under_the_current_analyzer():
+def test_pra_baseline_keeps_main_minima_under_the_current_analyzer():
     from tools.ci import graph_impact_pq as pq
 
     main = pq.snapshot_at(ROOT, '9fb507d69a13dc058e731f039bf445e84e4b5d3a')
@@ -198,7 +198,9 @@ def test_pra_baseline_matches_main_under_the_current_analyzer():
                 'figures': {**main['recorded_baseline']['figures'], 'scc_max': main['scc_max']},
                 'test_to_test_count': len(impact.test_to_test_edges(main)),
                 'analyzer_sha256': pq.file_sha256hex(ROOT / 'tools/bazel/build_files.py')}
-    assert recorded == expected
+    assert impact.baseline_errors(recorded, expected) == []
+    fixed = expected.keys() - {'figures', 'reach_budget', 'test_to_test_count', 'edge_groups', 'test_to_test'}
+    assert {key: recorded[key] for key in fixed} == {key: expected[key] for key in fixed}
 
 
 @pytest.mark.parametrize('mutation', [None, 'base fingerprint', 'base source fingerprint',
@@ -210,6 +212,10 @@ def test_pra_remeasurement_is_a_one_shot_transition(mutation, monkeypatch):
     from tools.ci import graph_impact_pq as pq
 
     current = json.loads((ROOT / 'tests/fixtures/graph_impact_baseline.json').read_text())
+    # Main 9fb507d69a13dc058e731f039bf445e84e4b5d3a recorded 174 and 889
+    # under the PR-A analyzer transition, before later shrink-only records.
+    current['figures']['scc_max'] = 174
+    current['test_to_test_count'] = 889
     previous = deepcopy(current)
     previous.update(analyzer_sha256=pq.PR_A_ANALYZERS[0], test_to_test_count=875)
     previous['figures']['scc_max'] = 168

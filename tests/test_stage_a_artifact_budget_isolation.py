@@ -45,7 +45,7 @@ def test_budget_teardown_preserves_a_retained_quantum_callable(tmp_path, monkeyp
     campaign = dispatch_tests.campaign.__wrapped__(tmp_path)
     build = dispatch_tests._scratch_quantum_argv(tmp_path, campaign, {}, ())
     argv = build()
-    sealed = json.loads(argv[argv.index("--spec") + 1])
+    sealed = json.loads(argv["argv"][argv["argv"].index("--spec") + 1])
     assert sys.modules["dispatch_joint_quanta"] is original
     assert sys.modules["dispatch_joint_quanta"].quantum_argv is retained
     assert sealed["env"] == {}

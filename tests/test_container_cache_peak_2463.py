@@ -419,18 +419,3 @@ def test_both_peaks_must_fit_the_ceiling_or_it_is_rejected():
     assert recomputed["ceiling_bytes"] == ceiling
     with pytest.raises(ValueError):
         peak_mod.derive_cache_ceiling(-1, headroom_bytes=0)
-
-
-def test_pb_charges_cache_gib_plus_each_scratch_reservation():
-    if importlib.util.find_spec("prismabuild") is None:
-        pytest.skip("public PB SDK unavailable; pricing needs a qualified receipt")
-    from prismabuild.local_scratch import scratch_terms
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    runner = importlib.import_module("tools.tessera_campaign_container")
-    cache_gib = fixture_mod.FIXTURE["pb_cache_gib"]
-    names = runner.CONTAINER_CACHE_SCRATCH_ENV
-    root = "/pq-fixture-cache-charge-1091/compile"
-    declared = {names[0]: root, names[1]: str(cache_gib * (1 << 30)),
-                runner.LOCAL_SCRATCH_PAIRS_ENV: f"{names[0]}:{names[1]}"}
-    assert scratch_terms(declared) == {"spool_gb": cache_gib}

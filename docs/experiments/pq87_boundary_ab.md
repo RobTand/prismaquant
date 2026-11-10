@@ -24,7 +24,7 @@ Use the same immutable container image and live BF16 server for A/B:
    control receipt, provided its observed stack, boot, input tokenization and
    action/campaign identity match. Preserve distinct live serve identities.
 
-The frozen input is `experiments/pq87_boundary_contract.json`: the existing
+The frozen input is `archive/pq_experiments_2026-11-09/experiments/pq87_boundary_contract.json`: the existing
 five terse prompts, six seeded repetitions, temperature 1, top-p 1. Every
 outcome is retained and re-scored. No rate or zero-defect threshold decides
 artifact eligibility. The fixed-point cap is selected on this schedule, so

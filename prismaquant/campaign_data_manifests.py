@@ -13,6 +13,9 @@ import socket
 import stat as statmod
 import subprocess
 
+from .data_manifest_contract import (ReadsetRefused, SCHEMA, SCHEMA_V2, SHARED_MOUNT,
+    MANIFEST_KEYS, ENTRY_KEYS, MAX_ENTRIES, MAX_READS, MAX_MANIFEST_BYTES,
+    check_manifest, check_manifest_bytes, check_manifest_v2)  # noqa: F401
 from .render_cache_paths import cache_weight_filename
 from .tessera_campaign_cli import explicit_campaign_options
 from . import tessera_campaign_selection as _selection_owner
@@ -25,15 +28,6 @@ from .digests import (bytes_sha256hex, text_sha256hex, file_sha256hex,
 
 UNITS_RE = re.compile(r"units/(row-\d{4}(?:-p\d{4})?)\.json")
 RECORD_SIZE = 1 << 20
-
-
-class ReadsetRefused(RuntimeError):
-    """A campaign input, read set or data manifest the producer refuses.
-
-    A domain error: the dispatcher and the experiment entry points turn it
-    into their exit status, and library callers catch it like any other
-    ``RuntimeError``.
-    """
 
 
 def read_optional_campaign_json(path):
@@ -356,99 +350,6 @@ class Campaign:
         return result
 
 
-SCHEMA = "prismaquant.prismabuild.data_manifest.v1"
-SCHEMA_V2 = "prismaquant.prismabuild.data_manifest.v2"
-SHARED_MOUNT = "/mnt/shared"
-
-#: ``prismabuild.core._DATA_MANIFEST_KEYS`` and ``_DATA_MANIFEST_ENTRY_KEYS``,
-#: restated because PrismaBuild is not importable from the environments that
-#: build a manifest.  ``validate_data_manifest`` builds both through
-#: ``_exact_mapping``: an unknown key is a refusal, not an ignored extra.
-MANIFEST_KEYS = frozenset({"schema", "produced_by", "mount_prefix", "entries",
-                           "entry_count", "total_bytes", "annotations"})
-ENTRY_KEYS = frozenset({"path", "offset", "bytes", "sha256"})
-
-#: ``prismabuild.core.DATA_MANIFEST_MAX_ENTRIES`` and
-#: ``DATA_MANIFEST_MAX_BYTES``: ``validate_data_manifest`` refuses a longer
-#: entry list and ``load_data_manifest`` refuses a larger file.  A routed GLM
-#: row is about 870 capture and weight entries plus a 5,920-file seed wire, so
-#: roughly 6,800 entries and 2 MB -- well inside both, but the ceilings belong
-#: here so a future read set that crosses one is refused by the producer
-#: rather than by the fleet.
-MAX_ENTRIES = 1_000_000
-MAX_READS = 4_000_000
-MAX_MANIFEST_BYTES = 64 * 1024 * 1024
-
-
-def check_manifest(manifest: dict, *, where: str = "data manifest") -> dict:
-    """Refuse here what PrismaBuild would refuse at submission.
-
-    The producer is in this repo and the validator is in PrismaBuild, so a
-    manifest that drifts breaks nothing in either tree: it surfaces as a
-    refused submission, after the campaign was laid out.  These are the same
-    four rules ``prismabuild.core.validate_data_manifest`` applies, and they
-    are cheap enough to apply to every row at submit time.
-    """
-    if set(manifest) != set(MANIFEST_KEYS):
-        raise ReadsetRefused(
-            f"{where}: fields differ: "
-            f"missing={sorted(MANIFEST_KEYS - set(manifest))}, "
-            f"extra={sorted(set(manifest) - MANIFEST_KEYS)}")
-    if manifest["schema"] != SCHEMA:
-        raise ReadsetRefused(f"{where}: schema must be {SCHEMA}")
-    for field in ("produced_by", "annotations"):
-        if not isinstance(manifest[field], dict):
-            raise ReadsetRefused(f"{where}: {field} must be an object")
-    prefix = manifest["mount_prefix"]
-    if not prefix.startswith("/") or prefix != os.path.normpath(prefix):
-        raise ReadsetRefused(f"{where}: mount_prefix must be a normalized absolute path")
-    if prefix == "/":
-        raise ReadsetRefused(f"{where}: mount_prefix must name a mount, not the root")
-    entries = manifest["entries"]
-    if not isinstance(entries, list) or not entries:
-        raise ReadsetRefused(f"{where}: entries must be a non-empty array")
-    if len(entries) > MAX_ENTRIES:
-        raise ReadsetRefused(f"{where}: entries exceed {MAX_ENTRIES}")
-    seen: set[tuple[str, int]] = set()
-    total = 0
-    for index, entry in enumerate(entries):
-        at = f"{where} entries[{index}]"
-        if set(entry) != set(ENTRY_KEYS):
-            raise ReadsetRefused(f"{at}: fields differ")
-        path, offset, size = entry["path"], entry["offset"], entry["bytes"]
-        if not path.startswith(prefix + "/"):
-            raise ReadsetRefused(f"{at}: {path} is outside {prefix}")
-        if os.path.normpath(path) != path:
-            raise ReadsetRefused(f"{at}: {path} is not normalized")
-        if not isinstance(offset, int) or offset < 0:
-            raise ReadsetRefused(f"{at}: offset must be a non-negative integer")
-        if not isinstance(size, int) or size <= 0:
-            raise ReadsetRefused(f"{at}: bytes must be positive")
-        if (path, offset) in seen:
-            raise ReadsetRefused(f"{at}: repeats a (path, offset)")
-        seen.add((path, offset))
-        total += size
-    if manifest["entry_count"] != len(entries):
-        raise ReadsetRefused(f"{where}: entry_count disagrees with entries")
-    if manifest["total_bytes"] != total:
-        raise ReadsetRefused(f"{where}: total_bytes disagrees with entries")
-    return manifest
-
-
-def check_manifest_bytes(blob: bytes, *, where: str = "data manifest") -> bytes:
-    """Refuse a manifest file PrismaBuild would refuse to read at all.
-
-    ``load_data_manifest`` stats the file before it parses it, so an oversized
-    manifest fails at submission with nothing validated.  Checking the bytes
-    the producer is about to write keeps that refusal here.
-    """
-    if len(blob) > MAX_MANIFEST_BYTES:
-        raise ReadsetRefused(
-            f"{where}: manifest file is {len(blob)} bytes, over the "
-            f"{MAX_MANIFEST_BYTES}-byte limit")
-    return blob
-
-
 def _producer_commit(tree: str) -> str:
     try:
         out = subprocess.run(["git", "-C", tree, "rev-parse", "HEAD"],
@@ -465,6 +366,8 @@ def _producer_commit(tree: str) -> str:
 #: commit record; their builders' complete import graph is a separate scope.
 PRODUCER_SOURCES = ("prismaquant/campaign_data_manifests.py",
                     "prismaquant/tessera_campaign_cli.py",
+                    "prismaquant/data_manifest_contract.py",
+                    "prismaquant/contract_checks.py",
                     "prismaquant/tessera_campaign_selection.py",
                     "prismaquant/tessera_acquisition_inputs.py",
                     "prismaquant/render_cache_paths.py",
@@ -660,7 +563,7 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
                              size_source: str) -> dict:
     """``produced_by`` that two submissions of one campaign agree on, byte for byte.
 
-    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    The submitter ingests the manifest as a content-addressed input and seals its
     digest into the action key, so a field that changes between runs -- a
     hostname, a clock reading -- gives the same row a new key on every submit.
     That is not a cosmetic loss: a finished row stops being a cache hit and is
@@ -669,7 +572,7 @@ def deterministic_provenance(workspace: str, campaign: Campaign,
 
     The producer is named by the digest of its own source, not by ``git
     rev-parse HEAD``.  ``plan`` publishes these bytes and runs as a
-    PrismaBuild action, where ``HEAD`` is pbrun's snapshot commit rather than
+    sealed action, where ``HEAD`` is the snapshot commit rather than
     the submitter's, and inside a container, where git exits 128 on a checkout
     another uid owns and ``_producer_commit`` reads that as ``"unknown"``.  A
     host-side ``submit`` re-deriving the same row would then write a different
@@ -992,53 +895,6 @@ class _ReadPlanV2:
                   "total_bytes": sum(entry["bytes"] for entry in self.entries),
                   "read_plan": {"phases": phases, "read_bytes": cumulative}}
         return check_manifest_v2(result, where=where)
-
-
-def check_manifest_v2(manifest: dict, *, where: str = "data manifest V2") -> dict:
-    """Mirror the published PB V2 unique-entry and ordered-read gates."""
-    if set(manifest) != MANIFEST_KEYS | {"read_plan"} or manifest.get("schema") != SCHEMA_V2:
-        raise ReadsetRefused(f"{where}: complete {SCHEMA_V2} fields required")
-    common = {key: value for key, value in manifest.items() if key != "read_plan"}
-    common["schema"] = SCHEMA
-    check_manifest(common, where=where)
-    if "phases" in manifest["annotations"]:
-        raise ReadsetRefused(f"{where}: V2 uses read_plan, not annotations.phases")
-    plan = manifest["read_plan"]
-    if not isinstance(plan, dict) or set(plan) != {"phases", "read_bytes"}:
-        raise ReadsetRefused(f"{where}: complete read_plan required")
-    phases = plan["phases"]
-    if not isinstance(phases, list) or not phases:
-        raise ReadsetRefused(f"{where}: read_plan needs nonempty phases")
-    names, used, cumulative, reads = set(), set(), 0, 0
-    for phase in phases:
-        if not isinstance(phase, dict) or set(phase) != {
-                "name", "entry_indices", "bytes", "cumulative_bytes"}:
-            raise ReadsetRefused(f"{where}: malformed read phase")
-        name, indices = phase["name"], phase["entry_indices"]
-        if (not isinstance(name, str) or not name or name.strip() != name
-                or "\x00" in name or name in names or not isinstance(indices, list)):
-            raise ReadsetRefused(f"{where}: invalid or repeated read phase name/indices")
-        names.add(name)
-        reads += len(indices)
-        if reads > MAX_READS:
-            raise ReadsetRefused(f"{where}: read references exceed {MAX_READS}")
-        local, size = set(), 0
-        for index in indices:
-            if (type(index) is not int or index < 0 or index >= len(manifest["entries"])
-                    or index in local):
-                raise ReadsetRefused(f"{where}: invalid or repeated phase entry index")
-            local.add(index)
-            used.add(index)
-            size += manifest["entries"][index]["bytes"]
-        cumulative += size
-        if (type(phase["bytes"]) is not int or phase["bytes"] != size
-                or type(phase["cumulative_bytes"]) is not int
-                or phase["cumulative_bytes"] != cumulative):
-            raise ReadsetRefused(f"{where}: phase byte accounting differs")
-    if used != set(range(len(manifest["entries"]))) or type(plan["read_bytes"]) is not int or plan["read_bytes"] != cumulative:
-        raise ReadsetRefused(f"{where}: read_plan coverage or read_bytes differs")
-    return manifest
-
 
 
 def _campaign_with_cached_capture_sizes(workspace: str):
@@ -2416,7 +2272,7 @@ def deterministic_entry_provenance(entry_point: str, *, plan: str,
                                    plan_sha256: str, workspace: str) -> dict:
     """``produced_by`` for a post-campaign pass, with nothing run-specific in it.
 
-    ``pbrun`` ingests the manifest as a content-addressed input and seals its
+    The submitter ingests the manifest as a content-addressed input and seals its
     digest into the action key, so a hostname or a clock reading here would
     give the same pass a new key on every submit and turn a finished action
     into a re-run. Every field is a property of the tree, the plan and the
@@ -2436,7 +2292,7 @@ def publish_row_manifests(campaign_manifest, workspace, *, out_dir, out_manifest
     src = campaign_manifest
     rows = json.load(open(src))
     if not isinstance(rows, list):
-        raise ReadsetRefused(f"{src}: expected a list of pbcampaign rows")
+        raise ReadsetRefused(f"{src}: expected a list of campaign rows")
     src_sha = file_sha256hex(src)
 
     sizes = None if stat else load_sizes(sizes_cache)

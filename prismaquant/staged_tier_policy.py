@@ -31,8 +31,8 @@ pool read).
 
 This module enforces tier *choice*: which staged tier a bulk open may use.
 Supported staged readers pair that policy with :mod:`staged_lease`, which
-acquires, opens and releases lifetime-pinned windows through PrismaBuild's
-client SDK. Async reads join before descriptor close and lease release;
+owns descriptors under immutable manifests and retained native lifetimes.
+Async reads join before descriptor close and window release;
 CPU/GPU data outlives a window only in an owned buffer charged to the action.
 The successful open's serving record supplies its pin identity. Activating
 this policy alone does not add lifetime ownership to an arbitrary reader.
@@ -45,6 +45,10 @@ import threading
 #: The campaign default: RAM first, SSD stage when declared. Pool/HDD are
 #: never bulk tiers under this policy.
 DEFAULT_ALLOWED_TIERS = "ram,ssd"
+
+PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
+SHA_ENV = 'PRISMAQUANT_STAGED_MANIFEST_SHA256'
+READ_ENV = 'PRISMAQUANT_READ_CONTRACT_SHA256'
 
 _KNOWN_TIERS = ("ram", "ssd")
 
@@ -205,3 +209,15 @@ class StagedRangeNotLanded(TierPolicyRefused):
         self.declared = str(declared)
         self.start = int(start)
         self.end = int(end)
+
+
+def _activate_native_launch():
+    import os
+    setting = os.environ.get('PRISMAQUANT_STAGED_ALLOWED_TIERS')
+    if setting is not None:
+        if setting != 'ssd' or not all(os.environ.get(key) for key in (PATH_ENV, SHA_ENV, READ_ENV)):
+            raise ValueError('incomplete explicit native staged-reader configuration')
+        activate_staged_tier_policy(setting)
+
+
+_activate_native_launch()

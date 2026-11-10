@@ -80,17 +80,17 @@ Gates, all fail closed with exit 3:
   ``--check-only`` runs the gates and writes nothing, mirroring the
   external binder's dry run.
 
-This is a producer, never a scheduler: it submits no PB rows and holds no
-state. Run it on a checkout inside the PB code closure (unlike the external
+This is a producer, never a scheduler: it submits no jobs and holds no
+state. Run it on the sealed source checkout (unlike the external
 binder script, which lives beside the data and cannot be captured), then
 submit from its outputs.
 
-With ``--produced-output`` (PQ #1070), as an admitted PrismaBuild action
-submitted with the data manifest and write-only produced-output template
-that ``tools/stage_b_preparation_submission.py`` writes, it files a prewrite
+The historical ``--produced-output`` route (PQ #1070) used an admitted job
+with the data manifest and write-only produced-output template
+from ``tools/stage_b_preparation_submission.py``. It files a prewrite
 for each group of files it creates under ``--metadata-root`` and commits
 them at their origin (``prismaquant.stage_b_prep_io``). Without the flag it
-writes exactly as before.
+writes exactly as before. This route remains unqualified for native execution.
 """
 from __future__ import annotations
 
@@ -776,7 +776,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     return sealed
 
 
-def main(argv=None) -> int:
+def main(argv=None, *, finalize_publication=True) -> int:
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
@@ -797,7 +797,7 @@ def main(argv=None) -> int:
     ap.add_argument("--data-manifest-sha256", default=None,
                     help="PQ #1092: the digest of the data manifest this "
                          "admitted action was submitted with. Every declared "
-                         "input is then read off PrismaBuild's stage through "
+                         "input is then read from the immutable stage through "
                          "the residency reader and checked against its "
                          "digest; a read the stage does not hold refuses, "
                          "never falling back to the pool. Needs --residency "
@@ -806,12 +806,9 @@ def main(argv=None) -> int:
                     help="with --data-manifest-sha256: the staged tiers a "
                          "read may come from (default ram,ssd)")
     ap.add_argument("--produced-output", action="store_true",
-                    help="PQ #1070: commit every file this run creates under "
-                         "--metadata-root as a PrismaBuild produced output of "
-                         "this admitted action. The action must declare the "
-                         "write-only template tools/stage_b_preparation_"
-                         "submission.py writes; refuses before the first "
-                         "write otherwise")
+                    help="request authenticated produced outputs; native "
+                         "publication authority is held for unit4, so this "
+                         "refuses before input preparation or writes")
     ap.add_argument("--metadata-root", type=Path, default=None,
                     help="PQ #884: explicit immutable control-metadata "
                          "generation root. Slice manifests land at "
@@ -902,7 +899,16 @@ def main(argv=None) -> int:
                          "unchanged")
     ap.add_argument("--check-only", action="store_true",
                     help="Gate 1 alone; write nothing")
+    from prismaquant.stage_a_produced_output import add_declaration_arguments
+    add_declaration_arguments(ap)
     args = ap.parse_args(argv)
+    if args.produced_output:
+        from prismaquant.stage_b_prep_io import (
+            PreparationPublicationRefused, bind_preparation_publication)
+        try:
+            bind_preparation_publication(args.metadata_root, required=True)
+        except PreparationPublicationRefused as exc:
+            return _fail(str(exc))
     if args.head_slices and not args.executable_readsets:
         return _fail("--head-slices needs --executable-readsets")
     if args.checkpoint_incoming_mode is not None and not args.executable_readsets:
@@ -1423,9 +1429,7 @@ def main(argv=None) -> int:
     from prismaquant.stage_b_prep_io import (
         PreparationPublicationRefused, bind_preparation_publication, publish_files)
     try:
-        # With --produced-output, inside the admitted PrismaBuild action, the
-        # files are produced outputs committed at their origin (PQ #1070);
-        # without it they are published directly, as before.
+        # Argument entry authenticates the launch-bound publication request.
         publication = bind_preparation_publication(
             metadata_root, required=args.produced_output)
         # Publication order is the recoverability contract: every
@@ -1512,6 +1516,8 @@ def main(argv=None) -> int:
         records.append((out / "derivation.json", _pretty(produced["derivation"]),
                         "derivation"))
         publish_files(publication, "records", records)
+        if publication is not None and finalize_publication:
+            publication.finalize(Path(publication.publication.producer['record_dir']) / 'produced-result.json')
     except (ValueError, OSError, PreparationPublicationRefused) as exc:
         return _fail(str(exc))
     bound = ("unbound (pre-stage-A)" if receipt is None else

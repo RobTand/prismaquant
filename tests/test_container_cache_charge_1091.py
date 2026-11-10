@@ -32,18 +32,13 @@ def _layout(tmp_path, *, cache=None, pins=None):
     return _spec(env, roots=tuple(dict.fromkeys((cot, spill, cache)))), env
 
 
-def test_cache_pair_is_priced_independently_without_creating_directories(tmp_path):
+def test_cache_pair_is_declared_independently_without_creating_directories(tmp_path):
     runner = _runner()
     spec, env = _layout(tmp_path)
     declared = runner.local_scratch_environment(spec, env)
-    pairs = declared[runner.LOCAL_SCRATCH_PAIRS_ENV]
-    assert pairs == ",".join(f"{a}:{b}" for a, b in (_COTANGENT, _SPILL, CACHE))
-    assert {name: declared[name] for name in CACHE} == {name: env[name] for name in CACHE}
-    if importlib.util.find_spec("prismabuild") is None:
-        pytest.skip("public PB SDK unavailable; pricing requires a qualified PB-worker receipt")
-    # A present but incompatible/broken SDK must fail, not be skipped.
-    from prismabuild.local_scratch import scratch_terms
-    assert scratch_terms(declared) == {"spool_gb": 4}
+    names = [name for pair in (_COTANGENT, _SPILL, CACHE) for name in pair]
+    assert set(declared) == set(names)
+    assert {name: declared[name] for name in names} == {name: env[name] for name in names}
     assert list(tmp_path.iterdir()) == []
 
 
@@ -57,7 +52,7 @@ def test_cache_forwarding_and_defaults_do_not_reuse_spill_or_tmp():
         "TORCHINDUCTOR_CACHE_DIR": env[CACHE[0]] + "/inductor",
         "XDG_CACHE_HOME": env[CACHE[0]] + "/xdg"}
     assert inside["PRISMAQUANT_TMPDIR"] == env["PRISMAQUANT_TMPDIR"]
-    assert "PRISMABUILD_LOCAL_SCRATCH_PAIRS" not in inside
+    assert not [name for name in inside if name.startswith("PRISMABUILD_")]
 
 
 @pytest.mark.parametrize("cache_relation", ["same", "ancestor", "descendant"])

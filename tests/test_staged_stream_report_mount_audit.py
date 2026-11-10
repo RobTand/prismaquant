@@ -1,6 +1,6 @@
 """Real benchmark main/report with tiny owned bytes, not throughput evidence.
 
-Doubles: stage-mount existence/discovery, map admission/main resolver, the
+Doubles: stage-mount discovery, the bound staged-manifest resolver, the
 reader's offline residency policy, read-shape lookup, cache advice and IO/NFS
 counters. Tensor header/payload reads, digest/value comparison, main loop and
 JSON output are real. No live stage, lease, fleet or throughput is qualified.
@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 import torch
@@ -25,24 +25,19 @@ def test_real_main_serializes_found_mount_and_owned_tensor_result(
         tmp_path, monkeypatch, mount_present):
     source = tmp_path / "owned.safetensors"
     save_file({"weight": torch.arange(8, dtype=torch.float32).reshape(2, 4)}, str(source))
-    manifest = tmp_path / "map.json"
-    manifest.write_text(json.dumps({
-        "manifest_sha256": "a" * 64,
-        "entries": {f"0:{source}": {
-            "offset": 0, "bytes": source.stat().st_size, "stage_path": str(source),
-        }},
-    }))
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    extent = SimpleNamespace(source_path=str(source), source_offset=0,
+                             length=source.stat().st_size, object_path=str(source))
+    resolver = SimpleNamespace(manifest=SimpleNamespace(
+        lifetime={"mode": "retained_shared_phase", "namespace": str(stage)}, extents=[extent]))
     output = tmp_path / "result.json"
     options = {"rsize": "1048576", "nconnect": "4"}
-    facts = MountFacts("/stage/prewarm", "nfs4", MappingProxyType(options))
+    facts = MountFacts(str(stage), "nfs4", MappingProxyType(options))
     monkeypatch.setattr(mount_facts, "find_mount",
                         lambda *_args, **_kwargs: facts if mount_present else None)
-    isdir = os.path.isdir
-    monkeypatch.setattr(os.path, "isdir",
-                        lambda path: True if str(path) == "/stage/prewarm" else isdir(path))
-    monkeypatch.setenv("PRISMABUILD_RESIDENCY_MAP", str(manifest))
-    monkeypatch.setattr(residency_map, "bind_residency_manifest", lambda _digest: None)
-    monkeypatch.setattr(residency_map, "residency_resolver", lambda: object())
+    monkeypatch.setenv("PRISMAQUANT_STAGED_MANIFEST", str(tmp_path / "manifest.json"))
+    monkeypatch.setattr(residency_map, "residency_resolver", lambda: resolver)
     # Actual source_safe_open uses its normal offline/local branch for owned bytes.
     monkeypatch.setattr(residency_shard_reader, "residency_resolver", lambda: None)
     monkeypatch.setattr(residency_shard_reader, "policy_is_active", lambda: False)
@@ -53,7 +48,7 @@ def test_real_main_serializes_found_mount_and_owned_tensor_result(
     def nfs_counters():
         ticks["nfs"] += 1
         count = ticks["nfs"] * (1 << 20)
-        return {"/stage/prewarm": (count, count), "/mnt/shared": (0, 0)}
+        return {str(stage): (count, count), "/mnt/shared": (0, 0)}
 
     def process_counters():
         ticks["process"] += 1

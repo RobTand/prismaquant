@@ -2624,12 +2624,8 @@ ORIGINAL_DELIVERY_KEYS = frozenset({
     'material_windows', 'readers', 'storage_aliases', 'payload_reads',
 })
 ORIGINAL_NATIVE_DELIVERY_KEYS = frozenset({
-    'claim', 'serving', 'ref_id', 'entry', 'source_fd_stat', 'descriptors_closed',
-    'lease_released', 'sealed_fd_stat', 'kernel_seals',
-})
-ORIGINAL_NATIVE_CLAIM_KEYS = frozenset({
-    'queue_root', 'action_key', 'nonce', 'scope_id', 'worker', 'host', 'incarnation',
-    'attempt_source', 'map_path', 'helper_root',
+    'source_fd_stat', 'staged_manifest_sha256', 'read_contract_sha256', 'pin_id',
+    'range_ref', 'descriptors_closed', 'lease_released', 'sealed_fd_stat', 'kernel_seals',
 })
 ORIGINAL_COPY_RECEIPT_KEYS = frozenset({
     'device', 'stream_id', 'files', 'fence', 'failed', 'retained_host_aliases', 'host_aliases_at_fence',
@@ -2641,8 +2637,8 @@ def validate_original_source_material_receipt(value, authority):
 
     All delivered/held/lookahead files remain in the snapshot. Installed
     prefix/head coverage belongs to source_initialization, not this receipt.
-    Native claim nonces here are observations of the capture producer and are
-    deliberately not compared with a later consumer's active claim.
+    Immutable phase and read-contract witnesses describe the actual delivery.
+    Producer identity is joined independently by native_results.
     """
     from .source_generation import _control, _exact, _same, _contract, _snapshot
     from .residency_map import residency_map_key
@@ -2669,7 +2665,7 @@ def validate_original_source_material_receipt(value, authority):
     entries = {(row['path'], row['offset']): row for row in readset['entries']}
     rows = value['deliveries']
     _contract.require(isinstance(rows, list), 'original material deliveries must be actual rows')
-    generations, latest, live_bytes, claim = set(), {}, 0, None
+    generations, latest, live_bytes = set(), {}, 0
     for row in rows:
         _exact(row, ORIGINAL_DELIVERY_KEYS, 'original actual delivered file')
         name = row['name']
@@ -2691,40 +2687,16 @@ def validate_original_source_material_receipt(value, authority):
             row[key] for key in ('material_windows', 'readers', 'storage_aliases'))),
             'retired original delivery still claims a live consumer')
         native = _exact(row['native_delivery'], ORIGINAL_NATIVE_DELIVERY_KEYS, 'actual native original delivery')
-        current_claim = _exact(native['claim'], ORIGINAL_NATIVE_CLAIM_KEYS, 'actual original producer claim')
-        _contract.sha256(current_claim['action_key'], where='actual original producer action key')
-        for key in ORIGINAL_NATIVE_CLAIM_KEYS - {'action_key'}:
-            _contract.string(current_claim[key], where=f'actual original producer {key}')
-        _same(current_claim['attempt_source'], 'launch-env', 'actual original launch identity')
-        _same(current_claim['worker'], current_claim['incarnation'], 'actual original worker incarnation')
-        _same(current_claim['helper_root'], runtime['prismabuild']['helper_root'], 'actual original producer SDK root')
-        if claim is None:
-            claim = current_claim
-        else:
-            _same(current_claim, claim, 'actual original same producer claim')
-        serving = _exact(native['serving'], {'tier_id', 'epoch', 'pin_id', 'range_ref'}, 'actual native serving record')
-        _same(serving['range_ref'], residency_map_key(paths[name], 0), 'actual native whole-file range')
-        for key in ('tier_id', 'pin_id'):
-            _contract.string(serving[key], where=f'actual native {key}')
-        _contract.require(type(serving['epoch']) is str, 'actual native epoch is absent')
-        _contract.string(native['ref_id'], where='actual acquired native ref')
-        native_entry = _exact(native['entry'], {'key', 'stage_path', 'bytes', 'sha256', 'file_id',
-                                               'mover_action_key', 'generation'}, 'actual native pinned entry')
-        _same(native_entry['key'], serving['range_ref'], 'actual native pin/open range')
-        _same(native_entry['sha256'], expected[name], 'actual native material digest')
-        _same(native_entry['bytes'], entry['bytes'], 'actual native material length')
-        _contract.absolute_posix_path(native_entry['stage_path'], where='actual staged descriptor path')
-        _contract.sha256(native_entry['mover_action_key'], where='actual native covering mover')
-        _contract.string(native_entry['generation'], where='actual native material generation')
+        _contract.sha256(native['staged_manifest_sha256'], where='actual staged manifest')
+        _contract.sha256(native['read_contract_sha256'], where='actual enclosing read contract')
+        _same(native['range_ref'], residency_map_key(paths[name], 0), 'actual native whole-file range')
+        _contract.string(native['pin_id'], where='actual retained source phase')
         for key in ('source_fd_stat', 'sealed_fd_stat'):
             signature = native[key]
             _contract.require(isinstance(signature, list) and len(signature) == 5 and
                               all(type(item) is int and item >= 0 for item in signature),
                               'actual descriptor stat identity is incomplete')
             _same(signature[2], entry['bytes'], 'actual descriptor whole-file length')
-        source_stat = native['source_fd_stat']
-        _same(native_entry['file_id'], dict(ino=source_stat[1], size=source_stat[2],
-              mtime_ns=source_stat[3], ctime_ns=source_stat[4]), 'actual portable native descriptor identity')
         _contract.require(type(native['kernel_seals']) is int and native['kernel_seals'] & _SEALS == _SEALS,
                           'actual delivered material is not kernel sealed')
         _contract.require(native['descriptors_closed'] is True and native['lease_released'] is True,

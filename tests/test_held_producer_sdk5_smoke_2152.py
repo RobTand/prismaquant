@@ -1,139 +1,237 @@
-"""Self-contained CPU SDK5 native-carrier contract integration smoke.
+"""Native reader-domain joins over actual CPU material observations.
 
-Synthetic immutable evidence is authenticated by the real installed SDK and
-joined to Original controls. This is not real fleet/native-GPU qualification
-or recovery of the historical producer's retained evidence.
+The historical filename remains selectable. These tests grant no CUDA/source
+qualification; the full native boundary has its separate producer/consumer proof.
 """
-from __future__ import annotations
-
+import copy
+from dataclasses import replace
+import gc
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
+from safetensors import safe_open
 
-from fleet_sdk import installed_client_sdk, require_prismabuild_sdk
-from native_carrier_fixture import native_carrier
-from prismaquant import source_generation as sg
-from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
+from prismaquant import source_generation as sg, native_results as nr
+from prismaquant.flux_jobs import ExecutionResult
+from test_capture_original_material import _owner
+from test_original_source_admission import (  # noqa: F401
+    authority_case, original_runner, original_model, material, _forget_state, _bound,
+    runtime_layout, nonqualifying_runtime,
+)
 
-# Placeholder source-tree seals intentionally disagree with the private helper
-# tree. Matching identity must reach that named refusal in certified mode.
-PRODUCER_RUNTIME = {
-    "schema": "prismaquant.original_source_runtime.v1",
-    "prismaquant_source_sha256": "0" * 64,
-    "tessera_source_sha256": "0" * 64,
-    "modeling_source": {"path": "/held/modeling.py", "sha256": "0" * 64},
-    "model_class": "transformers.models.held.HeldModel",
-    "profile": "held", "config": {},
-    "versions": {"python": "held", "torch": "held", "torch_git": None,
-                 "cuda": None, "transformers": "held"},
-    "container_content_sha256": None,
-    "arithmetic": {"matmul_precision": "highest", "allow_tf32": False,
-                   "allow_bf16_reduced_precision_reduction": False},
-    "material_pipeline": {"decoder": "safetensors.safe_open", "framework": "pt",
-                          "decoder_device": "cpu",
-                          "cast_owner": "prismaquant.layer_streaming",
-                          "direct_gpu_decode": False, "target_dtype": "torch.bfloat16",
-                          "tensor_dtypes": {}, "scale_inv_map": {}},
-    "prismabuild": {"sdk_version": 5, "helper_root": "fixture",
-                    "source_tree": {"package_sha256": "0" * 64,
-                                    "helper_tree_sha256": "0" * 64},
-                    "runtime_generation": "fixture"},
-}
-PRODUCER_RESOURCES = {
-    "schema": "prismaquant.original_source_resources.v1",
-    "cpu_bytes": 1, "material_bytes": 1, "source_cache_bytes": 1,
-    "source_prefetch": {"max_cache_slots": 2, "prefetch_workers": 1,
-                        "prefetch_lookahead": 1, "cache_headroom_gb": 1,
-                        "prefetch_min_available_gb": 1,
-                        "require_prefetched_residency": True},
-    "copy_bytes": 1, "gpu_bytes": 0, "native_bytes": 0, "serialization_bytes": 1,
-    "artifact_bytes": 1, "deadline_seconds": 60, "stall_seconds": 10,
-    "host_floor_bytes": 1, "margin_bytes": 0,
-    "claim_demand": {},
-}
+pytestmark = pytest.mark.own_process
 
 
-def _bound(tmp, name, doc):
-    path = tmp / name
-    path.write_text(json.dumps(doc, sort_keys=True))
-    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+def _running_control(directory):
+    """Nonterminal join input, with no native execution or source authority."""
+    return ExecutionResult('running', '1', Path(directory))
 
 
-def _producer_authority(tmp, context):
-    runtime = json.loads(json.dumps(PRODUCER_RUNTIME))
-    runtime['prismabuild'].update(helper_root=context['helper_root'],
-                                runtime_generation=Path(context['helper_root']).name)
-    resources = dict(PRODUCER_RESOURCES, claim_demand=context['resources'])
-    return {"runtime": _bound(tmp, "runtime.json", runtime),
-            "resources": _bound(tmp, "resources.json", resources),
-            "source_model_identity": {"config": runtime["config"]}}
+def reader_domain_case(case):
+    authority = case['authority']
+    runtime = case['packet']['runtime']
+    expected = _bound(case['tmp'] / 'independent-reader-runtime.json', runtime)
+    inputs = {role: {**binding, 'bytes': Path(binding['path']).stat().st_size}
+              for role, binding in (('observed-runtime', authority['runtime']),
+                                    ('selected-runtime', expected))}
+    # A join-only input cannot satisfy read_selected_result or issue source authority.
+    execution = _running_control(case['tmp'])
+    witness = case['owner'].receipt()['deliveries'][0]['native_delivery']
+    staged = {'sha256': witness['staged_manifest_sha256'],
+              'read_contract_sha256': witness['read_contract_sha256']}
+    result = nr.SelectedResult({'runtime': runtime['native_runtime'], 'inputs': inputs}, {}, {},
+        {'resources': case['packet']['resources']['claim_demand'], 'staged_input': staged}, execution)
+    return case['owner'].receipt(), authority, result
 
 
-def _claim_receipt(claim):
-    return {"deliveries": [{"native_delivery": {"claim": dict(
-        claim, attempt_source="launch-env", map_path="/held/producer/map")}}]}
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', ['runtime', 'resources', 'manifest', 'readset', 'missing-input'])
+def test_held_producer_context_authenticates_and_joins(authority_case, monkeypatch, mode, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, authority['runtime']) is None
+    publication = copy.deepcopy(selected.publication)
+    launch = copy.deepcopy(selected.launch)
+    if damage == 'runtime':
+        publication['runtime']['python']['sha256'] = '0' * 64
+    elif damage == 'resources':
+        launch['resources']['memory_gib'] += 1
+    elif damage == 'missing-input':
+        publication['inputs'] = {}
+    elif damage == 'manifest':
+        launch['staged_input']['sha256'] = '0' * 64
+    else:
+        launch['staged_input']['read_contract_sha256'] = '0' * 64
+    changed = nr.SelectedResult(publication, {}, {}, launch, selected.execution)
+    refusal = {'runtime': 'selected reader measured native runtime',
+               'resources': 'selected reader actual producer reservation',
+               'manifest': 'actual reader delivery selected staged contract',
+               'readset': 'actual reader delivery selected staged contract',
+               'missing-input': 'reader runtime must be an independently declared native input'}[damage]
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._require_original_reader_producer(receipt, authority, changed, authority['runtime'])
 
 
-def test_held_producer_context_authenticates_and_joins(
-        installed_client_sdk, tmp_path, monkeypatch, capsys):
-    """Authenticate one private immutable attempt, then exercise real joins."""
-    require_prismabuild_sdk()
-    assert installed_client_sdk.SDK_VERSION == PB_CLIENT_SDK_VERSION == 5
-    queue, action, record, receipt, payload, expected = native_carrier(tmp_path, monkeypatch)
-    result = installed_client_sdk.read_verified_action_result(
-        queue, action['action_key'],
-        published_unix=record['published_unix'], attempt=expected['attempt'],
-        max_result_bytes=64 * 1024, max_evidence_bytes=1024 * 1024,
-        require_native_producer_context=True)
-    context = result["producer_context"]
-    assert context["schema"] == "prismabuild.native_producer_context.v1"
-    for key, value in expected.items():
-        assert context[key] == value, key
-    for key in ('action_key', 'attempt', 'published_unix', 'generation', 'host'):
-        assert context[key] == result[key], key
-    assert context['worker'] == context['incarnation'] == result['worker_id']
-    assert result["payload"] == payload
-    assert result["request"]["action_key"] == action['action_key']
-    assert result["receipt"]["receipt_sha256"] == receipt['receipt_sha256']
-    assert result["payload"].count(b"passed")
-    # The actual executable wrapper of the private attempt, bound from its
-    # sealed request bytes — not params.command asserted alone.
-    installed_client_sdk.bind_standard_capture_command(result["request"])
-    # The consumer delivery join accepts the genuine context identity and
-    # then stops at the sealed helper-tree check in certified mode: the private
-    # helper has real on-disk digests, which
-    # cannot agree with this control's placeholders. That named refusal is the
-    # boundary.
-    claim = {key: context[key] for key in ("queue_root", "action_key", "nonce",
-                                           "scope_id", "worker", "host",
-                                           "incarnation", "helper_root")}
-    authority = _producer_authority(tmp_path, context)
-    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
-    with pytest.raises(RuntimeError, match="selected reader actual complete helper tree"):
-        sg._require_original_reader_producer(
-            _claim_receipt(claim), authority, result, authority["runtime"])
-    # No later consumer or foreign producer may substitute one identity axis.
-    for axis in ("nonce", "scope_id"):
-        foreign = dict(claim)
-        foreign[axis] = "f" * 32
-        with pytest.raises(RuntimeError, match="actual reader delivery selected producer"):
-            sg._require_original_reader_producer(
-                _claim_receipt(foreign), authority, result, authority["runtime"])
-    # CEO D32: dev mode hashes no helper tree to seal a run. The same genuine
-    # context completes the join with one `not computed` stamp, and a foreign
-    # producer axis is stamped instead of refused.
-    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
-    capsys.readouterr()
-    assert sg._require_original_reader_producer(
-        _claim_receipt(claim), authority, result, authority["runtime"]) is None
-    out = capsys.readouterr().out
-    assert out.count("[DEV-MODE]") == 1
-    assert "seal selected reader actual complete helper tree not computed" in out
-    foreign = dict(claim, nonce="f" * 32)
-    assert sg._require_original_reader_producer(
-        _claim_receipt(foreign), authority, result, authority["runtime"]) is None
-    out = capsys.readouterr().out
-    assert "seal actual reader delivery selected producer differs at nonce" in out
-    assert "seal selected reader actual complete helper tree not computed" in out
+def _selected_runtime_input(selected):
+    return {key: selected.publication['inputs']['selected-runtime'][key] for key in ('path', 'sha256')}
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('axis,value', [('cores', 2), ('memory_gib', 2), ('gpus', 1),
+                                      ('walltime_s', 61), ('placement', 'aarch64')])
+def test_reader_reservation_checks_each_native_resource_axis(authority_case, monkeypatch, mode, axis, value):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    launch = copy.deepcopy(selected.launch)
+    assert launch['resources'][axis] != value
+    launch['resources'][axis] = value
+    with pytest.raises(RuntimeError, match='selected reader actual producer reservation'):
+        sg._require_original_reader_producer(receipt, authority, replace(selected, launch=launch), expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('role', ['observed-runtime', 'selected-runtime'])
+@pytest.mark.parametrize('damage', ['missing', 'path', 'sha256', 'changed-bytes'])
+def test_each_reader_runtime_input_is_independently_bound(authority_case, monkeypatch, mode, role, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    assert authority['runtime']['path'] != expected['path']
+    assert Path(authority['runtime']['path']).read_bytes() == Path(expected['path']).read_bytes()
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    publication = copy.deepcopy(selected.publication)
+    if damage == 'missing':
+        del publication['inputs'][role]
+    elif damage in ('path', 'sha256'):
+        publication['inputs'][role][damage] = '/independent/foreign-runtime' if damage == 'path' else '0' * 64
+    else:
+        Path(publication['inputs'][role]['path']).write_bytes(b'{"changed":true}')
+    changed = replace(selected, publication=publication)
+    refusal = 'owned bytes' if damage == 'changed-bytes' else 'independently declared native input'
+    with pytest.raises(ValueError if damage == 'changed-bytes' else RuntimeError, match=refusal):
+        sg._require_original_reader_producer(receipt, authority, changed, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', ['observed-runtime', 'selected-runtime', 'both-foreign-config'])
+def test_reader_runtime_selection_and_source_config_are_separate_joins(authority_case, monkeypatch, mode, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    authority = copy.deepcopy(authority)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    runtime = copy.deepcopy(authority_case['packet']['runtime'])
+    if damage == 'both-foreign-config':
+        runtime['config']['hidden_size'] += 1
+        authority['runtime'] = _bound(authority_case['tmp'] / 'foreign-observed.json', runtime)
+        expected = _bound(authority_case['tmp'] / 'foreign-selected.json', runtime)
+        publication = copy.deepcopy(selected.publication)
+        publication['inputs'] = {role: {**binding, 'bytes': Path(binding['path']).stat().st_size}
+            for role, binding in (('observed-runtime', authority['runtime']), ('selected-runtime', expected))}
+        selected = replace(selected, publication=publication)
+        refusal = 'selected reader runtime source config'
+    else:
+        runtime['versions']['python'] += '.independent-change'
+        binding = _bound(authority_case['tmp'] / 'changed-runtime.json', runtime)
+        if damage == 'observed-runtime':
+            authority['runtime'] = binding
+        else:
+            expected = binding
+        refusal = 'observed original source runtime'
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._require_original_reader_producer(receipt, authority, selected, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', [None, []])
+def test_reader_requires_explicit_staged_launch(authority_case, monkeypatch, mode, damage):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    changed = replace(selected, launch={**selected.launch, 'staged_input': damage})
+    with pytest.raises(RuntimeError, match='requires explicit immutable staged launch'):
+        sg._require_original_reader_producer(receipt, authority, changed, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('delivery', ['nonfirst', 'reacquired'])
+@pytest.mark.parametrize('axis', ['read_contract_sha256', 'staged_manifest_sha256'])
+def test_every_actual_reader_delivery_joins_selected_staging(authority_case, monkeypatch, mode, delivery, axis):
+    receipt, authority, selected = reader_domain_case(authority_case)
+    expected = _selected_runtime_input(selected)
+    if delivery == 'reacquired':
+        # authority_case advances staging while preparing its controls. A new
+        # real owner isolates these two deliveries to one actual manifest.
+        with _owner(authority_case['material']) as owner:
+            path = owner.root / 'two.safetensors'
+            for _ in range(2):
+                with owner.material_window([path]):
+                    with owner.safe_open(safe_open, path, framework='pt') as reader:
+                        tensor = reader.get_tensor(reader.keys()[0])
+                        assert tensor.device.type == 'cpu'
+                    del tensor
+                gc.collect()
+            receipt = owner.receipt()
+        targets = [i for i, row in enumerate(receipt['deliveries']) if row['name'] == path.name]
+        assert len(targets) == 2
+        target = targets[-1]
+        assert receipt['deliveries'][target]['delivery_index'] == 2
+        witness = receipt['deliveries'][0]['native_delivery']
+        staged = {'sha256': witness['staged_manifest_sha256'],
+                  'read_contract_sha256': witness['read_contract_sha256']}
+        selected = replace(selected, launch={**selected.launch, 'staged_input': staged})
+    else:
+        assert len(receipt['deliveries']) > 1
+        target = 1
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._require_original_reader_producer(receipt, authority, selected, expected) is None
+    changed = copy.deepcopy(receipt)
+    changed['deliveries'][target]['native_delivery'][axis] = '0' * 64
+    with pytest.raises(RuntimeError, match='actual reader delivery selected staged contract'):
+        sg._require_original_reader_producer(changed, authority, selected, expected)
+
+
+@pytest.mark.parametrize('mode', ['0', '1'])
+@pytest.mark.parametrize('damage', ['node', 'missing-role', 'extra-role', 'rebound'])
+def test_scientific_artifact_consumer_checks_selected_node_roles_and_binding(tmp_path, monkeypatch, mode, damage):
+    path = tmp_path / 'control.json'
+    raw = b'{"answer":42}\n'
+    path.write_bytes(raw)
+    binding = {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+    measured = nr.bind_result_artifact(path, max_bytes=128)
+    execution = _running_control(tmp_path)
+    selected = nr.SelectedResult({'producer_id': 'nonqualifying-artifact-control',
+        'artifacts': {'control': measured}}, {'control': raw}, {}, {}, execution)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    assert sg._original_artifact_publication(selected, node_id='nonqualifying-artifact-control',
+                                              roles={'control'}) is selected
+    assert sg._published_original_artifact(selected, 'control', binding,
+        resource_check=None, max_bytes=128) == {'answer': 42}
+    publication = copy.deepcopy(selected.publication)
+    if damage == 'node':
+        publication['producer_id'] = 'other-node'
+        refusal = 'actual artifact publication selected node'
+    elif damage in ('missing-role', 'extra-role'):
+        if damage == 'missing-role':
+            publication['artifacts'] = {}
+        else:
+            publication['artifacts']['extra'] = measured
+        refusal = 'actual published artifact roles'
+    else:
+        replacement = b'{"answer":43}\n'
+        path.write_bytes(replacement)
+        publication['artifacts']['control'] = nr.bind_result_artifact(path, max_bytes=128)
+        rebound = replace(selected, publication=publication, artifact_payloads={'control': replacement})
+        new_binding = {'path': str(path), 'sha256': hashlib.sha256(replacement).hexdigest()}
+        assert sg._published_original_artifact(rebound, 'control', new_binding,
+            resource_check=None, max_bytes=128) == {'answer': 43}
+        with pytest.raises(RuntimeError, match='selected published control binding'):
+            sg._published_original_artifact(rebound, 'control', binding, resource_check=None, max_bytes=128)
+        return
+    with pytest.raises(RuntimeError, match=refusal):
+        sg._original_artifact_publication(replace(selected, publication=publication),
+            node_id='nonqualifying-artifact-control', roles={'control'})

@@ -1,8 +1,8 @@
 # Model-independent retained-render qualification requests (PQ #1503)
 
-`tools/build_t4_logical_request.py` builds a new, exclusive-write PrismaBuild
-logical request from a digest-bound v1 or v2 adopted catalog. PrismaBuild still
-owns partitioning and placement. The qualifier, PB schemas, CPU/GPU/memory
+`tools/build_t4_logical_request.py` builds a new, exclusive-write
+logical request from a digest-bound v1 or v2 adopted catalog. The execution
+system still owns partitioning and placement. The qualifier, request schemas, CPU/GPU/memory
 reservations, tier policy, mover declarations and batch limits are unchanged.
 No export bytes, serving numerics, release inputs or retained results are changed.
 
@@ -29,9 +29,9 @@ here is **filename-only**: a legacy qname-named file must still have the modern
 there is no automatic migration or weakened digest admission.
 
 `--prior-child SHA256 PARENT_KEY` reads a
-`prismabuild.child_result_manifest.v1` at
-`CAS_ROOT/blobs/<first-two-digest-characters>/<digest>`; `--cas-root` defaults to
-`/mnt/shared/prismabuild-fleet/cas`. The manifest digest, schema, caller-declared
+child result manifest (schema v1) at
+`CAS_ROOT/blobs/<first-two-digest-characters>/<digest>`; `--cas-root` is required
+and names the content-addressed store holding prior child manifests. The manifest digest, schema, caller-declared
 full parent key and every row's task/output identity are checked. Each row's
 qualified result must exist at `ROOT/qualified/<pair-id>.json`, match its
 `value_sha256`, and pass the same content checks as an explicit result.
@@ -99,4 +99,4 @@ through direct assembly and rebinding, legacy directory lookup and ambiguity
 refusals. Its builder-to-consumer fixture simulates qualification metadata and
 replaces the source-artifact fence; the separate fence tests keep testing that
 unchanged boundary. No GPU decoder runs in these tests. Tests and compile checks
-must be run through PrismaBuild, not by executing the example as a test locally.
+must be run as admitted jobs, not by executing the example as a test locally.

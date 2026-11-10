@@ -89,16 +89,14 @@ def harness(monkeypatch):
     return windows, script
 
 
-def test_unpublished_then_republish_serves_stage_bytes(harness):
+def test_unpublished_immutable_entry_refuses_without_retry(harness):
     windows, script = harness
     script.append(LeaseRefused("unpublished", kind="availability"))
     res = FakeResolver()
-    window, _key, _staged, _r, fd, _serving, tier = _open(res)
-    assert fd == 7 and tier == "stage"
-    assert len(windows) == 2 and windows[1] is window
-    assert windows[0].entered == 1 and windows[1].entered == 1
-    assert res.pool_reads == [] and res.fallbacks == []
-    assert res.tiers == [(PATH, "stage")]
+    with pytest.raises(LeaseRefused, match="unpublished"):
+        _open(res)
+    assert len(windows) == 1
+    assert res.pool_reads == [] and len(res.fallbacks) == 1
 
 
 def test_integrity_refusal_fails_first_attempt(harness):
@@ -122,14 +120,12 @@ def test_landing_timeout_records_fallback_and_raises(harness, monkeypatch):
     assert len(res.fallbacks) == 1 and res.pool_reads == []
 
 
-def test_retry_is_bounded_by_the_deadline(harness):
+def test_availability_refusal_never_sleeps(harness, monkeypatch):
     windows, script = harness
-    script.extend(LeaseRefused("unpublished", kind="availability")
-                  for _ in range(100000))
-    res = FakeResolver()
-    start = time.monotonic()
-    with pytest.raises(LeaseRefused):
-        _open(res, deadline=start + 0.2) if hasattr(
-            pxc, "_acquire_open_bulk_window") else _open(res)
-    assert time.monotonic() - start < 5
-    assert len(res.fallbacks) == 1 and res.pool_reads == []
+    script.append(LeaseRefused("unpublished", kind="availability"))
+    def forbidden_sleep(_seconds):
+        raise AssertionError('immutable reader must not sleep')
+    monkeypatch.setattr(time, 'sleep', forbidden_sleep)
+    with pytest.raises(LeaseRefused, match='unpublished'):
+        _open(FakeResolver())
+    assert len(windows) == 1

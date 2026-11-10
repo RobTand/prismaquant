@@ -5,8 +5,9 @@
 every one of those surfaces is independent work: its anchors, its
 leave-one-out gate and its refusal are its own.  Run as one process it is a
 single exclusive GPU action, and the second box sits idle beside it
-(RobTand/prismaquant#282).  This lays the same campaign out as N PrismaBuild
-rows and puts the pieces back together.
+(RobTand/prismaquant#282).  This plans independent scientific rows and puts their validated pieces back
+together. Native Flux execution is CPU-qualified only; numerical launches
+remain refused until their staging, device and progress contracts qualify.
 
 The quantum is the **fused anchor group**, not the bare unit.  Anchors are
 placed per group: the group shares one rung grid, and the group's worst member
@@ -26,7 +27,7 @@ Four steps, and each one is separately re-runnable:
     rows without loading the model.
 
 ``plan``
-    One ``--units`` selection file per row and one pbcampaign manifest.  Rows
+    One ``--units`` selection file per row and one application row manifest.  Rows
     are portable (no host pin), not exclusive, GPU-demanding, and carry a
     memory demand derived from the phase plan the row will check itself
     against -- the plan's bytes, the process floor measured on this fleet, and
@@ -40,10 +41,9 @@ Four steps, and each one is separately re-runnable:
     (RobTand/prismaquant#522).
 
 ``submit``
-    ``pbcampaign`` over that manifest.  Re-running it **is** the resume: a
-    finished row is a CAS hit that runs nothing and a running row is attached
-    to by its job id, so there is no second dispatcher here deciding what to
-    skip.
+    Native Flux submission and collection of saved IDs under .flux-state/.
+    Re-running an identical request reattaches only those IDs. Strict staged
+    input delivery and progress watchdogs remain unqualified and refuse launch.
 
 ``merge``
     One ``cost.pkl``, one ``cost.anchors.json`` and one export-inputs cache
@@ -65,17 +65,9 @@ round -- so adopting the anchors resumes the group exactly where it stood.
 
 Rows planned before the progress contract
 -----------------------------------------
-Nothing migrates in place.  A row already in ``ready/`` was sealed with its
-own ``execution_timeout_s``; that request is immutable and stays exactly as
-it is, still bounded by the number it was submitted with.  The stall policy
-is sealed too, so a plan made after it produces different action keys, and a
-key that has never been priced is not a cache hit.  What carries the work
-across is the journal rather than the queue: the new row resumes from the
-same identity-bound ``cost_stage_checkpoint`` directory (or is handed the
-monolith's anchors with ``--seed-workspace`` / ``--seed-checkpoint``), so the
-anchors already committed under the old key are re-adopted rather than
-re-measured.  Withdraw the old rows once the new ones are running; do not
-edit them.
+Historical PB rows and files remain untouched. New native records neither adopt
+PB results nor infer execution from a cache hit. Scientific checkpoint adoption
+still passes the existing identity and byte checks.
 """
 from __future__ import annotations
 
@@ -85,8 +77,6 @@ import json
 import math
 import os
 import pickle
-import shlex
-import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -107,8 +97,6 @@ from prismaquant import campaign_data_manifests
 from prismaquant import tessera_campaign_rows as campaign_rows
 from prismaquant.campaign_container_spec import (
     BOUNDED_CAPTURE_ENV,
-    CONTAINER_IMAGE_FLAG,
-    admission_image_reference,
     container_memory_budget_gb,
     validate_container,
 )
@@ -124,7 +112,6 @@ from prismaquant.tessera_campaign_table import (
     merge_acquisition_rows,
     payload_acquisition_records,
     require_equal,
-    require_campaign_receipts,
     aqua_requested_cells,
     merge_checkpoint,
     merge_payloads,
@@ -133,7 +120,6 @@ from prismaquant.tessera_campaign_table import (
 
 from prismaquant.digests import file_sha256hex
 
-PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
 
 
 def publish_namespace_requests(rows: list[dict]) -> None:
@@ -281,7 +267,7 @@ def verify_row_demand(spec: dict, census: dict, row: dict, *,
             f"own argv derives: {terms}"
             + (f" + {demand['headroom_gb']} GiB declared headroom"
                if demand["headroom_gb"] else "")
-            + ". PrismaBuild would admit the row and its CaptureMemoryGuard "
+            + ". The row's CaptureMemoryGuard "
             "would then refuse it.")
     return record
 
@@ -309,10 +295,10 @@ def verify_manifest_demands(spec: dict, census: dict, rows: list, *,
     return records
 
 
-def parse_pbrun_demand(demand: str) -> "dict[str, int]":
-    """Parse pbrun's ``key=value,key=value`` demand spelling."""
+def parse_resource_demand(demand: str) -> "dict[str, int]":
+    """Parse the retained ``key=value,key=value`` resource intent spelling."""
     if not isinstance(demand, str) or not demand.strip():
-        raise DemandRefused("--demand must be a non-empty pbrun demand string")
+        raise DemandRefused("--demand must be a non-empty resource demand string")
     parsed: dict[str, int] = {}
     for item in demand.split(","):
         name, separator, value = item.partition("=")
@@ -372,7 +358,7 @@ def verify_joint_submission_demand(spec: dict, plan: dict, demand: str, *,
     conservatism, and it is recorded rather than silently trimmed.
     """
     gib = 1024 ** 3
-    parsed = parse_pbrun_demand(demand)
+    parsed = parse_resource_demand(demand)
     reserved_gb = parsed.get("mem_gb")
     if reserved_gb is None:
         raise DemandRefused(
@@ -431,8 +417,7 @@ def partition_rows_by_fit(row_memory_gb: "dict[str, int]", per_box: int,
                           budget) -> "tuple[list[str], list[dict]]":
     """Split the planned rows into the ones a box holds and the ones it does not.
 
-    Concurrency is a property of the row's demand, not a flag: PrismaBuild
-    admits as many rows as a box's memory holds.  So this checks rather than
+    Concurrency follows declared resource admission, not a planner override.  So this checks rather than
     sets -- shrinking a row's declared demand to force co-residency would be
     reserving less than the row holds.
 
@@ -487,7 +472,7 @@ def cmd_census(args) -> int:
     workspace.mkdir(parents=True, exist_ok=True)
     census_path = workspace / "census.json"
     manifest = workspace / "census-manifest.json"
-    row = campaign_rows.prismabuild_row(
+    row = campaign_rows.campaign_row(
         spec,
         ["--model", spec["model"],
          "--out", str(workspace / "census-unused.pkl"),
@@ -506,7 +491,7 @@ def cmd_census(args) -> int:
             campaign_rows.streamed_resource_plan(spec, {}, []), indent=2, sort_keys=True)+'\n')
     print(f"[dispatch] census manifest {manifest}")
     if args.submit:
-        return _pbcampaign(manifest, wait_s=args.wait_s,
+        return _flux_campaign(manifest, wait_s=args.wait_s,
                            receipts=workspace / "census-receipts.json")
     return 0
 
@@ -520,7 +505,7 @@ def cmd_capture(args) -> int:
     if census.get("model") != spec["model"]:
         raise RuntimeError("capture census and spec name different models")
     manifest = workspace / "capture-manifest.json"
-    row = campaign_rows.prismabuild_row(spec, ["--model", spec["model"],
+    row = campaign_rows.campaign_row(spec, ["--model", spec["model"],
         "--out", str(workspace / "capture-unused.pkl"),
         "--cache-dir", str(workspace / "capture-cache"),
         "--calibration-census", str(census_path),
@@ -537,7 +522,7 @@ def cmd_capture(args) -> int:
             campaign_rows.streamed_resource_plan(spec, census, sorted(census['counts'])),
             indent=2, sort_keys=True)+'\n')
     if args.submit:
-        return _pbcampaign(manifest, wait_s=args.wait_s,
+        return _flux_campaign(manifest, wait_s=args.wait_s,
                            receipts=workspace / "capture-receipts.json")
     return 0
 
@@ -553,37 +538,28 @@ def _calibration_cache_binding(path, census_path):
     return dict(path=str(path), sha256=sha256(path))
 
 
-def _pbcampaign(manifest: Path, *, wait_s: int, receipts: Path | None = None) -> int:
-    """Run the campaign and keep the fleet's own row table.
-
-    The table is what says a row *ran*, as opposed to having been accepted:
-    every row reports a key, the host it executed on and its exit status, and
-    ``merge`` refuses without it.  A submission acknowledgement is not a result.
-    """
-    # No ``--transport``: the fleet's own default carries these rows, and the
-    # rows say what they need.  Every row declares progress phases, which
-    # ``pbcampaign`` refuses at manifest load on SLURM because the stall
-    # watchdog is the pull-queue worker's.  Pinning ``--transport pool`` here
-    # would instead submit into a queue a cut-over fleet might not drain; the
-    # refusal is the outcome we want, and it names the reason.
-    command = [sys.executable, str(PBCAMPAIGN), "--wait-s", str(wait_s), str(manifest)]
-    print("[dispatch] " + " ".join(command), flush=True)
-    completed = subprocess.run(command, check=False, text=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    print(completed.stdout, flush=True)
+def _flux_campaign(manifest: Path, *, wait_s: int, receipts: Path | None = None) -> int:
+    """Submit once or reconnect saved native IDs; never parse a CLI table."""
+    from tools.tessera_fleet.model_worker import atomic_json
+    rows = json.loads(Path(manifest).read_bytes())
+    stage = Path(manifest).stem
+    state = Path(manifest).parent / '.flux-state' / stage
+    campaign_rows.submit_rows(rows, state)
+    results = campaign_rows.collect_rows(state, wait=wait_s > 0)
+    succeeded = len(results) == len(rows) and all(r['status'] == 'succeeded' and r['payload_exit'] == 0
+                    and not r['query_error'] for r in results)
+    returncode = 0 if succeeded else 1
     if receipts is not None:
-        rows = _parse_row_table(completed.stdout)
-        receipts.write_text(json.dumps(
-            {"manifest": str(manifest), "returncode": completed.returncode,
-             "rows": rows}, indent=2) + "\n")
-        print(f"[dispatch] {len(rows)} row receipts -> {receipts}")
-    return completed.returncode
+        atomic_json(receipts, {'schema': 'pq.tessera.native-receipts.v1',
+                    'manifest': str(manifest), 'state_dir': str(state),
+                    'returncode': returncode, 'rows': results})
+    return returncode
 
 
-def _parse_row_table(text: str) -> list[dict]:
-    """The ``pbwait`` row table (``prismaquant.pbwait_table``)."""
-    from prismaquant.pbwait_table import parse_pbwait_table
-    return parse_pbwait_table(text)
+def cmd_status(args) -> int:
+    """Read saved native IDs without replanning, submission or PB state."""
+    from tools.tessera_fleet.common import show_status
+    return show_status(args.workspace, args.stage, collect_rows=campaign_rows.collect_rows)
 
 
 # ---------------------------------------------------------------------------
@@ -1185,7 +1161,7 @@ def cmd_plan(args) -> int:
         # spec's argv alone priced that row at its stream window instead
         # (PQ #1686).
         row_spec = {**spec, "campaign_argv": argv}
-        row = campaign_rows.prismabuild_row(spec, argv,
+        row = campaign_rows.campaign_row(spec, argv,
                    mem_gb=campaign_rows.row_memory_gb(row_spec, members, census, selected_source=selected_source),
                    timeout_s=(None if args.timeout_s is None else int(args.timeout_s)))
         if part is not None:
@@ -1291,7 +1267,7 @@ def cmd_plan(args) -> int:
         "rows": planned,
     }
 
-    # Every published row names the bytes PrismaBuild's prewarm loop warms it
+    # Every published row names the bytes strict delivery must provide
     # from, so a subset copied out of manifest.json carries them too. Only the
     # producer knows a row's read set, and a row whose read set cannot be
     # derived refuses the plan here.
@@ -1365,7 +1341,7 @@ def cmd_check(args) -> int:
           "their own argv supports")
     require_data_manifests(rows, where=manifest)
     print(f"[dispatch] {len(rows)} rows in {manifest} name a data manifest "
-          "PrismaBuild can warm them from")
+          "the strict delivery contract must satisfy")
     return 0
 
 #: Where ``plan`` writes each row's read set, and the manifest ``submit`` hands
@@ -1376,7 +1352,7 @@ SUBMITTED_MANIFEST = "manifest.submitted.json"
 
 
 class DataManifestRefused(RuntimeError):
-    """A row would reach PrismaBuild without the read set it is warmed from."""
+    """A row names no complete strict-delivery read set."""
 
 
 def _derived_data_manifests(workspace: Path, rows: list[dict], campaign, *,
@@ -1431,15 +1407,15 @@ def planned_data_manifests(workspace: Path, plan: dict,
 
 
 def require_data_manifests(rows: list[dict], *, where) -> None:
-    """Refuse a manifest any of whose rows PrismaBuild could not warm.
+    """Refuse a manifest any of whose rows names no complete read contract.
 
-    ``pbcampaign`` submits a row with no ``data_manifest`` without a word, and
-    the row then reads its inputs off cold spindles: every partial release of
+    Historically a row without ``data_manifest`` could start against cold
+    spindles: every partial release of
     ``extension-r1024-02`` and of the 09-15 census did, because each was a
     filtered copy of a ``manifest.json`` planned before ``plan`` attached the
     manifests.  This is the check a subset goes through before it is released,
     so it names every such row at once.  It reads the manifest each row names
-    and holds it to the rules PrismaBuild applies, and to belonging to the row
+    and validates its schema and ownership by the row
     that names it; it does not re-derive the read set, which ``submit`` does.
     """
     producer = campaign_data_manifests
@@ -1464,15 +1440,15 @@ def require_data_manifests(rows: list[dict], *, where) -> None:
     if refusals:
         raise DataManifestRefused(
             f"{len(refusals)} of {len(rows)} rows in {where} would reach "
-            "PrismaBuild without a data manifest its prewarm loop can warm "
-            "them from:\n" + "\n".join(refusals) + "\nA subset copied from a "
+            "execution without a complete data manifest "
+            "for its reads:\n" + "\n".join(refusals) + "\nA subset copied from a "
             "manifest.json that plan published carries one; re-plan a "
             "workspace planned before plan attached them.")
 
 
 def attach_data_manifests(workspace: Path, rows: list[dict], *,
                           out_dir: Path | None = None) -> list[dict]:
-    """Give every row the byte list PrismaBuild needs to warm it, or refuse.
+    """Give every row its exact strict-delivery byte list, or refuse.
 
     Only the producer knows a row's read set: the capture files its members
     name, the byte extents of those members' weights inside the safetensors
@@ -1481,7 +1457,7 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     spindles -- measured at 26 MB/s over 64 GB on sparky (row-0074,
     2026-09-12), about 40 minutes of idle GPU per row.
 
-    The manifest is a ``pbrun`` input, not part of the campaign's own
+    The manifest is a delivery contract, separate from the campaign's own
     checkpoint identity, so the row's ``argv`` is returned byte-identical to
     what ``plan`` wrote; only the ``data_manifest`` key is added.  A row whose
     manifest cannot be built is refused here, where the reason is readable,
@@ -1533,26 +1509,27 @@ def attach_data_manifests(workspace: Path, rows: list[dict], *,
     return attached
 
 
-def _publish_submitted_manifest(workspace: Path, rows: list[dict]) -> Path:
-    """Publish one checked request per workspace; allow identical retries."""
+def _publish_intent_bytes(path: Path, payload: bytes) -> Path:
+    """Durably publish exact intent bytes once; identical reconnects may reuse."""
     from prismaquant.cost_stage_checkpoint import publish_new_bytes
-
-    submitted = workspace.resolve() / SUBMITTED_MANIFEST
-    payload = (json.dumps(rows, indent=2) + "\n").encode("utf-8")
-    if not publish_new_bytes(submitted, payload, nofollow=True):
+    path = path.parent.resolve() / path.name
+    if not publish_new_bytes(path, payload, nofollow=True):
         try:
-            with os.fdopen(os.open(submitted, os.O_RDONLY | os.O_NOFOLLOW), "rb") as handle:
+            with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as handle:
                 existing = handle.read()
         except OSError as error:
-            raise RuntimeError(
-                f"submitted manifest at {submitted} is unreadable: {error}. "
-                "Use a fresh workspace.") from error
+            raise RuntimeError(f'submitted manifest at {path} is unreadable: {error}. '
+                               'Use a fresh workspace.') from error
         if existing != payload:
-            raise RuntimeError(
-                f"submitted manifest at {submitted} differs from the checked "
-                "request. Refusing to replace it. Use a fresh workspace for "
-                "a changed request.")
-    return submitted
+            raise RuntimeError(f'submitted manifest at {path} differs from the checked request. '
+                               'Use a fresh workspace for a changed request.')
+    return path
+
+
+def _publish_submitted_manifest(workspace: Path, rows: list[dict]) -> Path:
+    """Publish one checked request per workspace; allow identical reconnects."""
+    return _publish_intent_bytes(workspace.resolve() / SUBMITTED_MANIFEST,
+                                (json.dumps(rows, indent=2) + '\n').encode('utf-8'))
 
 
 def cmd_submit(args) -> int:
@@ -1571,22 +1548,15 @@ def cmd_submit(args) -> int:
     plural = "" if len(rows) == 1 else "s"
     print(f"[dispatch] data manifests attached to {len(rows)} row{plural} "
           f"-> {submitted}")
-    # Re-running the manifest IS the resume: a finished row is a cache hit and
-    # a running row is re-attached, both by pbcampaign itself.  The manifests
-    # are a deterministic function of the campaign and the tree, so a second
-    # submit addresses the same action keys as the first.
-    return _pbcampaign(submitted, wait_s=args.wait_s,
+    # The checked request is sealed separately from native execution facts.
+    # Resume reattaches only IDs saved under the identical stage intent.
+    return _flux_campaign(submitted, wait_s=args.wait_s,
                        receipts=workspace / "receipts.json")
 
 
 # ---------------------------------------------------------------------------
 # post-campaign GPU submissions
 # ---------------------------------------------------------------------------
-
-#: The published PrismaBuild client. ``pbrun`` snapshots the checkout and
-#: places the action; it is not vendored here so a stale copy cannot become a
-#: stale submission.
-PBRUN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbrun.py")
 
 JOINT_ENTRY_POINT = "prismaquant.tessera_joint_aura"
 ALLOCATION_ENTRY_POINT = "prismaquant.tessera_joint_allocation"
@@ -1615,75 +1585,38 @@ def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
     return actual
 
 
-def _pbrun_argv(args, *, manifest: Path, inner: list[str],
-                progress_phases=(), gpu_memory_gb=None, container_spec=None,
-                residency=None) -> list[str]:
-    """The submission command, with ``--data-manifest`` before ``--detach``.
-
-    Everything after ``--`` is the action; ``--data-manifest`` is an option of
-    ``pbrun`` itself, so it has to precede the separator. ``pbrun`` validates
-    the manifest, ingests it as a second content-addressed input and seals its
-    summary into the action, which is also why ``produced_by`` carries nothing
-    run-specific: the manifest's digest is part of the action key.
-
-    The container image the spec resolves is declared the same way
-    (``--container-image``, also before the separator): it is derived from the
-    SAME parsed document that is serialized into ``--spec``, so the row cannot
-    seal one image and be admitted against another, and an archive-backed spec
-    declares nothing because its launcher loads and verifies the image inside
-    the action (RobTand/prismabuild#714).
-    """
+def _native_action_row(args, *, manifest: Path, inner: list[str],
+                       progress_phases=(), gpu_memory_gb=None, container_spec=None,
+                       residency=None) -> dict:
+    """Retain scientific row intent for review and native admission."""
+    if args.priority != 0:
+        raise ValueError("queue priority mapping is unqualified; priority must be 0")
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
-    if container_spec is None:
-        spec = Path(args.spec).read_text()
-        parsed_spec = json.loads(spec)
-    else:
-        parsed_spec = container_spec
-        spec = DIRECT_ASCII_SPACED_LAX.text(container_spec)
-    container_image = admission_image_reference(parsed_spec)
-    argv = ["python3", str(args.pbrun), "--demand", args.demand]
-    if gpu_memory_gb is not None:
-        # The device envelope is a *subset* of the unified reservation on
-        # GB10, not a second box: without this PB caps the GPU subset at the
-        # whole reservation and the plan's own device bound is not enforced.
-        argv += ["--gpu-memory-gb", str(gpu_memory_gb)]
+    parsed = json.loads(Path(args.spec).read_text()) if container_spec is None else container_spec
+    command = ['python3', '-m', 'tools.tessera_campaign_container',
+               *list(args.container_arg or []), '--spec', DIRECT_ASCII_SPACED_LAX.text(parsed), '--', *inner]
+    demand = parse_resource_demand(args.demand)
     if args.cpus is not None:
-        argv += ["--cpus", str(args.cpus)]
-    if args.tag:
-        argv += ["--tag", args.tag]
+        demand['cpu'] = args.cpus
+    row = {'argv': command, 'cwd': parsed.get('cwd', str(Path.cwd())),
+           'demand': demand, 'env': dict(parsed.get('env', {})),
+           'tags': [args.tag] if args.tag else [],
+           'data_manifest': str(manifest), 'timeout_s': args.timeout_s}
+    from prismaquant.campaign_container_spec import admission_image_reference
+    image = admission_image_reference(parsed)
+    if image is not None:
+        row['container_images'] = [image]
+    if gpu_memory_gb is not None:
+        row['gpu_memory_gb'] = gpu_memory_gb
+    if progress_phases:
+        head_grace = getattr(args, "head_grace_s", None)
+        if head_grace is None:
+            head_grace = 1800
+        row['progress_phases'] = [
+            f'{name}={head_grace if name == "head" else 900}' for name in progress_phases]
     if residency is not None:
-        # A pbrun option, so it precedes the ``--`` separator like the manifest
-        # does. PB derives the tier demand from the manifest this same command
-        # seals, which is why nothing here names bytes or a tier. It is a
-        # parameter rather than a read of ``args`` because only the caller
-        # knows which entry point is being submitted, and only one of them
-        # reads through the stage.
-        argv += ["--residency", str(residency)]
-    argv += ["--priority", str(args.priority)]
-    if args.timeout_s is not None:
-        argv += ["--timeout-s", str(args.timeout_s)]
-    head_grace = getattr(args, "head_grace_s", None) or 1800
-    for name in progress_phases:
-        # The allowance bounds an uncommitted unit, not an arbitrary number of
-        # logging lines. The head walk reports one unit per resolved anchor
-        # roster entry since #678 -- for a run as well as a prepare since #741,
-        # where that walk measurably took 4 h 14 min of the 6 h 30 min before
-        # the first capture line on ``ad8803aa`` -- so the allowance no longer
-        # has to cover a silent pass over the whole roster. It still covers
-        # what stays unreported inside `head`: whole-source authentication,
-        # streamed model construction and, on a run, the production cache's
-        # unpickle between the last roster entry and the first boundary write. Their cost is a property of the plan and the
-        # box, so the allowance stays a caller input rather than a constant
-        # sized from one run.
-        argv += ["--progress-phase",
-                 f"{name}={head_grace if name == 'head' else 900}"]
-    if container_image is not None:
-        argv += [CONTAINER_IMAGE_FLAG, container_image]
-    argv += ["--data-manifest", str(manifest), "--detach", "--",
-             "python3", "-m", "tools.tessera_campaign_container"]
-    argv += list(args.container_arg or [])
-    argv += ["--spec", spec, "--", *inner]
-    return argv
+        row['residency'] = residency
+    return row
 
 
 def _declared_phase_names(manifest: dict) -> tuple[str, ...]:
@@ -1723,7 +1656,7 @@ def _manifest_path(args, plan: dict, *, entry_point: str, command: str) -> Path:
 
 def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str],
                        plan: dict, build, scope: dict | None = None) -> int:
-    """Build the read set, write it, and run the chain-style pbrun command.
+    """Build and retain post-campaign intent, refusing unqualified execution.
 
     Order matters for a dry run: the command shape is printed before the
     manifest is built, so a plan whose inputs are not on disk yet still shows
@@ -1751,34 +1684,14 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         validate_container(container_spec, bounded=True)
         container_spec = {**container_spec,
                           "env": {**BOUNDED_CAPTURE_ENV, **container_spec.get("env", {})}}
-    # Dev mode (Rob, 2026-09-19; the default since PQ #1147): the switch
-    # travels to the container exactly the way PRISMAQUANT_LAYER_READ_THREADS
-    # does -- sealed in the spec env the launcher receives -- so the pass
-    # gates inside read the same switch this submitter read. The spec FILE is
-    # never rewritten; only the in-memory copy moves. This changes the
-    # submission's argv, and therefore its action key: a dev submission is a
-    # different action from a certified one over the same plan, by design.
-    # A certified submitter (PRISMAQUANT_DEV_MODE=0) seals "0": the container
-    # does not inherit this environment, and unset there means dev mode.
-    from prismaquant.dev_mode import CERTIFIED_VALUE, dev_mode_enabled
-    if dev_mode_enabled():
-        from prismaquant.dev_mode import dev_warning
-        declared = (container_spec.get("env") or {}).get(DEV_MODE_ENV)
-        if declared is not None and declared != "1":
-            dev_warning(
-                f"spec env {DEV_MODE_ENV}={declared!r} contradicts the "
-                "submitting environment's '1'; the submitting environment wins")
-        container_spec = {**container_spec,
-                          "env": {**(container_spec.get("env") or {}),
-                                  DEV_MODE_ENV: "1"}}
-        dev_warning(
-            "submitting under dev mode (PRISMAQUANT_DEV_MODE is not 0): digest "
-            "arguments are records and the pass's provenance gates stamp instead "
-            "of refusing; every artifact this produces is dev-uncertified")
-    else:
-        container_spec = {**container_spec,
-                          "env": {**(container_spec.get("env") or {}),
-                                  DEV_MODE_ENV: CERTIFIED_VALUE}}
+    # Explicit scientific settings come from the versioned spec only.
+    # Native execution never forwards the submitting shell's environment.
+    from prismaquant.dev_mode import CERTIFIED_VALUE
+    declared_mode = (container_spec.get('env') or {}).get(DEV_MODE_ENV, CERTIFIED_VALUE)
+    if declared_mode not in {'0', '1'}:
+        raise ValueError('spec must declare PRISMAQUANT_DEV_MODE as 0 or 1')
+    container_spec = {**container_spec,
+                      'env': {**(container_spec.get('env') or {}), DEV_MODE_ENV: declared_mode}}
     manifest_path = _manifest_path(args, plan, entry_point=entry_point,
                                    command=command)
     manifest = build()
@@ -1844,13 +1757,12 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if residency is not None:
         # The action has to know which read set it was submitted with, or a
         # residency map composed for another manifest could answer for it. The
-        # digest is the manifest's own, the one pbrun seals into the action
-        # key, so this adds no fact -- it puts a fact the action could not see
+        # digest is the manifest's own exact delivery identity, so this adds no fact -- it puts a fact the action could not see
         # where the action can see it. Added only under --residency, so a
         # submission that asks for no stage keeps the argv, and therefore the
         # action key, it has today.
         inner = [*inner, "--data-manifest-sha256", bytes_sha256hex(blob)]
-    argv = _pbrun_argv(args, manifest=manifest_path, inner=inner,
+    row = _native_action_row(args, manifest=manifest_path, inner=inner,
                        progress_phases=phase_names, residency=residency,
                        gpu_memory_gb=gpu_memory_gb, container_spec=container_spec)
     summary = {
@@ -1884,7 +1796,8 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
     if scope is not None:
         summary["campaign_scope"] = scope
     if args.dry_run:
-        print("[dry-run] " + " ".join(shlex.quote(item) for item in argv))
+        from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+        print("[dry-run] " + DIRECT_ASCII_SPACED_LAX.text(row))
         print(json.dumps(summary, indent=1))
         # Checked after the summary is printed, so a read set the fleet would
         # refuse still reports the size and the phase boundaries that make the
@@ -1894,16 +1807,17 @@ def _submit_gpu_action(args, *, entry_point: str, command: str, inner: list[str]
         return 0
     campaign_data_manifests.check_manifest_bytes(blob, where=f"{entry_point}:{command}")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = manifest_path.with_name(manifest_path.name + ".tmp")
-    temporary.write_bytes(blob)
-    os.replace(temporary, manifest_path)
+    _publish_intent_bytes(manifest_path, blob)
     print(json.dumps(summary, indent=1))
-    # Flush before pbrun inherits the descriptors: under redirection this
-    # stream is block-buffered, and pbrun's own stderr lines would otherwise
-    # land glued to the buffered summary in the caller's log (2026-09-18: a
-    # refusal read as a silent exit 1 and was re-run with its text in argv).
-    print("[submit] " + " ".join(shlex.quote(item) for item in argv), flush=True)
-    return subprocess.run(argv, check=False).returncode
+    # Manifest and workflow intent remain reviewable even though strict
+    # delivery/device/progress/publication admission is not qualified yet.
+    state = manifest_path.parent / '.flux-state' / f'{entry_point}.{command}'
+    from tools.tessera_fleet.model_worker import atomic_json
+    state.mkdir(parents=True, exist_ok=True)
+    _publish_submitted_manifest(state, [row])
+    atomic_json(state / 'unqualified-summary.json', summary)
+    campaign_rows.submit_rows([row], state)
+    return 0
 
 
 def cmd_submit_joint(args) -> int:
@@ -2297,30 +2211,18 @@ def _add_submission_arguments(parser) -> None:
     parser.add_argument("--spec", required=True,
                         help="container spec JSON; its text is passed to "
                              "tools.tessera_campaign_container --spec")
-    parser.add_argument("--pbrun", default=str(PBRUN),
-                        help="the published pbrun client")
     parser.add_argument("--demand", required=True,
-                        help="pbrun --demand for this pass, measured from what "
+                        help="explicit resource demand for this pass, measured from what "
                              "it holds (for example gpu=1,mem_gb=104)")
     parser.add_argument("--cpus", type=int, default=None,
                         help="cores the action reserves")
     parser.add_argument("--tag", default=None,
                         help="placement tag; the joint pass needs a GB10 box")
-    parser.add_argument("--priority", type=int, default=-10,
-                        help="queue band; agent and post-campaign work runs at "
-                             "-10 so it never displaces campaign rows")
+    parser.add_argument("--priority", type=int, default=0,
+                        help="requested queue priority; nonzero values currently refuse native admission")
     parser.add_argument("--residency", default=None, choices=("stage",),
-                        help="submit-joint only: ask PrismaBuild to make this "
-                             "row's declared read set resident on its SSD "
-                             "stage tier before the row runs "
-                             "(RobTand/prismabuild#583). The action reads the "
-                             "stage through the residency map the launcher "
-                             "injects; omitted, nothing about the read set "
-                             "changes. Reserves cluster-scoped tier capacity, "
-                             "so it is a placement input, not a hint -- which "
-                             "is why submit-allocation, submit-export and "
-                             "submit-aqua refuse it: they read every byte "
-                             "from the pool.")
+                        help="submit-joint strict stage-residency intent; retained in "
+                             "planning and refused at native launch until unit 2 qualifies delivery")
     parser.add_argument("--timeout-s", type=int, default=None,
                         help="hard wall-clock cap for the action")
     parser.add_argument("--container-arg", action="append", default=None,
@@ -2587,7 +2489,13 @@ def cmd_merge(args) -> int:
     if missing:
         raise MergeRefused(
             f"{len(missing)} planned row(s) wrote no cost.pkl: " + ", ".join(missing[:8]))
-    receipt_summary = require_campaign_receipts(workspace, len(row_dirs))
+    try:
+        native = campaign_rows.require_native_success(
+            workspace / '.flux-state' / Path(SUBMITTED_MANIFEST).stem, len(row_dirs),
+            rows=json.loads((workspace / SUBMITTED_MANIFEST).read_bytes()))
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise MergeRefused(f'native campaign completion required: {exc}') from exc
+    receipt_summary = [f"{len(native)} native succeeded"]
     print(f"[dispatch] {len(row_dirs)} rows: " + ", ".join(receipt_summary))
     payloads = {}
     for row_id, path in row_dirs.items():
@@ -2688,7 +2596,7 @@ def main(argv=None) -> int:
     capture.add_argument("--submit", action="store_true")
     capture.set_defaults(func=cmd_capture)
 
-    plan = sub.add_parser("plan", help="lay the campaign out as pbcampaign rows")
+    plan = sub.add_parser("plan", help="lay the campaign out as scientific row intents")
     plan.add_argument("--spec", required=True)
     plan.add_argument("--workspace", required=True)
     plan.add_argument("--calibration-cache", default=None,
@@ -2791,6 +2699,12 @@ def main(argv=None) -> int:
                        help="what a GPU box in the fleet declares, in GiB; "
                             "defaults to the spec's 'box_memory_gb'.")
     submit.set_defaults(func=cmd_submit)
+
+    status = sub.add_parser('status', help='collect the exact saved native campaign IDs')
+    status.add_argument('--workspace', required=True)
+    status.add_argument('--stage', default=Path(SUBMITTED_MANIFEST).stem,
+                        help='native stage name; manifest.submitted by default')
+    status.set_defaults(func=cmd_status)
 
     joint = sub.add_parser(
         "submit-joint",

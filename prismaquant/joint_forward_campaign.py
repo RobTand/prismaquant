@@ -15,14 +15,10 @@ def resolve_forward_campaign(document, *, plan_sha256, prepared_sha256,
     from .cost_stage_checkpoint import canonical_json_sha256
     from .digests import bytes_sha256hex, text_sha256hex
     from .joint_campaign_ledger import (require_quantum_campaign, roster_digest)
-    from .stage_inputs import bound as _bound
+    from .joint_forward_resume import _read
 
     bound = document['source_campaign_record']
-    path = _bound(bound, 'forward recovery source campaign record')
-    raw = path.read_bytes()
-    if bytes_sha256hex(raw) != bound['sha256']:
-        raise RuntimeError('forward recovery campaign record changed during read')
-    record = json.loads(raw)
+    record, _ = _read(bound['path'], bound['sha256'])
     campaign = record['campaign']
     # Existing consumer validates the record's own canonical identity, schema,
     # exact campaign digests, scope and checkpoint binding.

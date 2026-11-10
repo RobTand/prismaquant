@@ -19,6 +19,21 @@ from tools.full_kl_teacher_payload import tokenizer_identity
 pytestmark = pytest.mark.task_suite
 
 
+@pytest.mark.parametrize("argv", [
+    ["sh", "-c", "flux submit true"],
+    ["bash", "-lc", "flux run true"],
+    ["python3", "-m", "prismaquant.flux_jobs"],
+])
+def test_real_configuration_refuses_nested_native_submission(tmp_path, argv):
+    from prismaquant.ship_gates import load_config
+    path = job_config(tmp_path)
+    config = json.loads(path.read_text())
+    next(stage for stage in config["stages"] if "argv" in stage)["argv"] = argv
+    path.write_text(json.dumps(config))
+    with pytest.raises(ValueError, match="must not submit nested jobs"):
+        load_config(path)
+
+
 def small_inputs(root: Path) -> tuple[Path, Path, Path]:
     """Build small tensors and run the real generic input sealer."""
     from safetensors.torch import save_file
@@ -174,7 +189,7 @@ def test_runner_refuses_incomplete_or_inconsistent_configuration(tmp_path, damag
     elif damage == "tp":
         config["topology"] = {"tensor_parallel_size": 3, "nnodes": 2}
     elif damage == "nested":
-        next(stage for stage in config["stages"] if "argv" in stage)["argv"] = ["pbrun.py"]
+        next(stage for stage in config["stages"] if "argv" in stage)["argv"] = ["flux_jobs.py"]
     else:
         config["stages"][0]["args"] += ["--model=other-model"]
     path.write_text(json.dumps(config))

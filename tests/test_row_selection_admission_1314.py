@@ -123,7 +123,7 @@ def test_check_and_submit_refuse_before_manifest_or_submission_work(row_case,
     monkeypatch.setattr(dispatch, "require_data_manifests", lambda *a, **k: called.append("check"))
     monkeypatch.setattr(dispatch, "attach_data_manifests",
                         lambda workspace, rows: called.append("attach") or rows)
-    monkeypatch.setattr(dispatch, "_pbcampaign", lambda *a, **k: called.append("submit") or 0)
+    monkeypatch.setattr(dispatch, "_flux_campaign", lambda *a, **k: called.append("submit") or 0)
     before = {path.name: path.read_bytes() for path in args.workspace.iterdir()}
     with pytest.raises(dispatch.DemandRefused, match="invalid unit selection"):
         command(args)

@@ -890,7 +890,7 @@ def mode_quantum(args, guard) -> dict:
             source_authentication=source, unit_names=unit_names)
         chain.require_prep_identity(prep, requested, n_batches=len(tokens), label=f"capture-batch-{start}:{stop}")
     results = []
-    from prismaquant.prismabuild_progress import commit
+    from prismaquant.joint_run_progress import log_progress
     for completed, (lo, hi) in enumerate(ranges, 1):
         guard(f"research prepared quantum {lo}:{hi}")
         owner = chain._owner_status(prep, lo, hi)
@@ -916,7 +916,7 @@ def mode_quantum(args, guard) -> dict:
             options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
             result = _run_prepared_quantum(options, guard)
         results.append(result)
-        commit(completed, chain.range_label(lo, hi), "prepared_quanta")
+        log_progress(completed, chain.range_label(lo, hi), "prepared_quanta")
     summary = {"layers": [start, stop], "fragments": [row["fragment"] for row in results],
                "units": sum(row["units"] for row in results)}
     print(json.dumps({"research_quantum_batch": summary}), flush=True)

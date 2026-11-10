@@ -22,15 +22,15 @@ and the exclusions that make the order true:
   artificial whole-roster hash phase;
 * a joint pass submitted before the campaign merge published the checkpoint's
   unit shards is refused with the directory named, not submitted blind;
-* the submit command puts ``--data-manifest`` before ``--detach`` and mirrors
-  the chain's demand, because a ``pbrun`` option after the separator is an
-  argument of the action instead.
+* native planning rows retain the scientific data manifest separately from
+  the payload argv and preserve the chain's resource demand.
 
 The tests exercise metadata-only paths without Torch. The producer imports
 cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
 """
 
 from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant import data_manifest_contract
 from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import tessera_campaign_table as campaign_table
 
@@ -277,7 +277,7 @@ def scratch(request):
     """A per-test directory that is never under ``/tmp``.
 
     ``pytest``'s own ``tmp_path`` lands wherever ``TMPDIR`` points, and
-    ``pbtest`` refuses a ``--basetemp`` override, so the one place a fleet
+    the sharded runner refuses a ``--basetemp`` override, so the one place a fleet
     shard can be told to write is a path this module chooses. /tmp was cleared
     by an OOM in 2026-04 and took a set of artifacts with it; nothing here
     writes there.
@@ -1077,7 +1077,7 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
         "--demand", "gpu=1,mem_gb=104",
         "--cpus", "6",
         "--tag", "gb10",
-        "--priority", "-10",
+        "--priority", "0",
         "--timeout-s", "86400",
         "--manifest-dir", str(manifest_dir),
         "--dry-run",
@@ -1087,17 +1087,12 @@ def test_the_submit_command_puts_the_manifest_before_the_detach(
     printed = capsys.readouterr().out
     command = next(line for line in printed.splitlines()
                    if line.startswith("[dry-run] "))[len("[dry-run] "):]
-    argv = command.split()
-    # ``--data-manifest`` is an option of pbrun. After the separator it would
-    # be an argument of the action, and the fleet would warm nothing.
-    assert argv.index("--data-manifest") < argv.index("--detach")
-    assert argv.index("--detach") < argv.index("--")
-    # The demand mirrors the chain's own PBRUN_DEMAND for the joint pass.
-    for expected in ("--demand", "gpu=1,mem_gb=104", "--cpus", "6", "--tag",
-                     "gb10", "--priority", "-10", "--timeout-s", "86400"):
-        assert expected in argv
-    assert argv[argv.index("--data-manifest") + 1].endswith(
-        "prismaquant.tessera_joint_aura.prepare.json.gz")
+    row = json.loads(command)
+    argv = row["argv"]
+    assert row["demand"] == {"gpu": 1, "mem_gb": 104, "cpu": 6}
+    assert row["tags"] == ["gb10"] and row["timeout_s"] == 86400
+    assert "--data-manifest" not in argv
+    assert row["data_manifest"].endswith("prismaquant.tessera_joint_aura.prepare.json.gz")
     assert "tools.tessera_campaign_container" in argv
     assert "prismaquant.tessera_joint_aura" in argv
     # A dry run submits nothing and writes nothing.
@@ -1144,7 +1139,7 @@ def test_a_resumed_run_forwards_the_source_transition_and_reads_it_in_the_head(
     assert dispatch.main([*common, "--resume", "--source-transition", str(receipt)]) == 0
     line = next(line for line in capsys.readouterr().out.splitlines()
                 if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
     assert inner[inner.index("--source-transition") + 1] == str(receipt.resolve())
     assert inner[inner.index("--source-transition-sha256") + 1] == digest
@@ -1205,14 +1200,15 @@ def test_joint_submit_environment_reaches_launcher_argv(
     ]) == 0
     line = next(line for line in capsys.readouterr().out.splitlines()
                 if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     launcher_args = submitted[submitted.index("tools.tessera_campaign_container") + 1:]
     monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [inspection()])
     monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))
     executed = []
-    monkeypatch.setattr(launcher.os, "execvp", lambda binary, argv: executed.append(argv))
+    from container_admission import stub_launch
+    stub_launch(monkeypatch, launcher, executed)
     launcher.main(launcher_args)
     docker_env = dict(item.split("=", 1) for index, item in enumerate(executed[0])
                       if index and executed[0][index - 1] == "--env")
@@ -1269,13 +1265,12 @@ def test_fresh_verified_prepare_seals_the_same_phases_and_manifest_digest(
                           "--dry-run"]) == 0
     printed = capsys.readouterr().out
     command = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
-    argv = shlex.split(command[len("[dry-run] "):])
-    phases = [argv[i + 1].split("=", 1)[0] for i, value in enumerate(argv)
-              if value == "--progress-phase"]
+    row = json.loads(command[len("[dry-run] "):])
+    argv = row["argv"]
+    phases = [phase.split("=", 1)[0] for phase in row["progress_phases"]]
     assert phases == ["head", "layer-0-part-0", "layer-1-part-0"]
-    assert argv.index("--progress-phase") < argv.index("--data-manifest")
     assert argv[argv.index("--prewarm-manifest") + 1] == (
-        argv[argv.index("--data-manifest") + 1])
+        row["data_manifest"])
     summary = json.loads(printed[printed.index("{\n"):])
     assert argv[argv.index("--prewarm-manifest-sha256") + 1] == summary["manifest_sha256"]
 
@@ -1316,17 +1311,16 @@ def test_a_resumed_prepare_seals_its_order_and_the_submission_carries_it(
                           "--dry-run"]) == 0
     printed = capsys.readouterr().out
     command = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
-    argv = shlex.split(command[len("[dry-run] "):])
+    row = json.loads(command[len("[dry-run] "):])
+    argv = row["argv"]
 
     # The sealed table is the resumed order this time: the head, the journal's
     # replay part, then the layer walk over the units still to qualify.
-    phases = [argv[i + 1].split("=", 1)[0] for i, value in enumerate(argv)
-              if value == "--progress-phase"]
+    phases = [phase.split("=", 1)[0] for phase in row["progress_phases"]]
     assert phases == ["head", "replay-0000", "layer-0-part-0", "layer-1-part-0"]
-    assert argv.index("--progress-phase") < argv.index("--data-manifest")
     # The action reads the same manifest the storage role warms, by digest.
     assert argv[argv.index("--prewarm-manifest") + 1] == (
-        argv[argv.index("--data-manifest") + 1])
+        row["data_manifest"])
     summary = json.loads(printed[printed.index("{\n"):])
     assert argv[argv.index("--prewarm-manifest-sha256") + 1] == summary["manifest_sha256"]
     assert summary["phases"] == built[0]["annotations"]["phases"]
@@ -1427,15 +1421,11 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
     spec.write_text(json.dumps({"container": {"image": "x"}}))
     directory = scratch / "manifests"
     submitted = []
-    real_run = subprocess.run
+    def submit(rows, state):
+        submitted.extend(rows)
+        return []
 
-    def fake_run(argv, **kwargs):
-        if argv[0] == "git":
-            return real_run(argv, **kwargs)
-        submitted.append(argv)
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(dispatch.campaign_rows, "submit_rows", submit)
     args = ["submit-joint", "prepare", "--plan", str(fixture["plan"]),
             *_scope_args(fixture),
             "--spec", str(spec), "--demand", "gpu=1,mem_gb=104",
@@ -1445,7 +1435,7 @@ def test_joint_submit_writes_one_deterministic_gzip_manifest(
     first = path.read_bytes()
     payload = json.loads(gzip.decompress(first))
     glm_data_manifests.check_manifest(payload)
-    assert submitted[0][submitted[0].index("--data-manifest") + 1] == str(path)
+    assert submitted[0]["data_manifest"] == str(path)
     assert dispatch.main(args) == 0
     assert path.read_bytes() == first
 
@@ -1492,9 +1482,11 @@ def test_a_joint_reservation_under_the_plans_own_bound_is_refused(
 
     assert submit("gpu=1,mem_gb=114") == 0
     printed = capsys.readouterr().out
-    # The device envelope reaches PB as a *subset* cap, not as a second box.
-    assert "--gpu-memory-gb 80" in printed
-    assert "--demand gpu=1,mem_gb=114" in printed
+    # The device envelope remains a subset cap of the native row demand.
+    line = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
+    row = json.loads(line[len("[dry-run] "):])
+    assert row["gpu_memory_gb"] == 80
+    assert row["demand"]["gpu"] == 1 and row["demand"]["mem_gb"] == 114
     summary = json.loads(printed[printed.index("{\n"):])
     assert summary["resource_demand"] == {
         "row": "prismaquant.tessera_joint_aura:prepare",
@@ -1539,7 +1531,7 @@ def test_a_dry_run_reports_the_phase_boundaries_it_would_submit(
 def test_the_manifest_of_a_pass_is_byte_identical_across_two_builds(
     scratch, shared_mount,
 ):
-    """``pbrun`` seals the manifest's digest into the action key.
+    """The submitter seals the manifest's digest into the action key.
 
     A field that drifted between two submissions of the same pass would give
     the finished pass a new key and re-run it, which is the opposite of what
@@ -1577,7 +1569,7 @@ def test_a_read_set_over_the_prismabuild_ceiling_is_refused_at_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(glm_data_manifests, "MAX_MANIFEST_BYTES", 128)
+    monkeypatch.setattr(data_manifest_contract, "MAX_MANIFEST_BYTES", 128)
 
     with pytest.raises(SystemExit) as refusal:
         dispatch.main([
@@ -1631,7 +1623,7 @@ def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
         "--demand", "gpu=1,mem_gb=104",
         "--cpus", "6",
         "--tag", "gb10",
-        "--priority", "-10",
+        "--priority", "0",
         "--manifest-dir", str(scratch / "manifests"),
         *(() if head_grace is None else ("--head-grace-s", str(head_grace))),
         "--dry-run",
@@ -1639,9 +1631,9 @@ def test_the_head_allowance_is_a_caller_input_and_the_others_are_not(
 
     command = next(line for line in capsys.readouterr().out.splitlines()
                    if line.startswith("[dry-run] "))[len("[dry-run] "):]
-    argv = shlex.split(command)
-    phases = [argv[index + 1] for index, token in enumerate(argv)
-              if token == "--progress-phase"]
+    row = json.loads(command)
+    argv = row["argv"]
+    phases = row["progress_phases"]
     assert phases, "the joint submission declares progress phases"
     assert phases[0] == f"head={1800 if head_grace is None else head_grace}"
     assert all(phase.endswith("=900") for phase in phases[1:])

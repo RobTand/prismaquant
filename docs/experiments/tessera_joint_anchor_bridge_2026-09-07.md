@@ -38,14 +38,14 @@ python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --cwd /home/rob/tmp/pq-joint-anchor-bridge --tag gb10 \
   --cpus 4 --gpu --demand mem_gb=96 --gpu-memory-gb 40 \
   --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  --detach -- bash experiments/pq322_joint_anchor_run.sh prepare \
+  --detach -- bash archive/pq_experiments_2026-11-09/experiments/pq322_joint_anchor_run.sh prepare \
   --plan "$JOINT_PLAN" --plan-sha256 "$PLAN_SHA256"
 
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbrun.py \
   --cwd /home/rob/tmp/pq-joint-anchor-bridge --tag gb10 \
   --cpus 4 --gpu --demand mem_gb=96 --gpu-memory-gb 40 \
   --env OMP_NUM_THREADS=1 --env MKL_NUM_THREADS=1 --env OPENBLAS_NUM_THREADS=1 \
-  --detach -- bash experiments/pq322_joint_anchor_run.sh run \
+  --detach -- bash archive/pq_experiments_2026-11-09/experiments/pq322_joint_anchor_run.sh run \
   --plan "$JOINT_PLAN" --plan-sha256 "$PLAN_SHA256" \
   --prepared "$PREPARED_RECORD" --prepared-sha256 "$PREPARED_SHA256"
 ```

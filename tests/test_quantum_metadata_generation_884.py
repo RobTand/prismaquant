@@ -848,7 +848,7 @@ def test_dispatcher_accepts_prepared_executable_rows(tmp_path, monkeypatch):
     argv = dispatch.quantum_argv(
         record, record_path=record_path,
         output_root=Path(str(campaign["root"])))
-    assert "--data-manifest" in argv
+    assert "data_manifest" in argv
     assert "prepared_input" in record["executable_readset"]
 
 

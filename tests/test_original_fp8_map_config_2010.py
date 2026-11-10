@@ -8,7 +8,7 @@ from prismaquant import layer_streaming, model_profiles
 from prismaquant.model_profiles.default import DefaultProfile
 from test_capture_original_material import material, _owner  # noqa: F401
 from test_original_streaming_bootstrap_2010 import _rebind
-from test_strict_reader_tier_enforcement import _forget_state  # noqa: F401
+from native_original_fixtures import _forget_state  # noqa: F401
 
 pytestmark = pytest.mark.own_process
 
