@@ -8,7 +8,7 @@ only once the rows it follows have finished. These tests hold:
 * The prep stages the head only; each quantum stages the head and every
   forward layer, and reads no entry another row wrote.
 * The manifests preserve exact declared phase bytes.
-* Every Stage A row carries the gb10 tag alone, priority -10 and its own
+* Every Stage A row carries the gb10 tag alone, priority 0 and its own
   manifest and template; the join is a CPU row.
 * The quanta wait for the prep's record and ending; the join waits for every
   quantum's ending and receipt. The rows the native transport fixture "runs" are the
@@ -238,7 +238,7 @@ def test_a_sealed_forward_round_names_every_row(sealed):
     for name in ["forward-prep", *labels]:
         envelope = _envelope(rows[name])
         assert envelope["tags"] == ["gb10"]
-        assert str(envelope["priority"]) == "-10"
+        assert str(envelope["priority"]) == "0"
         assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
         assert "--host-class" not in envelope and "--measurement" not in envelope
         templates.add(json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())["template_id"])

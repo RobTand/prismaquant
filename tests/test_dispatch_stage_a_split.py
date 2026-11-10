@@ -173,13 +173,13 @@ def test_a_sealed_round_names_every_row_and_its_order(sealed):
         assert _flag(payload, "--chain-split-digest-layer") == "3"
         assert "--resume-implementation-compatibility" not in payload
         assert "--chain-split-prep" not in payload
-    # Every Stage A row: the gb10 tag alone, priority -10, the full residency
+    # Every Stage A row: the gb10 tag alone, priority 0, the full residency
     # path, its own manifest and its own template.
     templates = set()
     for name in ["prep", *labels]:
         envelope = _envelope(rows[name])
         assert envelope["tags"] == ["gb10"]
-        assert str(envelope["priority"]) == "-10"
+        assert str(envelope["priority"]) == "0"
         assert envelope["data_manifest"] == rows[name]["data_manifest"]["path"]
         template = json.loads(Path(_flag(envelope["argv"], DECLARATION_FLAG)).read_text())
         templates.add(template["template_id"])
@@ -211,9 +211,9 @@ def test_a_sealed_priority_reaches_every_row(sealed):
 
 
 def test_the_default_priority_is_recorded(sealed):
-    assert sealed["document"]["priority"] == "-10"
+    assert sealed["document"]["priority"] == "0"
     for row in sealed["document"]["rows"]:
-        assert str(_envelope(row)["priority"]) == "-10", row["name"]
+        assert str(_envelope(row)["priority"]) == "0", row["name"]
 
 
 @pytest.mark.parametrize("priority", ["high", "", "1.5", "0 "])
