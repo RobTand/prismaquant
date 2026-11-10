@@ -23,7 +23,6 @@ import sysconfig
 from . import flux_jobs
 from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, file_digest_sha256hex
 from .file_identity import file_stat_signature, durable_package_path
-from .mount_facts import find_mount
 from .contract_checks import Contract, strict_json_loads
 from .staged_manifest import read_document, publish_staged_json, open_regular
 
@@ -251,14 +250,39 @@ def _runtime_imports():
     return result
 
 
-def _runtime_libraries():
-    """Bind Linux's actual file-backed implementation mappings, not ldd text."""
-    with open('/proc/self/maps', 'rb') as handle:
+def _runtime_proc_lines(filename):
+    with open(filename, 'rb') as handle:
         raw = handle.read(4 << 20)
         if handle.read(1):
-            raise ValueError('native runtime mappings exceed bound')
+            raise ValueError('native runtime proc metadata exceeds bound')
+    return raw.decode('utf-8', errors='strict').splitlines()
+
+
+def _runtime_mapped_device(fd):
+    """Maps uses the held file's mount device, not getattr's subvolume st_dev."""
+    ids = [line.partition(':')[2].strip()
+           for line in _runtime_proc_lines(f'/proc/self/fdinfo/{fd}')
+           if line.startswith('mnt_id:')]
+    if len(ids) != 1 or re.fullmatch(r'[0-9]+', ids[0]) is None:
+        raise ValueError('native runtime mapped file mount identity incomplete')
+    mounts = [fields for line in _runtime_proc_lines('/proc/self/mountinfo')
+              if (fields := line.split()) and fields[0] == ids[0]]
+    if len(mounts) != 1:
+        raise ValueError('native runtime mapped file mount identity not recorded or ambiguous')
+    fields = mounts[0]
+    if len(fields) < 10 or '-' not in fields:
+        raise ValueError('native runtime mapped file mount record malformed')
+    separator = fields.index('-')
+    device = re.fullmatch(r'([0-9]+):([0-9]+)', fields[2])
+    if separator < 6 or len(fields) != separator + 4 or device is None:
+        raise ValueError('native runtime mapped file mount device or record malformed')
+    return int(device[1]), int(device[2])
+
+
+def _runtime_libraries():
+    """Bind Linux's actual file-backed implementation mappings, not ldd text."""
     libraries = {}
-    for line in raw.decode('utf-8', errors='strict').splitlines():
+    for line in _runtime_proc_lines('/proc/self/maps'):
         fields = line.split(None, 5)
         if len(fields) < 6:
             if 'x' in fields[1] and fields[4] == '0':
@@ -274,17 +298,17 @@ def _runtime_libraries():
         if not filename.startswith('/') or filename.endswith(' (deleted)') or '\\' in filename:
             raise ValueError('native runtime unsupported mapped implementation owner')
         path = _runtime_path(filename)
-        info = os.stat(path)
         major, minor = (int(v, 16) for v in device.split(':'))
-        if info.st_ino != int(inode):
-            raise ValueError(f'native runtime mapped library replaced: {path}')
-        if (os.major(info.st_dev), os.minor(info.st_dev)) != (major, minor):
-            # Btrfs getattr reports a subvolume's anonymous device; maps
-            # reports the filesystem device recorded in mountinfo instead.
-            mount = find_mount(path)
-            if mount is None or mount.filesystem != 'btrfs' or mount.device != (major, minor):
+        fd = open_regular(path)
+        try:
+            info = os.fstat(fd)
+            signature = file_stat_signature(info)
+            if ((*_runtime_mapped_device(fd), info.st_ino) != (major, minor, int(inode)) or
+                    file_stat_signature(os.stat(path, follow_symlinks=False)) != signature):
                 raise ValueError(f'native runtime mapped library replaced: {path}')
-        libraries[path] = file_stat_signature(info)
+            libraries[path] = signature
+        finally:
+            os.close(fd)
     if not libraries or len(libraries) > MAX_RUNTIME_ENTRIES:
         raise ValueError('native runtime requires finite mapped libraries')
     return dict(sorted(libraries.items()))

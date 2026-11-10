@@ -455,6 +455,10 @@ def test_native_mapping_owner_parser_refuses_substitution(runtime_layout, monkey
             return io.BytesIO(raw)
         return original_open(path, *args, **kwargs)
     monkeypatch.setattr(builtins, 'open', mapped_open)
+    # These synthetic maps use stat's device, independent of the host's
+    # actual mount device. Full fdinfo/mountinfo joins have their own tests.
+    monkeypatch.setattr(nr, '_runtime_mapped_device', lambda fd:
+        (os.major(os.fstat(fd).st_dev), os.minor(os.fstat(fd).st_dev)))
     real = runtime_layout['real_libraries']
     assert real() == {str(library):nr.file_stat_signature(known)}
     if mutation == 'named-code':

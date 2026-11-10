@@ -10369,7 +10369,6 @@ pq_py_library(
         ":prismaquant/digests",
         ":prismaquant/file_identity",
         ":prismaquant/flux_jobs",
-        ":prismaquant/mount_facts",
         ":prismaquant/staged_manifest",
     ],
 )

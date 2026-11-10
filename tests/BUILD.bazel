@@ -81497,7 +81497,6 @@ pq_py_library(
     ],
     deps = [
         "//:prismaquant/__init__",
-        "//:prismaquant/mount_facts",
         "//:prismaquant/native_results",
         ":native_runtime_observer",
         "@pq_pip//pytest",

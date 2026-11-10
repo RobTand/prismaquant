@@ -54,18 +54,19 @@ Stage preflight resolves the same instance and checks its health before creating
 state or manifests. An empty live configuration is hashed as evidence and is
 allowed; missing broker identity and offline ranks still refuse.
 
-As of: 2026-11-10, mapped-file identity on btrfs subvolumes, issue #3368.
-Source: `prismaquant/native_results.py`, `prismaquant/mount_facts.py`.
-Runtime v5 requires each mapped library's inode to match the resolved path's
-stat inode. Devices must match directly, or the resolved path's containing
-mount must be btrfs and its mountinfo device must match the mapping device.
-Btrfs stat reports a subvolume's anonymous device while maps reports the
-filesystem device. The shared mount reader selects the longest containing
-mount, including escaped mountpoints and the topmost equal-path entry.
-Deleted mappings, changed inodes, unrelated devices and unsupported device
-aliases still refuse. Overlayfs has no device-alias exception. This corrects
-the mapped-device refusal recorded in the November 8 runtime notes below;
-it changes no scientific, format, serving or scratch-filesystem gate.
+As of: 2026-11-10, descriptor mount identity for mapped files, issue #3368.
+Source: `prismaquant/native_results.py`.
+Runtime v5 opens each resolved mapped library through the shared regular-file
+reader and retains that descriptor while checking identity. Its fdinfo
+`mnt_id` selects exactly one mountinfo record; that record's device and the
+descriptor's inode must match maps. The path's final stat signature must
+still equal the descriptor's signature. Stat devices remain in the file
+signatures but never substitute for the mapped mount device. This handles
+btrfs subvolume devices without filesystem special cases or path-prefix
+mount selection. Missing, malformed or ambiguous mount provenance refuses,
+as do deleted mappings, different devices/inodes and changed path targets.
+This corrects the mapped-device refusal recorded in the November 8 runtime
+notes below. Scientific, format, serving and scratch-filesystem gates are unchanged.
 
 As of: 2026-11-10, P-4 dependency separation, after D-fix `90ceda405`.
 Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
