@@ -226,7 +226,7 @@ def _exact_metadata(path: Path) -> dict:
 
 def own_boundary_entry(directory: Path, session: dict, *, batch: int, boundary: int) -> dict:
     """The receipt record of a forward boundary entry this generation wrote."""
-    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA, activation_cache_filename
+    from .exact_activation_contract import EXACT_ACTIVATION_SCHEMA, activation_cache_filename
     name = f"boundary-{batch}-{boundary}-at-{boundary}"
     path = Path(directory) / str(session["generation"]) / "entries" / activation_cache_filename(name)
     metadata = _exact_metadata(path)
