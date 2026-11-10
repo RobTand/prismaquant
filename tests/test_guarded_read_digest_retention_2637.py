@@ -39,7 +39,13 @@ MANIFEST_SOURCE_BLOBS = {
         "98406374a7859e9a1b9e490671432372ad5dbe84a7a58c2b3c34377125af2037",
     ),
 }
-# Current native-migration sources; historical manifest pins above remain unchanged.
+# Reviewed native-migration pins, not refreshed historical evidence:
+# perturbed_x_cache: native lifecycle migration in 02c35277f and filename owner
+# extraction in ea9cd1f99; retained guarded-read scopes remain checked below.
+# tessera_census_cache: native result selection replaces the PB service reader.
+# digests: bounded chunks_sha256hex owner supports the native byte writer.
+# tensor_digests: the additive retained token owner route from 58a2db300.
+# Future changed pins require a per-file --reason and print the source diff.
 CURRENT_SOURCE_BLOBS = {'prismaquant/perturbed_x_cache.py': ('27f4faf97025b1f93639bccbc1c3418457b45274',
                                       '93c787b84bace425b8e9f966b5ce894cd5491a4a09326966f50f448d72322e82'),
  'prismaquant/tessera_census_cache.py': ('b8158910df6d22720611dd9b8588bf51777170c4',

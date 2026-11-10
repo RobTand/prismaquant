@@ -4,7 +4,7 @@ The byte-contract goldens and consumer-retention cases come from retained
 commit a9fce4a588dd41ebffcb77756166c8394a21b378. Census decisions are deliberately
 not asserted here: the retention-audit sibling owns that historical manifest.
 Current integration binds the owner source and the reviewed native-migration
-primitive baseline, with the routed token scope absent.
+primitive baseline against an enumerated supplied-main snapshot and explicit removals.
 """
 from __future__ import annotations
 
@@ -30,6 +30,29 @@ TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
 # Canonical JSON identity after the token route, native migration, and sealed
 # buffer digest consolidation. Retained byte-contract goldens stay fixed.
 TOKEN_ONLY_BASELINE_SHA256 = "2662654100cf87703aa743a859684263f60163540efc7674ed14e7cb4bbce3da"
+# Supplied main 6d8288ad had 277 primitive scopes. The migration removed
+# retired PB tooling in 8c336f2e3, 728a6e8fd, a4cf01ccc, adaf3d9f6,
+# 989eaa5fc and cb07374d5. 3ffa08ae7 consolidated SealedBuffer.seal;
+# 0c56ce19c removed its allowance. No other scope may disappear.
+MAIN_SCOPES_SHA256 = "839cb5c55d0171ea3d77e7c386a03678acda1f1dc443116603183569a0321609"
+MIGRATION_REMOVED_SCOPES = {
+    "hashlib:prismaquant/io_engine.py::SealedBuffer.seal",
+    "hashlib:prismaquant/joint_forward_resume.py::_read",
+    "hashlib:tools/build_t4_recovery_request.py::sha",
+    "hashlib:tools/derive_tessera_progress_grace.py::sha256",
+    "hashlib:tools/pwc_window_load_bench.py::_leaves",
+    "hashlib:tools/pwc_window_load_bench.py::run_quantum",
+    "hashlib:tools/pwc_window_load_bench.py::run_setup",
+    "hashlib:tools/pwc_window_load_bench.py::run_window",
+    "hashlib:tools/stagea_produced_live_cycle.py::_digest",
+    "sorted-json:prismaquant/prismabuild_progress.py::commit",
+    "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait",
+    "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait",
+    "sorted-json:prismaquant/prismabuild_progress.py::report",
+    "sorted-json:tools/build_t4_recovery_request.py::main",
+    "sorted-json:tools/derive_tessera_progress_grace.py::main",
+    "sorted-json:tools/pwc_window_load_bench.py::run_window",
+}
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs CUDA"))]
 
@@ -123,9 +146,16 @@ def test_token_route_has_a_reviewed_current_owner_pin():
     assert current == (blob, hashlib.sha256(raw).hexdigest()), "stale integration owner pin"
 
 
-def test_token_route_stays_absent_from_reviewed_native_baseline():
+def test_token_route_removes_only_enumerated_main_baseline_scopes():
     baseline = json.loads((REPO / "tests/fixtures/duplication_baseline.json").read_text())
-    assert TOKEN_SCOPE not in baseline["primitive_digest_sites"], "remove the routed consumer allowance"
+    main_sites = json.loads((REPO / 'tests/fixtures/digest_main_scopes_2638.json').read_text())
+    canonical_main = json.dumps(main_sites, separators=(',', ':')).encode()
+    assert hashlib.sha256(canonical_main).hexdigest() == MAIN_SCOPES_SHA256
+    assert len(main_sites) == len(set(main_sites)) == 277
+    removals = {TOKEN_SCOPE, *MIGRATION_REMOVED_SCOPES}
+    assert removals <= set(main_sites)
+    assert set(baseline['primitive_digest_sites']) == set(main_sites) - removals
+    assert len(baseline['primitive_digest_sites']) == 260
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
         "regenerate the reviewed native baseline after classifying source removals; "
