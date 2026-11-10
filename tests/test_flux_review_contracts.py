@@ -41,6 +41,12 @@ def test_missing_stage_mount_refuses_instead_of_inventing_measurements():
     ["sh", "-c", "flux submit true"], ["bash", "-lc", "/bin/flux run true"],
     ["bash", "-c", "true; flux submit true"],
     ["python3", "-m", "prismaquant.flux_jobs"],
+    ["python3", "-mprismaquant.flux_jobs"],
+    ["python3", "-c", "import prismaquant.flux_jobs as jobs; jobs.submit_job()"],
+    ["python3", "-c", "import subprocess; subprocess.run(['flux', 'submit', 'true'])"],
+    ["python3", "-c", "import os; os.system('flux run true')"],
+    ["bash", "--rcfile", "/dev/null", "-c", "flux submit true"],
+    ["bash", "--noprofile", "-lc", "flux run true"],
     ["sh", "-c", "python3 -m prismaquant.flux_jobs"],
     ["bash", "-c", "sh -c 'flux submit true'"],
     ["sh", "-c", 'true; bash -c "flux submit true"'],
@@ -52,6 +58,12 @@ def test_stage_commands_refuse_nested_submission_forms(argv):
 
 @pytest.mark.parametrize("argv", [
     ["python3", "-m", "prismaquant.ship_gates"], ["/bin/true"],
+    ["python3", "-c", "print('flux')"],
+    ["bash", "--rcfile", "flux", "-c", "true"],
+    ["bash", "--noprofile", "-c", "echo flux"],
+    ["bash", "-c", "echo flux"],
+    ["echo", "flux"],
+    ["python3", "-m", "other_module", "-mprismaquant.flux_jobs"],
     ["bash", "-c", "echo flux-results.json"], ["python3", "flux_report.py"],
 ])
 def test_ordinary_stage_commands_remain_allowed(argv):
@@ -89,3 +101,30 @@ def test_tensor_span_crossing_adjacent_extents_requires_one_covering_object(tmp_
     finally:
         from prismaquant.residency_map import reset_residency_resolver_for_tests
         reset_residency_resolver_for_tests()
+
+
+def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
+    helper = tmp_path / "fluxcache.py"
+    raw = b"print('reviewed helper')\n"
+    helper.write_bytes(raw)
+    monkeypatch.setattr(staged_launch, "CACHE_HELPER", str(helper))
+    monkeypatch.setattr(staged_launch, "CACHE_HELPER_SHA256", staged_launch.bytes_sha256hex(raw))
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    manifest = SimpleNamespace(lifetime={"mode": "host_local_cache", "root": str(tmp_path)}, members=lambda: [])
+    monkeypatch.setattr(staged_launch, "validate_binding", lambda binding: manifest)
+    publish = staged_launch.publish_staged_json
+    def swap(*args):
+        publish(*args)
+        helper.write_text("raise SystemExit('swapped')")
+    monkeypatch.setattr(staged_launch, "publish_staged_json", swap)
+    class Executed(Exception):
+        pass
+    def execute(path, argv):
+        assert argv[:3] == ["/usr/bin/python3", "-s", "-c"]
+        assert argv[3].encode() == raw
+        raise Executed
+    monkeypatch.setattr(staged_launch.os, "execv", execute)
+    binding = {"path": "manifest", "sha256": "a" * 64, "read_contract_sha256": "b" * 64,
+               "read_contract_path": "contract", "allowed_tiers": "ssd"}
+    with pytest.raises(Executed):
+        staged_launch.launch(binding, ["/bin/true"])

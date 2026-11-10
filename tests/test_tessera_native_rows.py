@@ -19,6 +19,18 @@ class NativeRowsTests(unittest.TestCase):
                 'demand': {'cpu': 1, 'mem_gb': 1}, 'env': {}, 'tags': [],
                 'timeout_s': 60, **extra}
 
+    def test_unresolvable_instance_leaves_no_stage_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / 'state'
+            with patch.object(jobs, '_source_identity', return_value={}), \
+                    patch.object(jobs, '_client_environment', return_value={}), \
+                    patch.object(jobs, '_instance_uri', side_effect=ValueError('unresolvable instance')), \
+                    patch.object(jobs, 'submit_job') as submit:
+                with self.assertRaisesRegex(ValueError, 'unresolvable instance'):
+                    rows.submit_rows([self.row()], state)
+            self.assertFalse(state.exists())
+            submit.assert_not_called()
+
     def test_preflight_all_rows_before_launch(self):
         with patch.object(jobs, 'validate_job', return_value={}), patch.object(jobs, 'submit_job') as submit:
             with self.assertRaisesRegex(ValueError, 'GPU lane not qualified'):

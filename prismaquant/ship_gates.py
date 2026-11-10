@@ -6,6 +6,8 @@ admission and placement. Existing producers and the shipcard verifier own gates.
 from __future__ import annotations
 
 import argparse
+import ast
+import re
 import copy
 import json
 import shlex
@@ -52,27 +54,78 @@ def _validate_destinations(destinations: list[Path], protected: set[Path], artif
 
 
 def _submits_nested_job(argv: list[str]) -> bool:
-    """Inspect argv and shell command strings without executing them."""
+    """Inspect command positions, shell strings and Python source without executing."""
+    # Shell punctuation starts a new command; ordinary arguments are not commands.
     for index, word in enumerate(argv):
-        if Path(word).name in {"flux", "flux_jobs.py"}:
-            return True
-        if word == "-m" and index + 1 < len(argv) and argv[index + 1] == "prismaquant.flux_jobs":
-            return True
-    for shell_index, shell in enumerate(argv):
-        if Path(shell).name not in {"sh", "bash", "dash", "zsh"}:
-            continue
-        for index in range(shell_index + 1, len(argv) - 1):
+        if word and all(char in ";&|()" for char in word):
+            if _submits_nested_job(argv[:index]) or _submits_nested_job(argv[index + 1:]):
+                return True
+            return False
+    while argv and ("=" in argv[0] or Path(argv[0]).name in {"env", "command", "exec"}):
+        argv = argv[1:]
+    if not argv:
+        return False
+    executable = Path(argv[0]).name
+    if executable in {"flux", "flux_jobs.py"}:
+        return True
+    if re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", executable):
+        for index, word in enumerate(argv[1:], 1):
+            if word == "-m":
+                return index + 1 < len(argv) and argv[index + 1] == "prismaquant.flux_jobs"
+            if word.startswith("-m"):
+                return word[2:] == "prismaquant.flux_jobs"
+            if word == "-c" and index + 1 < len(argv):
+                try:
+                    tree = ast.parse(argv[index + 1])
+                except SyntaxError as exc:
+                    raise ValueError("invalid Python stage command") from exc
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import) and any(
+                            alias.name == "prismaquant.flux_jobs" for alias in node.names):
+                        return True
+                    if isinstance(node, ast.ImportFrom) and (
+                            node.module == "prismaquant.flux_jobs" or
+                            node.module == "prismaquant" and any(alias.name == "flux_jobs" for alias in node.names)):
+                        return True
+                    if isinstance(node, ast.Call):
+                        name = node.func.attr if isinstance(node.func, ast.Attribute) else (
+                            node.func.id if isinstance(node.func, ast.Name) else "")
+                        if name in {"import_module", "__import__"} and node.args and isinstance(
+                                node.args[0], ast.Constant) and node.args[0].value == "prismaquant.flux_jobs":
+                            return True
+                        if name not in {"run", "call", "Popen", "check_call", "check_output",
+                                        "system", "popen", "execv", "execvp", "execvpe", "execve"}:
+                            continue
+                        for argument in node.args:
+                            try:
+                                value = ast.literal_eval(argument)
+                            except (ValueError, TypeError):
+                                continue
+                            if isinstance(value, str):
+                                value = shlex.split(value)
+                            if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
+                                if _submits_nested_job(list(value)):
+                                    return True
+                return False
+            if not word.startswith("-"):
+                break
+    if executable in {"sh", "bash", "dash", "zsh"}:
+        index = 1
+        while index < len(argv):
             word = argv[index]
-            if word.startswith("-") and "c" in word[1:]:
+            if word in {"--rcfile", "--init-file", "-o", "-O"}:
+                index += 2
+                continue
+            if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word) and index + 1 < len(argv):
                 try:
                     lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=True)
                     lexer.whitespace_split = True
-                    tokens = list(lexer)
+                    return _submits_nested_job(list(lexer))
                 except ValueError as exc:
                     raise ValueError("invalid shell stage command") from exc
-                if _submits_nested_job(tokens):
-                    return True
+            if word == "--" or not word.startswith("-"):
                 break
+            index += 1
     return False
 
 

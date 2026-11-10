@@ -160,7 +160,7 @@ def _profile_identity():
     config_raw = _checked(['config', 'get'], uri=uri)
     model_raw = _checked(['kvs', 'get', 'resource.R'], uri=uri)
     config, model = _native_document(config_raw), _native_document(model_raw)
-    if not isinstance(config, dict) or not config or not start:
+    if not isinstance(config, dict) or not start:
         raise ValueError('missing live Flux config or broker identity')
     ranks = _instance_ranks(model)
     online = _checked(['resource', 'status', '-s', 'online', '-n', '-o', '{ranks}'], uri=uri).strip()
@@ -254,6 +254,7 @@ def validate_job(*, checkout: Path, resources: FluxResources, environment=None, 
     if staged_input is not None:
         from .staged_launch import validate_binding
         validate_binding(staged_input, placement=resources.placement)
+    _profile_identity()
     return source
 
 
@@ -398,24 +399,31 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     _publish_flux_json(record_dir / 'submission.json', receipt)
     try:
         result = _flux_run(args, uri=profile['uri'])
+        for name, raw in (('stdout', result.stdout), ('stderr', result.stderr)):
+            try:
+                (record_dir / f'submit.{name}').write_text(raw)
+            except OSError:
+                pass
         if result.returncode:
             raise SubmissionUnknown('native submission returned an error')
         job_id = _job_id(result.stdout.strip())
     except (OSError, subprocess.SubprocessError, ValueError, SubmissionUnknown) as exc:
         raise SubmissionUnknown(f'submission unknown in {record_dir}; do not resubmit') from exc
     receipt.update(state='submitted', job_id=job_id)
+    recovery_written = False
     try:
         # The acknowledged ID is recoverable even if the ordinary receipt,
         # diagnostics or human-readable jobid cannot subsequently be saved.
         _publish_flux_json(record_dir / 'submitted-job.json', receipt)
-        (record_dir / 'submit.stdout').write_text(result.stdout)
-        (record_dir / 'submit.stderr').write_text(result.stderr)
+        recovery_written = True
         _publish_flux_json(record_dir / 'submission.json', receipt)
         (record_dir / 'jobid').write_text(job_id + '\n')
     except OSError as exc:
+        recovery = ('load submitted-job.json to reconcile' if recovery_written else
+                    'job id is only in this exception and submit.stdout')
         raise SubmissionUnknown(
             f'submitted as {job_id} in {record_dir}; receipt publication failed; '
-            'load submitted-job.json to reconcile, do not resubmit') from exc
+            f'{recovery}, do not resubmit') from exc
     return FluxSubmission(job_id, record_dir, launch_sha)
 
 

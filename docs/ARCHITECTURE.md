@@ -3,7 +3,7 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4 SHAPE v1 and CAPS v2 conformance, based on `e7308753f`.
+As of: 2026-11-10, P-4 C-fix, based on conform head `c764cca45`.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
@@ -16,8 +16,7 @@ including inside a job. Client paths are read lazily from the fleet-owned
 Importing the module never reads shared storage. Every CLI call resolves the
 current prefix; no run name or install prefix is embedded in live launch code.
 The CPU profile permits at most four cores, 16 GiB and
-1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply;
-the P-4 verification window permits one job at a time and at most 600 seconds.
+1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply.
 Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
 inside the Flux job's cgroup; it does not enforce the declared per-job memory
 size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
@@ -61,7 +60,7 @@ remains held for P-7. `native_results` owns authenticated result selection;
 the retired execution service.
 
 `staged_launch` verifies the external cache helper against a source-pinned SHA256
-before executing it. Immutable staged coverage checks run once. They have no
+before executing those verified bytes. Immutable staged coverage checks run once. They have no
 landing wait, poll deadline or progress-grace coupling. One resolver entry must
 cover the requested span; adjacent objects do not form a synthetic entry.
 The row builders omit retired progress-phase and container-image admission

@@ -225,3 +225,22 @@ def test_compilation_operators_cannot_contradict_equality_arm(tmp_path, boundary
     problems = verify(card, model_dir=model, required=["native_export.graph"])
     assert any("operator" in problem for problem in problems), problems
     assert boundary_verifier == []
+
+
+@pytest.mark.parametrize("native,mismatch", [(True, False), (True, True), (False, False)])
+def test_equality_linkage_accepts_native_and_recorded_producers(tmp_path, boundary_verifier, native, mismatch):
+    from tests.graph_receipt_fixtures import replace_receipt
+    model, card, record, receipt = graph_card(tmp_path)
+    if native:
+        arm = receipt["arms"][0]
+        arm.pop("pb_action")
+        arm["job_id"] = "12345"
+        record["metrics"]["graph_observation"]["equality_action"] = "54321" if mismatch else "12345"
+        replace_receipt(record, receipt)
+    problems = verify(card, model_dir=model, required=["native_export.graph"])
+    if mismatch:
+        assert any("equality arm/action linkage" in problem for problem in problems)
+        assert boundary_verifier == []
+    else:
+        assert problems == []
+        assert len(boundary_verifier) == 1

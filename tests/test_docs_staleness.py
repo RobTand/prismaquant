@@ -79,3 +79,10 @@ def test_claude_does_not_overstate_pipeline_enforcement():
     assert "structurally enforced\n   (`pipeline.py` `APPROVED_RESOURCE_OWNERS`)" not in text
     assert "declarative spec + owner validation, not executor" in text
     assert "runtime enforcement lives in the stage code" in text
+
+
+def test_current_execution_defers_temporary_limits_to_fleet_caps():
+    current = _read("docs/ARCHITECTURE.md").split("<!-- flux-current-start -->", 1)[1].split(
+        "<!-- flux-current-end -->", 1)[0]
+    assert "/mnt/shared/flux-migration/CAPS.md" in current
+    assert "verification window permits" not in current

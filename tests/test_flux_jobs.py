@@ -156,17 +156,33 @@ class FluxJobsTests(unittest.TestCase):
 
     def test_bad_submit_responses_stay_unknown(self):
         for index, response in enumerate((self.completed(''), self.completed('123\n456'),
-                                          self.completed('123\n', 1), self.completed('bad id'))):
+                                          self.completed('123\n', 1, 'submit diagnostic'), self.completed('bad id'))):
             self.record = self.root / f'record-{index}'
             with self.subTest(index=index), self.assertRaises(jobs.SubmissionUnknown):
                 self.submit_fixture(response)
+            self.assertEqual((self.record / 'submit.stdout').read_text(), response.stdout)
+            self.assertEqual((self.record / 'submit.stderr').read_text(), response.stderr)
             with self.assertRaises(jobs.SubmissionUnknown):
                 jobs.load_submission(self.record)
+
+    def test_recovery_write_failure_names_available_evidence(self):
+        publish = jobs._publish_flux_json
+        def fail(path, value):
+            if path.name == 'submitted-job.json':
+                raise OSError('injected recovery failure')
+            return publish(path, value)
+        with patch.object(jobs, '_publish_flux_json', side_effect=fail):
+            with self.assertRaisesRegex(jobs.SubmissionUnknown, 'only in this exception and submit.stdout'):
+                self.submit_fixture()
+        self.assertFalse((self.record / 'submitted-job.json').exists())
+        self.assertTrue((self.record / 'submit.stdout').is_file())
+        with self.assertRaises(jobs.SubmissionUnknown):
+            jobs.load_submission(self.record)
 
     def test_acknowledged_job_survives_receipt_or_jobid_write_failure(self):
         publish = jobs._publish_flux_json
         write = Path.write_text
-        for filename in ('submission.json', 'jobid', 'submit.stdout'):
+        for filename in ('submission.json', 'jobid'):
             self.record = self.root / ('failure-' + filename)
             def fail_publish(path, value):
                 if path.name == filename and value.get('state') == 'submitted':
@@ -405,6 +421,15 @@ class FluxJobsTests(unittest.TestCase):
             {'rank': '0-1'}, {'rank': '4-5'}]}}) + '\n'
         self.online = '0-1,4-5\n'
         self.overlay = '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: full\n'
+
+    def test_empty_live_config_is_hashed_without_refusal(self):
+        import hashlib
+        self.live_instance()
+        self.live_config = '{}\n'
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_flux_run', side_effect=self.instance_query):
+            profile = jobs._profile_identity()
+        self.assertEqual(profile['config_sha256'], hashlib.sha256(b'{}\n').hexdigest())
 
     def test_changed_instance_identity_submits_and_records_observations(self):
         self.live_instance()
