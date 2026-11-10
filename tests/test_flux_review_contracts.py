@@ -9,7 +9,14 @@ from prismaquant import ship_gates
 from tools import staged_read_stream_ab
 
 
-def test_host_local_launch_refuses_an_unpinned_cache_helper(tmp_path, monkeypatch):
+@pytest.fixture
+def launch_environment(monkeypatch):
+    for name in (staged_launch.PATH_ENV, staged_launch.SHA_ENV, staged_launch.READ_ENV,
+                 "PRISMAQUANT_READ_CONTRACT_PATH", "PRISMAQUANT_STAGED_ALLOWED_TIERS"):
+        monkeypatch.setenv(name, "")
+
+
+def test_host_local_launch_refuses_an_unpinned_cache_helper(tmp_path, monkeypatch, launch_environment):
     helper = tmp_path / "fluxcache.py"
     helper.write_text("raise SystemExit('modified')\n")
     monkeypatch.setattr(staged_launch, "CACHE_HELPER", str(helper))
@@ -21,9 +28,6 @@ def test_host_local_launch_refuses_an_unpinned_cache_helper(tmp_path, monkeypatc
     monkeypatch.setattr(staged_launch.os, "execvpe", lambda *args: calls.append(args))
     binding = {"path": "manifest", "sha256": "a" * 64, "read_contract_sha256": "b" * 64,
                "read_contract_path": "contract", "allowed_tiers": "ssd"}
-    for name in (staged_launch.PATH_ENV, staged_launch.SHA_ENV, staged_launch.READ_ENV,
-                 "PRISMAQUANT_READ_CONTRACT_PATH", "PRISMAQUANT_STAGED_ALLOWED_TIERS"):
-        monkeypatch.setenv(name, "")
     with pytest.raises(ValueError, match="cache helper sha256"):
         staged_launch.launch(binding, ["/bin/true"])
     assert calls == []
@@ -99,7 +103,7 @@ def test_tensor_span_crossing_adjacent_extents_requires_one_covering_object(tmp_
         reset_residency_resolver_for_tests()
 
 
-def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
+def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch, launch_environment):
     helper = tmp_path / "fluxcache.py"
     raw = b"import argparse; print('reviewed helper')\n"
     helper.write_bytes(raw)
