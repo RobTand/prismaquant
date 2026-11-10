@@ -102,15 +102,8 @@ class ProducedOutputSpool:
                 return prior['directory']
             if len(self._groups) >= MAX_GROUPS:
                 raise ProducedWindowRefused('group roster exceeds bound')
-            while self._held_bytes() + ceiling_bytes > self.max_bytes:
-                self._check_failures()
-                if self._make_room():
-                    continue
-                live = [g for g in self._groups.values() if g['future'] is not None and not g['durable']]
-                if not wait or not live:
-                    raise ProducedWindowRefused('bounded local window has no releasable completed group')
-                self._raise_if_cancelled()
-                self._cond.wait()
+            self._await_room(ceiling_bytes, wait=wait,
+                refusal_message='bounded local window has no releasable completed group')
             free = shutil.disk_usage(self.root).free
             if free < ceiling_bytes:
                 raise ProducedWindowRefused('local filesystem lacks declared headroom')
@@ -125,6 +118,17 @@ class ProducedOutputSpool:
 
     def _held_bytes(self):
         return sum(g['ceiling_bytes'] for g in self._groups.values() if not g['released'])
+
+    def _await_room(self, ceiling_bytes, *, wait, refusal_message):
+        while self._held_bytes() + ceiling_bytes > self.max_bytes:
+            self._check_failures()
+            if self._make_room():
+                continue
+            live = [g for g in self._groups.values() if g['future'] is not None and not g['durable']]
+            if not wait or not live:
+                raise ProducedWindowRefused(refusal_message)
+            self._raise_if_cancelled()
+            self._cond.wait()
 
     def _check_root(self):
         directory = open_directory(str(self.root))
