@@ -189,6 +189,49 @@ def test_four_step_two_probe_chain_matches_independent_in_memory_arithmetic(tmp_
     assert not storage._deferred_unlinks
 
 
+def test_rematerialization_waits_for_an_export_that_can_free_room(tmp_path, monkeypatch):
+    pub = publication(tmp_path, spool_bytes=8)
+    pub.bind_session({'generation': 'known', 'run_identity_sha256': 'b' * 64})
+    spool = ProducedOutputSpool.from_publication(pub)
+    first, _ = raw_group(pub, spool, batch='first', payload=b'AAAA')
+    spool.submit('first'); spool.await_group('first')
+    spool.retire_entry('first', first)
+    held, _ = raw_group(pub, spool, batch='held', payload=b'CCCC')
+    spool.submit('held'); spool.await_group('held')
+    _pending, local = raw_group(pub, spool, batch='pending', payload=b'BBBB')
+    entered, release, waited = threading.Event(), threading.Event(), threading.Event()
+    actual_copy = io_engine.publish_copy
+
+    def delayed(source, *args, **kwargs):
+        if Path(source) == local:
+            entered.set()
+            assert release.wait(30)
+        return actual_copy(source, *args, **kwargs)
+
+    monkeypatch.setattr(io_engine, 'publish_copy', delayed)
+    actual_wait = spool._cond.wait
+
+    def wait(*args, **kwargs):
+        waited.set()
+        release.set()
+        return actual_wait(*args, **kwargs)
+
+    monkeypatch.setattr(spool._cond, 'wait', wait)
+    spool.submit('pending')
+    try:
+        assert entered.wait(30)
+        with spool.local_reads([held]) as existing:
+            spool.prepare_reads([first])
+            assert waited.is_set()
+            assert existing[held].read_bytes() == b'CCCC'
+            with spool.local_reads([first]) as restored:
+                assert restored[first].read_bytes() == b'AAAA'
+            assert spool._held_bytes() <= 8
+    finally:
+        release.set()
+        spool.join_copies()
+
+
 @pytest.mark.parametrize('writer', ['document', 'copy'])
 def test_exclusive_temporary_collision_never_removes_foreign_file(tmp_path, monkeypatch, writer):
     import secrets

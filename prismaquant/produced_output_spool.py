@@ -331,9 +331,8 @@ class ProducedOutputSpool:
                     group = self._groups[key]
                     if not group['released']:
                         continue
-                    while self._held_bytes() + group['ceiling_bytes'] > self.max_bytes:
-                        if not self._make_room():
-                            raise ProducedWindowRefused('live readers retain rematerialization room')
+                    self._await_room(group['ceiling_bytes'], wait=True,
+                        refusal_message='live readers retain rematerialization room')
                     directory = group['directory']
                     directory.mkdir(mode=0o700)
                     group['identity'] = (directory.stat().st_dev, directory.stat().st_ino)
