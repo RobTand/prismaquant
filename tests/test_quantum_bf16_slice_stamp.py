@@ -139,7 +139,7 @@ def test_a_slice_without_a_run_identity_refuses(adjoint_slice):
         require_slice_bf16_reduction(adjoint_slice, True, where="q")
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 

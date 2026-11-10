@@ -367,7 +367,7 @@ def test_synthesize_reports_the_same_reuse_it_read(tmp_path, monkeypatch):
     assert record["encoder_source_reuse"]["status"] == bridge.ENCODER_REUSE_STATUS
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 

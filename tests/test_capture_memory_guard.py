@@ -475,7 +475,7 @@ def test_both_gpu_commands_are_capped_before_any_device_work(tmp_path, monkeypat
     assert seen["fraction"] == pytest.approx(80 / 121)
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 

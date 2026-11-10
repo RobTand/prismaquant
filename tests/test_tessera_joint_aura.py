@@ -1476,7 +1476,7 @@ def test_joint_aura_refuses_measured_aliases_before_the_walk(
     assert cache_weight_filename(names[0], fmt) in message
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 

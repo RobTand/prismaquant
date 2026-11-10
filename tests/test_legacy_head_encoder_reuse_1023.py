@@ -91,7 +91,7 @@ def test_legacy_walk_without_a_policy_stays_strict(legacy_walk):
     assert kwargs["historical_encoder_reuse"] is None
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 

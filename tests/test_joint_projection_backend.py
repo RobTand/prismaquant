@@ -454,7 +454,7 @@ def test_dev_mode_reference_path_keeps_the_autograd_refusal(monkeypatch):
         fused.product_sum(operand, operand)
 
 
-from staged_native_fixtures import (  # noqa: E402,F401
+from cpu_staged_fixtures import (  # noqa: E402,F401
     empty_native_staged_inputs, native_staged_state,
 )
 
