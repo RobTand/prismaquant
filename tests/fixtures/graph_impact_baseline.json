@@ -3,8 +3,8 @@
   "figures": {
     "u_pct": 51.145946653361364,
     "loc_u_pct": 64.55189830927246,
-    "scc_max": 169,
-    "median_selected_pct": 17.0,
+    "scc_max": 168,
+    "median_selected_pct": 13.2,
     "p90_selected_pct": 87.2,
     "modules_over_half": 268,
     "conftest_source_modules": 0
