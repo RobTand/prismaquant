@@ -42766,7 +42766,6 @@ pq_py_test(
         "//:tools/prismaquant_source_bootstrap",
         "//:tools/prismasnap",
         "//:tools/spec_decode_guard",
-        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
         ":conftest",
@@ -42793,7 +42792,10 @@ pq_py_test(
     library = ":test_flux_jobs_lib",
     deps = [
         "//:archive/cross_layer_2026-05-09/prismaquant/research_components/__init__",
+        "//:experiments/alloc_lead_asd/launch",
         "//:pqtel/__init__",
+        "//:prismaquant/__init__",
+        "//:prismaquant/activation_fair_pricing_cycle",
         "//:prismaquant/lane_shipcard",
         "//:tools/build_streamed_full_kl_teacher",
         "//:tools/dsv4_wikitext_inputs",
@@ -42810,9 +42812,8 @@ pq_py_test(
         "//:tools/prismaquant_source_bootstrap",
         "//:tools/prismasnap",
         "//:tools/spec_decode_guard",
-        "//:tools/tessera_campaign_container",
-        "//:tools/tessera_fleet/__init__",
         "//:tools/tessera_fleet/dispatch_model",
+        "//:tools/tessera_fleet/status",
         ":conftest",
     ],
     timeout = "moderate",
@@ -42829,6 +42830,9 @@ pq_py_library(
     deps = [
         "//:prismaquant/__init__",
         "//:prismaquant/activation_fair_pricing_cycle",
+        "//:prismaquant/quality_prefill_flux",
+        "//:tools/__init__",
+        "//:tools/tessera_campaign_container",
     ],
 )
 

@@ -19,10 +19,8 @@ from typing import Literal
 from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_LAX, bytes_sha256hex
 
 
-_PREFIX = Path('/home/rob/flux-vanilla/0.91.0-0.56.0')
-_CLI = str(_PREFIX / 'install/bin/flux')
-_PATH = f'{_PREFIX}/install/bin:{_PREFIX}/deps/bin:/usr/bin:/bin'
-_LIB = f'{_PREFIX}/install/lib:{_PREFIX}/deps/lib'
+_INSTANCE = Path('/mnt/shared/flux-migration/INSTANCE')
+_URI_RESOLVER = '/mnt/shared/flux-migration/flux-uri.sh'
 _PROFILE = 'pq.flux.stock-slot.v3'
 _LEGACY_PROFILE = 'pq.flux.fv1-model.perf-memory.v2'
 _THREADS = ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'TORCH_NUM_THREADS')
@@ -90,20 +88,45 @@ def _publish_flux_json(path, value):
         os.close(descriptor)
 
 
+def _client_environment():
+    """Read the fleet-owned client prefix lazily, without shell evaluation."""
+    try:
+        instance = _INSTANCE.read_text()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError('Flux INSTANCE is missing or unreadable') from exc
+    match = re.fullmatch(r'(/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+) ([A-Za-z0-9][A-Za-z0-9_.-]*)\n?', instance)
+    if match is None or any(part in {'.', '..'} for part in Path(match[1]).parts):
+        raise ValueError('Flux INSTANCE must contain one absolute PREFIX and RUN line')
+    prefix = match[1]
+    return {'PATH': f'{prefix}/install/bin:{prefix}/deps/bin:/usr/bin:/bin',
+            'HOME': '/home/rob',
+            'LD_LIBRARY_PATH': f'{prefix}/install/lib:{prefix}/deps/lib'}
+
+
 def _instance_uri():
-    """The coordinator must supply FLUX_URI; never guess a standing run."""
-    uri = os.environ.get('FLUX_URI', '')
-    if not uri or any(character.isspace() or character == '\0' for character in uri):
-        raise ValueError('coordinator FLUX_URI must name the intended Flux instance')
-    return uri
+    """Use explicit coordinator intent, otherwise the fleet's host resolver."""
+    if 'FLUX_URI' in os.environ:
+        uri = os.environ['FLUX_URI']
+        if not uri or any(character.isspace() or character == '\0' for character in uri):
+            raise ValueError('coordinator FLUX_URI must name the intended Flux instance')
+        return uri
+    try:
+        result = subprocess.run([_URI_RESOLVER], capture_output=True, text=True,
+                                env={'PATH': '/usr/bin:/bin'}, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError('FLUX_URI is unset and the fleet URI resolver is unavailable') from exc
+    if result.returncode or re.fullmatch(r'local:///[^\s\x00]+\n?', result.stdout) is None:
+        raise ValueError('FLUX_URI is unset and the fleet URI resolver failed or returned an invalid URI')
+    return result.stdout.removesuffix('\n')
 
 
 def _flux_run(args, *, timeout=30, uri=None):
     # Never inherit CLI plugins, job KVS namespaces, credentials, or PB context.
+    environment = _client_environment()
+    cli = environment['PATH'].split(':', 1)[0] + '/flux'
     with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-        result = subprocess.run([_CLI, *args], stdout=stdout, stderr=stderr,
-                                env={'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
-                                     'FLUX_URI': _instance_uri() if uri is None else uri}, timeout=timeout, check=False)
+        result = subprocess.run([cli, *args], stdout=stdout, stderr=stderr,
+                                env={**environment, 'FLUX_URI': _instance_uri() if uri is None else uri}, timeout=timeout, check=False)
         for stream in (stdout, stderr):
             if stream.tell() > 16 << 20:
                 raise ValueError('native query output exceeds evidence bound')
@@ -209,8 +232,8 @@ def job_unit_name(job_id):
 
 
 def _environment(record_dir, supplied):
-    environment = {'PATH': _PATH, 'HOME': '/home/rob', 'LD_LIBRARY_PATH': _LIB,
-                   'OUT': str(record_dir), 'FLUX_SCRATCH': '/tmp/flux-vanilla',
+    environment = {**_client_environment(), 'PATH': '/usr/bin:/bin',
+                   'OUT': str(record_dir),
                    'PYTHONDONTWRITEBYTECODE': '1', **dict.fromkeys(_THREADS, '1')}
     # No general application environment passthrough. Add a versioned setting
     # here only when its owning contract has migrated and can be validated.
@@ -250,12 +273,16 @@ if git('rev-parse', 'HEAD') != expected_commit or git('status', '--porcelain', '
 host = socket.gethostname().split('.')[0]
 roots = {'dl380g10': ('/home/rob/tl-gates/flux-validation', 'xfs'),
          'sparky': ('/tmp/flux-vanilla', 'ext4'), 'sparklina': ('/tmp/flux-vanilla', 'ext4')}
-root, expected_fs = roots[host]
+fallback_root, expected_fs = roots[host]
+provided_root = os.environ.get('FLUX_SCRATCH')
+root = fallback_root if provided_root is None else provided_root
+if not root.startswith('/') or os.path.normpath(root) != root or root == '/':
+    raise RuntimeError('invalid scratch root')
 actual_fs = subprocess.check_output(['/usr/bin/findmnt', '-n', '-o', 'FSTYPE', '-T', root], text=True).strip()
 if actual_fs != expected_fs:
     raise RuntimeError('unqualified scratch filesystem')
 os.environ['FLUX_SCRATCH'] = root
-scratch = pathlib.Path(root) / os.environ['FLUX_JOB_ID'].replace('ƒ', 'f', 1)
+scratch = pathlib.Path(root) / os.environ['FLUX_JOB_ID']
 child = None
 received = None
 def stop(signum, frame):
@@ -273,6 +300,8 @@ try:
     os.environ['TMPDIR'] = str(scratch)
     observation = {'schema': 'pq.flux.scratch.v1',
         'job_id': os.environ['FLUX_JOB_ID'], 'host': host, 'path': str(scratch),
+        'root_source': 'instance' if provided_root is not None else 'host-table',
+        'filesystem': actual_fs,
         'wrapper_pid': os.getpid(), 'affinity': sorted(os.sched_getaffinity(0))}
     (out / 'scratch.json').write_text(json.dumps(observation))
     if received is None:
@@ -328,8 +357,8 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
 
     ``afterok`` contains saved native ID strings. ``host:NAME`` is reserved for
     a caller's justified data-owner/runtime dependency. Only CPU validation is
-    qualified in profile v3. The coordinator supplies ``FLUX_URI``. Unsupported
-    input/output safety settings refuse.
+    qualified in profile v3. The coordinator supplies ``FLUX_URI`` or uses the
+    fleet resolver. Unsupported input/output safety settings refuse.
     """
     if isinstance(argv, (str, bytes)):
         raise ValueError('argv must be a sequence, not a shell string')

@@ -3,18 +3,41 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, review corrections P-2 on P-3 `8ca8b3121`.
+As of: 2026-11-10, P-4 SHAPE v1 and CAPS v2 conformance, based on `e7308753f`.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
-`flux_jobs.submit_job` admits a clean, detached shared checkout on the coordinator's
-explicit `FLUX_URI`. The CPU profile permits at most four cores, 16 GiB and
+`flux_jobs.submit_job` admits a clean, detached shared checkout. The coordinator's
+`FLUX_URI` takes precedence. When unset, the executor invokes
+`/mnt/shared/flux-migration/flux-uri.sh` with only `PATH=/usr/bin:/bin` and a
+five-second timeout, accepting one `local://` URI line. Failure refuses submission,
+including inside a job. Client paths are read lazily from the fleet-owned
+`/mnt/shared/flux-migration/INSTANCE`, strictly one absolute `PREFIX RUN` line.
+Importing the module never reads shared storage. Every CLI call resolves the
+current prefix; no run name or install prefix is embedded in live launch code.
+The CPU profile permits at most four cores, 16 GiB and
 1800 seconds. Consumer rules in `/mnt/shared/flux-migration/CAPS.md` also apply;
-the P-2 verification window permits one job at a time and at most 600 seconds.
+the P-4 verification window permits one job at a time and at most 600 seconds.
 Memory is declared to Flux. The container sets `--cgroups=disabled` and runs
 inside the Flux job's cgroup; it does not enforce the declared per-job memory
 size. The job unit and aggregate fleet cgroup caps remain separate host bounds.
 The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
+
+Payloads use `PATH=/usr/bin:/bin`, so Torch Inductor selects the system compiler
+with its multiarch includes. Only coordinator CLI invocations use the Flux
+install and dependency tool directories and library paths. No coordinator
+`FLUX_SCRATCH` is exported. The wrapper uses an instance-provided job value when
+present, otherwise the existing host table: XFS
+`/home/rob/tl-gates/flux-validation` on dl380g10, ext4 `/tmp/flux-vanilla` on
+either Spark. The observed instance config has no `FLUX_SCRATCH` setting, and
+P-4's live probe records whether the job receives one. Each selected root must
+pass the host filesystem qualification. Scratch lives under the exact
+`$FLUX_SCRATCH/$FLUX_JOB_ID`, is removed on exit, and its selected source and
+filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
+inside that same owned directory. Launcher allow-lists contain no variable
+names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
+the executor's allow-list, and container/staged names are checked alongside it.
+No environment names were renamed.
 
 `launch.json` records source, argv, instance and resource identity. The executor
 saves an acknowledged ID in fsynced `submitted-job.json` before `submission.json`,
@@ -57,10 +80,10 @@ The native CPU profile is `pq.flux.stock-slot.v3`. It submits
 qualified profile. Today's gate still permits zero GPUs only. Core class is
 chosen by the loaded topology; allocation authentication counts core, memory
 and GPU leaves and preserves physical core/PU/affinity checks.
-The coordinator must set `FLUX_URI` to the intended live instance before
-submission. There is no implicit run-name or newest-run discovery. Use the
-native local socket or coordinator URI described by the Flux skill's
-"Reach the instance" instructions. Every rank declared in live `resource.R`
+The coordinator may set `FLUX_URI` explicitly; otherwise the fleet URI resolver
+selects its host-local socket. The client prefix comes from `INSTANCE` as
+described in the current execution section. There is no run-name guessing or
+newest-run discovery. Every rank declared in live `resource.R`
 must be online and have a full broker overlay. Live config and R response
 SHA256 values, URI and broker starttime are recorded in both launch and
 submission receipts as observations, without config or model hash pins.
@@ -30455,12 +30478,14 @@ is not evidence. A lane producer may need its serving owner's lifecycle driver.
 
 #### 7.0.2 Submit and retain evidence
 
-Set the coordinator's `FLUX_URI` using the Flux skill's "Reach the instance"
-section. Read `/mnt/shared/flux-migration/CAPS.md` before submission. Use a clean,
+Set the coordinator's `FLUX_URI` explicitly or leave it unset to use the fleet
+resolver. The client prefix is read lazily from `INSTANCE`, as described in the
+current execution section. Read `/mnt/shared/flux-migration/CAPS.md` before submission. Use a clean,
 detached checkout under `/mnt/shared`, a unique record directory outside that
 checkout, a finite walltime, and the actual aggregate CPU and memory demand.
 `flux_jobs` starts each payload environment empty with `--env=-*` and adds its
-explicit allow-list, bounded native threads, output directory and local scratch.
+explicit allow-list, system-tool PATH, bounded native threads and output directory.
+Scratch is chosen inside the job from its instance environment or qualified host table.
 The wrapper removes its job-specific scratch and records the cleanup outcome.
 
 Run CPU preflight through the repository's submission API. These Python values

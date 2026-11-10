@@ -3,9 +3,12 @@
 import hashlib
 import json
 import os
+import re
+import runpy
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -58,6 +61,11 @@ class FluxJobsTests(unittest.TestCase):
         self.source = {'checkout': str(self.checkout), 'commit': 'a' * 40, 'tree': 'b' * 40}
         self.profile = {'profile': jobs._PROFILE, 'uri': 'local:///fixture/run/local-0', 'broker_starttime': '123.5'}
         self.resources = jobs.FluxResources(2, 3, 0, 60)
+        self.instance = self.root / 'INSTANCE'
+        self.instance.write_text('/opt/flux-client fleet-run\n')
+        setting = patch.object(jobs, '_INSTANCE', self.instance)
+        setting.start()
+        self.addCleanup(setting.stop)
 
     def completed(self, stdout='', rc=0, stderr=''):
         return subprocess.CompletedProcess([], rc, stdout, stderr)
@@ -77,12 +85,13 @@ class FluxJobsTests(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertEqual(command[:2], ['submit', '--env=-*'])
         self.assertIn('--resources-shape=slot/[core=2;memory=3]', command)
+        self.assertFalse(any('node/' in a or 'perf' in a for a in command if a.startswith(('--resources-shape=', '--requires='))))
         self.assertIn('--time-limit=60s', command)
         self.assertIn('--dependency=afterok:123', command)
         self.assertIn('--dependency=afterok:456', command)
         self.assertFalse(any(a.startswith(('-N', '--nodes', '--requires')) for a in command))
         exported = [a for a in command if a.startswith('--env=')][1:]
-        self.assertEqual(len(exported), 10)
+        self.assertEqual(len(exported), 9)
         self.assertIn('--env=OMP_NUM_THREADS=1', exported)
         self.assertIn('--env=OUT=' + str(self.record), exported)
         self.assertEqual(jobs.load_submission(self.record), submission)
@@ -537,6 +546,105 @@ class FluxJobsTests(unittest.TestCase):
         self.record = self.root / 'legacy-terminal'
         result = self.collect_fixture()
         self.assertEqual((result.status, result.payload_exit, result.query_error), ('succeeded', 0, None))
+
+    def test_resolver_uses_minimal_environment_and_short_timeout(self):
+        with patch.object(os, 'environ', {}), \
+                patch.object(subprocess, 'run', return_value=self.completed('local:///fleet/local-2\n')) as run:
+            self.assertEqual(jobs._instance_uri(), 'local:///fleet/local-2')
+        self.assertEqual(run.call_args.args[0], [jobs._URI_RESOLVER])
+        self.assertEqual(run.call_args.kwargs['env'], {'PATH': '/usr/bin:/bin'})
+        self.assertEqual(run.call_args.kwargs['timeout'], 5)
+
+    def test_explicit_uri_does_not_call_resolver(self):
+        with patch.object(os, 'environ', {'FLUX_URI': 'local:///chosen'}), \
+                patch.object(subprocess, 'run') as run:
+            self.assertEqual(jobs._instance_uri(), 'local:///chosen')
+        run.assert_not_called()
+
+    def test_resolver_failure_and_missing_resolver_refuse(self):
+        for output, rc in (('local:///fleet\n', 1), ('', 0), ('ssh://fleet/path\n', 0),
+                           ('local:///fleet\nextra\n', 0), (' local:///fleet\n', 0),
+                           ('local:///bad uri\n', 0), ('local:///bad\0uri', 0)):
+            with self.subTest(output=output, rc=rc), patch.object(os, 'environ', {}), \
+                    patch.object(subprocess, 'run', return_value=self.completed(output, rc)), \
+                    self.assertRaisesRegex(ValueError, 'resolver failed'):
+                jobs._instance_uri()
+        for error in (FileNotFoundError(), subprocess.TimeoutExpired('resolver', 5)):
+            with patch.object(os, 'environ', {}), \
+                    patch.object(subprocess, 'run', side_effect=error), \
+                    self.assertRaisesRegex(ValueError, 'resolver is unavailable'):
+                jobs._instance_uri()
+
+    def test_client_prefix_is_lazy_and_follows_instance_changes(self):
+        with patch.object(Path, 'read_text', side_effect=AssertionError('import touched filesystem')):
+            runpy.run_module('prismaquant.flux_jobs', run_name='prismaquant._import_probe', alter_sys=True)
+        self.assertEqual(jobs._client_environment()['PATH'],
+                         '/opt/flux-client/install/bin:/opt/flux-client/deps/bin:/usr/bin:/bin')
+        self.instance.write_text('/new/client other-run\n')
+        with patch.object(os, 'environ', {'FLUX_URI': 'local:///chosen'}), \
+                patch.object(subprocess, 'run', return_value=self.completed()) as run:
+            jobs._flux_run(['resource', 'list'])
+        self.assertEqual(run.call_args.args[0][0], '/new/client/install/bin/flux')
+        self.assertEqual(run.call_args.kwargs['env']['LD_LIBRARY_PATH'],
+                         '/new/client/install/lib:/new/client/deps/lib')
+
+    def test_missing_or_malformed_instance_refuses(self):
+        for value in ('', '/opt/flux', 'relative run\n', '/opt/flux run extra\n',
+                      '/opt/flux run\n/other run\n', '/opt/../flux run\n',
+                      '/opt/flux ../run\n', '/opt/flux run\x00', '/opt//flux run\n'):
+            self.instance.write_text(value)
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'INSTANCE'):
+                jobs._client_environment()
+        self.instance.unlink()
+        with self.assertRaisesRegex(ValueError, 'INSTANCE'):
+            jobs._client_environment()
+
+    def test_payload_uses_system_tools_without_coordinator_scratch(self):
+        with patch.dict(os.environ, {'FLUX_SCRATCH': '/unqualified/coordinator-root'}):
+            environment = jobs._environment(self.record, None)
+        self.assertEqual(environment['PATH'], '/usr/bin:/bin')
+        self.assertNotIn('FLUX_SCRATCH', environment)
+
+    def test_instance_scratch_is_qualified_used_and_removed(self):
+        scratch_root = self.root / 'instance-scratch'
+        scratch_root.mkdir()
+        self.record.mkdir()
+        def query(args, **kwargs):
+            if args[0] == '/usr/bin/findmnt':
+                self.assertEqual(args[-1], str(scratch_root))
+                return 'xfs\n'
+            return self.source['commit'] if args[1:] == ['rev-parse', 'HEAD'] else ''
+        environment = {'OUT': str(self.record), 'FLUX_SCRATCH': str(scratch_root), 'FLUX_JOB_ID': 'ƒ123'}
+        with patch.dict(os.environ, environment, clear=True), \
+                patch.object(sys, 'argv', ['payload', self.source['commit'], '/bin/true']), \
+                patch.object(jobs.socket, 'gethostname', return_value='dl380g10'), \
+                patch.object(subprocess, 'check_output', side_effect=query), \
+                patch.object(subprocess, 'Popen', return_value=SimpleNamespace(pid=123, wait=lambda: 0)), \
+                patch.object(os, 'killpg', side_effect=ProcessLookupError()), \
+                patch('signal.signal'), self.assertRaises(SystemExit) as exit:
+            exec(jobs._PAYLOAD, {})
+        self.assertEqual(exit.exception.code, 0)
+        observation = json.loads((self.record / 'scratch.json').read_text())
+        self.assertEqual(observation['root_source'], 'instance')
+        self.assertEqual(observation['path'], str(scratch_root / 'ƒ123'))
+        self.assertFalse((scratch_root / 'ƒ123').exists())
+        self.assertTrue(json.loads((self.record / 'cleanup.json').read_text())['removed'])
+
+    def test_launcher_allow_lists_have_no_secret_like_names(self):
+        from tools import tessera_campaign_container as adapter
+        from prismaquant import staged_manifest
+        names = {*jobs._environment(self.record, {'XDG_RUNTIME_DIR': '/run/user/1000'}),
+                 *adapter.AMBIENT_SETTINGS, *adapter.BOUNDED_CAPTURE_ENV,
+                 *adapter.CONTAINER_CACHE_ENV, adapter.SAFE_PATH_ENV,
+                 adapter.CHECKOUT_COMMIT_ENV, adapter.DEV_MODE_ENV,
+                 staged_manifest.PATH_ENV, staged_manifest.SHA_ENV, staged_manifest.READ_ENV,
+                 'PRISMAQUANT_READ_CONTRACT_PATH', 'PRISMAQUANT_STAGED_ALLOWED_TIERS'}
+        # Container cache entries pair an environment name with its subdirectory.
+        names = {name[0] if isinstance(name, tuple) else name for name in names}
+        self.assertFalse([name for name in names if re.search('KEY|TOKEN|SECRET|PASS|AUTH', name.upper())])
+        # Prefill delegates its entire native allow-list to this shared owner.
+        from prismaquant import quality_prefill_flux
+        self.assertIs(quality_prefill_flux.flux_jobs, jobs)
 
     def test_client_never_inherits_ambient_environment(self):
         with patch.dict(os.environ, {'FLUX_URI': self.profile['uri'], 'PB_ACTION_KEY': 'fixture', 'API_TOKEN': 'fixture', 'FLUX_KVS_NAMESPACE': 'fixture'}), \

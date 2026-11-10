@@ -97,7 +97,7 @@ def controller():
     from prismaquant.staged_manifest import publish_staged_json, SCHEMA
     out = Path(os.environ['OUT'])
     phase = out / 'phase'; phase.mkdir()
-    root = '/tmp/flux-vanilla/' + os.environ['FLUX_JOB_ID'] + '/cache'
+    root = str(Path(os.environ['TMPDIR']) / 'cache')
     source_paths, objects, extents = [], [], []
     for i, raw in enumerate(BLOBS):
         source = str(out / f'canonical-does-not-exist-{i}')
