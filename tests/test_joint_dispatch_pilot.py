@@ -22,9 +22,13 @@ def _pilot_spec(tmp_path, monkeypatch):
     from stage_a_spool_spec import with_spool
     from tools import dispatch_joint_quanta as dispatch
 
+    # Minimal pilot spec, not a GLM copy; replay and KDA settings use defaults.
+    document = with_spool({"container": {"image": "sha256:" + "0" * 64}, "env": {}})
+    assert set(document) == {"container", "env"}
+    assert set(document["container"]) == {"image", "mounts"}
+    assert document["env"] == {}
     spec = tmp_path / "pilot-spec.json"
-    spec.write_text(json.dumps(with_spool(
-        {"container": {"image": "sha256:" + "0" * 64}, "env": {}})))
+    spec.write_text(json.dumps(document))
     monkeypatch.setattr(dispatch, "SPEC_PATH", spec)
 
 
