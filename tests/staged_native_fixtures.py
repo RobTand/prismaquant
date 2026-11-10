@@ -119,3 +119,11 @@ def native_staged_state(monkeypatch):
         stage_b_prep_io.reset_staged_reads_for_tests()
         residency_map.reset_residency_resolver_for_tests()
         assert not any(name == 'prismabuild' or name.startswith('prismabuild.') for name in sys.modules)
+
+
+@pytest.fixture
+def empty_native_staged_inputs(tmp_path, monkeypatch, native_staged_state):
+    """Bind a real manifest for CPU controls whose payload IO is stubbed."""
+    _, _, binding, _ = fixture(tmp_path)
+    bind(monkeypatch, binding)
+    return binding

@@ -332,6 +332,7 @@ def test_plan_refuses_unqualified_probe_or_activation_policies(tmp_path, field, 
 
 
 @pytest.mark.parametrize("prior", [None, "1"])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypatch, prior):
     """The plan's activation-scale value is live inside execute and gone after.
 
@@ -383,6 +384,7 @@ def test_execute_scopes_the_activation_scale_env_to_the_call(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("profile_tool", ["cprofile", "py-spy"])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypatch, profile_tool):
     import torch
     from types import SimpleNamespace
@@ -423,6 +425,7 @@ def test_original_full_draw_refuses_subset_before_model_load(tmp_path, monkeypat
 
 @pytest.mark.parametrize("scope", [None, "mtp"])
 @pytest.mark.parametrize("command", ["prepare", "run"])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch, command, scope):
     import torch
     from types import SimpleNamespace
@@ -488,6 +491,7 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize('changed', ['schema', 'plan_sha256', 'implementation_sha256'])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_run_refuses_stale_prepared_gate_before_full_wire_intake(tmp_path, monkeypatch, changed):
     from prismaquant import gpu_guard, tessera_joint_aura as bridge
 
@@ -602,6 +606,7 @@ def test_parallel_intake_hashes_independent_files_without_changing_cells(tmp_pat
 
 
 @pytest.mark.parametrize("defect", ["missing", "parent", "command", "schema"])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_sampling_refuses_unobserved_execution(tmp_path, monkeypatch, defect):
     import os
     from prismaquant import tessera_joint_aura as bridge, gpu_guard
@@ -1162,6 +1167,7 @@ def test_a_missing_device_envelope_is_a_pure_input_refusal(tmp_path, monkeypatch
     assert touched == []
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_the_declared_envelope_reaches_the_allocator_unchanged(tmp_path, monkeypatch):
     """``execute`` states the plan's own number, and it is not defaulted.
 
@@ -1229,6 +1235,7 @@ def test_bounded_environment_refuses_before_metadata_and_device(tmp_path, monkey
         bridge.execute("prepare", config, plan_sha256="b" * 64)
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_a_pure_refusal_precedes_the_allocator_touch(tmp_path, monkeypatch):
     """A row refused for metadata must be refused before the device is touched.
 
@@ -1467,3 +1474,9 @@ def test_joint_aura_refuses_measured_aliases_before_the_walk(
     assert all(name in message for name in names)
     assert fmt in message
     assert cache_weight_filename(names[0], fmt) in message
+
+
+from staged_native_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

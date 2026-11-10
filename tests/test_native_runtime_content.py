@@ -365,7 +365,7 @@ def test_unsupported_loader_refuses_real_imported_owner(runtime_layout, monkeypa
 def test_existing_loaded_bytecode_is_separately_bound(runtime_layout):
     original = observe()
     cache = runtime_layout['root'] / 'reviewpkg/__pycache__/numerics.cpython-312.pyc'
-    cache.parent.mkdir()
+    cache.parent.mkdir(exist_ok=True)
     cache.write_bytes(b'known executable cache bytes')
     runtime_layout['imported']['reviewpkg.numerics']['cached'] = str(cache)
     before = observe()

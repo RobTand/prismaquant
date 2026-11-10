@@ -92,7 +92,6 @@ def _pre_fix_rows(tmp_path):
             "env": {},
             "tags": ["gb10"],
             "retry_safe": True,
-            "progress_phases": ["startup=3600", "pricing=900", "finalize=1800"],
             "timeout_s": 300,
         })
     return rows

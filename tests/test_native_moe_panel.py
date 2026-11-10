@@ -857,6 +857,8 @@ def bound_protocol_document(tmp_path, name, value):
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
+from native_runtime_fixtures import synthetic_runtime
+
 def original_protocol_case(tmp_path, layer=3):
     """Isolated SYNTHETIC metadata/completion fixture, never an actual receipt.
 
@@ -918,8 +920,7 @@ def original_protocol_case(tmp_path, layer=3):
         'material_pipeline': {'decoder': 'safetensors.safe_open', 'framework': 'pt', 'decoder_device': 'cpu',
                              'cast_owner': 'prismaquant.layer_streaming', 'direct_gpu_decode': False,
                              'target_dtype': 'torch.bfloat16', 'tensor_dtypes': {}, 'scale_inv_map': {}},
-        'prismabuild': {'sdk_version': 5, 'helper_root': '/synthetic-sdk5', 'runtime_generation': 'synthetic-sdk5',
-                       'source_tree': {'package_sha256': 'e' * 64, 'helper_tree_sha256': None}}}
+        'native_runtime': synthetic_runtime()}
     resources = {'schema': 'prismaquant.original_source_resources.v1', 'material_bytes': 1024,
         'cpu_bytes': 128 * 1024**2, 'source_cache_bytes': 1024, 'copy_bytes': 1024, 'gpu_bytes': 0,
         'native_bytes': 0, 'serialization_bytes': 8 * 1024**2, 'artifact_bytes': 16 * 1024**2,

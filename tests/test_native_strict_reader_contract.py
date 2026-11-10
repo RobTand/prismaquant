@@ -235,6 +235,10 @@ def test_canonical_cache_helper_uses_isolated_python(tmp_path, monkeypatch):
                  'PRISMAQUANT_READ_CONTRACT_SHA256', 'PRISMAQUANT_READ_CONTRACT_PATH',
                  'PRISMAQUANT_STAGED_ALLOWED_TIERS'):
         monkeypatch.setenv(name, 'fixture-restored-on-exit')
+    helper = tmp_path / 'cache-helper.py'
+    helper.write_bytes(b'# reviewed unit fixture helper\n')
+    monkeypatch.setattr(staged_launch, 'CACHE_HELPER', str(helper))
+    monkeypatch.setattr(staged_launch, 'CACHE_HELPER_SHA256', sha(helper.read_bytes()))
     calls = []
     class Executed(Exception):
         pass
@@ -246,7 +250,7 @@ def test_canonical_cache_helper_uses_isolated_python(tmp_path, monkeypatch):
         staged_launch.launch(binding, ['python3', '-s', '-m', 'owned_payload'])
     executable, argv = calls.pop()
     assert executable == '/usr/bin/python3'
-    assert argv[:3] == ['/usr/bin/python3', '-s', staged_launch.CACHE_HELPER]
+    assert argv[:4] == ['/usr/bin/python3', '-I', '-c', helper.read_text()]
     assert argv[argv.index('--') + 1:] == ['python3', '-s', '-m', 'owned_payload']
     members = json.loads((tmp_path / 'staged-members.json').read_bytes())
     assert members == [{'key': '3' * 64, 'bytes': 7}]

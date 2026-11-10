@@ -5,6 +5,7 @@ that this artificial interpreter support is a production numerical runtime.
 """
 import importlib
 import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,12 @@ def runtime_layout(tmp_path, monkeypatch):
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(raw)
+    executable = root / 'support/python'
+    shutil.copyfile(sys.executable, executable)
+    runtime_path = nr._runtime_path
+    monkeypatch.setattr(nr, '_runtime_path', lambda value: str(executable) if value == '/proc/self/exe' else runtime_path(value))
+    monkeypatch.setattr(sys, 'executable', str(executable))
+    monkeypatch.setattr(sys, 'dont_write_bytecode', True)
     # Genuine importable package and real Distribution metadata. RECORD does
     # not list its nested extension/data; the tree census must discover them.
     monkeypatch.syspath_prepend(str(root))
@@ -69,3 +76,16 @@ def nonqualifying_runtime(runtime_layout, monkeypatch):
     # nonqualifying CPU fixture, not the installed numerical closure.
     monkeypatch.setattr(nr, 'measure_runtime', lambda *, dependencies=(): runtime)
     return runtime
+
+
+def synthetic_runtime():
+    """A valid-shaped parser input with no measured or selected authority."""
+    row = {'bytes': 1, 'sha256': 'e' * 64}
+    return {'schema': nr.RUNTIME_SCHEMA,
+        'python': {'path': '/synthetic/python', **row, 'version': '3.12',
+                   'implementation': 'cpython', 'cache_tag': 'synthetic', 'flags': [0]},
+        'files': {'/synthetic/python': dict(row), '/synthetic/stdlib/control.py': dict(row),
+                  '/synthetic/libcontrol.so': dict(row)},
+        'stdlib': {'/synthetic/stdlib': ['control.py']}, 'dependencies': {},
+        'imports': {'sys': {'origin': 'built-in', 'locations': [], 'loader': 'synthetic', 'cached': None}},
+        'libraries': ['/synthetic/libcontrol.so']}

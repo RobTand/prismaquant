@@ -162,7 +162,7 @@ def test_unstatable_destination_refuses_before_admission(render_owner, monkeypat
 
     monkeypatch.setattr(Path, "lstat", lstat)
     monkeypatch.setattr(publication, "require_prewrite", lambda **kwargs: pytest.fail("unexpected admission"))
-    with pytest.raises(ValueError, match="cannot stat"):
+    with pytest.raises(ValueError, match="render destination fails origin containment"):
         publication.require_render_prewrite(plan)
 
 

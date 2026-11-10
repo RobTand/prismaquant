@@ -185,6 +185,7 @@ def test_plan_admits_reference_default_but_refuses_unknown_backend(tmp_path):
 
 
 @pytest.mark.parametrize('legacy_schema', [True, False])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoption(tmp_path, monkeypatch, legacy_schema):
     # This remains a certified refusal; dev mode records a backend seal.
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
@@ -228,6 +229,7 @@ def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoptio
     assert json.loads((tmp_path / 'run/results.json').read_text())['passed'] is False
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_the_gpu_pass_binds_the_digest_quantum_and_refuses_to_hash_its_source(tmp_path, monkeypatch):
     """PQ #1374: a prepare hashed the whole source under its GPU reservation.
     The pass now hands the identity build the plan's bound digest cache and a
@@ -295,6 +297,7 @@ def _campaign_runtime(monkeypatch, **changed):
     return qualification, actual
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path, monkeypatch):
     """#553: the campaign paid 5h51m of head phase for a refusal it could make first."""
     from prismaquant import tessera_joint_aura as bridge, gpu_guard
@@ -448,3 +451,9 @@ def test_dev_mode_reference_path_keeps_the_autograd_refusal(monkeypatch):
     operand = torch.ones(3, 4, requires_grad=True)
     with pytest.raises(RuntimeError, match='no autograd registration'):
         fused.product_sum(operand, operand)
+
+
+from staged_native_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

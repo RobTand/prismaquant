@@ -79,11 +79,19 @@ def _config(**extra):
             **extra}
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_legacy_walk_passes_the_plan_reuse_policy(legacy_walk):
     kwargs = legacy_walk(_config(historical_encoder_reuse=POLICY))
     assert kwargs["historical_encoder_reuse"] == POLICY
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_legacy_walk_without_a_policy_stays_strict(legacy_walk):
     kwargs = legacy_walk(_config())
     assert kwargs["historical_encoder_reuse"] is None
+
+
+from staged_native_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

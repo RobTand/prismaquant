@@ -190,7 +190,8 @@ def _argv(records_dir, output_root, receipt=None, extra=()):
     # These fixtures exercise unrelated dispatcher contracts without a GPU
     # measurement. Pilot admission itself uses the production defaults in
     # test_joint_dispatch_pilot.py; never invent a passing pilot here.
-    argv = ["--records", str(records_dir), "--output-root", str(output_root),
+    from stage_a_spool_spec import write_declaration
+    argv = ["--stage-a-produced-declaration", str(write_declaration(records_dir.parent)), "--records", str(records_dir), "--output-root", str(output_root),
             "--force-unverified-pilot"]
     if receipt is not None:
         argv += ["--adjoint-receipt", str(receipt)]
@@ -710,7 +711,7 @@ def test_two_stage_a_rows_whose_windows_exceed_a_box_are_not_both_placed(
     import subprocess
     argv = stage_a_argv(_adjoint_manifest(tmp_path, campaign), campaign)
     from prismaquant.tessera_campaign_rows import validate_row
-    with pytest.raises(ValueError, match="data_manifest: strict staging is unqualified without a bound staged_input"):
+    with pytest.raises(ValueError, match="GPU lane not qualified"):
         validate_row(argv)
 
 
@@ -1297,7 +1298,7 @@ def test_a_stage_b_row_retains_spill_and_cotangent_ceilings(tmp_path, campaign):
     variables = dict(item.split('=', 1) for item in _outer_env(argv))
     assert {key: int(variables[key]) for key in ceilings} == ceilings
     from prismaquant.tessera_campaign_rows import validate_row
-    with pytest.raises(ValueError, match="data_manifest: strict staging is unqualified without a bound staged_input"):
+    with pytest.raises(ValueError, match="GPU lane not qualified"):
         validate_row(argv)
 
 

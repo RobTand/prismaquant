@@ -285,7 +285,7 @@ def test_two_ladder_dispatches_with_different_probes_are_separate_trees(tmp_path
 
 
 def test_ladder_gpu_refuses_before_staging(tmp_path):
-    with pytest.raises(ValueError, match='gpus'):
+    with pytest.raises(ValueError, match='GPU lane not qualified'):
         dispatch_ladder.main(['--shards', '1', '--checkout', str(tmp_path), '--workspace', str(tmp_path / 'w')])
     assert not (tmp_path / 'w').exists()
 

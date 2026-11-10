@@ -98,6 +98,7 @@ def test_a_quantum_run_off_refuses_an_unstamped_slice(tmp_path, launcher):
     (None, {}),
     ("off", {BF16_REDUCTION_FIELD: False}),
 ])
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_matching_settings_reach_the_head(tmp_path, launcher, env, stamp):
     if env is not None:
         launcher.setenv(BF16_REDUCTION_ENV, env)
@@ -106,6 +107,7 @@ def test_matching_settings_reach_the_head(tmp_path, launcher, env, stamp):
         _launch(tmp_path, {"run_identity": stamp})
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_dev_mode_records_the_mismatch_and_goes_on(tmp_path, launcher, capsys):
     launcher.setenv(DEV_MODE_ENV, "1")
     _stop_at_the_head(launcher)
@@ -135,3 +137,9 @@ def test_a_malformed_stamp_refuses_in_either_mode(monkeypatch, identity):
 def test_a_slice_without_a_run_identity_refuses(adjoint_slice):
     with pytest.raises(QuantumIdentityRefused, match="carries no run identity"):
         require_slice_bf16_reduction(adjoint_slice, True, where="q")
+
+
+from staged_native_fixtures import (  # noqa: E402,F401
+    empty_native_staged_inputs, native_staged_state,
+)
+

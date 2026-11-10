@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-import dispatch_joint_quanta as dispatch
+from tools import dispatch_joint_quanta as dispatch
 from prismaquant import flux_jobs, tessera_campaign_rows
 
 SAVED = {"job_id": "f123", "record_dir": "/records/rows/00000", "launch_sha256": "a" * 64}

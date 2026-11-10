@@ -236,7 +236,8 @@ def test_the_dry_run_plan_declares_the_stage_a_image(tmp_path, joint_spec, capsy
     manifest = _joint_manifest(tmp_path, {"plan_sha256": "1" * 64,
                                           "prepared_sha256": "2" * 64,
                                           "read_manifest_sha256": "4" * 64})
-    code = joint.main(["--records", str(records),
+    from stage_a_spool_spec import write_declaration
+    code = joint.main(["--stage-a-produced-declaration", str(write_declaration(tmp_path)), "--records", str(records),
                        "--output-root", str(tmp_path / "out"),
                        "--adjoint-manifest", str(manifest),
                        "--dry-run"])

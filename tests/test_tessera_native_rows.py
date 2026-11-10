@@ -21,7 +21,7 @@ class NativeRowsTests(unittest.TestCase):
                 'timeout_s': 60, **extra}
 
     def test_unresolvable_instance_leaves_no_stage_state(self):
-        with tempfile.TemporaryDirectory(dir=os.environ['OUT']) as directory:
+        with tempfile.TemporaryDirectory(dir=os.environ.get('TEST_TMPDIR')) as directory:
             state = Path(directory) / 'state'
             with patch.object(jobs, '_source_identity', return_value={}), \
                     patch.object(jobs, '_client_environment', return_value={}), \
@@ -72,7 +72,7 @@ class NativeRowsTests(unittest.TestCase):
             rows.validate_row(self.row(cwd='/home/rob/prismaquant'))
 
     def test_application_environment_never_dropped(self):
-        with patch.object(jobs, '_source_identity', return_value={}):
+        with patch.object(jobs, '_source_identity', return_value={}), patch.object(jobs, '_client_environment', return_value={}):
             for env in ({'SCIENTIFIC_SETTING': 'a'}, {'PRISMABUILD_ACTION_KEY': 'x'},
                         {'API_TOKEN': 'x'}, {'OMP_NUM_THREADS': '4'}):
                 with self.subTest(env=env), self.assertRaisesRegex(ValueError, 'environment'):
@@ -149,7 +149,8 @@ class NativeRowsTests(unittest.TestCase):
                 'walltime_s': 60, 'placement': 'portable'}, 'afterok': [],
                 'profile': {'profile': jobs._PROFILE, 'uri': 'local:///fixture/run/local-0',
                             'broker_starttime': '123.5'}}
-            launch['native_argv'] = jobs._native_arguments(
+            with patch.object(jobs, '_client_environment', return_value={}):
+                launch['native_argv'] = jobs._native_arguments(
                 row['argv'], identity, jobs.FluxResources(1, 1, 0, 60), record, [],
                 jobs._environment(record, None), None)
             raw = jobs._json_bytes(launch)

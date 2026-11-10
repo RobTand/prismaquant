@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 import pytest
-import dispatch_stage_a_split as stage
-import dispatch_capture_chain as capture
-import dispatch_joint_quanta as joint
+from tools import dispatch_stage_a_split as stage
+from tools import dispatch_capture_chain as capture
+from tools import dispatch_joint_quanta as joint
 from prismaquant import flux_jobs as jobs, tessera_campaign_rows as rows
 
 

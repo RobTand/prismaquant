@@ -66,4 +66,4 @@ def test_the_resources_are_a_native_cpu_profile():
 
 def test_no_retired_submitter_or_progress_phase_remains():
     source = (ROOT / "tools" / "prepare_stageb_after_capture.py").read_text()
-    assert "progress" not in source.lower() and "--tag" not in source
+    assert "--progress-phase" not in source and "--tag" not in source

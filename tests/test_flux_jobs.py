@@ -52,7 +52,7 @@ class FluxJobsTests(unittest.TestCase):
                          b'{"a":"\xc6\x92","n":NaN}\n')
 
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(dir=os.environ['OUT'])
+        self.temporary = tempfile.TemporaryDirectory(dir=os.environ.get('TEST_TMPDIR'))
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.checkout = self.root / 'source'
