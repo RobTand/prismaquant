@@ -1,13 +1,13 @@
 """No Python module loads the retired PrismaBuild package, statically or dynamically.
 
-The AST half of the ban (``tests/test_prismabuild_ban.py`` holds the text half and the exclusion
-lists): the finding set over the live scope is empty and there is no allowlist.
+The AST half of the ban shares its source inventory and exclusions with the
+text scanner in ``tests/prismabuild_scan.py``. The finding set is empty.
 """
 from __future__ import annotations
 
 import ast
 
-from tests.test_prismabuild_ban import excluded, read_text, tracked
+from tests.prismabuild_scan import excluded, read_text, tracked
 
 
 def dynamic_loads(source: str) -> list[str]:

@@ -176,7 +176,7 @@ def main():
     original, dropped = load_original(args.original_manifest, campaign,
                                       {'path': args.plan, 'sha256': args.plan_sha256})
     manifest = recovery_manifest(original, capsule, bound)
-    from prismaquant.campaign_data_manifests import check_manifest_v2
+    from prismaquant.data_manifest_contract import check_manifest_v2
     check_manifest_v2(manifest)
     wire = gzip.compress((json.dumps(manifest, sort_keys=True, separators=(',', ':')) + '\n').encode(), mtime=0)
     digest = hashlib.sha256(wire).hexdigest()

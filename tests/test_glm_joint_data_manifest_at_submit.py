@@ -31,6 +31,7 @@ cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
 """
 
 from prismaquant.campaign_data_manifests import ReadsetRefused
+from prismaquant import data_manifest_contract
 from prismaquant.render_cache_paths import cache_weight_filename
 from prismaquant import tessera_campaign_table as campaign_table
 
@@ -1578,7 +1579,7 @@ def test_a_read_set_over_the_prismabuild_ceiling_is_refused_at_submit(
     fixture = _workspace(scratch)
     spec = scratch / "spec.joint.json"
     spec.write_text(json.dumps({"container": {"image": "x"}}))
-    monkeypatch.setattr(glm_data_manifests, "MAX_MANIFEST_BYTES", 128)
+    monkeypatch.setattr(data_manifest_contract, "MAX_MANIFEST_BYTES", 128)
 
     with pytest.raises(SystemExit) as refusal:
         dispatch.main([

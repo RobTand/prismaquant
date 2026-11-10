@@ -15,7 +15,7 @@ from typing import Mapping
 from prismaquant import tessera_campaign_rows as campaign_rows
 from tools.tessera_fleet.model_worker import atomic_json
 
-STATE = ".flux-state"
+from tools.tessera_fleet.stage_status import STATE, stage_state
 SOURCE = "source"
 
 
@@ -98,12 +98,6 @@ def run_stage(rows: list[dict], workspace: Path, stage: str, *,
     if len(table) != len(rows) or done != len(rows):
         raise ValueError(f'{stage}: {done} of {len(rows)} action(s) done; refusing downstream merge')
     return table
-
-
-def stage_state(workspace, stage):
-    if not stage or Path(stage).name != stage or stage in {'.', '..'}:
-        raise ValueError('stage must be one path component')
-    return Path(workspace) / STATE / stage
 
 
 def encoder_workspace_files(checkout: Path, wrapper: Path, wrapper_name: str,
