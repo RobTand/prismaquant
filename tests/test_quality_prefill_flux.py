@@ -275,6 +275,46 @@ def envelope_fixture(tmp_path, *, staged=None):
     return manifest, value, envelope
 
 
+@pytest.mark.parametrize('online', ['0', '1'])
+def test_phase_preflight_enforces_child_host_health_before_native_validation(tmp_path, monkeypatch, online):
+    manifest, phase, value, estimates, publish = admission_fixture(tmp_path)
+    for child, estimate in zip(value['children'], estimates['phases'][phase]['children']):
+        child['resources']['placement'] = 'host:dl380g10'
+        estimate['resources_sha256'] = scientific.canonical_sha256(child['resources'])
+    publish()
+    value['plan_context_sha256'] = prefill._plan_context_sha256(manifest)
+    roster_binding = prefill.write_phase_roster(value, tmp_path / 'roster.json')
+    manifest['execution']['phases'][phase]['task_roster'] = roster_binding
+    manifest = scientific.freeze_manifest(manifest)
+    binding = prefill._publish_document(manifest, tmp_path / 'manifest.json', 16 << 20)
+    checkout = tmp_path / 'source'
+    source = dict(checkout=str(checkout), commit='a' * 40, tree='b' * 40)
+    monkeypatch.setattr(prefill, '_prefill_source', lambda _: source)
+    monkeypatch.setattr(prefill, '_authenticate_graph', lambda *args, **kwargs: None)
+    monkeypatch.setenv('FLUX_URI', 'local:///fixture/run/local-0')
+    model = dict(version=1, execution=dict(R_lite=[dict(rank='0-1')],
+                                          nodelist=['dl380g10,sparky']))
+    def query(args, **kwargs):
+        if args[0] == 'getattr': text = '900.5\n'
+        elif args[0] == 'config': text = '{}\n'
+        elif args[0] == 'kvs': text = json.dumps(model)
+        elif args[0] == 'hostlist': text = 'dl380g10 sparky\n'
+        elif args[0] == 'resource': text = online + '\n'
+        elif args[0] == 'overlay': text = '0 coordinator: full\n1 worker: offline\n'
+        else: raise AssertionError('unexpected native query')
+        return prefill.flux_jobs.subprocess.CompletedProcess([], 0, text, '')
+    monkeypatch.setattr(prefill.flux_jobs, '_flux_run', query)
+    def native_validation(**kwargs):
+        raise RuntimeError('native validation reached after health admission')
+    monkeypatch.setattr(prefill.flux_jobs, 'validate_job', native_validation)
+    root = prefill.Path('/mnt/shared') / tmp_path.name / 'health-phase'
+    error, message = ((RuntimeError, 'native validation reached') if online == '0'
+                      else (ValueError, 'every eligible rank.*online'))
+    with pytest.raises(error, match=message):
+        prefill.submit_phase(binding, phase=phase, checkout=checkout, record_dir=root)
+    assert not root.exists()
+
+
 def test_task_envelope_binds_complete_child_and_sealed_plan(tmp_path):
     manifest, value, envelope = envelope_fixture(tmp_path)
     binding = prefill._publish_document(envelope, tmp_path / 'envelope.json', 1 << 20)

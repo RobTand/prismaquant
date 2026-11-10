@@ -426,7 +426,7 @@ def submit_phase(manifest_binding: dict, *, phase: str, checkout: Path,
     prepared = dict(root=root, manifest_binding=manifest_binding, manifest=manifest,
         roster_binding=roster_binding, roster=roster, envelopes=envelopes, submission=submission)
     _authenticate_graph(manifest_binding, phase, root, prepared=prepared)
-    flux_jobs._profile_identity()
+    flux_jobs._profile_identity(FluxResources(**roster['children'][0]['resources']))
     for child in roster['children']:
         measured = flux_jobs.validate_job(checkout=checkout, resources=FluxResources(**child['resources']),
                                           staged_input=child['staged_input'])
