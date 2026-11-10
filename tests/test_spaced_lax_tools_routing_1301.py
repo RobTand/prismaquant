@@ -145,15 +145,7 @@ def test_campaign_row_embeds_the_resolved_container_spec():
             "env": {"LABEL": "é"}, "container": {"image": "sha256:" + "a" * 64}}
     # The pre-refactor serializer bytes stay literal and independent of the
     # row builder. Native intent retains the image and omits retired phases.
-    expected = {
-        'argv': ['python3', '-m', 'tools.tessera_campaign_container', '--spec',
-                 '{"container": {"image": "sha256:' + 'a' * 64 +
-                 '"}, "env": {"LABEL": "\\u00e9"}}', '--',
-                 'python3', '-u', '-m', 'prismaquant.tessera_campaign', '--model', 'é'],
-        'cwd': '/work', 'demand': {'gpu': 1, 'cpu': 2, 'mem_gb': 16},
-        'env': {'LABEL': 'é'}, 'tags': ['gb10'], 'retry_safe': True,
-        'container_images': ['sha256:' + 'a' * 64], 'timeout_s': 30,
-    }
+    expected = json.loads((ROOT / "tests/fixtures/native_campaign_row_2320.json").read_text())
     assert campaign_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 

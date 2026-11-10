@@ -102732,6 +102732,8 @@ pq_py_test(
     path = "tests/test_profile_attribution_1942.py",
     library = ":test_profile_attribution_1942_lib",
     deps = [
+        "//:prismaquant/file_identity",
+        "//:prismaquant/io_spans",
         "//:tools/pq_profile_child",
         ":conftest",
     ],
@@ -102744,15 +102746,9 @@ pq_py_library(
         "test_profile_attribution_1942.py",
     ],
     data = [
-        "//:prismaquant/digests.py",
-        "//:prismaquant/file_identity.py",
-        "//:prismaquant/io_spans.py",
         "test_profile_attribution_1942.py",
     ],
     deps = [
-        "//:prismaquant/digests",
-        "//:prismaquant/file_identity",
-        "//:prismaquant/io_spans",
         "//:tools/__init__",
         "//:tools/pq_profile_artifact",
         "@pq_pip//pytest",
@@ -104488,13 +104484,20 @@ pq_py_library(
         "test_profile_observer_bootstrap_1942.py",
     ],
     data = [
+        "//:prismaquant/digests.py",
+        "//:prismaquant/file_identity.py",
         "//:prismaquant/io_spans.py",
         "//:tools/pq_row_profile_observer.py",
         "test_profile_observer_bootstrap_1942.py",
     ],
     deps = [
+        "//:prismaquant/digests",
+        "//:prismaquant/file_identity",
         "//:prismaquant/io_spans",
+        "//:tools/__init__",
+        "//:tools/pq_profile_artifact",
         "//:tools/pq_row_profile_observer",
+        "@pq_pip//pytest",
     ],
 )
 
@@ -114259,7 +114262,6 @@ pq_py_test(
         "//:tools/stage_b_preparation_submission",
         "//:tools/stagea_forward_recovery",
         "//:tools/staged_exact_read_bench",
-        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/status",
         ":conftest",
     ],
@@ -114292,7 +114294,6 @@ pq_py_library(
         "//:tools/dispatch_joint_quanta",
         "//:tools/dispatch_tessera_campaign",
         "//:tools/render_window_bench",
-        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/model_worker",
         ":golden_table",
         "@pq_pip//pytest",
