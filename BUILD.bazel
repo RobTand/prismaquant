@@ -13376,7 +13376,11 @@ pq_py_library(
         "tools/pq_profile_artifact.py",
     ],
     data = [
+        "prismaquant/digests.py",
         "tools/pq_profile_artifact.py",
+    ],
+    deps = [
+        ":prismaquant/digests",
     ],
 )
 
@@ -13397,6 +13401,7 @@ pq_py_library(
         "tools/pq_row_profile_observer.py",
     ],
     data = [
+        "prismaquant/io_spans.py",
         "tools/pq_row_profile_observer.py",
     ],
     deps = [
