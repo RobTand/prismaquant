@@ -102,7 +102,7 @@ def launch(binding, command):
             raise ValueError('staged cache helper sha256 differs from reviewed pin')
         members = Path(os.environ['TMPDIR']) / 'staged-members.json'
         publish_staged_json(members, manifest.members())
-        os.execv('/usr/bin/python3', ['/usr/bin/python3', '-s', '-c', helper.decode('utf-8'),
+        os.execv('/usr/bin/python3', ['/usr/bin/python3', '-I', '-c', helper.decode('utf-8'),
             '--root', manifest.lifetime['root'], 'run-set', '--members', str(members), '--', *command])
     os.execvpe(command[0], command, os.environ)
 

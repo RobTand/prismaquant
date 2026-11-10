@@ -3,12 +3,12 @@
 <!-- flux-current-start -->
 ## Current execution: stock Flux
 
-As of: 2026-11-10, P-4 C-fix, based on conform head `c764cca45`.
+As of: 2026-11-10, P-4 D-fix. Sources below describe the current implementation.
 Source: `prismaquant/flux_jobs.py`, `prismaquant/staged_launch.py`,
 `prismaquant/tessera_campaign_rows.py`, `tools/tessera_campaign_container.py`.
 
 `flux_jobs.submit_job` admits a clean, detached shared checkout. The coordinator's
-`FLUX_URI` takes precedence. When unset, the executor invokes
+`FLUX_URI` takes precedence when nonempty. When unset or empty, the executor invokes
 `/mnt/shared/flux-migration/flux-uri.sh` with only `PATH=/usr/bin:/bin` and a
 five-second timeout, accepting one `local://` URI line. Failure refuses submission,
 including inside a job. Client paths are read lazily from the fleet-owned
@@ -24,16 +24,12 @@ The limits in `CAPS.md` are consumer rules, not stock Flux enforcement.
 
 Payloads use `PATH=/usr/bin:/bin`, so Torch Inductor selects the system compiler
 with its multiarch includes. Coordinator CLI invocations retain the Flux
-install and dependency tool directories on PATH. Both environments retain
-the Flux library search path for native client calls. No coordinator
+install and dependency tool directories on PATH and the Flux library search
+path for native client calls. Payloads carry no `LD_LIBRARY_PATH`. No coordinator
 `FLUX_SCRATCH` is exported. The wrapper uses an instance-provided job value when
 present, otherwise the existing host table: XFS
 `/home/rob/tl-gates/flux-validation` on dl380g10, ext4 `/tmp/flux-vanilla` on
-either Spark. The observed instance config has no `FLUX_SCRATCH` setting, and
-P-4's live probe on sparklina confirmed that the instance supplied no value.
-Its `scratch.json` records `root_source=host-table`; `cleanup.json` confirms
-removal. Evidence: `/mnt/shared/flux-migration/pq-tessera/jobs/p4-conform-01-probe/`
-and `/mnt/shared/flux-migration/pq-tessera/evidence/p4-conform/scratch-config-observation.json`.
+either Spark.
 Each selected root must pass the host filesystem qualification. Scratch lives under the exact
 `$FLUX_SCRATCH/$FLUX_JOB_ID`, with the payload ID normalized to its equivalent
 ASCII f58 spelling for scientific path contracts. Scratch is removed on exit.
@@ -68,7 +64,8 @@ remains held for P-7. `native_results` owns authenticated result selection;
 the retired execution service.
 
 `staged_launch` verifies the external cache helper against a source-pinned SHA256
-before executing those verified bytes. Immutable staged coverage checks run once. They have no
+before executing those verified bytes with Python isolated mode, excluding cwd
+imports. Immutable staged coverage checks run once. They have no
 landing wait, poll deadline or progress-grace coupling. One resolver entry must
 cover the requested span; adjacent objects do not form a synthetic entry.
 The row builders omit retired progress-phase and container-image admission

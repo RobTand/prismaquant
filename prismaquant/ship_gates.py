@@ -54,8 +54,10 @@ def _validate_destinations(destinations: list[Path], protected: set[Path], artif
 
 
 def _submits_nested_job(argv: list[str]) -> bool:
-    """Inspect command positions, shell strings and Python source without executing."""
-    # Shell punctuation starts a new command; ordinary arguments are not commands.
+    """Refuse Flux argv words anywhere, plus shell and Python submit forms."""
+    if any(Path(word).name in {"flux", "flux_jobs.py"} for word in argv):
+        return True
+    # Split shell command segments before inspecting embedded Python or shell source.
     for index, word in enumerate(argv):
         if word and all(char in ";&|()" for char in word):
             if _submits_nested_job(argv[:index]) or _submits_nested_job(argv[index + 1:]):
@@ -70,13 +72,16 @@ def _submits_nested_job(argv: list[str]) -> bool:
         return True
     if re.fullmatch(r"python(?:[0-9]+(?:\.[0-9]+)*)?", executable):
         for index, word in enumerate(argv[1:], 1):
-            if word == "-m":
-                return index + 1 < len(argv) and argv[index + 1] == "prismaquant.flux_jobs"
-            if word.startswith("-m"):
-                return word[2:] == "prismaquant.flux_jobs"
-            if word == "-c" and index + 1 < len(argv):
+            if index > 1 and argv[index - 1] in {"-W", "-X"}:
+                continue
+            option = re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]*(m|c)(.*)", word)
+            if option and option[1] == "m":
+                module = option[2] or (argv[index + 1] if index + 1 < len(argv) else "")
+                return module == "prismaquant.flux_jobs"
+            if option and option[1] == "c" and (option[2] or index + 1 < len(argv)):
+                source = option[2] or argv[index + 1]
                 try:
-                    tree = ast.parse(argv[index + 1])
+                    tree = ast.parse(source)
                 except SyntaxError as exc:
                     raise ValueError("invalid Python stage command") from exc
                 for node in ast.walk(tree):
@@ -118,7 +123,7 @@ def _submits_nested_job(argv: list[str]) -> bool:
                 continue
             if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", word) and index + 1 < len(argv):
                 try:
-                    lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=True)
+                    lexer = shlex.shlex(argv[index + 1], posix=True, punctuation_chars=";&|()`{}")
                     lexer.whitespace_split = True
                     return _submits_nested_job(list(lexer))
                 except ValueError as exc:

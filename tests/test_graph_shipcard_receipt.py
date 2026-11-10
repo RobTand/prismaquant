@@ -244,3 +244,21 @@ def test_equality_linkage_accepts_native_and_recorded_producers(tmp_path, bounda
     else:
         assert problems == []
         assert len(boundary_verifier) == 1
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_equality_linkage_both_producer_fields_uses_job_id(tmp_path, boundary_verifier, mismatch):
+    from tests.graph_receipt_fixtures import replace_receipt
+    model, card, record, receipt = graph_card(tmp_path)
+    arm = receipt["arms"][0]
+    recorded_id = arm.pop("pb_action")
+    arm["pb_action"] = recorded_id if mismatch else "different-recorded-id"
+    arm["job_id"] = "different-native-id" if mismatch else recorded_id
+    replace_receipt(record, receipt)
+    problems = verify(card, model_dir=model, required=["native_export.graph"])
+    if mismatch:
+        assert any("equality arm/action linkage" in problem for problem in problems)
+        assert boundary_verifier == []
+    else:
+        assert problems == []
+        assert len(boundary_verifier) == 1

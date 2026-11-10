@@ -59,10 +59,6 @@ def test_stage_commands_refuse_nested_submission_forms(argv):
 @pytest.mark.parametrize("argv", [
     ["python3", "-m", "prismaquant.ship_gates"], ["/bin/true"],
     ["python3", "-c", "print('flux')"],
-    ["bash", "--rcfile", "flux", "-c", "true"],
-    ["bash", "--noprofile", "-c", "echo flux"],
-    ["bash", "-c", "echo flux"],
-    ["echo", "flux"],
     ["python3", "-m", "other_module", "-mprismaquant.flux_jobs"],
     ["bash", "-c", "echo flux-results.json"], ["python3", "flux_report.py"],
 ])
@@ -120,7 +116,7 @@ def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
     class Executed(Exception):
         pass
     def execute(path, argv):
-        assert argv[:3] == ["/usr/bin/python3", "-s", "-c"]
+        assert argv[:3] == ["/usr/bin/python3", "-I", "-c"]
         assert argv[3].encode() == raw
         raise Executed
     monkeypatch.setattr(staged_launch.os, "execv", execute)
@@ -128,3 +124,38 @@ def test_host_local_launch_executes_the_verified_bytes(tmp_path, monkeypatch):
                "read_contract_path": "contract", "allowed_tiers": "ssd"}
     with pytest.raises(Executed):
         staged_launch.launch(binding, ["/bin/true"])
+
+
+@pytest.mark.parametrize("argv", [
+    ["env", "-i", "flux", "submit"],
+    ["timeout", "60", "flux", "submit"],
+    ["nohup", "flux", "submit"], ["nice", "-n", "5", "flux", "submit"],
+    ["time", "flux", "submit"], ["stdbuf", "-oL", "flux", "submit"],
+    ["setsid", "flux", "submit"], ["xargs", "flux", "submit"],
+    ["wrapper", "/custom/flux_jobs.py"],
+    ["sh", "-c", "if true; then flux submit; fi"],
+    ["sh", "-c", "for x in a; do flux submit; done"],
+    ["sh", "-c", "if false; then true; else flux submit; fi"],
+    ["sh", "-c", "! flux submit"], ["sh", "-c", "{ flux submit; }"],
+    ["sh", "-c", "echo `flux submit`"],
+    ["python3", "-Ic", "import prismaquant.flux_jobs"],
+    ["python3", "-Im", "prismaquant.flux_jobs"],
+    ["python3", "-X", "dev", "-m", "prismaquant.flux_jobs"],
+    ["python3", "-W", "error", "-m", "prismaquant.flux_jobs"],
+    ["echo", "flux"], ["bash", "--rcfile", "flux", "-c", "true"],
+])
+def test_fail_closed_tripwire_keeps_original_and_cluster_forms(argv):
+    assert ship_gates._submits_nested_job(argv)
+
+
+def test_pinned_cache_helper_runs_without_cwd_imports(tmp_path):
+    import subprocess
+    from pathlib import Path
+    raw = Path(staged_launch.CACHE_HELPER).read_bytes()
+    assert staged_launch.bytes_sha256hex(raw) == staged_launch.CACHE_HELPER_SHA256
+    (tmp_path / 'argparse.py').write_text("raise RuntimeError('cwd import')\n")
+    result = subprocess.run(['/usr/bin/python3', '-I', '-c', raw.decode(), '--help'],
+                            cwd=tmp_path, env={'PATH': '/usr/bin:/bin'},
+                            capture_output=True, text=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    assert 'run-set' in result.stdout
