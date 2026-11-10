@@ -15,8 +15,24 @@ from pathlib import Path
 import pytest
 
 from test_dispatch_joint_quanta import campaign, records_dir
-from test_joint_dispatch_pilot import _argv, _published_pilots, _ready
+from test_joint_dispatch_pilot import _argv, _published_pilots, _ready, _pilot_spec
 from tools import dispatch_joint_quanta as dispatch
+
+@pytest.fixture(autouse=True)
+def _refuse_fleet_spec_reads(monkeypatch, _pilot_spec):
+    """Keep the production reader, using the existing portable pilot spec.
+
+    A fleet mount on the verification worker must not conceal a missing
+    fixture. Guard reads as well as replacing the dispatcher's spec root.
+    """
+    read_text = Path.read_text
+
+    def portable_read(path, *args, **kwargs):
+        assert not str(path).startswith('/mnt/shared/'), 'pilot read escaped its hermetic fixture'
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', portable_read)
+
 
 class _ProductionPilotGateway(dispatch.FakeGateway):
     """Fixture submit/terminal behaviour with the production pilot reader."""

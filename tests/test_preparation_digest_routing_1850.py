@@ -248,6 +248,12 @@ def test_preparation_commit_emits_the_complete_native_descriptor(tmp_path, monke
         return publish(**kwargs)
 
     monkeypatch.setattr(po, 'publish', capture)
+    if not raw:
+        from prismaquant.stage_a_produced_output import BoundaryProducedBindingError
+        with pytest.raises(BoundaryProducedBindingError, match='^finite integer limit required$'):
+            publication.commit('records', [(path, raw)], writer_identities={path: identity})
+        assert seen == [] and publication.batches == []
+        return
     out = publication.commit('records', [(path, raw)], writer_identities={path: identity})
     assert out['ok'] is True
     # Native authority belongs to the batch producer, not per-descriptor
