@@ -189,3 +189,45 @@ def test_a_write_only_owner_names_its_lifetime_and_never_reads_back(tmp_path, mo
                 owner.write(torch.zeros(4), batch_index=0, boundary_index=3, probe_index=0)
             assert not list(owner.directory.rglob('*.pt*'))
             assert owner.produced_origin_batches() == []
+
+
+@pytest.mark.parametrize('native', [False, True])
+@pytest.mark.parametrize('maximum', [1024, 2048])
+@pytest.mark.parametrize('write_only', [False, True])
+def test_shared_stage_a_binding_preserves_handoff_policy(monkeypatch, native, maximum, write_only):
+    from types import SimpleNamespace
+    from prismaquant import joint_quantum_handoff as handoff
+    from prismaquant import joint_cost_stage_a as stage_a
+    from prismaquant.joint_adjoint_checkpoints import AdjointIdentityRefused
+
+    if native:
+        monkeypatch.setenv('FLUX_JOB_ID', '123')
+    else:
+        monkeypatch.delenv('FLUX_JOB_ID', raising=False)
+    calls = []
+    publication = SimpleNamespace(write_only=write_only,
+        durable_maxima=lambda: {'payload_max_bytes': maximum})
+
+    def bind():
+        calls.append(True)
+        return publication
+
+    monkeypatch.setattr(BoundaryProducedPublication, 'bind_from_admitted_owner', bind)
+    def normal():
+        return stage_a.bind_stage_a_produced_output(artifact_max_bytes=1024)
+    def transfer():
+        return handoff.bind_handoff_publication(boundary_storage={'max_artifact_bytes': 1024})
+    for invoke in (normal, transfer):
+        if not native:
+            assert invoke() is None
+        elif maximum != 1024:
+            with pytest.raises(AdjointIdentityRefused) as refused:
+                invoke()
+            assert str(refused.value) == 'launch-bound artifact maximum differs from effective Stage A budget'
+        elif invoke is transfer and not write_only:
+            with pytest.raises(handoff.QuantumHandoffRefused) as refused:
+                invoke()
+            assert str(refused.value) == 'handoff requires a write-only declaration'
+        else:
+            assert invoke() is publication
+    assert len(calls) == (2 if native else 0)

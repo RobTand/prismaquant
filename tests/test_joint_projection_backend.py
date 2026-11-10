@@ -300,6 +300,8 @@ def _campaign_runtime(monkeypatch, **changed):
 @pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path, monkeypatch):
     """#553: the campaign paid 5h51m of head phase for a refusal it could make first."""
+    fixture_files = {path.relative_to(tmp_path).as_posix()
+                     for path in tmp_path.rglob('*') if path.is_file()}
     from prismaquant import tessera_joint_aura as bridge, gpu_guard
     qualification, _ = _campaign_runtime(monkeypatch, compiler={
         'nvcc_version': qualification_nvcc(),
@@ -313,8 +315,8 @@ def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path,
     config['execution']['projection_backend'] = selector()
     with pytest.raises(RuntimeError, match='unqualified runtime identity: compiler'):
         bridge.execute('prepare', config, plan_sha256='d' * 64)
-    written = sorted(path.relative_to(tmp_path).as_posix()
-                     for path in (tmp_path / 'prepare').rglob('*') if path.is_file())
+    written = sorted({path.relative_to(tmp_path).as_posix()
+                      for path in tmp_path.rglob('*') if path.is_file()} - fixture_files)
     assert not (tmp_path / 'renders').exists()
     assert written == ['prepare/profile.pstats', 'prepare/profile.txt', 'prepare/results.json'], written
     assert json.loads((tmp_path / 'prepare/results.json').read_text())['passed'] is False
