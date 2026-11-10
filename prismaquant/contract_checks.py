@@ -55,6 +55,7 @@ def strict_json_loads(
 
 
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}\Z")
+# Bazel canonical repository names use +, including rules_python++python+pq.
 _PATH_COMPONENT = re.compile(r"[A-Za-z0-9._+-]+\Z")
 
 

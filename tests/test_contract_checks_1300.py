@@ -271,3 +271,22 @@ def test_moe_checkpoint_exact_keys_refuse_as_before(value):
     assert prismasnap_moe_checkpoint._require_exact_keys is prismasnap_checkpoint._require_exact_keys
     GOLDEN.call(lambda: prismasnap_moe_checkpoint._require_exact_keys(
         value, _KEYS, where="PrismaSnap MoE plan"))
+
+
+def test_runfiles_path_golden_keeps_plus_component():
+    from prismaquant.contract_checks import Contract
+    path = '/execroot/_main/bazel-out/k8-fastbuild/bin/pkg.runfiles/rules_python++python+pq/site.py'
+    assert Contract().absolute_posix_path(path, where='source') == path
+
+
+@pytest.mark.parametrize('path', [
+    '/runfiles/rules_python++python+pq/../source.py',
+    '/runfiles/./source.py', '/runfiles//source.py', '/runfiles/pkg/',
+    '/runfiles/pkg%2fsource.py', '/runfiles/pkg:source.py',
+    '/runfiles/pkg source.py', '/runfiles/pkg\\source.py',
+])
+def test_runfiles_path_golden_still_refuses_odd_components(path):
+    from prismaquant.contract_checks import Contract
+    with pytest.raises(ValueError) as refused:
+        Contract().absolute_posix_path(path, where='source')
+    assert str(refused.value) == 'source must be normalized and traversal-free'
