@@ -627,8 +627,9 @@ def campaign_row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | N
     the CPU count and the container; the default class supplies exactly the
     spec-level values, so a row built for it is byte-identical to the row this
     function returned before classes existed.  Nothing about the class is
-    written into the row. The container specification stays in argv. Native
-    scheduler metadata contains no progress watchdog or image admission fields.
+    written into the row. The container specification stays in argv, and the
+    row retains its image admission intent. Native execution still refuses
+    this unqualified GPU row before submission.
     """
     from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
