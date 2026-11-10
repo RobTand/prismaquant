@@ -6,7 +6,9 @@ import json
 import pytest
 
 import g3_residency as R
-from staged_native_fixtures import bind, publish_inputs
+from staged_native_fixtures import bind, native_staged_state, publish_inputs  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("native_staged_state")
 
 
 def staged_plan(tmp_path, monkeypatch, *, drop_entry=False):
