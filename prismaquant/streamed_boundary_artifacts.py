@@ -1546,6 +1546,7 @@ class StreamedBoundaryArtifacts:
                 checkpoint_ceiling_bytes=envelope_bytes - file_plan['temp_overlap_bytes'],
                 temp_ceiling_bytes=file_plan['temp_overlap_bytes'],
                 paths=[p for filename in paths for p in (filename, filename + '.tmp')])
+        from .file_identity import WriterIdentities
         self._next_checkpoint_reservation += 1
         self._checkpoint_reservations[reservation] = {
             "envelope_bytes": envelope_bytes, "files": files,
@@ -1555,7 +1556,7 @@ class StreamedBoundaryArtifacts:
             "receipt_digest": None,
             "produced_batch": produced_batch,
             "directory_identity": None, "retained_files": None,
-            "writer_identities": {}, "writer_directories": {},
+            "writer_identities": WriterIdentities(), "writer_directories": {},
         }
         self._checkpoint_active = reservation
         self.telemetry["checkpoint_reservations"] += 1
