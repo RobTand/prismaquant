@@ -22,7 +22,8 @@ def mapped_library(tmp_path, monkeypatch):
 
     def configure(*, stat_device=31, stat_inode=4242, maps_device='00:1e',
                   mount_device='0:30', filesystem='btrfs', deleted=False,
-                  fdinfo='mnt_id:\t10\n', mountinfo=Ellipsis, extra_mounts=''):
+                  fdinfo='mnt_id:\t10\n', mountinfo=Ellipsis, extra_mounts='',
+                  mapped_stat=PermissionError()):
         maps = (f'1000-2000 r-xp 00000000 {maps_device} 4242 {library}'
                 + (' (deleted)' if deleted else '') + '\n')
         if mountinfo is Ellipsis:
@@ -30,7 +31,8 @@ def mapped_library(tmp_path, monkeypatch):
                          + extra_mounts)
         info = SimpleNamespace(st_dev=stat_device, st_ino=stat_inode,
                                st_size=18, st_mtime_ns=100, st_ctime_ns=200)
-        state = SimpleNamespace(library=library, opened=[], path_info=info, on_fdinfo=None,
+        state = SimpleNamespace(library=library, opened=[], path_info=info, fd_info=info,
+                                mapped_stat=mapped_stat, mapped_addresses=[], on_fdinfo=None,
                                 proc={'maps': maps, 'mountinfo': mountinfo, 'fdinfo': fdinfo})
 
         def proc_open(path, mode):
@@ -49,10 +51,18 @@ def mapped_library(tmp_path, monkeypatch):
             state.opened.append(descriptor)
             return descriptor
 
+        def stat(path, **kwargs):
+            if str(path).startswith('/proc/self/map_files/'):
+                state.mapped_addresses.append(str(path).rsplit('/', 1)[1])
+                if isinstance(state.mapped_stat, Exception):
+                    raise state.mapped_stat
+                return state.mapped_stat
+            return state.path_info
+
         monkeypatch.setattr(nr, 'open', proc_open, raising=False)
         monkeypatch.setattr(nr, 'open_regular', acquire)
-        monkeypatch.setattr(nr, 'os', SimpleNamespace(fstat=lambda fd: info,
-            stat=lambda path, **kwargs: state.path_info, close=os.close))
+        monkeypatch.setattr(nr, 'os', SimpleNamespace(fstat=lambda fd: state.fd_info,
+            stat=stat, close=os.close))
         return state
 
     return configure
@@ -71,6 +81,63 @@ def test_mapped_library_identity_uses_fd_mount_device_for_every_filesystem(mappe
 def test_mapped_library_compares_hex_maps_device_with_decimal_mount_device(mapped_library):
     state = mapped_library(maps_device='08:1f', mount_device='8:31')
     assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+
+
+@pytest.mark.parametrize('mapped_device, mapped_inode, stat_inode, accepted', [
+    (31, 4242, 4242, True),
+    (32, 4242, 4242, False),  # Same inode on another btrfs subvolume.
+    (31, 4243, 4242, False),
+    (31, 4243, 4243, False),  # Even matching stats must agree with maps' inode.
+])
+def test_mapped_library_prefers_exact_map_files_identity(
+        mapped_library, mapped_device, mapped_inode, stat_inode, accepted):
+    state = mapped_library(stat_inode=stat_inode, fdinfo=None, mountinfo=None,
+        mapped_stat=SimpleNamespace(st_dev=mapped_device, st_ino=mapped_inode))
+    if accepted:
+        assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+    else:
+        with pytest.raises(ValueError, match='mapped library replaced'):
+            nr._runtime_libraries()
+    assert state.mapped_addresses == ['1000-2000']
+    with pytest.raises(OSError):
+        os.fstat(state.opened[0])
+
+
+@pytest.mark.parametrize('error', [PermissionError(), FileNotFoundError()])
+def test_mapped_library_unavailable_map_files_falls_back_to_fd_mount(mapped_library, error):
+    state = mapped_library(mapped_stat=error)
+    assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+    assert state.mapped_addresses == ['1000-2000']
+
+
+def test_mapped_library_other_map_files_io_errors_do_not_fall_back(mapped_library):
+    state = mapped_library(mapped_stat=OSError('mapped file IO failure'))
+    with pytest.raises(OSError, match='mapped file IO failure'):
+        nr._runtime_libraries()
+    with pytest.raises(OSError):
+        os.fstat(state.opened[0])
+
+
+@pytest.mark.parametrize('row', [
+    '10 1 0:30 /@ /mount rw shared:1 master:2 - btrfs /dev/data rw\n',
+    r'10 1 0:30 /@ /a\040b rw - btrfs /dev/data rw' + '\n',
+])
+def test_mapped_library_mountinfo_optional_fields_and_escaped_mountpoint(mapped_library, row):
+    state = mapped_library(mountinfo=row)
+    assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+
+
+def test_mapped_library_unrelated_non_utf8_mount_does_not_refuse(mapped_library):
+    state = mapped_library()
+    state.proc['mountinfo'] = state.proc['mountinfo'].encode() + b'20 1 0:32 / /odd-\xff rw - ext4 /dev/other rw\n'
+    assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+
+
+def test_mapped_library_maps_still_requires_utf8(mapped_library):
+    state = mapped_library()
+    state.proc['maps'] = state.proc['maps'].encode() + b'\xff\n'
+    with pytest.raises(UnicodeDecodeError):
+        nr._runtime_libraries()
 
 
 @pytest.mark.parametrize('change', [
@@ -119,7 +186,7 @@ def test_mapped_library_selects_held_mount_id_among_same_path_mounts(mapped_libr
     assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
 
 
-def test_mapped_library_different_path_target_cannot_borrow_another_mount_device(mapped_library, tmp_path):
+def test_mapped_library_redirected_target_with_different_mount_device_is_refused(mapped_library, tmp_path):
     state = mapped_library(fdinfo='mnt_id: 20\n',
         extra_mounts='20 1 0:32 / /other rw - btrfs /dev/other rw\n')
     target = tmp_path / 'target.so'
@@ -146,6 +213,69 @@ def test_mapped_library_path_replacement_while_descriptor_is_held_is_refused(map
     assert len(state.opened) == 1
     with pytest.raises(OSError):
         os.fstat(state.opened[0])
+
+
+@pytest.mark.parametrize('exact_mapping', [True, False])
+def test_mapped_library_real_rename_over_is_refused(tmp_path, monkeypatch, exact_mapping):
+    library = tmp_path / 'library.so'
+    replacement = tmp_path / 'replacement.so'
+    library.write_bytes(b'original bytes')
+    replacement.write_bytes(b'replacement bytes')
+    known = library.stat()
+    assert replacement.stat().st_ino != known.st_ino
+    device = (os.major(known.st_dev), os.minor(known.st_dev))
+    maps = [f'1000-2000 r-xp 0 {device[0]:02x}:{device[1]:02x} {known.st_ino} {library}']
+    monkeypatch.setattr(nr, '_runtime_proc_lines', lambda path: maps)
+    opened = []
+    regular = nr.open_regular
+
+    def acquire(path):
+        fd = regular(path)
+        opened.append(fd)
+        replacement.replace(library)
+        return fd
+
+    monkeypatch.setattr(nr, 'open_regular', acquire)
+    monkeypatch.setattr(nr, '_runtime_mapped_stat', lambda address: known if exact_mapping else None)
+    monkeypatch.setattr(nr, '_runtime_mapped_device', lambda fd: device)
+    with pytest.raises(ValueError, match='mapped library replaced'):
+        nr._runtime_libraries()
+    with pytest.raises(OSError):
+        os.fstat(opened[0])
+
+
+@pytest.mark.parametrize('change_signature', [False, True])
+def test_mapped_library_each_range_is_checked_and_prior_signature_cannot_be_overwritten(
+        mapped_library, monkeypatch, change_signature):
+    state = mapped_library(mapped_stat=SimpleNamespace(st_dev=31, st_ino=4242))
+    state.proc['maps'] += state.proc['maps'].replace('1000-2000', '3000-4000')
+    acquire = nr.open_regular
+
+    def change_on_second_range(path):
+        fd = acquire(path)
+        if change_signature and len(state.opened) == 2:
+            state.fd_info = state.path_info = SimpleNamespace(st_dev=31, st_ino=4242,
+                st_size=19, st_mtime_ns=100, st_ctime_ns=200)
+        return fd
+
+    monkeypatch.setattr(nr, 'open_regular', change_on_second_range)
+    if change_signature:
+        with pytest.raises(ValueError, match='mapped library replaced'):
+            nr._runtime_libraries()
+    else:
+        assert nr._runtime_libraries() == {str(state.library): (31, 4242, 18, 100, 200)}
+    assert state.mapped_addresses == ['1000-2000', '3000-4000']
+    for fd in state.opened:
+        with pytest.raises(OSError):
+            os.fstat(fd)
+
+
+def test_mapped_library_nonregular_owner_has_library_error_context(mapped_library):
+    state = mapped_library()
+    state.library.unlink()
+    state.library.mkdir()
+    with pytest.raises(ValueError, match=f'native runtime mapped library must be a regular file: {state.library}'):
+        nr._runtime_libraries()
 
 
 @pytest.mark.parametrize('kind', ['maps', 'fdinfo', 'mountinfo'])

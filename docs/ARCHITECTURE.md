@@ -54,17 +54,23 @@ Stage preflight resolves the same instance and checks its health before creating
 state or manifests. An empty live configuration is hashed as evidence and is
 allowed; missing broker identity and offline ranks still refuse.
 
-As of: 2026-11-10, descriptor mount identity for mapped files, issue #3368.
+As of: 2026-11-10, mapped-file identity after review G, issue #3368.
 Source: `prismaquant/native_results.py`.
 Runtime v5 opens each resolved mapped library through the shared regular-file
-reader and retains that descriptor while checking identity. Its fdinfo
-`mnt_id` selects exactly one mountinfo record; that record's device and the
-descriptor's inode must match maps. The path's final stat signature must
-still equal the descriptor's signature. Stat devices remain in the file
-signatures but never substitute for the mapped mount device. This handles
-btrfs subvolume devices without filesystem special cases or path-prefix
-mount selection. Missing, malformed or ambiguous mount provenance refuses,
-as do deleted mappings, different devices/inodes and changed path targets.
+reader and retains that descriptor while checking identity. It first stats
+`/proc/self/map_files/<start>-<end>`, the kernel's link to each actual mapped
+file, and requires its stat device and inode to equal the descriptor's.
+This distinguishes btrfs subvolumes even when their inode numbers repeat.
+If map_files is missing or permission-restricted, the descriptor's fdinfo
+`mnt_id` instead selects exactly one mountinfo record; that record's device
+must match maps. This fallback cannot detect same-inode substitution across
+btrfs subvolumes sharing the mapped device. Other map_files IO errors refuse.
+Both paths require the descriptor's inode to match maps and the path's final
+stat signature to equal the descriptor's. Repeated paths must retain their
+first signature, and every mapped range is checked. No filesystem special
+cases or path-prefix mount selection are used. Missing, malformed or ambiguous
+fallback mount provenance refuses, as do deleted mappings and changed path
+targets. Mountinfo permits non-UTF-8 path bytes; maps remains strict UTF-8.
 This corrects the mapped-device refusal recorded in the November 8 runtime
 notes below. Scientific, format, serving and scratch-filesystem gates are unchanged.
 
@@ -599,7 +605,8 @@ with finite metadata/file/aggregate byte ceilings and a RECORD entry bound.
 Name/version come from those fenced bytes, not eager distribution properties.
 The final observation repeats the same bounded path and checks descriptor/path
 identity. FIFO, symlink, oversized metadata and replacement refuse. Runtime v5,
-content/source/scientific gates and the production Btrfs refusal are preserved.
+content/source/scientific gates are preserved. The Btrfs mapped-device refusal
+retained at that revision is superseded by the November 10 #3368 fix above.
 
 As of: 2026-11-08, scientific native-consumer coverage under parent review.
 Source: `prismaquant/source_generation.py` and its reader/admission tests,
@@ -609,8 +616,9 @@ config, every granted-resource axis and every actual staged delivery. CPU
 fixtures retain exact node/role/artifact binding refusals and cannot issue
 full64 or independent-root qualification. The parent native proof at `983b08719`
 feeds actual verified native bytes into these artifact consumers. Runtime v5
-and the scientific fixtures remain subject to independent review; the current
-Btrfs interpreter is unqualified by its mapped-device fence.
+and the scientific fixtures remain subject to independent review. That revision's
+Btrfs interpreter refusal is superseded by the November 10 #3368 identity fix;
+this does not confer scientific or serving qualification.
 
 As of: 2026-11-08, current execution-scope authentication.
 Source: `prismaquant/flux_jobs.py`, based on `cabd4b20e4f8a2c34dab64c77caabb21e440cb79`.
@@ -634,8 +642,9 @@ libpython/external libraries. Other loaded implementations have individually
 measured file owners and an exact observed roster. New imports/mappings change
 identity or refuse; this does not claim a closure for arbitrary future code.
 Existing loaded bytecode caches are separately measured. Custom loaders and
-unverifiable mapping owners, including the current x86 Btrfs device-alias case,
-refuse, as do executable anonymous stacks and editable/path-injection owners.
+unverifiable mapping owners refuse, as do executable anonymous stacks and
+editable/path-injection owners. The x86 Btrfs device-alias refusal recorded at
+that revision is superseded by the November 10 #3368 identity fix above.
 The positive native CPU proof uses a scoped static fixture interpreter with
 its GNU_STACK executable permission removed and the exact binary digest recorded.
 Original-source declarations include safetensors, numpy, sympy and mpmath beside

@@ -250,12 +250,21 @@ def _runtime_imports():
     return result
 
 
-def _runtime_proc_lines(filename):
+def _runtime_proc_lines(filename, *, errors='strict'):
     with open(filename, 'rb') as handle:
         raw = handle.read(4 << 20)
         if handle.read(1):
             raise ValueError('native runtime proc metadata exceeds bound')
-    return raw.decode('utf-8', errors='strict').splitlines()
+    return raw.decode('utf-8', errors=errors).splitlines()
+
+
+def _runtime_mapped_stat(address):
+    """Follow the kernel's link to this range's actual mapped file."""
+    try:
+        return os.stat(f'/proc/self/map_files/{address}')
+    except (PermissionError, FileNotFoundError):
+        # Some kernels/containers hide or restrict even our own map_files.
+        return None
 
 
 def _runtime_mapped_device(fd):
@@ -265,7 +274,7 @@ def _runtime_mapped_device(fd):
            if line.startswith('mnt_id:')]
     if len(ids) != 1 or re.fullmatch(r'[0-9]+', ids[0]) is None:
         raise ValueError('native runtime mapped file mount identity incomplete')
-    mounts = [fields for line in _runtime_proc_lines('/proc/self/mountinfo')
+    mounts = [fields for line in _runtime_proc_lines('/proc/self/mountinfo', errors='surrogateescape')
               if (fields := line.split()) and fields[0] == ids[0]]
     if len(mounts) != 1:
         raise ValueError('native runtime mapped file mount identity not recorded or ambiguous')
@@ -288,7 +297,7 @@ def _runtime_libraries():
             if 'x' in fields[1] and fields[4] == '0':
                 raise ValueError('native runtime anonymous executable mapping unsupported')
             continue
-        _, perms, _, device, inode, filename = fields
+        address, perms, _, device, inode, filename = fields
         if filename.startswith('['):
             if 'x' in perms and filename not in {'[vdso]', '[vsyscall]'}:
                 raise ValueError('native runtime named anonymous executable owner unsupported')
@@ -299,12 +308,24 @@ def _runtime_libraries():
             raise ValueError('native runtime unsupported mapped implementation owner')
         path = _runtime_path(filename)
         major, minor = (int(v, 16) for v in device.split(':'))
-        fd = open_regular(path)
+        try:
+            fd = open_regular(path)
+        except ValueError as error:
+            raise ValueError(f'native runtime mapped library must be a regular file: {path}') from error
         try:
             info = os.fstat(fd)
             signature = file_stat_signature(info)
-            if ((*_runtime_mapped_device(fd), info.st_ino) != (major, minor, int(inode)) or
-                    file_stat_signature(os.stat(path, follow_symlinks=False)) != signature):
+            mapped = _runtime_mapped_stat(address)
+            if mapped is not None:
+                same_file = (mapped.st_dev, mapped.st_ino) == (info.st_dev, info.st_ino)
+            else:
+                # Mount device + inode remains usable when map_files is restricted,
+                # but cannot detect same-inode substitution across btrfs subvolumes
+                # sharing that device. map_files distinguishes their stat devices.
+                same_file = _runtime_mapped_device(fd) == (major, minor)
+            if (not same_file or info.st_ino != int(inode) or
+                    file_stat_signature(os.stat(path, follow_symlinks=False)) != signature or
+                    (path in libraries and libraries[path] != signature)):
                 raise ValueError(f'native runtime mapped library replaced: {path}')
             libraries[path] = signature
         finally:
