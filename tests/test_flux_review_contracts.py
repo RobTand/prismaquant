@@ -18,6 +18,7 @@ def test_host_local_launch_refuses_an_unpinned_cache_helper(tmp_path, monkeypatc
     monkeypatch.setattr(staged_launch, "validate_binding", lambda binding: manifest)
     calls = []
     monkeypatch.setattr(staged_launch.os, "execv", lambda *args: calls.append(args))
+    monkeypatch.setattr(staged_launch.os, "execvpe", lambda *args: calls.append(args))
     binding = {"path": "manifest", "sha256": "a" * 64, "read_contract_sha256": "b" * 64,
                "read_contract_path": "contract", "allowed_tiers": "ssd"}
     for name in (staged_launch.PATH_ENV, staged_launch.SHA_ENV, staged_launch.READ_ENV,
