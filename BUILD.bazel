@@ -13372,8 +13372,6 @@ pq_py_library(
     ],
     data = [
         "prismaquant/digests.py",
-        "prismaquant/file_identity.py",
-        "prismaquant/io_spans.py",
         "tools/pq_profile_artifact.py",
     ],
     deps = [

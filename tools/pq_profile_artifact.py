@@ -11,16 +11,18 @@ from typing import TypeGuard
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _PROFILE_OWNERS = {
-    'pq_profile_shared_digest_owner': _SOURCE_ROOT / 'prismaquant/digests.py',
-    'pq_profile_shared_sampler_owner': _SOURCE_ROOT / 'prismaquant/io_spans.py',
-    'pq_profile_shared_file_identity_owner': _SOURCE_ROOT / 'prismaquant/file_identity.py',
+    'pq_profile_shared_digest_owner': 'digests.py',
+    'pq_profile_shared_sampler_owner': 'io_spans.py',
+    'pq_profile_shared_file_identity_owner': 'file_identity.py',
 }
 
 
 def load_profile_source(owner_name: str, path: Path) -> ModuleType:
     """Load only the profiler's three stdlib owners from this snapshot."""
     expected = _PROFILE_OWNERS[owner_name]
-    if Path(path) != expected:
+    path = Path(path)
+    if (path.name != expected or path.parent.name != 'prismaquant'
+            or path.parent.parent != _SOURCE_ROOT):
         raise KeyError(str(path))
     if owner_name not in sys.modules:
         spec = importlib.util.spec_from_file_location(owner_name, path)
