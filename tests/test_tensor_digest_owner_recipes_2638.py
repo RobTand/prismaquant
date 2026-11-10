@@ -3,8 +3,8 @@
 The byte-contract goldens and consumer-retention cases come from retained
 commit a9fce4a588dd41ebffcb77756166c8394a21b378. Census decisions are deliberately
 not asserted here: the retention-audit sibling owns that historical manifest.
-Current integration must instead bind the owner source and shrink main's
-primitive baseline by exactly the routed token scope.
+Current integration binds the owner source and the reviewed native-migration
+primitive baseline, with the routed token scope absent.
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ FP32_STREAM_LIST_GOLDEN = "b9c80b5adeca450753a16950c3cc655d271f7bef7a485bc83f112
 
 REPO = Path(__file__).resolve().parents[1]
 TOKEN_SCOPE = "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256"
-# Canonical JSON identity of supplied main 6d8288ad's baseline, with ONLY
-# TOKEN_SCOPE removed (277 -> 276 primitive sites). No historical Git needed.
+# Canonical JSON identity after the token route and authorized PB retirement.
+# Retired adapter scopes disappeared; retained byte-contract goldens stay fixed.
 TOKEN_ONLY_BASELINE_SHA256 = "78d379bc79f16c8529736bdcc272a085ee6c2c21754d0d1887a5f73fd59249c9"
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
     not torch.cuda.is_available(), reason="needs CUDA"))]
@@ -123,12 +123,12 @@ def test_token_route_has_a_reviewed_current_owner_pin():
     assert current == (blob, hashlib.sha256(raw).hexdigest()), "stale integration owner pin"
 
 
-def test_token_route_removes_exactly_one_main_baseline_scope():
+def test_token_route_stays_absent_from_reviewed_native_baseline():
     baseline = json.loads((REPO / "tests/fixtures/duplication_baseline.json").read_text())
     assert TOKEN_SCOPE not in baseline["primitive_digest_sites"], "remove the routed consumer allowance"
     canonical = json.dumps(baseline, sort_keys=True, separators=(",", ":")).encode()
     assert hashlib.sha256(canonical).hexdigest() == TOKEN_ONLY_BASELINE_SHA256, (
-        "regenerate from supplied main: only the token primitive scope may disappear; "
+        "regenerate the reviewed native baseline after classifying source removals; "
         "do not restore retained-branch allowances or change other baseline sections"
     )
 

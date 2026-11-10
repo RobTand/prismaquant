@@ -32,7 +32,10 @@ def _reader(monkeypatch, raw, *, failure=None):
 
 
 class _ProducedOutput:
-    DESCRIPTOR_SCHEMA_V2 = "fixture.descriptor.v2"
+    """Native publication protocol control; byte/destination validation has its own suite."""
+    write_only = True
+    generation = "gen-fixture"
+    binding = {"sha256": "a" * 64}
 
     def __init__(self, *, outcome=None, reject=False):
         self.events = []
@@ -40,26 +43,29 @@ class _ProducedOutput:
         self.outcome = {"ok": True, "ref": "origin-ref"} if outcome is None else outcome
         self.reject = reject
 
-    def validate_descriptor(self, descriptor, template, instance):
-        self.events.append(("validate", descriptor, template, instance))
+    def bind_session(self, session):
+        self.session = session
+
+    def descriptor_for(self, reference, *, producer_generation, file_identity):
+        self.events.append(("descriptor", reference, producer_generation, file_identity))
         if self.reject:
             raise ValueError("descriptor refused")
-        result = dict(descriptor, validated=True)
-        self.validated.append(result)
-        return result
+        descriptor = {"path": reference.path, "bytes": reference.file_bytes,
+                      "sha256": reference.sha256, "producer_generation": producer_generation,
+                      "file_identity": file_identity}
+        self.validated.append(descriptor)
+        return descriptor
 
-    def commit_origin_batch(self, queue, instance, template, descriptors, *, batch_id):
-        self.events.append(("commit", queue, instance, template, descriptors, batch_id))
+    def publish(self, *, batch_id, descriptors):
+        self.events.append(("publish", batch_id, descriptors))
+        if not self.outcome["ok"]:
+            raise prep.PreparationPublicationRefused("native publication refused")
         return self.outcome
 
 
 def _publication(*, outcome=None, reject=False):
     po = _ProducedOutput(outcome=outcome, reject=reject)
-    bound = SimpleNamespace(
-        _po=po, queue=object(), template={"write_only": True}, generation="gen-é",
-        instance={"owner_action_key": "a" * 64, "owner_attempt": {"nonce": "attempt"}},
-    )
-    return prep.PreparationPublication(bound), po
+    return prep.PreparationPublication(po), po
 
 
 @pytest.mark.parametrize("raw", RAW_VALUES)
@@ -133,28 +139,23 @@ def test_missing_stage_never_reads_the_pool(monkeypatch):
 ]])
 def test_publication_preserves_full_descriptors_order_and_batch_accounting(created):
     publication, po = _publication()
-    bound = publication.publication
-    out = publication.commit("records", created)
+    identities = {path: (1, index + 1) for index, (path, _) in enumerate(created)}
+    out = publication.commit("records", created, writer_identities=identities)
     assert out == {"ok": True, "ref": "origin-ref"}
-    assert out is not po.outcome
-    assert [event[0] for event in po.events] == ["validate"] * len(created) + ["commit"]
+    assert out is po.outcome
+    assert po.session == {"generation": po.generation, "run_identity_sha256": po.binding["sha256"]}
+    assert [event[0] for event in po.events] == ["descriptor"] * len(created) + ["publish"]
     for event, (path, raw) in zip(po.events[:-1], created, strict=True):
-        assert event[1] == {
-            "schema": po.DESCRIPTOR_SCHEMA_V2, "slot": "stage_b_metadata",
-            "artifact_class": "payload", "path": path, "bytes": len(raw),
-            "sha256": hashlib.sha256(raw).hexdigest(),
-            "producer_generation": "stage-b-prep-records-gen-é",
-            "owner_action_key": "a" * 64, "owner_attempt": {"nonce": "attempt"},
-        }
-        assert event[1]["owner_attempt"] is not bound.instance["owner_attempt"]
-        assert event[2] is bound.template and event[3] is bound.instance
-    commit = po.events[-1]
-    assert commit[1] is bound.queue and commit[2] is bound.instance and commit[3] is bound.template
-    assert commit[4] == po.validated
-    assert all(a is b for a, b in zip(commit[4], po.validated, strict=True))
-    assert commit[5] == "stage-b-prep-records-gen-é"
+        reference = event[1]
+        assert (reference.path, reference.name, reference.file_bytes, reference.sha256) == (
+            path, Path(path).name, len(raw), hashlib.sha256(raw).hexdigest())
+        assert event[2] == "stage-b-prep-records-gen-fixture"
+        assert event[3] is identities[path]
+    assert po.events[-1][1] == "stage-b-prep-records-gen-fixture"
+    assert po.events[-1][2] == po.validated
+    assert all(a is b for a, b in zip(po.events[-1][2], po.validated, strict=True))
     assert publication.batches == [{
-        "kind": "records", "batch_id": "stage-b-prep-records-gen-é", "files": len(created),
+        "kind": "records", "batch_id": "stage-b-prep-records-gen-fixture", "files": len(created),
         "bytes": sum(len(raw) for _, raw in created), "ref": "origin-ref",
     }]
 
@@ -164,14 +165,14 @@ def test_descriptor_refusal_precedes_commit_and_accounting():
     with pytest.raises(ValueError) as refused:
         publication.commit("records", [("first.bin", b"first"), ("second.bin", b"second")])
     assert str(refused.value) == "descriptor refused" and refused.value.__cause__ is None
-    assert [event[0] for event in po.events] == ["validate"]
+    assert [event[0] for event in po.events] == ["descriptor"]
     assert publication.batches == []
 
 
-def test_payload_type_refusal_precedes_bad_kind_and_descriptor_validation():
+def test_payload_type_refusal_precedes_descriptor_validation():
     publication, po = _publication()
     with pytest.raises(TypeError) as refused:
-        publication.commit("bad/kind", [("str.bin", cast(bytes, "not bytes"))])
+        publication.commit("records", [("str.bin", cast(bytes, "not bytes"))])
     assert str(refused.value) == "Strings must be encoded before hashing"
     assert refused.value.__cause__ is None
     assert po.events == [] and publication.batches == []
@@ -182,15 +183,15 @@ def test_commit_refusal_keeps_exact_message_and_does_not_account():
     publication, po = _publication(outcome=outcome)
     with pytest.raises(prep.PreparationPublicationRefused) as refused:
         publication.commit("records", [("a.bin", b"A")])
-    assert str(refused.value) == f"the preparation's 'records' batch did not commit: {outcome}"
+    assert str(refused.value) == "native publication refused"
     assert refused.value.__cause__ is None
-    assert [event[0] for event in po.events] == ["validate", "commit"]
+    assert [event[0] for event in po.events] == ["descriptor", "publish"]
     assert publication.batches == []
 
 
 def test_bad_kind_refuses_before_validation_or_commit():
     publication, po = _publication()
-    with pytest.raises(ValueError, match="^a preparation batch kind is a bare name$"):
+    with pytest.raises(ValueError, match="^bounded bare identifier required$"):
         publication.commit("bad/kind", [("a.bin", b"A")])
     assert po.events == [] and publication.batches == []
 
@@ -222,4 +223,4 @@ def test_publication_uses_the_existing_byte_owner(monkeypatch):
     monkeypatch.setattr(prep, "bytes_sha256hex", owner)
     publication.commit("records", [("a.bin", raw)])
     assert len(seen) == 1 and seen[0] is raw
-    assert po.events[0][1]["sha256"] == "e" * 64
+    assert po.events[0][1].sha256 == "e" * 64

@@ -327,7 +327,7 @@ def _direct_args(tmp_path: Path, container: dict) -> types.SimpleNamespace:
     spec = _write_spec(tmp_path / "spec.json", container)
     return types.SimpleNamespace(
         spec=spec,
-        demand="gpu=1,mem_gb=104", cpus=6, tag="sparky", priority=-10,
+        demand="gpu=1,mem_gb=104", cpus=6, tag="sparky", priority=0,
         timeout_s=None, container_arg=None, residency=None, head_grace_s=1800)
 
 

@@ -22,6 +22,7 @@ from golden_table import GoldenTable
 
 GOLDEN = GoldenTable("spaced_lax_tools_consumers_2320")
 ROOT = Path(__file__).resolve().parents[1]
+RETIRED_HELP_TOOLS = {"tools/pwc_window_load_bench.py"}
 LAUNCH_CONTRACTS = json.loads((Path(__file__).parent / "fixtures" /
     "spaced_lax_tools_launch_contracts_2320.json").read_text())["rows"]
 
@@ -148,6 +149,9 @@ def test_campaign_row_embeds_the_resolved_container_spec():
     # The serializer oracle predates campaign argument admission. Only the
     # input flag changes; all serialized bytes and row obligations stay checked.
     expected['argv'][-2] = '--model'
+    # Native rows retain the image, while unqualified progress enforcement is refused at launch.
+    expected.pop('progress_phases')
+    expected['container_images'] = ['sha256:' + 'a' * 64]
     assert campaign_row(spec, ["--model", "é"], mem_gb=16,
                 timeout_s=30, module="prismaquant.tessera_campaign") == expected
 
@@ -173,7 +177,7 @@ def _standalone(name, args, tmp_path):
 
 
 @pytest.mark.parametrize("name", [row["file"].removeprefix("tools/")
-    for row in LAUNCH_CONTRACTS if row["kind"] == "Standard-library argument/help entry"])
+    for row in LAUNCH_CONTRACTS if row["kind"] == "Standard-library argument/help entry" and row["file"] not in RETIRED_HELP_TOOLS])
 def test_lightweight_cli_help_works_without_scientific_dependencies(name, tmp_path):
     result = _standalone(name, ["--help"], tmp_path)
     assert result.returncode == 0, result.stderr.decode()
@@ -297,3 +301,9 @@ def test_separately_staged_model_worker_keeps_its_standard_library_help(tmp_path
     result = subprocess.run(["/usr/bin/python3", "-S", str(worker), "--help"],
         cwd=tmp_path, env=env, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr.decode()
+
+
+def test_retired_pb_lease_benchmark_cannot_be_launched():
+    """The migration removed this PB-only benchmark, not its live CLI coverage."""
+    for filename in RETIRED_HELP_TOOLS:
+        assert not (ROOT / filename).exists()

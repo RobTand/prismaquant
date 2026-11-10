@@ -254,8 +254,8 @@ def test_the_stage_is_submitted_with_strict_coverage_and_the_plans_roster(
     printed = capsys.readouterr().out
     command = next(line for line in printed.splitlines()
                    if line.startswith("[dry-run] "))
-    argv = shlex.split(command[len("[dry-run] "):])
-    inner = argv[argv.index("--data-manifest") + 2:]
+    row = json.loads(command[len("[dry-run] "):])
+    inner = row["argv"]
 
     # The gate is unconditional: there is no spelling of this submission that
     # reaches the stage without it.
@@ -267,8 +267,8 @@ def test_the_stage_is_submitted_with_strict_coverage_and_the_plans_roster(
     assert inner[inner.index("--serving-lane") + 1] == "tessera"
     # The manifest declares a read set to PrismaBuild, and the reservation is
     # checked against the row's own physical bound rather than taken on trust.
-    assert "--data-manifest" in argv
-    assert argv[argv.index("--demand") + 1] == "gpu=1,mem_gb=114"
+    assert row["data_manifest"].endswith(".json.gz")
+    assert row["demand"] == {"gpu": 1, "mem_gb": 114, "cpu": 6}
     summary = json.loads(printed[printed.index("{\n"):])
     scope = summary["campaign_scope"]
     assert scope["kind"] == "complete_campaign"

@@ -760,3 +760,9 @@ def test_publication_concurrent_identical_callers_preserve_no_clobber(tmp_path, 
             future.result(timeout=20)
     namespace.require_namespace_publication(rows[0])
     assert not list((tmp_path / "new").rglob("*.tmp*"))
+
+
+@pytest.fixture(autouse=True)
+def owned_native_admission(monkeypatch):
+    """Namespace metadata controls supply the admitting job explicitly."""
+    monkeypatch.setattr(adapter, "native_admission", lambda environ: ADMISSION)

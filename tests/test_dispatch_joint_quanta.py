@@ -349,7 +349,8 @@ def test_stage_a_argv_prefetch_override_is_payload_flagged(tmp_path, campaign):
                                    name="adjoint.data-manifest.json.gz")
     plain = stage_a_argv(manifest, campaign)
     assert "--prefetch-override" not in plain["argv"]
-    assert plain["argv"][-1] == "--resume"
+    assert "--resume" in plain["argv"]
+    assert "--produced-declaration" in plain["argv"]
 
     override = Path("/mnt/shared/joint-panel/prefetch-override-v10.json")
     widened = stage_a_argv(manifest, campaign, prefetch_override=override)
@@ -373,8 +374,7 @@ def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
     override.write_text("{}")
     gateway = FakeGateway()
     out = tmp_path / "out"
-    code = main(["--records", str(records_dir), "--output-root", str(out),
-                 "--state", str(tmp_path / "state.json"),
+    code = main(_argv(records_dir, out) + [
                  "--adjoint-manifest", str(_adjoint_manifest(tmp_path, campaign)),
                  "--stage-a-prefetch-override", str(override)],
                 _gateway=gateway)

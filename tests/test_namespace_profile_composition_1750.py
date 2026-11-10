@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request
+from tests.test_tessera_campaign_namespace_1986 import arguments, replace_fixture_request, owned_native_admission
 from tools import dispatch_tessera_campaign as dispatch
 from tools import pq_admitted_profile as profiler
 from tools import tessera_campaign_namespace as namespace

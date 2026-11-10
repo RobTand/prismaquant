@@ -19,6 +19,7 @@ from typing import Literal
 from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_UTF8_LAX, bytes_sha256hex
 
 
+_SHARED_ROOT = Path('/mnt/shared')
 _INSTANCE = Path('/mnt/shared/flux-migration/INSTANCE')
 _URI_RESOLVER = '/mnt/shared/flux-migration/flux-uri.sh'
 _PROFILE = 'pq.flux.stock-slot.v3'
@@ -371,7 +372,7 @@ def submit_job(argv, *, checkout: Path, resources: FluxResources, record_dir: Pa
     if not isinstance(resources, FluxResources):
         raise TypeError('resources must be FluxResources')
     checkout, record_dir = Path(checkout).resolve(), Path(record_dir).resolve()
-    if not record_dir.is_relative_to(Path('/mnt/shared')) or record_dir.is_relative_to(checkout):
+    if not record_dir.is_relative_to(_SHARED_ROOT) or record_dir.is_relative_to(checkout):
         raise ValueError('records require a separate shared directory outside the source checkout')
     dependencies = [_job_id(value) for value in afterok]
     if len({job_id_number(value) for value in dependencies}) != len(dependencies):

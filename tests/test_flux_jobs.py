@@ -55,6 +55,9 @@ class FluxJobsTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(dir=os.environ.get('TEST_TMPDIR'))
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        shared_root = patch.object(jobs, '_SHARED_ROOT', self.root)
+        shared_root.start()
+        self.addCleanup(shared_root.stop)
         self.checkout = self.root / 'source'
         self.checkout.mkdir()
         self.record = self.root / 'record'

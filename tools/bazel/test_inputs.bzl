@@ -11,6 +11,10 @@ name no evidence shows; the generator turns each into its library.
 """
 
 TEST_INPUTS = {
+    "//tests:test_research_instrument_metadata_boundaries_audit": struct(
+        modules = ["experiments/glm_manifest_read.py", "experiments/glm_nfs_row_read.py"],
+        reason = "the reader module names are composed from parametrized f-strings.",
+    ),
     "//tests:test_conftest_names_the_test_environment": struct(
         deps = ["@pq_pip//tessera_quant", "@pq_pip//torch", "@pq_pip//transformers"],
         reason = "it checks the terminal summary names torch, transformers and tessera-quant versions, which conftest reads from installed metadata without importing them.",

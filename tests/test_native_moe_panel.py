@@ -908,7 +908,7 @@ def original_protocol_case(tmp_path, layer=3):
             'fit_ids_sha256': hashlib.sha256(calibration_ids.int().numpy().tobytes()).hexdigest(),
             'text_sha256': 'a' * 64, 'model': str(model_root), 'seed': 0,
             'source': 'SYNTHETIC/parser-control', 'split_role': 'calibration'}}
-    runtime = {'schema': 'prismaquant.original_source_runtime.v1',
+    runtime = {'schema': 'prismaquant.original_source_runtime.v2',
         'prismaquant_source_sha256': 'b' * 64, 'tessera_source_sha256': 'c' * 64,
         'modeling_source': {'path': '/synthetic/modeling_glm5_next.py', 'sha256': 'd' * 64},
         'model_class': contract['model_class'], 'profile': 'glm5_next', 'config': config,

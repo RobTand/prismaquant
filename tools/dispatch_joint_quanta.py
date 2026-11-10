@@ -137,7 +137,7 @@ LOAD_PHASE_FLOOR_ONE_READER = {
 COMPUTE_CEILING_SCHEMA = "prismaquant.compute_unit_ceiling.v1"
 COMPUTE_PHASE_GRACE_SCHEMA = "prismaquant.compute_phase_grace.v1"
 COMPUTE_PHASE_BOUND = (
-    "grace = measured transfer term + the sum of the compute terms. "
+    "grace = measured transfer term + the sum of the compute terms, including the tail in the last phase. "
     "Immutable staged coverage checks do not wait. Native launch does not "
     "enforce a progress-stall watchdog; these stamps describe the payload plan.")
 #: What each compute kind counts, and where an unmeasured kind's time will

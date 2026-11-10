@@ -20,6 +20,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from staged_native_fixtures import empty_native_staged_inputs, native_staged_state
 import torch
 
 from prismaquant import aura_provenance
@@ -364,7 +365,7 @@ def test_submit_joint_digest_arguments_are_records_under_dev_mode(
     out = capsys.readouterr().out
     assert "DEV-MODE" in out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     actual = hashlib.sha256(Path(fixture["plan"]).read_bytes()).hexdigest()
     inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
     assert inner[inner.index("--plan-sha256") + 1] == actual  # the record is the ACTUAL digest
@@ -381,7 +382,7 @@ def test_submit_joint_run_resume_needs_no_receipt_under_dev_mode(
     assert dispatch.main(argv) == 0
     out = capsys.readouterr().out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     inner = submitted[submitted.index("prismaquant.tessera_joint_aura"):]
     assert "--resume" in inner
     assert "--source-transition" not in inner
@@ -406,7 +407,7 @@ def _submitted_launcher_argv(capsys):
     import shlex
     out = capsys.readouterr().out
     line = next(line for line in out.splitlines() if line.startswith("[dry-run] "))
-    submitted = shlex.split(line[len("[dry-run] "):])
+    submitted = json.loads(line[len("[dry-run] "):])["argv"]
     return submitted[submitted.index("tools.tessera_campaign_container") + 1:]
 
 
@@ -478,12 +479,14 @@ def _refusing_prepare(tmp_path, monkeypatch):
     return json.loads((tmp_path / "prepare/results.json").read_text())
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_results_json_has_no_dev_keys_without_the_flag(tmp_path, monkeypatch):
     result = _refusing_prepare(tmp_path, monkeypatch)
     assert dev_mode.DEV_UNCERTIFIED_KEY not in result
     assert dev_mode.DEV_MODE_KEY not in result
 
 
+@pytest.mark.usefixtures("empty_native_staged_inputs")
 def test_results_json_carries_the_top_level_dev_stamp(tmp_path, monkeypatch):
     monkeypatch.setenv(DEV_ENV, "1")
     result = _refusing_prepare(tmp_path, monkeypatch)
