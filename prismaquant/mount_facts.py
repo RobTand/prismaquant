@@ -17,6 +17,7 @@ class MountFacts:
     point: str
     filesystem: str
     options: Mapping[str, str]
+    device: tuple[int, int] | None = None
 
 
 def find_mount(path: str | Path, *, table: str | Path = "/proc/self/mountinfo") -> MountFacts | None:
@@ -29,11 +30,15 @@ def find_mount(path: str | Path, *, table: str | Path = "/proc/self/mountinfo") 
     for row in rows:
         head, separator, tail = row.partition(" - ")
         fields = head.split()
+        device = None
         if separator:
             super_fields = tail.split()
             if len(fields) < 6 or len(super_fields) < 3:
                 continue
             escaped_point, filesystem = fields[4], super_fields[0]
+            if re.fullmatch(r"[0-9]+:[0-9]+", fields[2]):
+                major, minor = fields[2].split(":")
+                device = (int(major), int(minor))
             option_fields = (fields[5], super_fields[2])
         else:
             if len(fields) < 4:
@@ -51,5 +56,5 @@ def find_mount(path: str | Path, *, table: str | Path = "/proc/self/mountinfo") 
             for item in text.split(","):
                 name, _, value = item.partition("=")
                 options[name] = value
-        best = MountFacts(point, filesystem, MappingProxyType(options))
+        best = MountFacts(point, filesystem, MappingProxyType(options), device)
     return best

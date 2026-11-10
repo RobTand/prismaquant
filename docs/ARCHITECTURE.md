@@ -54,6 +54,19 @@ Stage preflight resolves the same instance and checks its health before creating
 state or manifests. An empty live configuration is hashed as evidence and is
 allowed; missing broker identity and offline ranks still refuse.
 
+As of: 2026-11-10, mapped-file identity on btrfs subvolumes, issue #3368.
+Source: `prismaquant/native_results.py`, `prismaquant/mount_facts.py`.
+Runtime v5 requires each mapped library's inode to match the resolved path's
+stat inode. Devices must match directly, or the resolved path's containing
+mount must be btrfs and its mountinfo device must match the mapping device.
+Btrfs stat reports a subvolume's anonymous device while maps reports the
+filesystem device. The shared mount reader selects the longest containing
+mount, including escaped mountpoints and the topmost equal-path entry.
+Deleted mappings, changed inodes, unrelated devices and unsupported device
+aliases still refuse. Overlayfs has no device-alias exception. This corrects
+the mapped-device refusal recorded in the November 8 runtime notes below;
+it changes no scientific, format, serving or scratch-filesystem gate.
+
 As of: 2026-11-10, P-4 dependency separation, after D-fix `90ceda405`.
 Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
 `prismaquant/joint_quantum_handoff.py`,

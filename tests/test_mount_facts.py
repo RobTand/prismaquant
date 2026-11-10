@@ -24,10 +24,18 @@ def test_topmost_containing_mount_owns_options(tmp_path, kind):
     mounted = find_mount("/stage/staged/model/weights", table=table)
     assert mounted.point == "/stage/staged"
     assert mounted.filesystem == "nfs4"
+    assert mounted.device == ((0, 3) if kind == "mountinfo" else None)
     assert mounted.options["timeo"] == "600"
     assert mounted.options["nconnect"] == "8"
     assert find_mount("/stage/staged/local disk/a", table=table).filesystem == "tmpfs"
     assert find_mount("/stage/staged-other/a", table=table).filesystem == "ext4"
+
+
+@pytest.mark.parametrize("device, expected", [("8:31", (8, 31)), ("bad", None)])
+def test_mount_device_is_decimal_and_malformed_device_has_no_identity(tmp_path, device, expected):
+    table = tmp_path / "mountinfo"
+    table.write_text(f"1 0 {device} / / rw - btrfs /dev/root rw\n")
+    assert find_mount("/library.so", table=table).device == expected
 
 
 def test_missing_or_malformed_mount_table_has_no_facts(tmp_path):

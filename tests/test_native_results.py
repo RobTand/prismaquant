@@ -1,14 +1,105 @@
 """Bounded publication bytes and measured runtime policy, independent of CUDA."""
 import copy
 import hashlib
+import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from prismaquant import native_results as nr
+from prismaquant.mount_facts import find_mount
+
+
+@pytest.fixture
+def mapped_library(tmp_path, monkeypatch):
+    directory = tmp_path / 'sub volume'
+    directory.mkdir()
+    library = directory / 'library.so'
+    library.write_bytes(b'known mapped bytes')
+    table = tmp_path / 'mountinfo'
+    point = str(directory).replace(' ', r'\040')
+
+    def configure(*, stat_device=31, stat_inode=4242, maps_device='00:1e',
+                  mount_device='0:30', filesystem='btrfs', deleted=False, extra_mounts='',
+                  mountpoint=point):
+        raw = (f'1000-2000 r-xp 00000000 {maps_device} 4242 {library}'
+               + (' (deleted)' if deleted else '') + '\n').encode()
+        table.write_text('1 0 8:1 / / rw - ext4 /dev/root rw\n'
+            f'2 1 {mount_device} /@ {mountpoint} rw - {filesystem} /dev/data rw\n'
+            + extra_mounts)
+        info = SimpleNamespace(st_dev=stat_device, st_ino=stat_inode,
+                               st_size=18, st_mtime_ns=100, st_ctime_ns=200)
+        monkeypatch.setattr(nr, 'open', lambda path, mode: io.BytesIO(raw), raising=False)
+        monkeypatch.setattr(nr, 'os', SimpleNamespace(stat=lambda path: info,
+                                                     major=os.major, minor=os.minor))
+        monkeypatch.setattr(nr, 'find_mount', lambda path: find_mount(path, table=table))
+        return library
+
+    return configure
+
+
+@pytest.mark.parametrize('filesystem, stat_device', [('btrfs', 31), ('ext4', 30),
+                                                    ('overlay', 30), ('zfs', 30)])
+def test_mapped_library_identity_accepts_exact_device_or_btrfs_mount(mapped_library, filesystem, stat_device):
+    library = mapped_library(filesystem=filesystem, stat_device=stat_device)
+    assert nr._runtime_libraries() == {str(library): (stat_device, 4242, 18, 100, 200)}
+
+
+@pytest.mark.parametrize('change', [
+    {'stat_inode': 4243},
+    {'stat_inode': 4243, 'stat_device': 30},
+    {'maps_device': '00:20'},
+    {'mount_device': '0:32'},
+    {'mount_device': 'bad'},
+    {'filesystem': 'ext4'},
+    {'filesystem': 'overlay'},
+    {'deleted': True},
+])
+def test_mapped_library_identity_refuses_replaced_or_unverifiable_owner(mapped_library, change):
+    mapped_library(**change)
+    with pytest.raises(ValueError, match='mapped library replaced|unsupported mapped implementation owner'):
+        nr._runtime_libraries()
+
+
+def test_mapped_library_mount_must_contain_resolved_target(mapped_library, tmp_path):
+    library = mapped_library()
+    target = tmp_path / 'other' / library.name
+    target.parent.mkdir()
+    target.write_bytes(b'other file, same synthetic inode')
+    library.unlink()
+    library.symlink_to(target)
+    # Even an equal inode cannot borrow the old path's btrfs mount device.
+    with pytest.raises(ValueError, match='mapped library replaced'):
+        nr._runtime_libraries()
+
+
+def test_mapped_library_does_not_borrow_a_path_prefix_mount(mapped_library, tmp_path):
+    mapped_library(mountpoint=str(tmp_path / 'sub'))
+    with pytest.raises(ValueError, match='mapped library replaced'):
+        nr._runtime_libraries()
+
+
+def test_mapped_library_uses_topmost_mount_at_same_path(mapped_library, tmp_path):
+    point = str(tmp_path / 'sub volume').replace(' ', r'\040')
+    mapped_library(extra_mounts=f'3 2 0:32 / {point} rw - btrfs /dev/other rw\n')
+    with pytest.raises(ValueError, match='mapped library replaced'):
+        nr._runtime_libraries()
+
+
+@pytest.mark.parametrize('stat_device', [30, 31])
+def test_mapped_library_missing_mountinfo_only_allows_exact_device(mapped_library, tmp_path, stat_device):
+    library = mapped_library(stat_device=stat_device)
+    (tmp_path / 'mountinfo').unlink()
+    if stat_device == 30:
+        assert nr._runtime_libraries() == {str(library): (30, 4242, 18, 100, 200)}
+    else:
+        with pytest.raises(ValueError, match='mapped library replaced'):
+            nr._runtime_libraries()
 
 
 def test_measured_interpreter_is_the_actual_executable():
