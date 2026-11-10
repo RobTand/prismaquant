@@ -114262,6 +114262,7 @@ pq_py_test(
         "//:tools/stage_b_preparation_submission",
         "//:tools/stagea_forward_recovery",
         "//:tools/staged_exact_read_bench",
+        "//:tools/tessera_campaign_container",
         "//:tools/tessera_fleet/status",
         ":conftest",
     ],
