@@ -282,6 +282,8 @@ actual_fs = subprocess.check_output(['/usr/bin/findmnt', '-n', '-o', 'FSTYPE', '
 if actual_fs != expected_fs:
     raise RuntimeError('unqualified scratch filesystem')
 os.environ['FLUX_SCRATCH'] = root
+# Native f58 spellings are equivalent; scientific paths require ASCII.
+os.environ['FLUX_JOB_ID'] = os.environ['FLUX_JOB_ID'].replace('ƒ', 'f', 1)
 scratch = pathlib.Path(root) / os.environ['FLUX_JOB_ID']
 child = None
 received = None

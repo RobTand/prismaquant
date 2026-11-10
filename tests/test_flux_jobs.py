@@ -626,8 +626,8 @@ class FluxJobsTests(unittest.TestCase):
         self.assertEqual(exit.exception.code, 0)
         observation = json.loads((self.record / 'scratch.json').read_text())
         self.assertEqual(observation['root_source'], 'instance')
-        self.assertEqual(observation['path'], str(scratch_root / 'ƒ123'))
-        self.assertFalse((scratch_root / 'ƒ123').exists())
+        self.assertEqual(observation['path'], str(scratch_root / 'f123'))
+        self.assertFalse((scratch_root / 'f123').exists())
         self.assertTrue(json.loads((self.record / 'cleanup.json').read_text())['removed'])
 
     def test_launcher_allow_lists_have_no_secret_like_names(self):

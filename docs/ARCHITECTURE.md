@@ -32,7 +32,8 @@ present, otherwise the existing host table: XFS
 either Spark. The observed instance config has no `FLUX_SCRATCH` setting, and
 P-4's live probe records whether the job receives one. Each selected root must
 pass the host filesystem qualification. Scratch lives under the exact
-`$FLUX_SCRATCH/$FLUX_JOB_ID`, is removed on exit, and its selected source and
+`$FLUX_SCRATCH/$FLUX_JOB_ID`, with the payload ID normalized to its equivalent
+ASCII f58 spelling for scientific path contracts. Scratch is removed on exit; its source and
 filesystem are retained with cleanup evidence. The staged proof uses `TMPDIR`
 inside that same owned directory. Launcher allow-lists contain no variable
 names with KEY, TOKEN, SECRET, PASS or AUTH substrings; quality prefill shares
