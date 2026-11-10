@@ -121,3 +121,8 @@ def recovery_publication(root, refs, specification, register, *, job_id='123'):
             producer_generation=batch) for ref in selected])
     selection, result = register(pub)
     return selection, pub, result
+
+
+def bound_file(path):
+    import hashlib
+    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}

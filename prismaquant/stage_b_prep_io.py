@@ -5,6 +5,8 @@ Read-set/template builders retain their scientific wire formats. Launch-bound ou
 """
 from __future__ import annotations
 
+from .file_identity import WriterIdentities
+
 import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -509,7 +511,7 @@ def publish_files(publication: PreparationPublication | None, kind: str,
             raise PreparationPublicationRefused(
                 f"the preparation's {kind!r} batch: {exc}") from exc
     created: list[tuple[str, bytes]] = []
-    writer_identities = {}
+    writer_identities = WriterIdentities()
     if publication is not None:
         publication.prepare_directories([path for path, _, _ in planned])
     for path, payload, where in planned:

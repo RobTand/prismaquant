@@ -46,6 +46,10 @@ import threading
 #: never bulk tiers under this policy.
 DEFAULT_ALLOWED_TIERS = "ram,ssd"
 
+PATH_ENV = 'PRISMAQUANT_STAGED_MANIFEST'
+SHA_ENV = 'PRISMAQUANT_STAGED_MANIFEST_SHA256'
+READ_ENV = 'PRISMAQUANT_READ_CONTRACT_SHA256'
+
 _KNOWN_TIERS = ("ram", "ssd")
 
 
@@ -209,7 +213,6 @@ class StagedRangeNotLanded(TierPolicyRefused):
 
 def _activate_native_launch():
     import os
-    from .staged_manifest import PATH_ENV, SHA_ENV, READ_ENV
     setting = os.environ.get('PRISMAQUANT_STAGED_ALLOWED_TIERS')
     if setting is not None:
         if setting != 'ssd' or not all(os.environ.get(key) for key in (PATH_ENV, SHA_ENV, READ_ENV)):

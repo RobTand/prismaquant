@@ -566,7 +566,8 @@ def test_native_small_file_publication_never_replaces_a_collision(tmp_path, monk
     from prismaquant import cost_stage_checkpoint as journal
     from prismaquant import joint_adjoint_checkpoints as checkpoint
     info = tmp_path.stat()
-    directories, identities = {str(tmp_path): (info.st_dev, info.st_ino)}, {}
+    from prismaquant.file_identity import WriterIdentities
+    directories, identities = {str(tmp_path): (info.st_dev, info.st_ino)}, WriterIdentities()
     path = tmp_path / 'known.bin'
     actual = os.link
     foreign = b'independently known foreign bytes'

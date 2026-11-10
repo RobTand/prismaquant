@@ -57,6 +57,14 @@ Source: `prismaquant/contract_checks.py`, `prismaquant/io_buffers.py`,
 `prismaquant/data_manifest_contract.py`, `prismaquant/exact_activation_contract.py`,
 `tools/tessera_fleet/common.py`,
 `tools/pq_profile_artifact.py`, `tools/pq_profile_source.py`.
+As of: 2026-11-10, P-4 graph round 3. Sources: `prismaquant/file_identity.py`,
+`prismaquant/cost_stage_checkpoint.py`, `prismaquant/staged_tier_policy.py`.
+Native writers pass a `WriterIdentities` registry that captures and retains their
+held file identities. Generic journals depend on descriptor IO primitives rather
+than the native registry implementation. No-follow directory traversal lives with
+sealed buffers in `io_buffers.py`; the tier policy owns the launch environment
+names and does not import the manifest implementation to activate itself.
+
 Shared strict JSON and refusal checks live below numerical artifact schemas.
 The IO engine's sealed buffers and synchronous extent copy share one leaf;
 staged metadata and readers use them without importing the engine's scheduler.

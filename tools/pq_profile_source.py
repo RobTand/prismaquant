@@ -5,17 +5,17 @@ from pathlib import Path
 from types import ModuleType
 
 _PROFILE_OWNERS = {
-    'digests': 'pq_profile_shared_digest_owner',
-    'io_spans': 'pq_profile_shared_sampler_owner',
-    'file_identity': 'pq_profile_shared_file_identity_owner',
+    'digests': ('pq_profile_shared_digest_owner', 'prismaquant/digests.py'),
+    'io_spans': ('pq_profile_shared_sampler_owner', 'prismaquant/io_spans.py'),
+    'file_identity': ('pq_profile_shared_file_identity_owner', 'prismaquant/file_identity.py'),
 }
 
 
 def profile_source_owner(source: str) -> ModuleType:
     """Reuse only the profiler's three stdlib owners from this source snapshot."""
-    owner_name = _PROFILE_OWNERS[source]
+    owner_name, filename = _PROFILE_OWNERS[source]
     if owner_name not in sys.modules:
-        path = Path(__file__).resolve().parents[1] / 'prismaquant' / (source + '.py')
+        path = Path(__file__).resolve().parents[1] / filename
         spec = importlib.util.spec_from_file_location(owner_name, path)
         if spec is None or spec.loader is None:
             raise RuntimeError('profile source owner unavailable: ' + source)

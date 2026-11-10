@@ -13,7 +13,7 @@ def guarded(name,*args,**kwargs):
         raise AssertionError('heavy package imported: '+name)
     return real_import(name,*args,**kwargs)
 builtins.__import__=guarded
-from tools.pq_profile_artifact import bytes_sha256hex
+from tools.pq_profile_source import bytes_sha256hex
 assert bytes_sha256hex(b'')=='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 print('stdlib owner loaded')
 """

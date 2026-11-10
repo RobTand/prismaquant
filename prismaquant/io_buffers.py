@@ -1,4 +1,4 @@
-"""Bounded byte IO primitives: sealed buffers, kernel seals and extent copies."""
+"""Descriptor IO primitives: sealed buffers, bounded copies and no-follow directories."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -7,6 +7,7 @@ import hashlib
 import io
 import mmap
 import os
+from pathlib import Path
 
 # The memfd seal numbers are Linux UAPI and ABI-fixed since kernel 3.11
 # (uapi/asm-generic/fcntl.h, uapi/linux/memfd.h). CPython defines the
@@ -227,3 +228,28 @@ def copy_extent(source_fd, destination_fd, source_offset, length, *, chunk_bytes
     return chunks_sha256hex(copied_chunks())
 
 
+
+def open_nofollow_directory(filename, *, create=False, identity=None):
+    """Hold a canonical directory without following any symlink component."""
+    filename = os.fspath(filename)
+    if not isinstance(filename, str) or not filename.startswith('/') or '\0' in filename or os.path.normpath(filename) != filename:
+        raise ValueError('path must be normalized and absolute')
+    directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in Path(filename).parts[1:]:
+            if create:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        if identity is not None:
+            current = os.fstat(directory)
+            if (current.st_dev, current.st_ino) != tuple(identity):
+                raise ValueError('writer directory identity changed')
+        return directory
+    except BaseException:
+        os.close(directory)
+        raise

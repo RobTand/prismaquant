@@ -12,7 +12,8 @@ from pathlib import Path
 import sys
 
 from prismaquant.digests import bytes_sha256hex, canonical_json_sha256
-from prismaquant.file_identity import file_stat_signature, open_nofollow_directory
+from prismaquant.file_identity import file_stat_signature
+from prismaquant.io_buffers import open_nofollow_directory
 from prismaquant.stage_a_produced_output import (BoundaryProducedPublication,
     add_declaration_arguments, read_bound_document)
 from prismaquant.produced_output_spool import ProducedOutputSpool

@@ -1,6 +1,8 @@
 """Finite prefill documents; native execution remains with the shared Flux owner."""
 from __future__ import annotations
 
+from .file_identity import WriterIdentities
+
 from dataclasses import asdict
 import os
 from pathlib import Path
@@ -737,7 +739,7 @@ def _publish_document(value: object, path: Path, limit: int, *, directory_identi
     raw = scientific.canonical_json_bytes(value) + b'\n'
     _check.require(len(raw) <= limit, 'document exceeds byte limit')
     directory = open_directory(str(filename.parent), identity=directory_identity)
-    written = {}
+    written = WriterIdentities()
     try:
         observed = os.fstat(directory)
         identity = (observed.st_dev, observed.st_ino)
