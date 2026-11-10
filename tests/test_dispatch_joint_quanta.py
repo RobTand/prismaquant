@@ -375,6 +375,7 @@ def test_main_threads_stage_a_prefetch_override(tmp_path, campaign, records_dir,
     gateway = FakeGateway()
     out = tmp_path / "out"
     code = main(_argv(records_dir, out) + [
+                 "--state", str(tmp_path / "state.json"),
                  "--adjoint-manifest", str(_adjoint_manifest(tmp_path, campaign)),
                  "--stage-a-prefetch-override", str(override)],
                 _gateway=gateway)

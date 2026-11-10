@@ -862,7 +862,7 @@ from native_runtime_fixtures import synthetic_runtime
 def original_protocol_case(tmp_path, layer=3):
     """Isolated SYNTHETIC metadata/completion fixture, never an actual receipt.
 
-    Native descriptors, claims and CUDA completion rows below are deliberately
+    Native descriptors, retained phases and CUDA completion rows below are deliberately
     synthetic parser inputs. No real owner receipt is altered or presented as
     CUDA proof. Qualification/root admission are absent, so this record cannot
     authorize a launch. Actual CPU owner receipts are tested separately.
@@ -959,21 +959,15 @@ def original_protocol_case(tmp_path, layer=3):
         calibration_sha256=calibration['calibration_sha256'], calibration_shape=calibration['shape'],
         calibration_dtype=calibration['dtype'],
         scope='first calibration sequence; decode uses its first row, not autoregressive generation')
-    claim = {'queue_root': '/synthetic-queue', 'action_key': '2' * 64, 'nonce': 'synthetic-producer-nonce',
-        'scope_id': 'synthetic-scope', 'worker': 'synthetic-worker', 'host': 'synthetic-host',
-        'incarnation': 'synthetic-worker', 'attempt_source': 'launch-env', 'map_path': '/synthetic-map',
-        'helper_root': '/synthetic-sdk5'}
     deliveries = []
     for index, (name, digest) in enumerate(sorted(digests.items()), 1):
         key = residency_map_key(paths[name], 0)
         deliveries.append({'name': name, 'sha256': digest, 'bytes_hashed': 128, 'delivery_index': 1,
             'held': name == 'lookahead.safetensors', 'material_windows': int(name == 'lookahead.safetensors'),
             'readers': 0, 'storage_aliases': int(name == 'lookahead.safetensors'), 'payload_reads': 1,
-            'native_delivery': {'claim': copy.deepcopy(claim), 'ref_id': 'synthetic-ref-' + name,
-                'serving': {'tier_id': 'synthetic-tier', 'epoch': '', 'pin_id': 'synthetic-pin-' + name, 'range_ref': key},
-                'entry': {'key': key, 'stage_path': paths[name], 'bytes': 128, 'sha256': digest,
-                    'file_id': {'ino': index, 'size': 128, 'mtime_ns': 1, 'ctime_ns': 1},
-                    'mover_action_key': '3' * 64, 'generation': 'synthetic-delivery'},
+            'native_delivery': {'staged_manifest_sha256': '4' * 64,
+                'read_contract_sha256': authority['readset']['sha256'],
+                'pin_id': 'synthetic-pin-' + name, 'range_ref': key,
                 'source_fd_stat': [1, index, 128, 1, 1], 'sealed_fd_stat': [2, index, 128, 1, 1],
                 'kernel_seals': _SEALS, 'descriptors_closed': True, 'lease_released': True}})
     generations = {row['name']: row['delivery_index'] for row in deliveries}
@@ -1165,8 +1159,7 @@ def test_original_prior_completed_delivery_is_not_overwritten_by_new_pending_sam
     current = copy.deepcopy(old)
     current.update(delivery_index=old['delivery_index'] + 1, held=True,
                    material_windows=1, storage_aliases=1, payload_reads=1)
-    current['native_delivery']['ref_id'] += '-new'
-    current['native_delivery']['serving']['pin_id'] += '-new'
+    current['native_delivery']['pin_id'] += '-new'
     material['deliveries'].append(current)
     material['deliveries'].sort(key=lambda row: (row['name'], row['delivery_index']))
     material['material_live_bytes'] += current['bytes_hashed']

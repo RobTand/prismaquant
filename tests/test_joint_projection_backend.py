@@ -314,7 +314,8 @@ def test_identity_gate_refuses_before_the_head_phase_writes_any_render(tmp_path,
     with pytest.raises(RuntimeError, match='unqualified runtime identity: compiler'):
         bridge.execute('prepare', config, plan_sha256='d' * 64)
     written = sorted(path.relative_to(tmp_path).as_posix()
-                     for path in tmp_path.rglob('*') if path.is_file())
+                     for path in (tmp_path / 'prepare').rglob('*') if path.is_file())
+    assert not (tmp_path / 'renders').exists()
     assert written == ['prepare/profile.pstats', 'prepare/profile.txt', 'prepare/results.json'], written
     assert json.loads((tmp_path / 'prepare/results.json').read_text())['passed'] is False
 

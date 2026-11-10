@@ -191,7 +191,8 @@ def test_commit_refusal_keeps_exact_message_and_does_not_account():
 
 def test_bad_kind_refuses_before_validation_or_commit():
     publication, po = _publication()
-    with pytest.raises(ValueError, match="^bounded bare identifier required$"):
+    from prismaquant.stage_a_produced_output import BoundaryProducedBindingError
+    with pytest.raises(BoundaryProducedBindingError, match="^bounded bare identifier required$"):
         publication.commit("bad/kind", [("a.bin", b"A")])
     assert po.events == [] and publication.batches == []
 

@@ -427,6 +427,16 @@ def test_dev_mode_env_reaches_the_container_and_the_spec_file_stays_sealed(
 
     monkeypatch.setenv(DEV_ENV, "1")
     assert dispatch.main(argv) == 0
+    ambient = _submitted_launcher_argv(capsys)
+    assert json.loads(ambient[ambient.index("--spec") + 1])["env"][DEV_ENV] == "0"
+    # Native submissions take scientific settings from an explicit spec.
+    dev_spec = spec.with_name("explicit-dev-spec.json")
+    declared = json.loads(original)
+    declared["env"] = {**declared.get("env", {}), DEV_ENV: "1"}
+    dev_spec.write_text(json.dumps(declared))
+    dev_argv = list(argv)
+    dev_argv[dev_argv.index("--spec") + 1] = str(dev_spec)
+    assert dispatch.main(dev_argv) == 0
     dev = _submitted_launcher_argv(capsys)
     assert spec.read_text() == original  # the sealed spec file is never rewritten
     spec_json = json.loads(dev[dev.index("--spec") + 1])

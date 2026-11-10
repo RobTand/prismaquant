@@ -1609,7 +1609,7 @@ def _native_action_row(args, *, manifest: Path, inner: list[str],
     if gpu_memory_gb is not None:
         row['gpu_memory_gb'] = gpu_memory_gb
     if progress_phases:
-        row['progress_phases'] = [f'{name}={args.head_grace_s if name == "head" else 900}' for name in progress_phases]
+        row['progress_phases'] = [f'{name}={(getattr(args, "head_grace_s", None) or 1800) if name == "head" else 900}' for name in progress_phases]
     if residency is not None:
         row['residency'] = residency
     return row

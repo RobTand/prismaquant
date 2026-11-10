@@ -1,4 +1,4 @@
-"""The campaign container image reaches PrismaBuild's admission contract.
+"""Scientific planning rows retain the image selected by their resolved spec.
 
 PrismaBuild #714: a GB10-class action was claimed by the Spark that did *not*
 hold its pinned Docker image, and died inside ``tools.tessera_campaign_container``
@@ -8,9 +8,8 @@ change adds the submitter's ``--container-image`` and the campaign row field
 ``container_images``; this file gates the PrismaQuant callers that must fill
 them:
 
-* the joint dispatcher's stage-A and quantum argvs declare exactly the image
-  of the same parsed spec they serialize into ``--spec`` (one parse, no
-  second-read race), as a submitter option before the payload separator;
+* the joint dispatcher's stage-A and quantum rows declare exactly the image
+  of the same parsed spec they serialize into ``--spec``;
 * generated campaign rows carry ``container_images`` from the *resolved*
   row-class container, so a class override declares its own image;
 * a spec whose image is supplied by a validated ``container.archive``

@@ -22,9 +22,8 @@ and the exclusions that make the order true:
   artificial whole-roster hash phase;
 * a joint pass submitted before the campaign merge published the checkpoint's
   unit shards is refused with the directory named, not submitted blind;
-* the submit command puts ``--data-manifest`` before ``--detach`` and mirrors
-  the chain's demand, because a submitter option after the separator is an
-  argument of the action instead.
+* native planning rows retain the scientific data manifest separately from
+  the payload argv and preserve the chain's resource demand.
 
 The tests exercise metadata-only paths without Torch. The producer imports
 cold PrismaQuant metadata owners; numerical COST V2 work stays deferred.
@@ -1482,7 +1481,7 @@ def test_a_joint_reservation_under_the_plans_own_bound_is_refused(
 
     assert submit("gpu=1,mem_gb=114") == 0
     printed = capsys.readouterr().out
-    # The device envelope reaches PB as a *subset* cap, not as a second box.
+    # The device envelope remains a subset cap of the native row demand.
     line = next(line for line in printed.splitlines() if line.startswith("[dry-run] "))
     row = json.loads(line[len("[dry-run] "):])
     assert row["gpu_memory_gb"] == 80

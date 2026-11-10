@@ -265,9 +265,9 @@ def test_the_stage_is_submitted_with_strict_coverage_and_the_plans_roster(
     assert inner[inner.index("--model-path") + 1] == str(campaign["model"])
     assert inner[inner.index("--formats") + 1] == ",".join(MEASURED)
     assert inner[inner.index("--serving-lane") + 1] == "tessera"
-    # The manifest declares a read set to PrismaBuild, and the reservation is
+    # The row declares its scientific read set, and the reservation is
     # checked against the row's own physical bound rather than taken on trust.
-    assert row["data_manifest"].endswith(".json.gz")
+    assert row["data_manifest"].endswith("prismaquant.aqua_activation_cost.price.json")
     assert row["demand"] == {"gpu": 1, "mem_gb": 114, "cpu": 6}
     summary = json.loads(printed[printed.index("{\n"):])
     scope = summary["campaign_scope"]
