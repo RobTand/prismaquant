@@ -108,7 +108,7 @@ RESOURCE = "resource"
 ALLOWLIST = {
     # Native migration: these checks authenticate owned bytes, launch geometry,
     # and containment. They are independent of dev-mode resume compatibility.
-    ("prismaquant/joint_quantum_handoff.py", "bind_handoff_publication"): (
+    ("prismaquant/joint_quantum_handoff.py", "bind_stage_a_publication"): (
         1, RESOURCE, "the native declaration payload ceiling equals the effective Stage A budget"),
     ("prismaquant/stage_a_chain_resume.py", "require_producer_contained"): (
         1, STRUCTURE, "the stopped producer names the saved native job and immutable launch"),
@@ -344,10 +344,6 @@ ALLOWLIST = {
         "binds the current producer-package digest, live full-model identity and "
         "resolved source-dispatch selectors. These source/authority refusals stay "
         "in both modes; they are not resumable-run seals or CUDA qualification"),
-    # Found by the _require call form, loop fields and resource ceilings.
-    ("prismaquant/joint_cost_stage_a.py", "bind_stage_a_produced_output"): (
-        1, RESOURCE, "the produced-output template's durable payload maximum against the "
-        "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
     ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
     ("prismaquant/tessera_joint_aura.py", "seed_source_identity_cache"): (

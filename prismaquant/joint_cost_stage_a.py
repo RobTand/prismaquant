@@ -2378,15 +2378,9 @@ def _io_counters() -> dict:
 
 
 def bind_stage_a_produced_output(*, artifact_max_bytes):
-    """Bind current native declaration and require its effective artifact ceiling."""
-    from .stage_a_produced_output import BoundaryProducedPublication
-    if not os.environ.get("FLUX_JOB_ID"):
-        return None
-    publication = BoundaryProducedPublication.bind_from_admitted_owner()
-    declared = publication.durable_maxima()["payload_max_bytes"]
-    if declared != artifact_max_bytes:
-        raise AdjointIdentityRefused("launch-bound artifact maximum differs from effective Stage A budget")
-    return publication
+    """Use the shared launch binding and effective artifact ceiling check."""
+    from .joint_quantum_handoff import bind_stage_a_publication
+    return bind_stage_a_publication(artifact_max_bytes=artifact_max_bytes)
 
 
 def _stage_a_device_envelope(config, *, environ=None):
