@@ -438,6 +438,31 @@ class FluxJobsTests(unittest.TestCase):
         self.online = '0-1,4-5\n'
         self.overlay = '0 coordinator: full\n1 worker1: full\n4 worker4: full\n5 worker5: full\n'
 
+    def test_real_container_admission_consumes_real_launch_profile(self):
+        from prismaquant import native_results
+        from tools.tessera_campaign_container import native_admission
+
+        self.live_instance()
+        with patch.dict(os.environ, {'FLUX_URI': self.profile['uri']}), \
+                patch.object(jobs, '_source_identity', return_value=self.source), \
+                patch.object(jobs, '_flux_run', side_effect=self.instance_query):
+            submission = jobs.submit_job(['/bin/true'], checkout=self.checkout,
+                resources=self.resources, record_dir=self.record)
+        launch = json.loads((self.record / 'launch.json').read_bytes())
+        context = {'job_id': submission.job_id, 'record_dir': str(self.record),
+            'launch_sha256': submission.launch_sha256, 'source': self.source,
+            'resources': launch['resources']}
+        environ = {'FLUX_JOB_ID': submission.job_id, 'OUT': str(self.record)}
+        # Only the independently verified running-job context is a unit seam.
+        # The saved launch, profile producer and admission consumer are real.
+        with patch.dict(os.environ, environ), \
+                patch.object(native_results, 'execution_context', return_value=context):
+            admission = native_admission(environ)
+        self.assertEqual(admission['profile'], {key: launch['profile'][key]
+            for key in ('profile', 'config_sha256', 'r_sha256')})
+        self.assertEqual(admission['profile']['r_sha256'],
+                         hashlib.sha256(self.live_r.encode()).hexdigest())
+
     def test_empty_live_config_is_hashed_without_refusal(self):
         import hashlib
         self.live_instance()

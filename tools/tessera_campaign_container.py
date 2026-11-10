@@ -623,7 +623,7 @@ def native_admission(environ) -> dict:
             "cores": resources["cores"], "memory_gib": resources["memory_gib"],
             "gpus": resources["gpus"], "walltime_s": resources["walltime_s"],
             "profile": {key: saved_profile[key]
-                        for key in ("profile", "config_sha256", "model_sha256")}}
+                        for key in ("profile", "config_sha256", "r_sha256")}}
 
 
 def _require_admission(admission: dict) -> None:
