@@ -133,7 +133,12 @@ class NativeRowsTests(unittest.TestCase):
             launch = {'schema': 'pq.flux.launch.v1', 'record_dir': str(record),
                 'argv': ['/bin/true'],
                 'source': identity, 'resources': {'cores': 1, 'memory_gib': 1, 'gpus': 0,
-                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [], 'native_argv': []}
+                'walltime_s': 60, 'placement': 'portable'}, 'afterok': [],
+                'profile': {'profile': jobs._PROFILE, 'uri': 'local:///fixture/run/local-0',
+                            'broker_starttime': '123.5'}}
+            launch['native_argv'] = jobs._native_arguments(
+                row['argv'], identity, jobs.FluxResources(1, 1, 0, 60), record, [],
+                jobs._environment(record, None), None)
             raw = jobs._json_bytes(launch)
             (record / 'launch.json').write_bytes(raw)
             digest = jobs.bytes_sha256hex(raw)
